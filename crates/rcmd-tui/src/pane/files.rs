@@ -31,6 +31,8 @@ pub struct FilePane {
 
     // Geometry recorded during render, used to turn a click into a row.
     pub rows_rect: Rect,
+    /// The scrollbar as last drawn; `None` when everything fits.
+    pub bar: Option<crate::scrollbar::Bar>,
     pub header_cells: Vec<(SortKey, Rect)>,
     /// Something the pane refused to do and the user should hear about, collected by
     /// the app into the status line on the next draw.
@@ -53,10 +55,29 @@ pub struct FilePane {
     pub results: Option<Results>,
     /// Set while browsing inside an archive. `cwd` stays the directory holding it.
     pub archive: Option<ArchiveView>,
+    /// A big archive being listed on another thread: Esc gives up on it.
+    opening: Option<Opening>,
     /// `[files] git_status`: the letters for this directory, and the run in flight.
     git: Option<crate::git::Marks>,
     git_rx: Option<std::sync::mpsc::Receiver<crate::git::Marks>>,
 }
+
+struct Opening {
+    file: PathBuf,
+    rx: std::sync::mpsc::Receiver<std::io::Result<Listing>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Below this an archive is listed at once: a few milliseconds, and the next key lands
+/// inside it. Above it, listing runs on a thread — a 300 MB `.tar.gz` took 1.1 s,
+/// all of it with the UI frozen, before this.
+const LIST_AT_ONCE: u64 = 8 << 20;
 
 pub struct ArchiveView {
     pub file: PathBuf,
@@ -67,6 +88,11 @@ pub struct ArchiveView {
 
 impl ArchiveView {
     /// The names inside the archive that `paths` (rows of this pane) stand for.
+    /// Everything in the archive, as listed when it was opened.
+    pub fn listing(&self) -> &Listing {
+        &self.listing
+    }
+
     pub fn inner(&self, paths: &[PathBuf]) -> Vec<String> {
         paths
             .iter()
@@ -115,7 +141,8 @@ pub fn filter_matches(text: &str, name: &str, is_dir: bool) -> bool {
 impl FilePane {
     pub fn new(cwd: &Path, sort: Sort, show_hidden: bool) -> Self {
         let mut p = Self {
-            cwd: cwd.to_path_buf(),
+            // A session saved by an older build may hold `\\?\D:\…`.
+            cwd: rcmd_core::paths::plain(cwd),
             entries: Vec::new(),
             cursor: 0,
             offset: 0,
@@ -124,6 +151,7 @@ impl FilePane {
             show_hidden,
             error: None,
             rows_rect: Rect::ZERO,
+            bar: None,
             header_cells: Vec::new(),
             notice: None,
             all: Vec::new(),
@@ -136,6 +164,7 @@ impl FilePane {
             checked: (Instant::now(), None),
             results: None,
             archive: None,
+            opening: None,
             git: None,
             git_rx: None,
         };
@@ -214,8 +243,49 @@ impl FilePane {
     }
 
     /// Browse `file` as a directory. False, with a notice, if it cannot be read.
-    pub fn enter_archive(&mut self, file: &Path) -> bool {
-        match archive::list(file) {
+    /// Browse `file` as a directory: at once if it is small, else from a thread, with a
+    /// notice meanwhile.
+    pub fn enter_archive(&mut self, file: &Path) {
+        let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+        if size < LIST_AT_ONCE {
+            let listed = archive::list(file);
+            self.show_archive(file, listed);
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (path, flag) = (file.to_path_buf(), stop.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(archive::list_until(&path, &flag));
+        });
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        self.notice = Some(format!("opening {name}\u{2026} Esc stops it"));
+        self.opening = Some(Opening {
+            file: file.to_path_buf(),
+            rx,
+            stop,
+        });
+    }
+
+    /// Take in a listing that has arrived. True when one did.
+    pub fn poll_opening(&mut self) -> bool {
+        let Some(o) = &self.opening else { return false };
+        let Ok(listed) = o.rx.try_recv() else {
+            return false;
+        };
+        let file = o.file.clone();
+        self.opening = None;
+        self.show_archive(&file, listed);
+        true
+    }
+
+    /// Give up on an archive still being listed. True if there was one.
+    pub fn stop_opening(&mut self) -> bool {
+        self.opening.take().is_some()
+    }
+
+    fn show_archive(&mut self, file: &Path, listed: std::io::Result<Listing>) {
+        match listed {
             Ok(listing) => {
                 if listing.unsafe_names > 0 {
                     self.notice = Some(format!(
@@ -233,11 +303,9 @@ impl FilePane {
                 self.marked.clear();
                 self.filter = None;
                 self.reload();
-                true
             }
             Err(e) => {
                 self.notice = Some(format!("cannot open the archive: {e}"));
-                false
             }
         }
     }
@@ -578,7 +646,7 @@ impl FilePane {
     /// Go to `path`. `record` puts the directory being left on the back list, which
     /// every move does except stepping through that list itself.
     fn navigate(&mut self, path: &Path, record: bool) -> bool {
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let canonical = rcmd_core::paths::canonical(path).unwrap_or_else(|_| path.to_path_buf());
         let policy = rcmd_core::policy::get();
         if !policy.allows(&canonical) {
             if let Some(root) = &policy.root {
@@ -590,6 +658,7 @@ impl FilePane {
             return false;
         }
         self.archive = None;
+        self.opening = None;
         // Leaving a results tab for a directory, the search is over.
         if let Some(mut r) = self.results.take() {
             if let Some(s) = r.search.take() {
@@ -803,11 +872,29 @@ impl FilePane {
     }
 
     pub fn scroll(&mut self, lines: isize) {
-        let max_offset = self
-            .entries
-            .len()
-            .saturating_sub(self.rows_rect.height as usize);
-        self.offset = (self.offset as isize + lines).clamp(0, max_offset as isize) as usize;
+        self.set_offset((self.offset as isize + lines).max(0) as usize);
+    }
+
+    /// Show the list from `offset`. The cursor comes along to stay on screen, as the
+    /// wheel does in other managers; left behind, the next frame would scroll back to it.
+    fn set_offset(&mut self, offset: usize) {
+        let h = (self.rows_rect.height as usize).max(1);
+        let max_offset = self.entries.len().saturating_sub(h);
+        self.offset = offset.min(max_offset);
+        self.cursor = self.cursor.clamp(self.offset, self.offset + h - 1);
+        self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
+    }
+
+    /// The scrollbar under the pointer, and where on its thumb it took hold.
+    pub fn bar_at(&self, x: u16, y: u16) -> Option<u16> {
+        self.bar.filter(|b| b.contains(x, y)).map(|b| b.grab(y))
+    }
+
+    /// The thumb, held at `grab`, dragged to row `y`.
+    pub fn drag_bar(&mut self, y: u16, grab: u16) {
+        if let Some(b) = self.bar {
+            self.set_offset(b.offset_at(y, grab));
+        }
     }
 
     /// Turn a click position into a row index, if it landed on one.
@@ -1135,5 +1222,69 @@ impl FilePane {
             }
             buf.set_line(rows.x, y, &Line::from(spans), rows.width);
         }
+        // Over the right border, beside the rows: how long the list is, and where.
+        self.bar = crate::scrollbar::draw(
+            frame.buffer_mut(),
+            crate::scrollbar::track(area, rows),
+            self.entries.len(),
+            self.offset,
+            border,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read as _;
+
+    fn big_tar(dir: &Path) -> PathBuf {
+        let t = dir.join("big.tar");
+        let mut b = tar::Builder::new(std::fs::File::create(&t).unwrap());
+        let mut h = tar::Header::new_gnu();
+        h.set_size(LIST_AT_ONCE + 1024);
+        h.set_mode(0o644);
+        h.set_cksum();
+        b.append_data(
+            &mut h,
+            "inside.bin",
+            std::io::repeat(7).take(LIST_AT_ONCE + 1024),
+        )
+        .unwrap();
+        b.finish().unwrap();
+        t
+    }
+
+    #[test]
+    fn a_big_archive_opens_from_a_thread_and_esc_can_give_up_on_it() {
+        let dir = std::env::temp_dir().join(format!("rcmd-files-bigarch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tar = big_tar(&dir);
+        let mut p = FilePane::new(&dir, Sort::default(), false);
+
+        p.enter_archive(&tar);
+        assert!(
+            p.archive.is_none() && p.opening.is_some(),
+            "not on the UI thread"
+        );
+        assert!(p
+            .notice
+            .as_deref()
+            .unwrap_or("")
+            .contains("opening big.tar"));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !p.poll_opening() {
+            assert!(Instant::now() < deadline, "the listing never came");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(p.archive.is_some());
+        assert!(p.entries.iter().any(|e| e.name == "inside.bin"));
+
+        p.go_up();
+        p.enter_archive(&tar);
+        assert!(p.stop_opening(), "Esc gives up");
+        assert!(!p.poll_opening() && p.archive.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

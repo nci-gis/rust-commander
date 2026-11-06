@@ -1,0 +1,145 @@
+name: release
+
+# A tag v* builds rcmd for every platform and opens a DRAFT release with the archives,
+# SHA256SUMS and the third-party licences; a person reads it and presses Publish.
+# A push to dev that changes this file, about.toml or about.hbs runs the same builds
+# without releasing anything, so the packaging is tested before a tag needs it.
+on:
+  push:
+    tags: ["v*"]
+    branches: [dev]
+    paths: [".github/workflows/release.yml", "about.toml", "about.hbs"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Before anything is built for a tag: the tag, the version in Cargo.toml and a dated
+  # CHANGELOG section all name the same release, and the tag is on main.
+  check:
+    name: tag, version and changelog agree
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: check
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          bad=0
+          cargo_v=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "rcmd-tui") | .version')
+          if [ "$cargo_v" != "$v" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but Cargo.toml says $cargo_v"; bad=1
+          fi
+          if ! grep -Eq "^## \[$v\] - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no dated section '## [$v] - YYYY-MM-DD' (run cargo release)"; bad=1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main; releases are tagged on main"; bad=1
+          fi
+          exit $bad
+
+  licences:
+    name: third-party licences
+    needs: check
+    # On a push to dev the check is skipped, and a skipped need would skip this too.
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install --locked cargo-about --features cli
+      # Fails if any crate is under a licence about.toml does not accept.
+      - run: cargo about generate about.hbs -o THIRD-PARTY.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licences
+          path: THIRD-PARTY.md
+
+  build:
+    name: ${{ matrix.target }}
+    needs: licences
+    # Skipped is inherited through every later need, not just the next one: without
+    # this, the skipped check on dev skipped the builds after licences had passed.
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          # Static: runs on any x86_64 Linux, old distributions included.
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked -p rcmd-tui --target ${{ matrix.target }}
+        env:
+          # rcmd.exe without its icon is a broken release, not a warning.
+          RCMD_REQUIRE_ICON: ${{ contains(matrix.target, 'windows') && '1' || '' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: licences
+      - name: package
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          [[ "$GITHUB_REF" == refs/tags/* ]] || version="dev-${GITHUB_SHA::7}"
+          name="rcmd-${version}-${{ matrix.target }}"
+          mkdir "$name"
+          cp LICENSE README.md THIRD-PARTY.md "$name/"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/rcmd.exe" "$name/"
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            cp "target/${{ matrix.target }}/release/rcmd" "$name/"
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rcmd-${{ matrix.target }}
+          path: |
+            rcmd-*.tar.gz
+            rcmd-*.zip
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rcmd-*
+          merge-multiple: true
+          path: dist
+      - name: checksums
+        run: cd dist && sha256sum rcmd-* > SHA256SUMS && cat SHA256SUMS
+      # Notes: this version's section of CHANGELOG.md.
+      - name: notes
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            /^## / { on = index($0, "[" v "]") > 0; next }
+            on' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
+      - name: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --draft \
+            --title "rcmd ${GITHUB_REF_NAME}" --notes-file notes.md

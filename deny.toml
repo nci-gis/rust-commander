@@ -5,7 +5,7 @@
 #               or is it unmaintained or yanked?
 #   licenses    is everything we ship compatible with rcmd's MIT licence?
 #               A GPL crate would put the whole binary under the GPL, which the
-#               provenance rule in CLAUDE.md exists to avoid.
+#               provenance rule in .agents/context/project.md exists to avoid.
 #   bans        are we pulling in duplicate versions or wildcard requirements?
 #   sources     does everything come from crates.io, not an unknown git repo?
 

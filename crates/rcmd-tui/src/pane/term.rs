@@ -46,6 +46,25 @@ pub struct TermPane {
     activity: RefCell<(Option<Instant>, Option<String>)>,
 }
 
+/// The cursor-position query a program sends to its terminal (DSR 6).
+const CPR_QUERY: &[u8] = b"\x1b[6n";
+
+/// How many cursor-position queries `chunk` holds, counting one split across the end
+/// of the previous chunk, whose last bytes `tail` keeps between calls.
+fn cursor_queries(tail: &mut Vec<u8>, chunk: &[u8]) -> usize {
+    let mut joined = std::mem::take(tail);
+    joined.extend_from_slice(chunk);
+    let n = joined
+        .windows(CPR_QUERY.len())
+        .filter(|w| *w == CPR_QUERY)
+        .count();
+    // Keep what could be the start of a query cut off by the read; never a whole one,
+    // which was counted already.
+    let keep = joined.len().min(CPR_QUERY.len() - 1);
+    tail.extend_from_slice(&joined[joined.len() - keep..]);
+    n
+}
+
 impl TermPane {
     pub fn spawn(cwd: &Path, rows: u16, cols: u16, shell: &str) -> Result<Self> {
         let rows = rows.max(MIN_ROWS);
@@ -117,16 +136,29 @@ impl TermPane {
         }
 
         let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, 5000)));
+        let (tx, rx) = channel::<Vec<u8>>();
         {
             let parser = parser.clone();
+            let answers = tx.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
+                let mut tail = Vec::new();
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
+                            let asked = cursor_queries(&mut tail, &buf[..n]);
                             if let Ok(mut p) = parser.write() {
                                 p.process(&buf[..n]);
+                                // A terminal answers "where is the cursor?". ConPTY asks
+                                // it once at start-up (PSEUDOCONSOLE_INHERIT_CURSOR) and
+                                // waits for the answer before the shell runs at all: on
+                                // Windows, an unanswered query was a dead terminal.
+                                for _ in 0..asked {
+                                    let (row, col) = p.screen().cursor_position();
+                                    let reply = format!("\x1b[{};{}R", row + 1, col + 1);
+                                    let _ = answers.send(reply.into_bytes());
+                                }
                             }
                         }
                     }
@@ -134,7 +166,6 @@ impl TermPane {
             });
         }
 
-        let (tx, rx) = channel::<Vec<u8>>();
         std::thread::spawn(move || {
             while let Ok(bytes) = rx.recv() {
                 if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
@@ -216,6 +247,13 @@ impl TermPane {
             let now = p.screen().scrollback() as isize;
             p.screen_mut().set_scrollback((now + delta).max(0) as usize);
         }
+    }
+
+    fn history(&self) -> usize {
+        self.parser
+            .write()
+            .map(|mut p| history_of(&mut p))
+            .unwrap_or(0)
     }
 
     fn scrolled(&self) -> usize {
@@ -327,10 +365,23 @@ impl TermPane {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
+        // Only while looking back: at the live screen a thumb would always sit at the
+        // bottom and say nothing.
+        let history = if back > 0 { self.history() } else { 0 };
         let Ok(guard) = self.parser.read() else {
             return;
         };
         frame.render_widget(PseudoTerminal::new(guard.screen()), inner);
+        drop(guard);
+        if back > 0 {
+            crate::scrollbar::draw(
+                frame.buffer_mut(),
+                crate::scrollbar::track(area, inner),
+                history + inner.height as usize,
+                history.saturating_sub(back),
+                theme::border_style(active),
+            );
+        }
     }
 
     /// Inner size for a pane rectangle, accounting for the border.
@@ -421,4 +472,48 @@ fn short_dir(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "/".into())
+}
+
+/// How many lines of history vt100 holds. It does not say, but it clamps a scrollback
+/// offset to that length, so ask for everything and put the offset back.
+fn history_of(p: &mut vt100::Parser) -> usize {
+    let now = p.screen().scrollback();
+    p.screen_mut().set_scrollback(usize::MAX);
+    let all = p.screen().scrollback();
+    p.screen_mut().set_scrollback(now);
+    all
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_is_measured_without_moving_the_view() {
+        let mut p = vt100::Parser::new(5, 20, 100);
+        assert_eq!(history_of(&mut p), 0);
+        for i in 0..30 {
+            p.process(format!("line {i}\r\n").as_bytes());
+        }
+        // 30 lines and the empty one the cursor sits on, 5 of them on screen.
+        assert_eq!(history_of(&mut p), 26);
+        p.screen_mut().set_scrollback(7);
+        assert_eq!(history_of(&mut p), 26);
+        assert_eq!(p.screen().scrollback(), 7, "the view stays where it was");
+    }
+
+    #[test]
+    fn cursor_queries_are_counted_even_when_a_read_splits_one() {
+        let mut tail = Vec::new();
+        assert_eq!(cursor_queries(&mut tail, b"hello\x1b[6nworld"), 1);
+        assert_eq!(cursor_queries(&mut tail, b"no query here"), 0);
+        // ConPTY's start-up query arriving in two reads.
+        assert_eq!(cursor_queries(&mut tail, b"prompt\x1b["), 0);
+        assert_eq!(cursor_queries(&mut tail, b"6n"), 1);
+        // Two in one read, and one ending exactly at the end is not counted again.
+        assert_eq!(cursor_queries(&mut tail, b"\x1b[6n\x1b[6n"), 2);
+        assert_eq!(cursor_queries(&mut tail, b"x"), 0);
+        // Other sequences that look alike are not queries.
+        assert_eq!(cursor_queries(&mut tail, b"\x1b[5n\x1b[6m\x1b[16n"), 0);
+    }
 }

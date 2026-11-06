@@ -125,6 +125,15 @@ fn zip_time(t: Option<zip::DateTime>) -> Option<SystemTime> {
 
 /// Everything in the archive, directories implied by deeper names included.
 pub fn list(archive: &Path) -> io::Result<Listing> {
+    list_until(archive, &std::sync::atomic::AtomicBool::new(false))
+}
+
+/// As [`list`], giving up when `stop` is set. A `.tar.gz` has no index: listing one
+/// reads all of it, about a second for 300 MB, so it runs off the UI thread and can
+/// be called off.
+pub fn list_until(archive: &Path, stop: &std::sync::atomic::AtomicBool) -> io::Result<Listing> {
+    use std::sync::atomic::Ordering;
+    let stopped = || io::Error::new(io::ErrorKind::Interrupted, "stopped");
     let mut out = Listing::default();
     let mut push = |raw: &str, kind: ItemKind, size: u64, modified, mode| match clean(raw) {
         Some(path) => out.items.push(Item {
@@ -140,6 +149,9 @@ pub fn list(archive: &Path) -> io::Result<Listing> {
         Format::Zip => {
             let mut z = zip::ZipArchive::new(File::open(archive)?).map_err(io::Error::other)?;
             for i in 0..z.len() {
+                if stop.load(Ordering::Relaxed) {
+                    return Err(stopped());
+                }
                 let f = z.by_index_raw(i).map_err(io::Error::other)?;
                 let name = f.name().map_err(io::Error::other)?.into_owned();
                 let kind = if f.is_dir() {
@@ -167,6 +179,9 @@ pub fn list(archive: &Path) -> io::Result<Listing> {
             };
             let mut t = tar::Archive::new(reader);
             for e in t.entries()? {
+                if stop.load(Ordering::Relaxed) {
+                    return Err(stopped());
+                }
                 let e = e?;
                 let h = e.header();
                 let name = String::from_utf8_lossy(&e.path_bytes()).into_owned();
@@ -225,13 +240,15 @@ pub fn children<'a>(items: &'a [Item], prefix: &str) -> Vec<(String, &'a Item)> 
     v
 }
 
-/// Everything at or below each of `chosen` — what extracting them means.
+/// Everything at or below each of `chosen` — what extracting them means. An empty
+/// name stands for the whole archive.
 pub fn expand<'a>(items: &'a [Item], chosen: &[String]) -> Vec<&'a Item> {
     items
         .iter()
         .filter(|it| {
             chosen.iter().any(|c| {
-                it.path == *c
+                c.is_empty()
+                    || it.path == *c
                     || it
                         .path
                         .strip_prefix(c.as_str())
@@ -239,6 +256,21 @@ pub fn expand<'a>(items: &'a [Item], chosen: &[String]) -> Vec<&'a Item> {
             })
         })
         .collect()
+}
+
+/// Files and bytes that extracting `chosen` would write, counted off the UI thread.
+pub fn count_until(
+    archive: &Path,
+    chosen: &[String],
+    stop: &std::sync::atomic::AtomicBool,
+) -> Option<(u64, u64)> {
+    let l = list_until(archive, stop).ok()?;
+    Some(
+        expand(&l.items, chosen)
+            .iter()
+            .filter(|i| i.kind == ItemKind::File)
+            .fold((0, 0), |(n, b), i| (n + 1, b + i.size)),
+    )
 }
 
 /// What the extractor needs from whoever runs it: the copy engine supplies these, so

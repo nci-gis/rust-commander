@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   # Advisories are published after code is written. A weekly run catches a new one
   # against dependencies that have not changed.
@@ -17,6 +17,9 @@ jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # A Windows build fails rather than make rcmd.exe without its icon.
+      RCMD_REQUIRE_ICON: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     strategy:
       # Report every platform's result. A Windows failure must not hide a macOS one.
       fail-fast: false
@@ -34,6 +37,18 @@ jobs:
       # actually says whether rcmd works on this platform.
       - run: cargo test --all
       - run: cargo build --release
+      # The build that passed, ready to run: try a branch on Windows or macOS without
+      # installing Rust there. Under the run's Artifacts; kept for two weeks.
+      - uses: actions/upload-artifact@v4
+        with:
+          # A pull request's ref_name is "1/merge", and "/" is not allowed in a name:
+          # use the branch it comes from.
+          name: rcmd-${{ runner.os }}-${{ github.head_ref || github.ref_name }}
+          path: |
+            target/release/rcmd
+            target/release/rcmd.exe
+          if-no-files-found: error
+          retention-days: 14
 
   cross-check:
     name: cross-check from linux

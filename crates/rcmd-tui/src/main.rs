@@ -18,7 +18,10 @@ mod menu;
 mod modal;
 mod opener;
 mod pane;
+mod quiet;
+mod rename_dialog;
 mod safety;
+mod scrollbar;
 mod search;
 mod session;
 mod theme;
@@ -55,6 +58,7 @@ Usage:
                             shell function can cd there (Q quits without it)
   rcmd --config PATH        use this config file instead of the default one
   rcmd --print-config       print every setting at its default, ready to save
+  rcmd --print-keys         print every key as Markdown (as configured)
   rcmd --check-config       validate the config file; exit 1 if it is wrong
   rcmd --screenshot[=WxH]   render one frame as plain text and exit
        --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
@@ -79,6 +83,7 @@ struct Cli {
     screenshot: Option<(u16, u16)>,
     keys: String,
     print_config: bool,
+    print_keys: bool,
     check_config: bool,
     no_restore: bool,
     read_only: bool,
@@ -97,6 +102,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "-h" | "--help" => cli.help = true,
             "-V" | "--version" => cli.version = true,
             "--print-config" => cli.print_config = true,
+            "--print-keys" => cli.print_keys = true,
             "--check-config" => cli.check_config = true,
             "--no-restore" => cli.no_restore = true,
             "--read-only" => cli.read_only = true,
@@ -179,6 +185,10 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if cli.print_keys {
+        print!("{}", keys::markdown(&settings.keymap));
+        return Ok(());
+    }
     theme::init(settings.theme.clone());
 
     // The command line may only tighten what the config says. A wrapper that sets
@@ -192,7 +202,7 @@ fn main() -> Result<()> {
     };
     settings.mode = settings.mode.max(cli_mode);
     if let Some(r) = &cli.root {
-        let r = match std::fs::canonicalize(r) {
+        let r = match rcmd_core::paths::canonical(r) {
             Ok(p) if p.is_dir() => p,
             Ok(_) => fail(&format!("--root {}: not a directory", r.display())),
             Err(e) => fail(&format!("--root {}: {e}", r.display())),
@@ -248,7 +258,12 @@ fn main() -> Result<()> {
         return screenshot(app, w, h, &cli.keys);
     }
 
-    let mut terminal = ratatui::init();
+    // init() for what it sets up (raw mode, the alternate screen, a panic hook that
+    // undoes them); then our own Terminal, whose backend stays quiet when idle.
+    drop(ratatui::init());
+    let mut terminal = ratatui::Terminal::new(quiet::Quiet::new(
+        ratatui::backend::CrosstermBackend::new(stdout()),
+    ))?;
     execute!(stdout(), EnableMouseCapture)?;
 
     // ratatui::init() installs a hook that restores the terminal; chain onto it so a

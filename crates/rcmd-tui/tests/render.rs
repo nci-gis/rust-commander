@@ -74,10 +74,8 @@ fn draws_both_panes_the_shell_and_the_key_bar() {
         s.contains("10 Quit"),
         "the function key bar should be drawn\n{s}"
     );
-    assert!(
-        s.contains("12 Term"),
-        "the terminal key should be offered\n{s}"
-    );
+    // F12 is in View > Terminal and F1, not on the key bar, which keeps to files.
+    assert!(!s.contains("12 Term"), "{s}");
     assert!(
         s.contains("items"),
         "the status line should count entries\n{s}"
@@ -257,6 +255,88 @@ fn f3_shows_the_file_with_line_numbers() {
         s.contains("Esc close"),
         "the key hints should be visible\n{s}"
     );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+const THUMB: char = '\u{2588}';
+
+/// How many rows have the scrollbar's thumb in column `col`. By column, because the
+/// shell's cursor is the same block.
+fn thumb_rows(s: &str, col: usize) -> usize {
+    s.lines()
+        .filter(|l| l.chars().nth(col) == Some(THUMB))
+        .count()
+}
+
+#[test]
+fn a_long_list_gets_a_scrollbar_and_a_short_one_does_not() {
+    let (a, b) = fixture();
+    let short = shot("80x24", &a, &b);
+    assert_eq!(thumb_rows(&short, 39), 0, "nothing to scroll\n{short}");
+    for i in 0..60 {
+        fs::write(a.join(format!("f{i:02}.txt")), b"").unwrap();
+    }
+    let long = shot("80x24", &a, &b);
+    assert!(
+        thumb_rows(&long, 39) > 0,
+        "on the left pane's right border\n{long}"
+    );
+    assert_eq!(thumb_rows(&long, 79), 0, "the right pane fits\n{long}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn dragging_the_scrollbar_scrolls_the_list_and_the_cursor_follows() {
+    let (a, b) = files(&[]);
+    for i in 0..60 {
+        fs::write(a.join(format!("f{i:02}.txt")), b"").unwrap();
+    }
+    // Rows start on screen row 3; the thumb is at the top of the right border.
+    let s = shot_keys("80x24", "drag:39:3:39:14", &a, &b);
+    assert!(s.contains("f59") && !s.contains("f10"), "at the end\n{s}");
+    assert!(
+        status(&s).contains("f48"),
+        "the cursor stays on screen\n{s}"
+    );
+    // A click on the track centres the thumb there: the last row is the end.
+    let s = shot_keys("80x24", "click:39:14", &a, &b);
+    assert!(s.contains("f59"), "{s}");
+    let s = shot_keys("80x24", "click:39:9", &a, &b);
+    assert!(s.contains("f30") && !s.contains("f59"), "the middle\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn the_viewer_shows_a_scrollbar_for_a_long_file_in_text_and_hex() {
+    let body: String = (0..300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    let text = shot_keys("100x16", "Down,F3", &a, &b);
+    assert!(thumb_rows(&text, 99) > 0, "text view\n{text}");
+    let hex = shot_keys("100x16", "Down,F3,h", &a, &b);
+    assert!(thumb_rows(&hex, 99) > 0, "hex view\n{hex}");
+    // Dragged to the bottom, the end of the file shows.
+    let end = shot_keys("100x16", "Down,F3,drag:99:2:99:14", &a, &b);
+    assert!(end.contains("line 299"), "{end}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    let (a, b) = with_file("doc.txt", b"one\ntwo\n");
+    let short = shot_keys("100x16", "Down,F3", &a, &b);
+    assert_eq!(thumb_rows(&short, 99), 0, "it all fits\n{short}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn dragging_over_lines_in_the_viewer_selects_them_for_y() {
+    let body: String = (0..300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    // Rows 3 to 5 are lines 2 to 4.
+    let s = shot_keys("110x16", "Down,F3,drag:10:3:10:5", &a, &b);
+    assert!(s.contains("3 lines selected"), "{s}");
+    let s = shot_keys("110x16", "Down,F3,drag:10:3:10:5,y", &a, &b);
+    assert!(s.contains("copied 3 lines"), "{s}");
+    // Esc lets go of the selection before it closes anything.
+    let s = shot_keys("110x16", "Down,F3,drag:10:3:10:5,Esc,y", &a, &b);
+    assert!(s.contains("copied 1 line"), "back to the top line\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -473,7 +553,9 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
     assert!(keys.contains("Keys") && keys.contains("Settings"), "{keys}");
     assert!(keys.contains("Quit rcmd"), "{keys}");
 
-    let rebound = shot_with(&cfg, "F1,PageDown", &a, &b);
+    // Wherever its group lands as the table grows: the next two pages.
+    let rebound =
+        shot_with(&cfg, "F1,PageDown", &a, &b) + &shot_with(&cfg, "F1,PageDown,PageDown", &a, &b);
     assert!(
         rebound.contains("\u{2022} F2"),
         "a rebound key should be listed, and marked as changed\n{rebound}"
@@ -653,6 +735,11 @@ fn tab_bar(s: &str) -> (String, usize) {
         .find(|(_, l)| l.contains("\u{2302} 1 "))
         .map(|(y, l)| (l.to_string(), y))
         .unwrap_or_else(|| panic!("no tab bar:\n{s}"))
+}
+
+/// `name` after the platform's path separator: `/b` here, `\b` on Windows.
+fn sep(name: &str) -> String {
+    format!("{}{name}", std::path::MAIN_SEPARATOR)
 }
 
 fn col(line: &str, needle: &str) -> usize {
@@ -928,7 +1015,10 @@ fn with_three_panes_f5_goes_to_the_pane_used_last_not_a_clone() {
         .lines()
         .find(|l| l.contains("to    "))
         .unwrap_or_else(|| panic!("{s}"));
-    assert!(to.contains("/b"), "should target the other directory\n{s}");
+    assert!(
+        to.contains(&sep("b")),
+        "should target the other directory\n{s}"
+    );
     assert!(
         s.contains("[Tab] other pane"),
         "with a choice, offer it\n{s}"
@@ -1190,6 +1280,21 @@ fn session_file(
     let p = dir.join("session.toml");
     fs::write(&p, text).unwrap();
     p
+}
+
+/// A session saved before `\\?\` was stripped still holds it; reopening it must not
+/// bring it back into the titles.
+#[cfg(windows)]
+#[test]
+fn a_session_saved_with_verbatim_paths_reopens_without_them() {
+    let (a, b) = files(&["alpha.txt"]);
+    fs::create_dir(a.join("sub")).unwrap();
+    let verbatim = |p: &std::path::Path| PathBuf::from(format!(r"\\?\{}", p.display()));
+    let state = session_file(a.parent().unwrap(), &verbatim(&a), &verbatim(&b), 2);
+    let s = shot_session(&state, &[]);
+    // The session opens pane a on its second tab, `sub`.
+    assert!(s.contains(" 2 sub "), "the session came back\n{s}");
+    assert!(!s.contains(r"\\?\"), "{s}");
 }
 
 #[test]
@@ -1640,10 +1745,7 @@ fn swap_trades_the_panes_and_mirror_copies_the_directory_across() {
     let top = |s: &str| s.lines().nth(1).unwrap().to_string();
     let s = shot_keys(SIZE, "Ctrl+u", &a, &b);
     let t = top(&s);
-    assert!(
-        col(&t, "/b") < col(&t, "/a") || col(&t, "\\b") < col(&t, "\\a"),
-        "{s}"
-    );
+    assert!(col(&t, &sep("b")) < col(&t, &sep("a")), "{s}");
     let s = shot_keys(SIZE, "Alt+=", &a, &b);
     assert!(!top(&s).contains("/b ") && !top(&s).contains("\\b "), "{s}");
 }
@@ -1736,6 +1838,76 @@ fn alt_q_previews_the_file_under_the_cursor_in_the_other_pane() {
         top.contains("/b ") || top.contains("\\b "),
         "taking the focus there ends it\n{s}"
     );
+}
+
+#[test]
+fn shift_f2_renames_with_a_pattern_and_shows_it_first() {
+    let (a, b) = files(&[]);
+    for n in ["IMG_7.JPG", "IMG_8.JPG", "notes.txt"] {
+        fs::write(a.join(n), n).unwrap();
+    }
+    // Mark the two pictures, then name them trip_1, trip_2 with a lower-case extension.
+    let mask = "Shift+F2,End,Backspace,Backspace,Backspace,t,r,i,p,_,[,C,]";
+    let keys = "Down,Insert,Insert,".to_string() + mask + ",Tab,Tab,Tab,Tab,Right";
+    let s = shot_keys("110x30", &keys, &a, &b);
+    assert!(s.contains("Rename 2 files"), "{s}");
+    assert!(s.contains("trip_1.jpg") && s.contains("trip_2.jpg"), "{s}");
+    assert!(s.contains("Enter renames 2 of 2"), "{s}");
+    assert!(a.join("IMG_7.JPG").exists(), "nothing renamed before Enter");
+
+    shot_keys("110x30", &(keys + ",Enter"), &a, &b);
+    let read = |n: &str| fs::read_to_string(a.join(n)).unwrap();
+    assert_eq!(
+        (read("trip_1.jpg"), read("trip_2.jpg")),
+        ("IMG_7.JPG".into(), "IMG_8.JPG".into())
+    );
+    assert_eq!(read("notes.txt"), "notes.txt", "not selected, not touched");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_pattern_that_gives_two_files_one_name_renames_nothing() {
+    let (a, b) = files(&["one.txt", "two.txt"]);
+    let keys = "Insert,Insert,Insert,Shift+F2,Ctrl+a,x,Enter";
+    let s = shot_keys("110x30", keys, &a, &b);
+    assert!(s.contains("two files would be named x.txt"), "{s}");
+    assert!(
+        s.contains("Rename 2 files"),
+        "Enter keeps the dialog open\n{s}"
+    );
+    assert!(a.join("one.txt").exists() && a.join("two.txt").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn tilde_goes_home_and_ctrl_backslash_to_the_root() {
+    let (a, b) = fixture();
+    let home = a.parent().unwrap().join("home");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("in-home.txt"), "").unwrap();
+    let out = isolated()
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .arg("--screenshot=100x24")
+        .arg("--keys=~")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains(" in-home "),
+        "the name, with txt in its own column\n{s}"
+    );
+
+    let s = shot_keys("100x24", "Ctrl+\\", &a, &b);
+    let root = a.ancestors().last().unwrap().display().to_string();
+    let title = s.lines().nth(1).unwrap();
+    assert!(
+        title.starts_with(&format!("\u{250c} {root} ")),
+        "{root}\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
 #[test]
@@ -2198,7 +2370,7 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
     let (a, b) = fixture();
     let s = shot_keys("100x34", "", &a, &b);
     assert!(
-        s.lines().next().unwrap().contains(" File   View   Help "),
+        s.lines().next().unwrap().contains(" File   View   Help"),
         "{s}"
     );
     let s = shot_keys("100x34", "F9", &a, &b);
@@ -2276,7 +2448,14 @@ fn shift_f1_shows_what_rcmd_is_using() {
 fn the_readme_tagline_is_the_cargo_description() {
     // Cargo.toml is the one source; the README is the one place that cannot read it.
     let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
-    let tagline = readme.lines().nth(2).unwrap_or_default();
+    // The centred line under the logo.
+    let tagline = readme
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix(r#"<p align="center">"#)?
+                .strip_suffix("</p>")
+        })
+        .unwrap_or_default();
     assert_eq!(
         tagline,
         env!("CARGO_PKG_DESCRIPTION"),
@@ -2300,4 +2479,120 @@ fn enter_on_a_result_lands_on_the_file_when_the_pane_was_opened_through_a_link()
     std::os::unix::fs::symlink(&a, &link).unwrap();
     let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,Enter", &link, &b);
     assert!(status(&s).contains("main.rs"), "{s}");
+}
+
+// ── docs stay true ─────────────────────────────────────────────────────────────────
+
+const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+
+#[test]
+fn docs_keys_md_is_what_print_keys_prints() {
+    let out = rcmd(&[OsStr::new("--print-keys")]);
+    assert!(out.status.success());
+    let now = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+    let doc = fs::read_to_string(format!("{REPO}/docs/keys.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert!(
+        doc == now,
+        "docs/keys.md is out of date: run `rcmd --print-keys > docs/keys.md`"
+    );
+}
+
+#[test]
+fn every_toml_example_in_the_docs_is_a_valid_config() {
+    let dir = std::env::temp_dir().join(format!("rcmd-doc-toml-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let mut checked = 0;
+    for file in ["README.md", "docs/config.md", "docs/security.md"] {
+        // A Windows checkout may have CRLF line ends; the examples are the same either way.
+        let text = fs::read_to_string(format!("{REPO}/{file}"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        let mut rest = text.as_str();
+        while let Some(start) = rest.find("```toml\n") {
+            let body = &rest[start + 8..];
+            let end = body.find("```").expect("a closed code block");
+            let cfg = write_config(&dir, &body[..end]);
+            let out = rcmd(&[
+                OsStr::new("--config"),
+                cfg.as_os_str(),
+                OsStr::new("--check-config"),
+            ]);
+            assert!(
+                out.status.success(),
+                "{file}: an example does not load:\n{}\n{}",
+                &body[..end],
+                String::from_utf8_lossy(&out.stderr)
+            );
+            checked += 1;
+            rest = &body[end..];
+        }
+    }
+    assert!(checked >= 6, "found only {checked} examples");
+}
+
+#[test]
+fn the_key_to_leave_the_terminal_follows_a_rebind_and_hints_are_not_repeated() {
+    let (a, b) = fixture();
+    let cfg_dir = a.parent().unwrap().join("cfg-term");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    let cfg = write_config(&cfg_dir, "[keys]\nfocus_terminal = [\"F11\"]\n");
+    let s = shot_with(&cfg, "F11", &a, &b);
+    assert!(status(&s).contains("F11 back to files"), "{s}");
+    // F9 is on the key bar; the menu bar does not say it again, and there is no
+    // startup hint repeating F1 / F10 / F12 in the status line.
+    let s = shot_keys(SIZE, "", &a, &b);
+    assert!(!s.lines().next().unwrap().contains("F9"), "{s}");
+    assert!(!status(&s).contains("help \u{b7}"), "{s}");
+}
+
+#[test]
+fn a_binary_file_switched_to_text_shows_its_lines_not_an_empty_screen() {
+    // Reported from Windows: a binary opens in hex, h switched it to text, and the
+    // screen was empty — binary files were never line-indexed.
+    let (a, b) = files(&[]);
+    let mut body = b"MZ\0\0binary header\n".to_vec();
+    body.extend_from_slice(b"second line\nthird line\n");
+    fs::write(a.join("prog.bin"), body).unwrap();
+    let s = shot_keys("100x20", "/,p,r,o,g,Enter,F3", &a, &b);
+    assert!(s.contains("hex"), "a binary opens in hex\n{s}");
+    let s = shot_keys("100x20", "/,p,r,o,g,Enter,F3,h", &a, &b);
+    assert!(s.contains("3 lines"), "{s}");
+    assert!(s.contains("second line"), "{s}");
+}
+
+#[test]
+fn autosave_is_configurable_with_a_floor_and_an_off() {
+    let dir = std::env::temp_dir().join(format!("rcmd-cfg-autosave-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for (body, ok) in [
+        ("[general]\nautosave_secs = 0\n", true),
+        ("[general]\nautosave_secs = 5\n", true),
+        ("[general]\nautosave_secs = 2\n", false),
+        ("[general]\nautosave_secs = 99999\n", false),
+    ] {
+        let cfg = write_config(&dir, body);
+        let out = rcmd(&[
+            OsStr::new("--config"),
+            cfg.as_os_str(),
+            OsStr::new("--check-config"),
+        ]);
+        assert_eq!(out.status.success(), ok, "{body}");
+    }
+}
+
+#[test]
+fn y_and_cap_y_copy_from_the_viewer_and_control_characters_are_refused() {
+    let (a, b) = files(&[]);
+    fs::write(a.join("notes.txt"), "first line\nsecond line\nthird line\n").unwrap();
+    fs::write(a.join("evil.txt"), "rm -rf ~\u{15}echo hi\n").unwrap();
+    let s = shot_keys("100x20", "/,n,o,t,Enter,F3,y", &a, &b);
+    assert!(s.contains("copied 1 line"), "{s}");
+    let s = shot_keys("100x20", "/,n,o,t,Enter,F3,Y", &a, &b);
+    assert!(s.contains("copied 3 lines"), "{s}");
+    let s = shot_keys("100x20", "/,e,v,i,Enter,F3,y", &a, &b);
+    assert!(s.contains("not copied"), "a Ctrl+U in the text\n{s}");
+    let s = shot_flags(&["--restricted"], "/,n,o,t,Enter,F3,y", &a, &b);
+    assert!(s.contains("restricted mode: no clipboard"), "{s}");
 }

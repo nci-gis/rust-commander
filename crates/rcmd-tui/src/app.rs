@@ -17,7 +17,11 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::Frame;
+
+/// The real terminal: crossterm on stdout, behind the backend that skips idle frames.
+pub type Term =
+    ratatui::Terminal<crate::quiet::Quiet<ratatui::backend::CrosstermBackend<std::io::Stdout>>>;
 
 use rcmd_core::format::{elide_middle, human_size};
 use rcmd_core::ops::{self, Request};
@@ -36,6 +40,7 @@ use crate::opener;
 use crate::pane::tabs::Click as TabClick;
 use crate::pane::terms::Click as TermClick;
 use crate::pane::{FilePane, FileTabs, Pane, TermPanel};
+use crate::rename_dialog::{self, RenameDialog};
 use crate::search::{self, Search};
 use crate::session::{self, Saved, SavedTab, SavedTerminal, Session};
 use crate::theme;
@@ -73,6 +78,8 @@ enum ModalAct {
     Finish,
     Run(Cmd),
     StartFind,
+    /// F4 in the rename dialog: these names, one per file, into the editor.
+    BatchEditor(String),
     Background,
     /// Left/Right in a menu-bar menu.
     Bar(isize),
@@ -87,6 +94,35 @@ type Shrunk = (
     PathBuf,
     (u16, u16),
     Result<rcmd_core::image::Picture, String>,
+);
+
+/// Where a confirmation's count goes until the count has been made.
+const COUNTING: &str = "counting\u{2026}";
+
+/// Hooks for extracting one entry to view: no questions, stoppable.
+struct ViewHooks(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl rcmd_core::archive::Hooks for ViewHooks {
+    fn stopped(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn begin(&mut self, _: &Path) {}
+    fn conflict(&mut self, _: &Path, _: u64) -> Option<bool> {
+        Some(true)
+    }
+    fn wrote(&mut self, _: u64) {}
+    fn done(&mut self) {}
+    fn skipped(&mut self, _: &Path, _: &str) {}
+    fn failed(&mut self, _: &Path, _: &std::io::Error) {}
+}
+
+/// An archive entry being extracted for F3: the result, its directory, its name, and
+/// the flag that stops it.
+type PendingView = (
+    Receiver<std::io::Result<()>>,
+    PathBuf,
+    String,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
 );
 
 /// The menu bar, left to right.
@@ -122,6 +158,8 @@ pub struct App {
     zoom: Option<PaneId>,
     /// The boundary being dragged; `true` when it is inside the terminal panel.
     resizing: Option<(Divider, bool)>,
+    /// A file pane's scrollbar being dragged, and where on the thumb it was held.
+    scrolling: Option<(PaneId, u16)>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -166,6 +204,11 @@ pub struct App {
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
+    /// F3 inside a big archive, extracting on a thread.
+    pending_view: Option<PendingView>,
+    /// The session as last written, and when the last check for changes ran.
+    saved: Option<Session>,
+    last_autosave: Instant,
 }
 
 impl App {
@@ -208,6 +251,7 @@ impl App {
             mru: Vec::new(),
             zoom: None,
             resizing: None,
+            scrolling: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -228,6 +272,9 @@ impl App {
             quick_image: None,
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
+            pending_view: None,
+            saved: None,
+            last_autosave: Instant::now(),
         }
     }
 
@@ -235,15 +282,9 @@ impl App {
     /// visible by default. Separate from `run` so a screenshot can do it too.
     pub fn boot(&mut self, area: Rect) {
         self.screen = area;
-        if self.status.is_empty() {
-            let k = |a| self.footer_key(a).unwrap_or_else(|| "?".into());
-            self.status = format!(
-                "{} help \u{b7} {} terminal \u{b7} {} quit",
-                k(Action::Help),
-                k(Action::FocusTerminal),
-                k(Action::Quit)
-            );
-        }
+        // No startup hint in the status line: the key bar already shows F1, F10 and F12,
+        // and a hint that vanished at the first message and never came back looked
+        // random. The right of the status line is for messages only.
         let restore = self.restore_terminal.take();
         if self.settings.mode == Mode::Restricted {
             return;
@@ -435,11 +476,31 @@ impl App {
         }
         if let Some(path) = session::default_path() {
             let s = self.snapshot();
-            let _ = session::save(&path, &s);
+            if session::save(&path, &s).is_ok() {
+                self.saved = Some(s);
+            }
         }
     }
 
-    pub fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    /// Save the session when it has changed, every `[general] autosave_secs`. Saving only on
+    /// quit lost everything when the window was closed instead — the X of Windows
+    /// Terminal, closing an SSH session — because then rcmd is killed, not asked.
+    fn autosave(&mut self) {
+        let every = self.settings.config.general.autosave_secs;
+        if every == 0
+            || !self.interactive
+            || self.last_autosave.elapsed() < Duration::from_secs(every)
+        {
+            return;
+        }
+        self.last_autosave = Instant::now();
+        let now = self.snapshot();
+        if self.saved.as_ref() != Some(&now) {
+            self.save_session();
+        }
+    }
+
+    pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
@@ -514,6 +575,7 @@ impl App {
                 for f in t.tabs_mut() {
                     f.poll_sizes();
                     f.poll_git();
+                    f.poll_opening();
                     let was = f.results.as_ref().is_some_and(|r| r.running());
                     f.poll_results();
                     if let Some(r) = f.results.as_ref().filter(|r| was && !r.running()) {
@@ -537,6 +599,23 @@ impl App {
             self.status = n;
         }
         self.pump_background_jobs();
+        self.autosave();
+        let viewed = self
+            .pending_view
+            .as_ref()
+            .and_then(|(rx, ..)| rx.try_recv().ok());
+        if let (Some(out), Some((_, tmp, name, _))) = (viewed, self.pending_view.take()) {
+            self.show_extracted(out, tmp, name);
+        }
+        // A count for the open confirmation, if it has come in.
+        if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
+            let got = c.counting.as_ref().and_then(|(n, _)| n.rx.try_recv().ok());
+            if let (Some((files, bytes)), Some((_, line))) = (got, c.counting.take()) {
+                if let Some(l) = c.body.get_mut(line) {
+                    *l = Self::count_label(files, bytes);
+                }
+            }
+        }
         let viewing = matches!(self.modal, Some(Modal::Usage));
         self.usage.tick(viewing);
         let hashed = self
@@ -899,6 +978,15 @@ impl App {
                 self.status = "search stopped".into();
                 return;
             }
+            if let Some((_, _, name, stop)) = self.pending_view.take() {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.status = format!("stopped extracting {name}");
+                return;
+            }
+            if self.focused_files().is_some_and(|f| f.stop_opening()) {
+                self.status = "stopped opening the archive".into();
+                return;
+            }
             if let Some(f) = self.focused_files().filter(|f| f.filter.is_some()) {
                 f.set_filter(None);
                 self.status = "filter off".into();
@@ -1026,7 +1114,14 @@ impl App {
             Action::MirrorPane => self.mirror_pane(),
             Action::MarkPattern => self.begin_pattern(true),
             Action::UnmarkPattern => self.begin_pattern(false),
-            Action::BulkRename => self.begin_batch(),
+            Action::BulkRename => {
+                let files = self.selection_in_view();
+                if files.is_empty() {
+                    self.status = "nothing selected".into();
+                } else {
+                    self.modal = Some(Modal::Rename(Box::new(RenameDialog::new(files))));
+                }
+            }
             Action::NewFile => {
                 let dir = self.focused_cwd();
                 self.modal = Some(Modal::Input(Input {
@@ -1144,6 +1239,19 @@ impl App {
             Action::Top => self.with_files(|f| f.go_to(0)),
             Action::Bottom => self.with_files(|f| f.go_end()),
             Action::Parent => self.with_files(|f| f.go_up()),
+            Action::GoHome => {
+                let home = crate::bookmarks::expand_tilde("~");
+                if home.is_absolute() {
+                    self.with_files(|f| f.set_cwd(&home));
+                } else {
+                    self.status = "no home directory: neither HOME nor USERPROFILE is set".into();
+                }
+            }
+            Action::GoRoot => self.with_files(|f| {
+                if let Some(root) = f.cwd.ancestors().last().map(Path::to_path_buf) {
+                    f.set_cwd(&root);
+                }
+            }),
             Action::EnterDir => {
                 // Only ever into a directory: Enter already views files, and a key that
                 // sometimes navigates and sometimes opens a viewer is one you stop
@@ -1251,6 +1359,24 @@ impl App {
                 .map(|(a, _)| *a)
             {
                 return self.perform(a);
+            }
+            // A scrollbar sits on a pane's right border, which is also half of the
+            // boundary beside it; where there is a scrollbar, it wins. The boundary can
+            // still be dragged by the other pane's border, or above and below the bar.
+            if let Some(id) = self.pane_at(x, y) {
+                let grab = self
+                    .panes
+                    .get(&id)
+                    .and_then(Pane::as_files)
+                    .and_then(|f| f.bar_at(x, y));
+                if let Some(grab) = grab {
+                    self.focus = id;
+                    if let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) {
+                        f.drag_bar(y, grab);
+                    }
+                    self.scrolling = Some((id, grab));
+                    return;
+                }
             }
             // A boundary is grabbed before either pane it separates: it sits on their
             // borders, which are otherwise just part of each pane. The exception is a
@@ -1403,6 +1529,12 @@ impl App {
     }
 
     fn on_drag(&mut self, x: u16, y: u16) {
+        if let Some((id, grab)) = self.scrolling {
+            if let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) {
+                f.drag_bar(y, grab);
+            }
+            return;
+        }
         if let Some((d, in_panel)) = self.resizing {
             let pct = d.pct_at(x, y);
             if in_panel {
@@ -1495,6 +1627,9 @@ impl App {
     }
 
     fn on_release(&mut self, x: u16, y: u16) {
+        if self.scrolling.take().is_some() {
+            return;
+        }
         if self.resizing.take().is_some() {
             return;
         }
@@ -1839,18 +1974,7 @@ impl App {
                 let req = Request::sync(pairs);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
-            Cmd::CopyText(_) if self.settings.mode == Mode::Restricted => {
-                self.status = "restricted mode \u{2014} the clipboard is turned off".into();
-            }
-            Cmd::CopyText(t) => {
-                if self.interactive {
-                    let seq = format!("\x1b]52;c;{}\x07", base64(t.as_bytes()));
-                    let mut out = stdout();
-                    let _ = out.write_all(seq.as_bytes());
-                    let _ = out.flush();
-                }
-                self.status = "sent to the clipboard".into();
-            }
+            Cmd::CopyText(t) => self.copy_text(t),
             Cmd::BatchRename(moves) => {
                 let out = rcmd_core::batch_rename::apply(&moves);
                 self.reload_all();
@@ -1873,6 +1997,31 @@ impl App {
                 self.modal = Some(Modal::Job(Job::new(kind, ops::start(request))));
             }
         }
+    }
+
+    /// Put text on the clipboard with OSC 52, unless the mode forbids it or the text
+    /// could act when pasted.
+    fn copy_text(&mut self, t: String) {
+        if self.settings.mode == Mode::Restricted {
+            // Short: it also has to fit beside the viewer's key hints.
+            self.status = "restricted mode: no clipboard".into();
+            return;
+        }
+        if let Some(why) = crate::safety::unsafe_to_paste(&t) {
+            self.status = why;
+            return;
+        }
+        if self.interactive {
+            let seq = format!("\x1b]52;c;{}\x07", base64(t.as_bytes()));
+            let mut out = stdout();
+            let _ = out.write_all(seq.as_bytes());
+            let _ = out.flush();
+        }
+        let lines = t.lines().count().max(1);
+        self.status = match lines {
+            1 => "copied 1 line to the clipboard".into(),
+            n => format!("copied {n} lines to the clipboard"),
+        };
     }
 
     /// Put the selection's paths on the clipboard with OSC 52.
@@ -1915,11 +2064,6 @@ impl App {
     fn on_modal_mouse(&mut self, m: MouseEvent) {
         let p = Position::new(m.column, m.row);
         let left = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
-        let wheel: isize = match m.kind {
-            MouseEventKind::ScrollDown => 3,
-            MouseEventKind::ScrollUp => -3,
-            _ => 0,
-        };
         let hit = |rects: &[Rect], i: usize| rects.get(i).is_some_and(|r| r.contains(p));
         let mut act = ModalAct::None;
         // A click on a menu-bar title switches menus, whatever menu is open.
@@ -1980,7 +2124,27 @@ impl App {
                     act = ModalAct::Background;
                 }
             }
-            Some(Modal::View(v)) if wheel != 0 => v.scroll_by(wheel),
+            Some(Modal::View(v)) => v.on_mouse(m),
+            Some(Modal::Rename(d)) if left => {
+                act = if hit(&d.buttons, 0) {
+                    match d.confirm() {
+                        rename_dialog::Outcome::Rename(m) => ModalAct::Run(Cmd::BatchRename(m)),
+                        _ => ModalAct::None,
+                    }
+                } else if hit(&d.buttons, 1) {
+                    match d.to_editor() {
+                        rename_dialog::Outcome::Editor(t) => ModalAct::BatchEditor(t),
+                        _ => ModalAct::None,
+                    }
+                } else if hit(&d.buttons, 2) {
+                    d.next_field(false);
+                    ModalAct::None
+                } else if hit(&d.buttons, 3) {
+                    ModalAct::Close
+                } else {
+                    ModalAct::None
+                };
+            }
             Some(Modal::Find(d)) if left => {
                 if hit(&d.buttons, 0) {
                     act = ModalAct::StartFind;
@@ -2023,6 +2187,21 @@ impl App {
     // ── file operations ────────────────────────────────────────────────────────────
 
     /// What the keys act on: everything marked, or the row under the cursor.
+    /// The selection in the order the pane shows it, which is what a counter counts.
+    fn selection_in_view(&self) -> Vec<PathBuf> {
+        let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
+            return Vec::new();
+        };
+        if f.marked.is_empty() {
+            return self.selection();
+        }
+        f.entries
+            .iter()
+            .filter(|e| f.marked.contains(&e.path))
+            .map(|e| e.path.clone())
+            .collect()
+    }
+
     fn selection(&self) -> Vec<PathBuf> {
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return Vec::new();
@@ -2147,7 +2326,6 @@ impl App {
             self.status = "no second pane to copy to — Alt+S splits one".into();
             return;
         };
-        let (files, bytes) = ops::scan(&sources);
         let request = match kind {
             ops::Kind::Copy => Request::copy(sources.clone(), dest.clone()),
             _ => Request::mv(sources.clone(), dest.clone()),
@@ -2164,7 +2342,7 @@ impl App {
                 Self::describe(&sources),
                 String::new(),
                 format!("to    {}", dest.display()),
-                Self::count_label(files, bytes),
+                COUNTING.into(),
             ],
             danger: false,
             request,
@@ -2172,6 +2350,7 @@ impl App {
             choices,
             choice: 0,
             source_dir: Some(self.focused_cwd()),
+            counting: Some((ops::count(sources), 3)),
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -2184,12 +2363,8 @@ impl App {
             self.status = "nothing selected".into();
             return;
         }
-        let (files, bytes) = ops::scan(&targets);
-        let mut body = vec![
-            Self::describe(&targets),
-            String::new(),
-            Self::count_label(files, bytes),
-        ];
+        let mut body = vec![Self::describe(&targets), String::new(), COUNTING.into()];
+        let counting = Some((ops::count(targets.clone()), 2));
         if permanent {
             body.push(String::new());
             body.push("Deleted permanently. This cannot be undone.".into());
@@ -2209,6 +2384,7 @@ impl App {
             choices: Vec::new(),
             choice: 0,
             source_dir: None,
+            counting,
         }));
     }
 
@@ -2480,7 +2656,7 @@ impl App {
     /// the pane is a third of the screen, and an editor that small is not an editor.
     /// Suspending is what every orthodox manager does, and the editor gets the terminal
     /// it expects — full size, its own alternate screen, its own mouse handling.
-    fn edit_externally(&mut self, terminal: &mut DefaultTerminal, path: &Path) -> Result<()> {
+    fn edit_externally(&mut self, terminal: &mut Term, path: &Path) -> Result<()> {
         let configured = self.settings.config.commands.editor.trim().to_string();
         let spec = Some(configured)
             .filter(|s| !s.is_empty())
@@ -2521,6 +2697,8 @@ impl App {
         // reset BOTH diff buffers so the next draw repaints every cell. One swap only
         // resets one of them, and the diff against the stale frame comes out empty.
         let _ = terminal.backend_mut().clear_region(ClearType::All);
+        // The editor left the cursor wherever it liked.
+        terminal.backend_mut().forget();
         terminal.swap_buffers();
         terminal.swap_buffers();
 
@@ -2605,16 +2783,30 @@ impl App {
                     }
                 }
             },
-            Some(Modal::View(v)) => {
-                if matches!(v.on_key(k), viewer::Action::Close) {
-                    act = ModalAct::Close;
+            Some(Modal::View(v)) => match v.on_key(k) {
+                viewer::Action::Close => act = ModalAct::Close,
+                viewer::Action::Copy(text) => {
+                    // Not Run(…): that closes the viewer first, and copying should not.
+                    self.copy_text(text);
+                    let said = self.status.clone();
+                    if let Some(Modal::View(v)) = self.modal.as_mut() {
+                        v.note(&said);
+                    }
+                    return;
                 }
-            }
+                viewer::Action::Stay => {}
+            },
             Some(Modal::Help(h)) => {
                 if matches!(h.on_key(k), viewer::Action::Close) {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Rename(d)) => match d.on_key(k) {
+                rename_dialog::Outcome::Stay => {}
+                rename_dialog::Outcome::Close => act = ModalAct::Close,
+                rename_dialog::Outcome::Rename(m) => act = ModalAct::Run(Cmd::BatchRename(m)),
+                rename_dialog::Outcome::Editor(t) => act = ModalAct::BatchEditor(t),
+            },
             Some(Modal::Find(d)) => match d.on_key(k) {
                 find_dialog::Outcome::Stay => {}
                 find_dialog::Outcome::Close => act = ModalAct::Close,
@@ -2697,6 +2889,11 @@ impl App {
                     self.status =
                         "running in the background \u{2014} it comes back if it has a question"
                             .into();
+                }
+            }
+            ModalAct::BatchEditor(text) => {
+                if let Some(Modal::Rename(d)) = self.modal.take() {
+                    self.begin_batch(d.files, &text);
                 }
             }
             ModalAct::StartFind => {
@@ -3021,17 +3218,11 @@ impl App {
 
     // ── bulk rename, quick view ────────────────────────────────────────────────────
 
-    /// Shift+F2: the selection's names into a file for the editor, one per line.
-    fn begin_batch(&mut self) {
-        let files = self.selection();
-        if files.is_empty() {
-            self.status = "nothing selected".into();
-            return;
-        }
+    /// F4 in the rename dialog: `text`, one name per file, into a file for the editor.
+    fn begin_batch(&mut self, files: Vec<PathBuf>, text: &str) {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let list = std::env::temp_dir().join(format!("rcmd-rename-{}-{n}.txt", std::process::id()));
-        let text = rcmd_core::batch_rename::names_text(&files);
         if let Err(e) = session::write_private(&list, text.as_bytes()) {
             self.status = format!("cannot write the list of names: {e}");
             return;
@@ -3597,17 +3788,26 @@ impl App {
             self.status = "nothing selected".into();
             return;
         }
-        let (n, bytes) = match rcmd_core::archive::list(&file) {
-            Ok(l) => rcmd_core::archive::expand(&l.items, &inner)
+        // Browsing it, the listing is in memory already; from outside (Alt+F9) it is
+        // counted on a thread, as F5's count is, so a big .tar.gz does not freeze.
+        let open = self.focused_archive().filter(|a| a.file == file).map(|a| {
+            rcmd_core::archive::expand(&a.listing().items, &inner)
                 .iter()
                 .filter(|i| i.kind == rcmd_core::archive::ItemKind::File)
-                .fold((0u64, 0u64), |(n, b), i| (n + 1, b + i.size)),
-            Err(e) => {
-                self.status = format!("cannot read the archive: {e}");
-                return;
+                .fold((0u64, 0u64), |(n, b), i| (n + 1, b + i.size))
+        });
+        let (count_line, counting) = match open {
+            Some((n, bytes)) => (Self::count_label(n, bytes), None),
+            None => {
+                let (f, chosen) = (file.clone(), inner.clone());
+                let work = move |stop: &std::sync::atomic::AtomicBool| {
+                    rcmd_core::archive::count_until(&f, &chosen, stop)
+                };
+                (COUNTING.to_string(), Some((ops::Count::spawn(work), 3)))
             }
         };
         let what = match inner.as_slice() {
+            [all] if all.is_empty() => "everything".to_string(),
             [one] => one.rsplit('/').next().unwrap_or(one).to_string(),
             many => format!("{} items", many.len()),
         };
@@ -3623,7 +3823,7 @@ impl App {
                 format!("{what}  from {name}"),
                 String::new(),
                 format!("to    {}", dest.display()),
-                Self::count_label(n, bytes),
+                count_line,
             ],
             danger: false,
             request,
@@ -3631,6 +3831,7 @@ impl App {
             choices,
             choice: 0,
             source_dir: None,
+            counting,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -3647,16 +3848,9 @@ impl App {
                 "Alt+F9 unpacks a .zip, .tar or .tar.gz \u{2014} the cursor is not on one".into();
             return;
         };
-        let top: Vec<String> = match rcmd_core::archive::list(&file) {
-            Ok(l) => rcmd_core::archive::children(&l.items, "")
-                .into_iter()
-                .map(|(n, _)| n)
-                .collect(),
-            Err(e) => {
-                self.status = format!("cannot read the archive: {e}");
-                return;
-            }
-        };
+        // The whole archive, named by the empty path: listing it to find its top level
+        // would be the freeze this avoids.
+        let top = vec![String::new()];
         let choices = self.transfer_targets();
         let Some(dest) = choices.first().cloned() else {
             self.status = "unpacking goes into another pane \u{2014} Alt+S splits one".into();
@@ -3750,34 +3944,52 @@ impl App {
             self.status = format!("cannot make a temporary directory: {err}");
             return;
         }
-        struct Quiet;
-        impl rcmd_core::archive::Hooks for Quiet {
-            fn stopped(&self) -> bool {
-                false
-            }
-            fn begin(&mut self, _: &Path) {}
-            fn conflict(&mut self, _: &Path, _: u64) -> Option<bool> {
-                Some(true)
-            }
-            fn wrote(&mut self, _: u64) {}
-            fn done(&mut self) {}
-            fn skipped(&mut self, _: &Path, _: &str) {}
-            fn failed(&mut self, _: &Path, _: &std::io::Error) {}
-        }
         // The guard on writes is the engine's; viewing is reading, so it is allowed
         // in read-only mode — into a directory rcmd made for it and removes after.
-        let out = rcmd_core::archive::extract(&file, &inner, &prefix, &tmp, &mut Quiet);
-        let path = tmp.join(&e.name);
+        // A small archive is read at once; a big one on a thread, since reaching one
+        // entry of a .tar.gz means decompressing everything before it.
+        let small = std::fs::metadata(&file).map_or(true, |m| m.len() < (8 << 20));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let name = e.name.clone();
+        if small {
+            let out =
+                rcmd_core::archive::extract(&file, &inner, &prefix, &tmp, &mut ViewHooks(stop));
+            return self.show_extracted(out, tmp, name);
+        }
+        let (tx, rx) = mpsc::channel();
+        let (dir, flag) = (tmp.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let out = rcmd_core::archive::extract(
+                &file,
+                &inner,
+                &prefix,
+                &dir,
+                &mut ViewHooks(flag.clone()),
+            );
+            // Given up on: nobody will view it, so nothing is left behind either.
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            let _ = tx.send(out);
+        });
+        self.status = format!("extracting {name} to view it\u{2026} Esc stops it");
+        self.pending_view = Some((rx, tmp, name, stop));
+    }
+
+    /// Open the viewer on an entry extracted for it, or say why not.
+    fn show_extracted(&mut self, out: std::io::Result<()>, tmp: PathBuf, name: String) {
+        let path = tmp.join(&name);
         match out.and_then(|_| Document::open(&path)) {
             Ok(doc) => {
                 let v = &self.settings.config.viewer;
                 let viewer = Viewer::open(doc, v.wrap, v.tab_width);
                 self.modal = Some(Modal::View(Box::new(viewer)));
                 self.view_temp = Some(tmp);
+                self.status.clear();
             }
             Err(err) => {
                 let _ = std::fs::remove_dir_all(&tmp);
-                self.status = format!("cannot view {}: {err}", e.name);
+                self.status = format!("cannot view {name}: {err}");
             }
         }
     }
@@ -3980,19 +4192,6 @@ impl App {
             self.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
             x += w + 1;
         }
-        let hint = format!(
-            "{} menu ",
-            self.footer_key(Action::MenuBar).unwrap_or_default()
-        );
-        let hw = hint.chars().count() as u16;
-        if area.width > x - area.x + hw + 2 {
-            frame.buffer_mut().set_line(
-                area.x + area.width - hw,
-                area.y,
-                &Line::from(Span::styled(hint, Style::new().fg(th.fg_dim))),
-                hw,
-            );
-        }
     }
 
     fn holding(&self) -> crate::usage::Holding {
@@ -4142,14 +4341,15 @@ impl App {
                 )
             }
             Some(Pane::Term(p)) => format!(
-                " terminal {}/{}{}  \u{b7}  F12 back to files",
+                " terminal {}/{}{}  \u{b7}  {} back to files",
                 p.active_tab() + 1,
                 p.tab_count(),
                 if p.split_count() > 1 {
                     format!("  \u{b7}  split {}/{}", p.focused_split(), p.split_count())
                 } else {
                     String::new()
-                }
+                },
+                self.footer_key(Action::FocusTerminal).unwrap_or_default()
             ),
             None => String::new(),
         };
@@ -4239,15 +4439,18 @@ impl App {
         }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still
         // says "5 Copy" is lying, and this is the line people look at most.
+        // In F-key order, as in every orthodox manager. On a narrow screen the ones that
+        // do not fit are left off whole, from the end, rather than cut mid-word.
         const KEYS: &[(Action, &str)] = &[
             (Action::Help, "Help"),
+            (Action::Rename, "Ren"),
             (Action::View, "View"),
             (Action::Edit, "Edit"),
             (Action::Copy, "Copy"),
             (Action::Move, "Move"),
             (Action::MkDir, "MkDir"),
             (Action::Delete, "Del"),
-            (Action::FocusTerminal, "Term"),
+            (Action::MenuBar, "Menu"),
             (Action::Quit, "Quit"),
         ];
         let mut spans = Vec::new();
@@ -4265,6 +4468,9 @@ impl App {
                 .filter(|d| d.parse::<u8>().is_ok())
                 .unwrap_or(&key);
             let w = (k.chars().count() + label.chars().count() + 3) as u16;
+            if cx + w > area.x + area.width {
+                break;
+            }
             hits.push((*action, Rect::new(cx, area.y, w, 1)));
             cx += w;
             spans.push(Span::styled(

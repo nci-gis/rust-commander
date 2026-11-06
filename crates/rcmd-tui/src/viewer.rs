@@ -3,7 +3,9 @@
 //! Text or hex, over a [`Document`] that keeps the file on disk, so opening a huge log
 //! is instant and scrolling to the end of it does not allocate the end of it.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -18,6 +20,17 @@ use crate::theme;
 pub enum Action {
     Stay,
     Close,
+    /// Put this on the clipboard: `y` the selection or the top line, `Y` the screen.
+    Copy(String),
+}
+
+/// What the left button is holding down.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Held {
+    /// The scrollbar's thumb, at this row of it.
+    Bar(u16),
+    /// The end of a selection of lines.
+    Select,
 }
 
 pub struct Viewer {
@@ -32,6 +45,13 @@ pub struct Viewer {
     typing: Option<String>,
     message: String,
     page: usize,
+    /// Where the text was drawn, and which line each of its rows shows.
+    body: Rect,
+    row_lines: Vec<usize>,
+    bar: Option<crate::scrollbar::Bar>,
+    /// Lines chosen with the mouse: where the drag began, where it is now.
+    selection: Option<(usize, usize)>,
+    held: Option<Held>,
 }
 
 impl Viewer {
@@ -55,6 +75,86 @@ impl Viewer {
             typing: None,
             message,
             page: 20,
+            body: Rect::ZERO,
+            row_lines: Vec::new(),
+            bar: None,
+            selection: None,
+            held: None,
+        }
+    }
+
+    /// The selected lines, first to last.
+    fn selected(&self) -> Option<(usize, usize)> {
+        self.selection.map(|(a, b)| (a.min(b), a.max(b)))
+    }
+
+    fn line_at(&self, y: u16) -> Option<usize> {
+        let row = y.checked_sub(self.body.y)?;
+        self.row_lines.get(row as usize).copied()
+    }
+
+    /// The mouse: the wheel scrolls, the scrollbar drags, and in text a drag selects
+    /// whole lines for `y` to copy. Your terminal's own selection (usually Shift+drag)
+    /// still works for part of a line.
+    pub fn on_mouse(&mut self, m: MouseEvent) {
+        let (x, y) = (m.column, m.row);
+        match m.kind {
+            MouseEventKind::ScrollDown => self.scroll(3),
+            MouseEventKind::ScrollUp => self.scroll(-3),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(b) = self.bar.filter(|b| b.contains(x, y)) {
+                    let grab = b.grab(y);
+                    self.top = b.offset_at(y, grab);
+                    self.held = Some(Held::Bar(grab));
+                    return;
+                }
+                let inside = x >= self.body.x && x < self.body.x + self.body.width;
+                match self
+                    .line_at(y)
+                    .filter(|_| inside && self.mode == Mode::Text)
+                {
+                    Some(i) => {
+                        self.selection = Some((i, i));
+                        self.held = Some(Held::Select);
+                    }
+                    None => self.selection = None,
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => match self.held {
+                Some(Held::Bar(grab)) => {
+                    if let Some(b) = self.bar {
+                        self.top = b.offset_at(y, grab);
+                    }
+                }
+                Some(Held::Select) => {
+                    // Past the top or bottom edge, the text scrolls under the pointer.
+                    let line = if y < self.body.y {
+                        self.scroll(-1);
+                        Some(self.top)
+                    } else if y >= self.body.y + self.body.height {
+                        self.scroll(1);
+                        self.row_lines.last().map(|l| l + 1)
+                    } else {
+                        self.line_at(y)
+                    };
+                    let last = self.doc.line_count().saturating_sub(1);
+                    if let (Some(l), Some(sel)) = (line, self.selection.as_mut()) {
+                        sel.1 = l.min(last);
+                    }
+                }
+                None => {}
+            },
+            MouseEventKind::Up(MouseButton::Left) => {
+                let held = self.held.take();
+                if let (Some(Held::Select), Some((a, b))) = (held, self.selected()) {
+                    let n = b - a + 1;
+                    self.message = format!(
+                        "{n} line{} selected \u{2014} y copies, Esc clears",
+                        if n == 1 { "" } else { "s" }
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
@@ -65,8 +165,10 @@ impl Viewer {
         }
     }
 
-    pub fn scroll_by(&mut self, delta: isize) {
-        self.scroll(delta);
+    /// Say something on the viewer's own message line, which is what shows while it
+    /// covers the screen.
+    pub fn note(&mut self, text: &str) {
+        self.message = text.to_string();
     }
 
     fn scroll(&mut self, delta: isize) {
@@ -125,6 +227,10 @@ impl Viewer {
 
         let page = self.page.max(1) as isize;
         match k.code {
+            KeyCode::Esc if self.selection.is_some() => {
+                self.selection = None;
+                self.message.clear();
+            }
             KeyCode::Esc | KeyCode::F(3) | KeyCode::F(10) | KeyCode::Char('q') => {
                 return Action::Close
             }
@@ -139,14 +245,34 @@ impl Viewer {
                     Mode::Text => Mode::Hex,
                     Mode::Hex => Mode::Text,
                 };
+                if self.mode == Mode::Text {
+                    if let Err(e) = self.doc.ensure_lines() {
+                        self.mode = Mode::Hex;
+                        self.message = format!("cannot show as text: {e}");
+                        return Action::Stay;
+                    }
+                }
                 // The two modes count in different units, so a shared `top` would jump
                 // somewhere arbitrary.
                 self.top = 0;
                 self.col = 0;
+                self.selection = None;
                 self.message = match self.mode {
                     Mode::Hex => "hex".into(),
                     Mode::Text => "text".into(),
                 };
+            }
+            KeyCode::Char('y' | 'Y') if self.mode == Mode::Hex => {
+                self.message = "copy works in text view \u{2014} h".into();
+            }
+            KeyCode::Char(c @ ('y' | 'Y')) => {
+                let (from, n) = match (c, self.selected()) {
+                    ('y', Some((a, b))) => (a, b - a + 1),
+                    ('y', None) => (self.top, 1),
+                    _ => (self.top, self.page.max(1)),
+                };
+                let text = self.doc.lines_from(from, n).join("\n");
+                return Action::Copy(text);
             }
             KeyCode::Char('w') => {
                 self.wrap = !self.wrap;
@@ -214,6 +340,19 @@ impl Viewer {
 
         let body = Rect::new(inner.x, inner.y, inner.width, inner.height - 1);
         self.page = body.height as usize;
+        let total = match self.mode {
+            Mode::Text => self.doc.line_count(),
+            Mode::Hex => self.doc.hex_rows(),
+        };
+        self.body = body;
+        self.row_lines.clear();
+        self.bar = crate::scrollbar::draw(
+            frame.buffer_mut(),
+            crate::scrollbar::track(area, body),
+            total,
+            self.top,
+            Style::new().fg(theme::t().accent),
+        );
         match self.mode {
             Mode::Text => self.render_text(frame, body),
             Mode::Hex => self.render_hex(frame, body),
@@ -232,6 +371,7 @@ impl Viewer {
             return;
         }
 
+        let selected = self.selected();
         let mut row = 0u16;
         let mut i = self.top;
         while row < area.height && i < total {
@@ -265,6 +405,13 @@ impl Viewer {
                 frame
                     .buffer_mut()
                     .set_line(area.x, y, &Line::from(spans), area.width);
+                if selected.is_some_and(|(a, b)| i >= a && i <= b) {
+                    let text = Rect::new(area.x + gutter + 1, y, area.width - gutter - 1, 1);
+                    frame
+                        .buffer_mut()
+                        .set_style(text, Style::new().bg(theme::t().row_cursor_active));
+                }
+                self.row_lines.push(i);
                 row += 1;
             }
             i += 1;
@@ -378,6 +525,7 @@ impl Viewer {
             ("Esc", "close"),
             ("h", "hex"),
             ("w", "wrap"),
+            ("y/Y", "copy"),
             ("/", "search"),
             ("n/N", "next"),
             ("g/G", "ends"),

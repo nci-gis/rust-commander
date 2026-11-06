@@ -22,6 +22,20 @@ pub fn unsafe_to_type(s: &str) -> Option<String> {
     })
 }
 
+/// Why `text` must not go on the clipboard, or `None`. Lines and tabs are fine — that
+/// is what copied text is — but any other control character would act when pasted
+/// into a terminal, as Ctrl+U and Enter did in a file name typed by Alt+C.
+pub fn unsafe_to_paste(text: &str) -> Option<String> {
+    text.chars()
+        .find(|c| c.is_control() && *c != '\n' && *c != '\t')
+        .map(|c| {
+            format!(
+                "not copied: a control character (U+{:04X}) would act when pasted",
+                c as u32
+            )
+        })
+}
+
 /// The command that changes a shell's directory to `path`, quoted the way that shell
 /// quotes, ending in Enter. `None` with the reason when the path cannot be quoted for
 /// that shell at all — refusing beats sending something that means something else.

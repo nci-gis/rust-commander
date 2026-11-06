@@ -77,6 +77,17 @@ impl Document {
         Ok(doc)
     }
 
+    /// Index the lines of a file that opened as binary, the first time text is asked
+    /// for. Binary files skip it on open, so the hex view of a big one costs nothing;
+    /// without this, switching such a file to text showed "0 lines" and an empty
+    /// screen. Some files that look binary are text — UTF-16 is full of NUL bytes.
+    pub fn ensure_lines(&mut self) -> io::Result<()> {
+        if self.lines.is_empty() && self.len > 0 {
+            self.index_lines()?;
+        }
+        Ok(())
+    }
+
     fn index_lines(&mut self) -> io::Result<()> {
         self.file.seek(SeekFrom::Start(0))?;
         let mut reader = BufReader::with_capacity(256 * 1024, &self.file);

@@ -99,25 +99,80 @@ impl Usage {
         }
     }
 
-    /// Bytes per minute, once there are a minute's worth of samples.
-    pub fn trend(&self) -> Option<f64> {
-        slope(self.samples.iter().copied())
+    pub fn trend(&self) -> Trend {
+        let v: Vec<(f64, u64)> = self.samples.iter().copied().collect();
+        verdict(&v)
     }
 }
 
-/// Least-squares slope of resident memory over time, in bytes per minute.
-pub fn slope(points: impl Iterator<Item = (f64, u64)>) -> Option<f64> {
-    let pts: Vec<(f64, f64)> = points.map(|(t, b)| (t, b as f64)).collect();
-    let n = pts.len() as f64;
-    let span = pts.last()?.0 - pts.first()?.0;
-    if pts.len() < 10 || span < 60.0 {
-        return None;
+/// Seconds after start when memory is still finding its level: listings read, tabs
+/// restored, the shell's scrollback filling towards its cap. Growth here is expected.
+pub const WARM_UP: f64 = 120.0;
+/// How much settled history a verdict needs.
+pub const WINDOW: f64 = 300.0;
+const KIB: f64 = 1024.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Trend {
+    /// Not enough settled history yet; about this many seconds to go.
+    WarmingUp(f64),
+    Flat,
+    /// `bytes` more over `secs`, as medians of the first and last thirds.
+    Growing {
+        bytes: u64,
+        secs: f64,
+    },
+    Falling {
+        bytes: u64,
+        secs: f64,
+    },
+}
+
+fn median(v: &[(f64, u64)]) -> u64 {
+    let mut b: Vec<u64> = v.iter().map(|s| s.1).collect();
+    b.sort_unstable();
+    b[b.len() / 2]
+}
+
+/// Whether memory is climbing, from `(seconds since start, bytes)` samples.
+///
+/// The first version fitted a line through everything from the first minute on, and
+/// called warm-up — a few steps up as rcmd settled — a leak. Now warm-up is left out,
+/// five minutes of what follows are needed, and the medians of the first and last
+/// thirds are compared, so one step does not tilt the answer. Growth counts only when
+/// it is both steady (128 KiB a minute) and real (1 MiB, and 2% of the total).
+pub fn verdict(samples: &[(f64, u64)]) -> Trend {
+    let now = samples.last().map_or(0.0, |s| s.0);
+    let settled: Vec<(f64, u64)> = samples.iter().copied().filter(|s| s.0 >= WARM_UP).collect();
+    let span = match (settled.first(), settled.last()) {
+        (Some(a), Some(b)) => b.0 - a.0,
+        _ => 0.0,
+    };
+    if settled.len() < 30 || span < WINDOW {
+        let from = settled.first().map_or(WARM_UP, |s| s.0);
+        return Trend::WarmingUp((from + WINDOW - now).max(1.0));
     }
-    let mx = pts.iter().map(|p| p.0).sum::<f64>() / n;
-    let my = pts.iter().map(|p| p.1).sum::<f64>() / n;
-    let sxy: f64 = pts.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
-    let sxx: f64 = pts.iter().map(|p| (p.0 - mx).powi(2)).sum();
-    (sxx > 0.0).then(|| sxy / sxx * 60.0)
+    let third = settled.len() / 3;
+    let (a, b) = (&settled[..third], &settled[settled.len() - third..]);
+    let centre = |v: &[(f64, u64)]| (v[0].0 + v[v.len() - 1].0) / 2.0;
+    let secs = centre(b) - centre(a);
+    let (m1, m2) = (median(a) as f64, median(b) as f64);
+    let per_min = (m2 - m1) / secs * 60.0;
+    let delta = m2 - m1;
+    let real = |d: f64| d >= 1024.0 * KIB && d >= m1 * 0.02;
+    if per_min >= 128.0 * KIB && real(delta) {
+        Trend::Growing {
+            bytes: delta as u64,
+            secs,
+        }
+    } else if per_min <= -128.0 * KIB && real(-delta) {
+        Trend::Falling {
+            bytes: (-delta) as u64,
+            secs,
+        }
+    } else {
+        Trend::Flat
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -246,23 +301,28 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         None => lines.push(("memory     measuring\u{2026}".into(), dim)),
     }
     let (trend, style) = match u.trend() {
-        None => ("trend      needs a minute of samples".to_string(), dim),
-        // Under 64 KiB a minute is allocator noise: a viewer opened, a listing read.
-        Some(s) if s.abs() < 64.0 * 1024.0 => {
-            ("trend      flat".to_string(), Style::new().fg(th.exec))
-        }
-        Some(s) if s > 0.0 => (
+        Trend::WarmingUp(left) => (
             format!(
-                "trend      growing {}/min over {} \u{2014} worth a look if it stays",
-                human_size(s as u64),
-                uptime(Duration::from_secs_f64(
-                    u.samples.back().map_or(0.0, |b| b.0) - u.samples.front().map_or(0.0, |f| f.0)
-                ))
+                "trend      settling in \u{2014} a verdict in about {}",
+                uptime(Duration::from_secs_f64(left))
+            ),
+            dim,
+        ),
+        Trend::Flat => ("trend      flat".to_string(), Style::new().fg(th.exec)),
+        Trend::Growing { bytes, secs } => (
+            format!(
+                "trend      up {} in {} \u{2014} a leak if it keeps going",
+                human_size(bytes),
+                uptime(Duration::from_secs_f64(secs))
             ),
             Style::new().fg(th.err).add_modifier(Modifier::BOLD),
         ),
-        Some(s) => (
-            format!("trend      falling {}/min", human_size((-s) as u64)),
+        Trend::Falling { bytes, secs } => (
+            format!(
+                "trend      down {} in {}",
+                human_size(bytes),
+                uptime(Duration::from_secs_f64(secs))
+            ),
             Style::new().fg(th.exec),
         ),
     };
@@ -300,10 +360,26 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         dim,
     ));
     lines.push((String::new(), plain));
+    // What the graph shows: the newest samples, one per column.
+    let width = inner.width.saturating_sub(2) as usize;
+    let shown: Vec<u64> = u
+        .samples
+        .iter()
+        .rev()
+        .take(width)
+        .rev()
+        .map(|s| s.1)
+        .collect();
+    let (lo, hi) = (
+        shown.iter().min().copied().unwrap_or(0),
+        shown.iter().max().copied().unwrap_or(0),
+    );
     lines.push((
         format!(
-            "resident memory, last {} (one bar per 2 s)",
-            uptime(Duration::from_secs(2 * u.samples.len() as u64))
+            "resident memory, last {}: {} to {} (a bar every 2 s)",
+            uptime(Duration::from_secs(2 * shown.len() as u64)),
+            human_size(lo),
+            human_size(hi)
         ),
         dim,
     ));
@@ -321,19 +397,11 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     let top = inner.y + lines.len() as u16;
     let spark_h = inner.height.saturating_sub(lines.len() as u16 + 1);
     if spark_h > 0 {
-        let width = inner.width.saturating_sub(2) as usize;
-        // Relative to the lowest value shown, so a few hundred KiB of change is visible
-        // against tens of MiB of baseline.
-        let shown: Vec<u64> = u
-            .samples
-            .iter()
-            .rev()
-            .take(width)
-            .rev()
-            .map(|s| s.1)
-            .collect();
-        let floor = shown.iter().min().copied().unwrap_or(0);
-        let data: Vec<u64> = shown.iter().map(|b| b - floor + 1).collect();
+        // The floor is three quarters of the lowest value, not the lowest value itself:
+        // measured from the minimum, a 0.9 MB step on 5 MB drew as a cliff from nothing
+        // and read as an alarm. This way a change shows at its real proportion.
+        let floor = lo / 4 * 3;
+        let data: Vec<u64> = shown.iter().map(|b| b - floor).collect();
         frame.render_widget(
             Sparkline::default()
                 .data(&data)
@@ -353,22 +421,45 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
 mod tests {
     use super::*;
 
+    /// Samples every 2 s for `mins` minutes, memory given by `f(seconds)`.
+    fn run(mins: u64, f: impl Fn(f64) -> u64) -> Vec<(f64, u64)> {
+        (0..mins * 30)
+            .map(|i| (i as f64 * 2.0, f(i as f64 * 2.0)))
+            .collect()
+    }
+
     #[test]
-    fn the_slope_needs_a_minute_and_reads_in_bytes_per_minute() {
-        let flat: Vec<(f64, u64)> = (0..40).map(|i| (i as f64 * 2.0, 50_000_000)).collect();
-        assert_eq!(slope(flat.into_iter()), Some(0.0));
-        let short: Vec<(f64, u64)> = (0..20).map(|i| (i as f64, 1)).collect();
-        assert_eq!(
-            slope(short.into_iter()),
-            None,
-            "twenty seconds is not a trend"
+    fn steps_while_settling_in_are_not_a_leak() {
+        // What the first report showed: 5.2 MB stepping up to 6.1 MB in two minutes,
+        // then staying there. It was called "growing" after 1m 54s.
+        let warm = |t: f64| match t {
+            t if t < 30.0 => 5_200_000,
+            t if t < 90.0 => 5_700_000,
+            _ => 6_100_000,
+        };
+        assert!(
+            matches!(verdict(&run(2, warm)), Trend::WarmingUp(_)),
+            "too early to say"
         );
-        // 1 KiB a second is 60 KiB a minute.
-        let rising: Vec<(f64, u64)> = (0..60)
-            .map(|i| (i as f64 * 2.0, 1_000_000 + i * 2048))
-            .collect();
-        let s = slope(rising.into_iter()).unwrap();
-        assert!((s - 61_440.0).abs() < 1.0, "{s}");
+        assert_eq!(verdict(&run(10, warm)), Trend::Flat);
+        // Jitter around a level is flat too.
+        let noisy = |t: f64| 20_000_000 + ((t as u64 * 7919) % 300_000);
+        assert_eq!(verdict(&run(15, noisy)), Trend::Flat);
+    }
+
+    #[test]
+    fn a_steady_climb_is_called_growth() {
+        // 200 KiB a minute on 20 MB: a slow leak, but a leak.
+        let leak = |t: f64| 20_000_000 + (t / 60.0 * 200.0 * 1024.0) as u64;
+        match verdict(&run(15, leak)) {
+            Trend::Growing { bytes, secs } => {
+                assert!(bytes > 1 << 20, "{bytes}");
+                assert!(secs > 300.0, "{secs}");
+            }
+            other => panic!("{other:?}"),
+        }
+        // The same climb with under five minutes past warm-up is not judged yet.
+        assert!(matches!(verdict(&run(6, leak)), Trend::WarmingUp(_)));
     }
 
     #[cfg(target_os = "linux")]

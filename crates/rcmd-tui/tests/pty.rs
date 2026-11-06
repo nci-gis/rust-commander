@@ -260,7 +260,7 @@ fn starts_draws_both_panes_and_quits_cleanly() {
 
     let screen = rcmd.screen();
     for want in [
-        "left", "right", "Name", "Size", "<DIR>", "notes", "10 Quit", "12 Term",
+        "left", "right", "Name", "Size", "<DIR>", "notes", "10 Quit", "9 Menu",
     ] {
         assert!(screen.contains(want), "{want:?} missing:\n{screen}");
     }
@@ -336,6 +336,9 @@ fn shift_f8_warns_then_deletes_for_real() {
         !s.0.join("data/Trash").exists(),
         "a permanent delete must not go through the trash"
     );
+    // The file goes before the progress box closes, and that box ignores q: wait for
+    // the result to reach the status line, or the q is swallowed (it was, once, on CI).
+    rcmd.wait_for("1 deleted");
     rcmd.quit();
 }
 
@@ -397,6 +400,7 @@ fn dragging_a_file_onto_the_other_pane_copies_it_after_asking() {
         !s.right().join("apple.txt").exists(),
         "only the grabbed file"
     );
+    rcmd.wait_for("1 copied"); // the progress box ignores q until it has closed
     rcmd.quit();
 }
 
@@ -421,6 +425,7 @@ fn ctrl_click_marks_and_the_mark_is_what_f5_copies() {
         !s.right().join("berry.txt").exists(),
         "the cursor's file stays put"
     );
+    rcmd.wait_for("1 copied"); // the progress box ignores q until it has closed
     rcmd.quit();
 }
 
@@ -860,6 +865,8 @@ fn shift_f2_renames_what_the_editor_changed_after_asking() {
     let mut rcmd = Session::start(&s, Some(&editor));
     rcmd.send(b"\x01"); // Ctrl+A: mark all
     rcmd.send(b"\x1b[1;2Q"); // Shift+F2
+    rcmd.wait_for("edit in editor");
+    rcmd.send(b"\x1bOS"); // F4: the editor route
     rcmd.wait_for("Rename 2 files");
     rcmd.wait_for("a.txt  \u{2192}  b.txt");
     assert_eq!(
@@ -1041,4 +1048,50 @@ fn soak_memory_settles_instead_of_growing() {
         m1 >> 10,
         m2 >> 10
     );
+}
+
+/// Windows found this: ConPTY asks its terminal where the cursor is (ESC[6n) before it
+/// lets the shell start, and an unanswered query left cmd.exe dead. The same query from
+/// a program on Unix must be answered too: here `dd` waits for the reply's first bytes,
+/// which never came before.
+#[test]
+fn the_terminal_answers_where_the_cursor_is() {
+    let s = Scratch::new("cpr");
+    let mut rcmd = Session::start(&s, None);
+    rcmd.send(F12);
+    rcmd.wait_for("$ ");
+    rcmd.send(b"stty -icanon -echo; printf '\\033[6n'; dd bs=1 count=2 2>/dev/null | od -An -c; stty sane\r");
+    rcmd.wait_for("033   [");
+    rcmd.send(F12);
+    rcmd.quit();
+}
+
+/// Reported from Windows: closing the window instead of pressing q lost the session,
+/// since it was written only on quit and a closed window kills rcmd without asking.
+/// It is saved when it changes now, so a kill keeps what was open.
+#[test]
+fn a_killed_rcmd_still_reopens_where_it_was() {
+    let s = Scratch::new("killed");
+    std::fs::create_dir(s.left().join("deeper")).unwrap();
+    let mut rcmd = Session::start(&s, None);
+    rcmd.send(b"\x14"); // Ctrl+T: a second tab
+    rcmd.send(DOWN);
+    rcmd.send(ENTER); // into deeper
+    rcmd.wait_for(" 2 deeper ");
+    // Autosave runs every 5 s by default: allow it two rounds.
+    let file = s.0.join("session.toml");
+    let start = Instant::now();
+    while !std::fs::read_to_string(&file).is_ok_and(|t| t.contains("deeper")) {
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "saved without quitting"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = rcmd.child.kill();
+    drop(rcmd);
+
+    let again = Session::start_with(&s, None, &[]);
+    again.wait_for(" 2 deeper ");
+    again.quit();
 }

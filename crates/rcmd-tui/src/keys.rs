@@ -41,6 +41,8 @@ pub enum Action {
     Open,
     EnterDir,
     Parent,
+    GoHome,
+    GoRoot,
     Mark,
     MarkAndNext,
     InvertMarks,
@@ -201,6 +203,20 @@ pub const BINDINGS: &[Binding] = &[
         group: "Navigate",
         about: "Go up one directory",
         keys: &["Backspace", "Alt+Left"],
+    },
+    Binding {
+        action: Action::GoHome,
+        name: "go_home",
+        group: "Navigate",
+        about: "Go to your home directory",
+        keys: &["~"],
+    },
+    Binding {
+        action: Action::GoRoot,
+        name: "go_root",
+        group: "Navigate",
+        about: "Go to the root of this drive or filesystem",
+        keys: &["Ctrl+\\"],
     },
     Binding {
         action: Action::Mark,
@@ -556,7 +572,7 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::BulkRename,
         name: "bulk_rename",
         group: "Files",
-        about: "Rename the selection by editing the names in $EDITOR",
+        about: "Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR",
         keys: &["Shift+F2"],
     },
     Binding {
@@ -651,6 +667,55 @@ pub const BINDINGS: &[Binding] = &[
         keys: &["Shift+F1"],
     },
 ];
+
+/// The order groups are shown in, F1 and `--print-keys` alike. A group not listed here
+/// still shows, after these.
+const GROUP_ORDER: &[&str] = &[
+    "General", "Navigate", "Select", "Files", "Sort", "Panes", "Tabs", "Terminal",
+];
+
+/// The bindings by group, each group once, in `GROUP_ORDER`; within a group, in table
+/// order. Rows were added to `BINDINGS` over time wherever they landed, so walking it
+/// in order showed some groups twice.
+pub fn grouped() -> Vec<(&'static str, Vec<&'static Binding>)> {
+    let mut groups: Vec<&'static str> = GROUP_ORDER.to_vec();
+    for b in BINDINGS {
+        if !groups.contains(&b.group) {
+            groups.push(b.group);
+        }
+    }
+    groups
+        .into_iter()
+        .map(|g| (g, BINDINGS.iter().filter(|b| b.group == g).collect()))
+        .filter(|(_, v): &(&str, Vec<&Binding>)| !v.is_empty())
+        .collect()
+}
+
+/// Every key as Markdown, for `docs/keys.md`.
+pub fn markdown(keymap: &Keymap) -> String {
+    let mut out = String::from(
+        "# Keys\n\n\
+         These are the defaults. Press **F1** in rcmd to see your own, after any changes in\n\
+         `[keys]` in the config. This file is generated: `rcmd --print-keys > docs/keys.md`.\n",
+    );
+    for (group, rows) in grouped() {
+        let _ = write!(out, "\n## {group}\n\n| Keys | Does |\n|---|---|\n");
+        for b in rows {
+            let keys: Vec<String> = keymap
+                .keys_for(b.action)
+                .iter()
+                .map(|k| format!("`{}`", k.replace('|', "\\|")))
+                .collect();
+            let keys = if keys.is_empty() {
+                "—".into()
+            } else {
+                keys.join(" ")
+            };
+            let _ = writeln!(out, "| {keys} | {} |", b.about.replace('|', "\\|"));
+        }
+    }
+    out
+}
 
 impl Action {
     pub fn from_name(s: &str) -> Option<Action> {
@@ -779,6 +844,10 @@ fn normalise(k: KeyEvent) -> Chord {
                 code = KeyCode::Char(c.to_ascii_lowercase());
             }
         }
+    }
+    // Ctrl+\ is the byte 0x1C in a legacy terminal, which crossterm reports as Ctrl+4.
+    if m.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('4') {
+        code = KeyCode::Char('\\');
     }
     // Terminals that speak the Kitty protocol add these; nothing here binds them.
     m.remove(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META);
@@ -924,6 +993,8 @@ mod tests {
             Action::Open,
             Action::EnterDir,
             Action::Parent,
+            Action::GoHome,
+            Action::GoRoot,
             Action::Mark,
             Action::MarkAndNext,
             Action::InvertMarks,
@@ -1031,6 +1102,17 @@ mod tests {
         assert_eq!(
             parse_key("Space").unwrap(),
             (KeyCode::Char(' '), KeyModifiers::NONE)
+        );
+    }
+
+    #[test]
+    fn ctrl_backslash_arrives_as_ctrl_4_from_a_legacy_terminal() {
+        let legacy = KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL);
+        assert_eq!(normalise(legacy), parse_key("Ctrl+\\").unwrap());
+        assert_eq!(
+            Keymap::default().action_for(legacy),
+            Some(Action::GoRoot),
+            "the binding fires either way"
         );
     }
 

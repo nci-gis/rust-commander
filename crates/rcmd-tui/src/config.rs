@@ -60,6 +60,10 @@ pub struct General {
     pub restore_session: bool,
     /// The File | View | Help bar on the top row. F9 opens it either way.
     pub menu_bar: bool,
+    /// Save the session this often when it has changed, in seconds, so closing the
+    /// window instead of quitting keeps it. 0 turns it off (it is still saved on
+    /// quit); otherwise 5 to 3600.
+    pub autosave_secs: u64,
 }
 
 impl Default for General {
@@ -69,6 +73,7 @@ impl Default for General {
             delete_to_trash: true,
             restore_session: true,
             menu_bar: true,
+            autosave_secs: 5,
         }
     }
 }
@@ -308,6 +313,12 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
             config.terminal.max_terminals
         ));
     }
+    let a = config.general.autosave_secs;
+    if a != 0 && !(5..=3600).contains(&a) {
+        return Err(format!(
+            "[general] autosave_secs = {a}: expected 0 (off) or 5 to 3600"
+        ));
+    }
     let ms = config.files.auto_refresh_ms;
     if ms != 0 && !(100..=60_000).contains(&ms) {
         return Err(format!(
@@ -356,7 +367,7 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
     };
     let root = match config.security.root.trim() {
         "" => None,
-        r => match std::fs::canonicalize(r) {
+        r => match rcmd_core::paths::canonical(r) {
             Ok(p) if p.is_dir() => Some(p),
             Ok(_) => return Err(format!("[security] root = \"{r}\": not a directory")),
             Err(e) => return Err(format!("[security] root = \"{r}\": {e}")),
@@ -463,8 +474,39 @@ impl Outcome {
     }
 }
 
+/// The text of a config file, whatever a Windows tool saved it as.
+fn decode(bytes: &[u8]) -> std::io::Result<String> {
+    let bad = |what: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, what.to_string());
+    let utf16 = |rest: &[u8], le: bool| {
+        let (pairs, odd) = rest.as_chunks::<2>();
+        if !odd.is_empty() {
+            return Err(bad("not valid UTF-16"));
+        }
+        let units = pairs.iter().map(|&c| {
+            if le {
+                u16::from_le_bytes(c)
+            } else {
+                u16::from_be_bytes(c)
+            }
+        });
+        char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .map_err(|_| bad("not valid UTF-16"))
+    };
+    match bytes {
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8(rest.to_vec()),
+        [0xFF, 0xFE, rest @ ..] => return utf16(rest, true),
+        [0xFE, 0xFF, rest @ ..] => return utf16(rest, false),
+        _ => String::from_utf8(bytes.to_vec()),
+    }
+    .map_err(|_| bad("not UTF-8 text; save it as UTF-8"))
+}
+
 /// Load from `explicit`, or the default location. Never fails: a bad file produces the
 /// defaults plus an [`Outcome::Rejected`] that the caller must show.
+///
+/// UTF-8, with or without a byte-order mark, or UTF-16 with one: Windows PowerShell 5's
+/// `rcmd --print-config > config.toml` writes UTF-16, and Notepad has written a BOM.
 pub fn load(explicit: Option<&Path>) -> (Settings, Outcome) {
     let path = match explicit {
         Some(p) => p.to_path_buf(),
@@ -473,7 +515,7 @@ pub fn load(explicit: Option<&Path>) -> (Settings, Outcome) {
             None => return (Settings::default(), Outcome::NoFile),
         },
     };
-    let text = match std::fs::read_to_string(&path) {
+    let text = match std::fs::read(&path).and_then(|b| decode(&b)) {
         Ok(t) => t,
         // A missing default file is the normal case. A missing file someone named on
         // the command line is a mistake worth pointing out.
@@ -543,7 +585,7 @@ pub fn render_default() -> String {
     };
     let body = toml::to_string_pretty(&cfg).expect("the default config must serialise");
     format!(
-        "# rcmd configuration — every setting, at its default.\n\
+        "# rcmd configuration - every setting, at its default.\n\
          # Delete what you do not change; a missing key keeps its default.\n\
          # Colours: \"#rrggbb\", \"reset\" (the terminal's own), or \"0\"-\"255\".\n\
          # Under [keys], listing an action replaces all of its default keys.\n\n{body}"
@@ -568,6 +610,37 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(s.config, expected);
+    }
+
+    #[test]
+    fn the_printed_default_is_ascii_so_no_shell_can_mangle_it() {
+        // PowerShell decodes a program's output with the console's code page before
+        // `>` writes it, so an em dash came out as "ΓÇö" in the user's file.
+        let text = render_default();
+        let odd: Vec<char> = text.chars().filter(|c| !c.is_ascii()).collect();
+        assert!(odd.is_empty(), "{odd:?}");
+    }
+
+    #[test]
+    fn a_config_saved_by_windows_tools_still_reads() {
+        let toml = "[general]\nmenu_bar = false\n# caf\u{e9}\n";
+        let utf16 = |le: bool| {
+            let mut b = if le {
+                vec![0xFF, 0xFE]
+            } else {
+                vec![0xFE, 0xFF]
+            };
+            for u in toml.encode_utf16() {
+                b.extend(if le { u.to_le_bytes() } else { u.to_be_bytes() });
+            }
+            b
+        };
+        let bom8 = [&[0xEF, 0xBB, 0xBF][..], toml.as_bytes()].concat();
+        for bytes in [toml.as_bytes().to_vec(), bom8, utf16(true), utf16(false)] {
+            assert_eq!(decode(&bytes).unwrap(), toml);
+        }
+        assert!(decode(&[0xFF, 0xFE, 0x41]).is_err(), "odd UTF-16");
+        assert!(decode(b"menu_bar = \xff").is_err(), "neither");
     }
 
     #[test]
@@ -652,7 +725,7 @@ mod tests {
             tmp.display().to_string()
         ))
         .unwrap();
-        assert_eq!(s.root, Some(std::fs::canonicalize(&tmp).unwrap()));
+        assert_eq!(s.root, Some(rcmd_core::paths::canonical(&tmp).unwrap()));
         assert!(Mode::Restricted > Mode::ReadOnly && Mode::ReadOnly > Mode::Normal);
     }
 

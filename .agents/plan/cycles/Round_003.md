@@ -100,12 +100,14 @@ where that is impossible, with one clear line telling the user which setting to 
 sent):
 
 - Colours right after Round 001: no green or red backgrounds.
-- Clicking in rcmd selects text in Terminal.app's own blue selection, and the pointer
-  is the I-beam, not an arrow. Terminal.app shows the arrow only while a program has
-  mouse reporting on, so **mouse reports are not reaching rcmd**: either View → Allow
-  Mouse Reporting (⌘R) is off, or Terminal.app does not accept the modes crossterm
-  turns on. Asked which. rcmd cannot set the pointer shape itself: the escape for it
-  (OSC 22) is not something Terminal.app understands.
+- Clicking in rcmd does nothing in rcmd, and the wheel scrolls Terminal.app's window,
+  so **mouse reports are not reaching rcmd**: either View → Allow Mouse Reporting (⌘R)
+  is off, or Terminal.app does not accept the modes crossterm turns on. Asked which.
+  ~~The pointer is the I-beam, which Terminal.app shows only when no program has mouse
+  reporting on.~~ **Wrong** (owner, 2026-11-07): Terminal.app shows the I-beam in a
+  plain zsh too, so the pointer's shape says nothing about mouse reporting; the clicks
+  and the wheel are the evidence. The blue "selection" was the profile's background,
+  as the second report found.
 - Option does not act as Alt, as expected. "Esc + Option + key" did nothing, also as
   expected: Esc-prefix is step 3, not built yet.
 

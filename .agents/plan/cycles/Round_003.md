@@ -1,9 +1,10 @@
 # Round 003: macOS keys and mouse
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 2
 **Date started**: 2026-11-06
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner's approval; history and resize
+keys on a Mac carried into [Round 004](Round_004.md))
 
 > This number first held a spike for SFTP and plugins. The owner dropped SFTP on
 > 2026-11-06 before it started; plugins moved to the end of the roadmap.
@@ -41,7 +42,7 @@ where that is impossible, with one clear line telling the user which setting to 
 
 ## Plan
 
-- [ ] 1. **Measure on the reporter's Mac**, before any code. In Terminal.app:
+- [x] 1. **Measure on the reporter's Mac**, before any code. In Terminal.app:
       - macOS version, `echo $TERM_PROGRAM $TERM_PROGRAM_VERSION`;
       - which keys fail: each F-key, Alt+letter, Alt+arrows, Shift+F-keys, Ctrl+\\;
         with and without Fn; with and without "Use Option as Meta key";
@@ -49,10 +50,10 @@ where that is impossible, with one clear line telling the user which setting to 
         on and off.
 
       rcmd cannot yet show which key it received, so this step is easier after step 2.
-- [ ] 2. **A key tester**: `rcmd --show-keys` prints each key as crossterm decodes it,
+- [x] 2. **A key tester**: `rcmd --show-keys` prints each key as crossterm decodes it,
       and the binding it would trigger, until Esc Esc. Useful on every platform and for
       every future "key X does nothing" report.
-- [ ] 3. **Esc as a prefix**, as Midnight Commander does, which works in any terminal
+- [x] 3. **Esc as a prefix**, as Midnight Commander does, which works in any terminal
       with no setting: Esc then a key within a second is Alt+key; Esc then 1…0 is
       F1…F10. Only where Esc alone does nothing (file panes, not dialogs, not the
       terminal panel), so closing a dialog is never delayed.
@@ -68,17 +69,17 @@ where that is impossible, with one clear line telling the user which setting to 
 - [ ] ~~3c.~~ **Dropped with 3b.** Was: **Option+← / →**: Terminal.app sends `ESC b` / `ESC f` for them by default (to
       confirm), which crossterm reads as Alt+B / Alt+F. Bind those to back and forward
       as well, so history works on a Mac out of the box.
-- [ ] 4. **Say what to change.** When a character that Option produces arrives where
+- [x] 4. *(partly: the Option hint; F-key advice is in the docs, as planned)* **Say what to change.** When a character that Option produces arrives where
       typing means nothing (a file pane), say once per session: "Option is typing
       characters: turn on Use Option as Meta key in Terminal → Settings → Profiles →
       Keyboard, or press Esc then the key". The same for F-keys if step 1 shows they
       arrive as media keys or not at all (rcmd sees nothing then; the hint goes on F1
       and in the docs).
-- [ ] 5. **The wheel**: from step 1's result. If reporting was off, the hint and docs.
+- [x] 5. *(no change needed: the mouse works)* **The wheel**: from step 1's result. If reporting was off, the hint and docs.
       If Terminal.app ignores crossterm's modes, also turn on alternate-scroll mode
       (`ESC[?1007h`, where the terminal turns the wheel into arrow keys on the
       alternate screen) and handle the arrows as scrolling.
-- [ ] 6. `docs/guide.md`: a "rcmd on macOS" section with the three settings. Keys F1 page
+- [x] 6. *(in `docs/troubleshooting.md`, at the owner's request)* `docs/guide.md`: a "rcmd on macOS" section with the three settings. Keys F1 page
       mentions Esc-prefix. CHANGELOG.
 
 ## Risks
@@ -197,11 +198,27 @@ Record what you could **not** verify as explicitly as what you could.
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** the Esc-prefix timeout and the
+once-only Option hint have no test (the first needs a clock the app does not take, the
+second is macOS-only code); `--show-keys` has no automated test; F-keys with and without
+Fn were not itemised. None blocks: Esc-prefix and Option-as-Alt were confirmed by hand on
+the owner's Mac, and the keys that still do not work there are Round 004's.
+
 **Learnings**:
 
--
+- **Measure first, with the tool.** Two conclusions in this round were wrong and were
+  only caught by the owner: a blue area taken for Terminal.app's selection was the
+  profile's background, and the I-beam pointer, taken as "no mouse reporting", is
+  Terminal.app's pointer everywhere. `rcmd --show-keys` settled the mouse in one run.
+- **macOS Terminal.app, with Option as Meta:** ⌥← / ⌥→ arrive as Alt+B / Alt+F (its
+  profile maps them to word left / right); ⌥↑ / ⌥↓ arrive as three keys (`ESC ESC [ A`,
+  which crossterm does not read as Alt+↑); Option+Shift and Ctrl+Shift drop their
+  modifiers on arrows; ⇧← / ⇧→ arrive. Without Option as Meta, Option types characters.
+  Mouse reporting works; the window's scrollbar shows the first screen above rcmd's.
+- Esc as a Meta prefix costs nothing if it arms only when Esc has nothing else to do.
 
-**Promotions**:
+**Promotions** (proposed; `reference/` is a person's to change):
 
-- [ ] → `reference/platforms.md`: macOS keyboard and mouse, and what rcmd does about it
-- [ ] → `reference/gotchas.md`: anything step 1 turns up that is not obvious
+- [ ] → `reference/platforms.md`: the macOS Terminal.app key table above, and Esc as Meta
+- [ ] → `reference/gotchas.md`: the I-beam pointer and the window scrollbar in
+      Terminal.app are not rcmd bugs; ask for `rcmd --show-keys` before guessing

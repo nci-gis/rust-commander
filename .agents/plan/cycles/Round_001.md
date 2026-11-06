@@ -1,9 +1,9 @@
 # Round 001: Colours on terminals without 24-bit colour
 
-**Status**: In Progress
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 1
 **Date started**: 2026-11-06
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner's approval)
 
 ## Goal
 
@@ -45,7 +45,7 @@ reversed rule in step 3.
 
 ## Plan
 
-- [ ] 1. **Confirm on the reporter's Mac** before writing code. In the Terminal.app
+- [x] 1. *(partly: the fix was confirmed on the Mac, the version numbers were never sent)* **Confirm on the reporter's Mac** before writing code. In the Terminal.app
       window that shows the problem:
 
       ```bash
@@ -55,10 +55,10 @@ reversed rule in step 3.
 
       Confirmed if `rgb` has a **green** background and `256` a dark grey one. Record
       the version numbers here: they set the cut-off in step 3.
-- [ ] 2. **Colour depth** as a setting, `[theme] colors = "auto" | "truecolor" | "256" |
+- [x] 2. **Colour depth** as a setting, `[theme] colors = "auto" | "truecolor" | "256" |
       "16"`, and an `RCMD_COLORS` environment variable that overrides it per host (a
       server's config cannot know which terminal is in front of it).
-- [ ] 3. **`auto` uses 24-bit only on positive evidence**, 256 otherwise:
+- [x] 3. **`auto` uses 24-bit only on positive evidence**, 256 otherwise:
       - `TERM_PROGRAM=Apple_Terminal` below the version from step 1 → 256, whatever
         `COLORTERM` says;
       - `COLORTERM` = `truecolor`/`24bit` → 24-bit;
@@ -71,14 +71,14 @@ reversed rule in step 3.
       slow SSH link, and Tahoe's Terminal.app reportedly does not answer colour
       queries. The cost is 256 colours over SSH on a capable terminal unless
       `COLORTERM` is forwarded or set.
-- [ ] 3b. **An `ansi` theme** from the 16 ANSI colours, which follows the user's own
+- [x] 3b. **An `ansi` theme** from the 16 ANSI colours, which follows the user's own
       palette (light or dark). Chosen automatically at depth 16; selectable anywhere.
       Whether it becomes the default is a decision for a person (ROADMAP).
-- [ ] 4. **Convert in one place**: `quiet.rs` already sees every cell before it is
+- [x] 4. **Convert in one place**: `quiet.rs` already sees every cell before it is
       written. Map `Rgb` to the nearest xterm-256 index there (the 6×6×6 cube or the
       grey ramp, whichever is closer). That covers the theme, `LS_COLORS` and colours a
       program prints into the terminal panel, which reach the backend through tui-term.
-- [ ] 5. `--print-config`, `docs/config.md`, CHANGELOG.
+- [x] 5. `--print-config`, `docs/config.md`, CHANGELOG.
 
 ## Risks
 
@@ -142,8 +142,22 @@ Record what you could **not** verify as explicitly as what you could.
 
 **Learnings**:
 
--
+- A terminal without 24-bit colour does not ignore `ESC[48;2;R;G;Bm`: macOS
+  Terminal.app before macOS 26 reads each number as its own attribute, so a theme's RGB
+  values become green and red backgrounds. ratatui and crossterm never check; the app
+  has to.
+- Decide colour depth on positive evidence only. `COLORTERM` and `TERM_PROGRAM` do not
+  cross SSH, and people export `COLORTERM=truecolor` in dotfiles, so "downgrade only
+  where known broken" breaks exactly the remote case.
+- One backend wrapper that every cell passes through (`quiet.rs`) made this a single
+  fix that also covers `LS_COLORS`, pictures and programs in the terminal panel.
+- crossterm sends even the 16 named colours as `38;5;N` (N 0–15); a test asserting
+  "no `38;5;`" at 16 colours was wrong, not the code.
+- Still unconfirmed: Terminal.app's first 24-bit build (464, from one third-party
+  report). If a newer Terminal.app shows muted colours, that number is the suspect.
 
-**Promotions**:
+**Promotions** (proposed; `reference/` is a person's to change):
 
 - [ ] → `reference/platforms.md`: Terminal.app and 24-bit colour, and how `auto` decides
+- [ ] → `reference/gotchas.md`: crossterm writes named colours as `38;5;N`; `COLORTERM`
+      does not survive SSH

@@ -30,8 +30,8 @@ users want Enter to open files.
 | # | Item | Size | Round | Status |
 |---|---|---|---|---|
 | **Now: fix what is broken** | | | | |
-| 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Review: works on the owner's Mac; build-464 cut-off unconfirmed |
-| 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Review: Esc as Meta done; the mouse works (no bug) |
+| 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
+| 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
 | **Next: Total Commander feel** | | | | |
 | 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning |
 | 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |

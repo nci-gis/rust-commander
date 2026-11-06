@@ -2333,7 +2333,10 @@ fn every_toml_example_in_the_docs_is_a_valid_config() {
     fs::create_dir_all(&dir).unwrap();
     let mut checked = 0;
     for file in ["README.md", "docs/config.md", "docs/security.md"] {
-        let text = fs::read_to_string(format!("{REPO}/{file}")).unwrap();
+        // A Windows checkout may have CRLF line ends; the examples are the same either way.
+        let text = fs::read_to_string(format!("{REPO}/{file}"))
+            .unwrap()
+            .replace("\r\n", "\n");
         let mut rest = text.as_str();
         while let Some(start) = rest.find("```toml\n") {
             let body = &rest[start + 8..];

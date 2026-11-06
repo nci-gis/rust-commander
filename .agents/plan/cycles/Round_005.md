@@ -26,6 +26,14 @@ ever passes through a shell, and running a program is still asked first.
   stdout and stderr closed. Its output is lost, and what happens differs by platform:
   `xdg-open` may open a script in an editor, `open` starts a new Terminal.app window,
   Windows opens a console window.
+- **Terminal tabs** start from a string split on spaces (`TermPane::spawn(…, shell)`),
+  so a program whose path has a space cannot be given to it as is; and a tab whose
+  process exits is removed (`TermTabs::reap`), which would take a program's output with
+  it. Step 1 has to change both.
+- **Finding (review, 2026-11-07)**: `o` decides "no desktop to open in" from `DISPLAY` /
+  `WAYLAND_DISPLAY`, on Linux only. Over SSH into a **Mac or a Windows machine**, `open`
+  and `explorer.exe` would open the file on that machine's own screen, or fail, never on
+  the screen in front of the user.
 
 ## What Enter will do
 
@@ -35,17 +43,25 @@ ever passes through a shell, and running a program is still asked first.
 | a program, script, `.desktop` or `.lnk` | "Run it?": **Run in a terminal tab** (default after Cancel), Run with the system, Cancel |
 | a file with an `[[open]]` rule for its extension | what the rule says |
 | any other file | the system's program for it, as `o` |
-| anything, when nothing can be opened (no desktop over SSH, read-only, restricted) | view it (F3), and say why on the status line |
+| anything, when nothing can be opened (over SSH on any system, no desktop, read-only, restricted) | view it (F3), and say why on the status line |
 
-`[files] enter = "open" | "view"`. **Default `open`** if the owner confirms (ROADMAP
-decisions); `view` keeps 0.1.0's behaviour.
+`[files] enter = "open" | "view"`. **Default `open`**, as the owner decided on
+2026-11-06 (ROADMAP, Decisions); `view` keeps 0.1.0's behaviour.
 
 ## Plan
 
+- [ ] 0. **"Can anything be opened here?"** in one place, used by `o`, Enter and the
+      rules: not over SSH (`SSH_CONNECTION` or `SSH_TTY` set) on any system; on Linux
+      and the BSDs, not without `DISPLAY` / `WAYLAND_DISPLAY`; never in read-only or
+      restricted. Fixes the SSH finding for `o` today, before Enter depends on it.
 - [ ] 1. **"Run it?" runs a console program in a terminal tab**: a new tab of the
       terminal panel started on the program's argv directly, never typed into a shell
       (so rule 5 holds without `safety.rs`). "Run with the system" stays as a choice.
-      Fixes the finding above and is what step 3's `terminal = true` reuses.
+      Fixes the finding above and is what step 3's `terminal = true` reuses. Needs:
+      `TermPane::spawn_argv` (an argv, no splitting); a tab started for a program stays
+      after the program ends, showing its output and "exited (status N) — Enter or Esc
+      closes"; its title is the program's name. Refused where the terminal is
+      (restricted) and where running programs is (read-only).
 - [ ] 2. **Enter** as in the table; `[files] enter`.
 - [ ] 3. **`[[open]]` rules** for extensions the user wants handled differently, first
       match wins, before the system's choice:
@@ -68,7 +84,7 @@ decisions); `view` keeps 0.1.0's behaviour.
 
       `command` is a list, never a string split by a shell. `os = ["windows"]` scopes a
       rule to some systems.
-- [ ] 4. **Open with…** (Shift+O, the File menu and the right-click menu): the rules that
+- [ ] 4. **Open with…** (Shift+O, unbound today; the File menu and the right-click menu): the rules that
       match this file, "System default", "View", "Edit". Windows' own chooser is left
       out: the supported call (`SHOpenWithDialog`) needs FFI, which
       `forbid(unsafe_code)` rules out. Listing installed applications on Linux and
@@ -91,6 +107,11 @@ decisions); `view` keeps 0.1.0's behaviour.
   `raw_arg`**.
 - **Secure modes.** Every new path that starts a program goes through `App::refused` and
   the `policy.rs` root check, like `o` today.
+- **Enter changes for everyone who has 0.1.0.** It viewed; it opens. The CHANGELOG says
+  so first under Changed, with `enter = "view"` to keep the old way, and Settings
+  (Round 007) will offer it.
+- **Over SSH, Enter views.** On a server that is the useful behaviour, and the status
+  line says why, so it does not look like Enter is broken.
 
 ## Do
 
@@ -102,7 +123,10 @@ decisions); `view` keeps 0.1.0's behaviour.
 - [ ] Render tests: Enter on a file says "would open … with …" under `--screenshot`;
       Enter on a program shows "Run it?"; Enter in read-only views; Open with lists the
       rules.
-- [ ] A pty test: "Run in a terminal tab" shows the program's output in a new tab.
+- [ ] A pty test: "Run in a terminal tab" shows the program's output in a new tab, and
+      the tab is still there after the program ends.
+- [ ] Render tests with `SSH_CONNECTION` set: Enter views, `o` refuses with the reason,
+      on every system (an environment variable, so CI covers all three).
 - [ ] By hand on each system (CI cannot open windows): a PDF opens; Enter over SSH on
       Linux views; a `.cmd` rule with a hostile name is refused, not run.
 

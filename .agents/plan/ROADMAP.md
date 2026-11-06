@@ -41,17 +41,29 @@ were done first:
 
 ## Next, in this order
 
-1. **Close Round 004.** Merge the review fixes (PR #4); the owner tries Option+R and
-   arrows, Option+J and Option+1…9 on the Mac; then Complete.
-2. **Release 0.2.0.** `dev` holds Round 001's colours, Rounds 003–004's keys, the
-   troubleshooting page and the temp-file fixes: 0.1.0 on a Mac in Terminal.app is hard
-   to read. The flow in `docs/development.md` (cargo release on `dev`, pull request into
-   `main`, tag on `main`, publish the draft).
-3. **Round 005**: Enter opens files the Total Commander way (item 3; was Round 002).
-4. **Round 006**: themes as files (item 4).
-5. **Round 007**: Settings (item 6), which needs 4; keymap sets join it only if a second
+1. **Close Round 004.** The review fixes are merged (PR #4); the owner tries Option+R
+   and arrows, Option+J and Option+1…9 on the Mac; then Complete.
+2. **Round 005**: Enter opens files the Total Commander way (item 3; was Round 002).
+   Reviewed on 2026-11-07: Enter defaults to `open`, as decided; one "can anything be
+   opened here?" check that also covers SSH on macOS and Windows (step 0, a bug in `o`
+   today); a terminal tab that runs a program by argv and stays after it ends.
+3. **Round 006**: themes as files (item 4).
+4. **Round 007**: Settings (item 6), which needs 4; keymap sets join it only if a second
    set is wanted by then.
-6. Then items 7–10 in table order, each numbered when started.
+5. Then items 7–10 in table order, each numbered when started.
+
+**Releasing is the owner's call** ("chưa release", 2026-11-07). `dev` already holds
+enough for 0.2.0 — Round 001's colours above all, since 0.1.0 is hard to read on a Mac in
+Terminal.app — and the flow in `docs/development.md` is ready when asked.
+
+**Small fixes, no round of their own** (on `dev`, or inside the next round that touches
+the file):
+
+- `rcmd --screenshot … | head` panics ("failed printing to stdout: Broken pipe",
+  exit 101) when the reader stops early; a closed pipe should end quietly, as `cat`
+  does. Any output larger than the pipe's buffer is affected.
+- `rcmd --show-keys` has no automated test (Round 003).
+- The Alt+R group's Esc path has no test of its own (Round 004).
 
 Waiting on a person, at any point: the one name (item 8); the four promotions proposed
 in Rounds 001 and 003; the read-only finding in

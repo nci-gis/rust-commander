@@ -1200,6 +1200,14 @@ impl FilePane {
             }
             buf.set_line(rows.x, y, &Line::from(spans), rows.width);
         }
+        // Over the right border, beside the rows: how long the list is, and where.
+        crate::scrollbar::draw(
+            frame.buffer_mut(),
+            crate::scrollbar::track(area, rows),
+            self.entries.len(),
+            self.offset,
+            border,
+        );
     }
 }
 

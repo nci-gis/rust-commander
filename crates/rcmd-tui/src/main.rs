@@ -19,6 +19,7 @@ mod modal;
 mod opener;
 mod pane;
 mod safety;
+mod scrollbar;
 mod search;
 mod session;
 mod theme;

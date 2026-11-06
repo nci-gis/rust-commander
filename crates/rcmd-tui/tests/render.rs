@@ -258,6 +258,44 @@ fn f3_shows_the_file_with_line_numbers() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+const THUMB: char = '\u{2503}';
+
+#[test]
+fn a_long_list_gets_a_scrollbar_and_a_short_one_does_not() {
+    let (a, b) = fixture();
+    let short = shot("80x24", &a, &b);
+    assert!(
+        !short.contains(THUMB),
+        "nothing to scroll, nothing drawn\n{short}"
+    );
+    for i in 0..60 {
+        fs::write(a.join(format!("f{i:02}.txt")), b"").unwrap();
+    }
+    let long = shot("80x24", &a, &b);
+    let rows: Vec<&str> = long.lines().filter(|l| l.contains(THUMB)).collect();
+    assert!(!rows.is_empty(), "the left pane overflows\n{long}");
+    // On the left pane's right border, not inside it: the right pane starts after it.
+    let col = rows[0].chars().position(|c| c == THUMB).unwrap();
+    assert!(col < 40, "on the left pane's border\n{long}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn the_viewer_shows_a_scrollbar_for_a_long_file_in_text_and_hex() {
+    let body: String = (0..300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    let text = shot_keys("100x16", "Down,F3", &a, &b);
+    assert!(text.contains(THUMB), "text view\n{text}");
+    let hex = shot_keys("100x16", "Down,F3,h", &a, &b);
+    assert!(hex.contains(THUMB), "hex view\n{hex}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    let (a, b) = with_file("doc.txt", b"one\ntwo\n");
+    let short = shot_keys("100x16", "Down,F3", &a, &b);
+    assert!(!short.contains(THUMB), "it all fits\n{short}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn tabs_are_expanded_rather_than_sent_to_the_terminal() {
     let (a, b) = with_file("doc.txt", b"ab\tc\n");

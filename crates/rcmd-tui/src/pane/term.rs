@@ -249,6 +249,13 @@ impl TermPane {
         }
     }
 
+    fn history(&self) -> usize {
+        self.parser
+            .write()
+            .map(|mut p| history_of(&mut p))
+            .unwrap_or(0)
+    }
+
     fn scrolled(&self) -> usize {
         self.parser
             .read()
@@ -358,10 +365,23 @@ impl TermPane {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
+        // Only while looking back: at the live screen a thumb would always sit at the
+        // bottom and say nothing.
+        let history = if back > 0 { self.history() } else { 0 };
         let Ok(guard) = self.parser.read() else {
             return;
         };
         frame.render_widget(PseudoTerminal::new(guard.screen()), inner);
+        drop(guard);
+        if back > 0 {
+            crate::scrollbar::draw(
+                frame.buffer_mut(),
+                crate::scrollbar::track(area, inner),
+                history + inner.height as usize,
+                history.saturating_sub(back),
+                theme::border_style(active),
+            );
+        }
     }
 
     /// Inner size for a pane rectangle, accounting for the border.
@@ -454,9 +474,33 @@ fn short_dir(p: &Path) -> String {
         .unwrap_or_else(|| "/".into())
 }
 
+/// How many lines of history vt100 holds. It does not say, but it clamps a scrollback
+/// offset to that length, so ask for everything and put the offset back.
+fn history_of(p: &mut vt100::Parser) -> usize {
+    let now = p.screen().scrollback();
+    p.screen_mut().set_scrollback(usize::MAX);
+    let all = p.screen().scrollback();
+    p.screen_mut().set_scrollback(now);
+    all
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_is_measured_without_moving_the_view() {
+        let mut p = vt100::Parser::new(5, 20, 100);
+        assert_eq!(history_of(&mut p), 0);
+        for i in 0..30 {
+            p.process(format!("line {i}\r\n").as_bytes());
+        }
+        // 30 lines and the empty one the cursor sits on, 5 of them on screen.
+        assert_eq!(history_of(&mut p), 26);
+        p.screen_mut().set_scrollback(7);
+        assert_eq!(history_of(&mut p), 26);
+        assert_eq!(p.screen().scrollback(), 7, "the view stays where it was");
+    }
 
     #[test]
     fn cursor_queries_are_counted_even_when_a_read_splits_one() {

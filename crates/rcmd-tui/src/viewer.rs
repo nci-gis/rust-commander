@@ -237,6 +237,17 @@ impl Viewer {
 
         let body = Rect::new(inner.x, inner.y, inner.width, inner.height - 1);
         self.page = body.height as usize;
+        let total = match self.mode {
+            Mode::Text => self.doc.line_count(),
+            Mode::Hex => self.doc.hex_rows(),
+        };
+        crate::scrollbar::draw(
+            frame.buffer_mut(),
+            crate::scrollbar::track(area, body),
+            total,
+            self.top,
+            Style::new().fg(theme::t().accent),
+        );
         match self.mode {
             Mode::Text => self.render_text(frame, body),
             Mode::Hex => self.render_hex(frame, body),

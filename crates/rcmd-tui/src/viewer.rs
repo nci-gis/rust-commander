@@ -139,6 +139,13 @@ impl Viewer {
                     Mode::Text => Mode::Hex,
                     Mode::Hex => Mode::Text,
                 };
+                if self.mode == Mode::Text {
+                    if let Err(e) = self.doc.ensure_lines() {
+                        self.mode = Mode::Hex;
+                        self.message = format!("cannot show as text: {e}");
+                        return Action::Stay;
+                    }
+                }
                 // The two modes count in different units, so a shared `top` would jump
                 // somewhere arbitrary.
                 self.top = 0;

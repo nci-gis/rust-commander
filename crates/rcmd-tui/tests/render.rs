@@ -2372,3 +2372,18 @@ fn the_key_to_leave_the_terminal_follows_a_rebind_and_hints_are_not_repeated() {
     assert!(!s.lines().next().unwrap().contains("F9"), "{s}");
     assert!(!status(&s).contains("help \u{b7}"), "{s}");
 }
+
+#[test]
+fn a_binary_file_switched_to_text_shows_its_lines_not_an_empty_screen() {
+    // Reported from Windows: a binary opens in hex, h switched it to text, and the
+    // screen was empty — binary files were never line-indexed.
+    let (a, b) = files(&[]);
+    let mut body = b"MZ\0\0binary header\n".to_vec();
+    body.extend_from_slice(b"second line\nthird line\n");
+    fs::write(a.join("prog.bin"), body).unwrap();
+    let s = shot_keys("100x20", "/,p,r,o,g,Enter,F3", &a, &b);
+    assert!(s.contains("hex"), "a binary opens in hex\n{s}");
+    let s = shot_keys("100x20", "/,p,r,o,g,Enter,F3,h", &a, &b);
+    assert!(s.contains("3 lines"), "{s}");
+    assert!(s.contains("second line"), "{s}");
+}

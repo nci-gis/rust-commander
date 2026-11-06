@@ -13,7 +13,7 @@ that heading and starts a new, empty one here. -->
 ### Added
 - Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
   start with the same key form a group, and its second keys can be pressed again and
-  again: **Alt+R, then arrows** resizes panes, on every system (macOS Terminal.app
+  again until Enter, Esc or another key: **Alt+R, then arrows** resizes panes, on every system (macOS Terminal.app
   drops the modifiers from Alt+Shift+arrows).
 - **Alt+1**…**Alt+9** go to tab N. Ctrl+PageUp / PageDown cannot be typed on a laptop
   (Ctrl+Fn+↑ loses Ctrl), and the terminal or desktop takes Ctrl+Tab.

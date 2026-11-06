@@ -160,9 +160,10 @@ pub struct App {
     resizing: Option<(Divider, bool)>,
     /// A file pane's scrollbar being dragged, and where on the thumb it was held.
     scrolling: Option<(PaneId, u16)>,
-    /// The group of two-key bindings open, by its first key, and when it was last
-    /// used: Alt+R, then arrows to resize, as many as wanted (see `on_key`).
-    group: Option<(crate::keys::Chord, Instant)>,
+    /// The group of two-key bindings open, by its first key: Alt+R, then arrows to
+    /// resize, as many as wanted (see `on_key`). Open until a key outside it, Enter,
+    /// Esc or the mouse; never by time, so the status line always tells the truth.
+    group: Option<crate::keys::Chord>,
     /// The Option-key hint has been shown this session.
     option_hinted: bool,
     /// The key bar's buttons as last drawn.
@@ -980,13 +981,6 @@ impl App {
 
     /// One turn of the event loop without input: lets a running job report in.
     pub fn tick(&mut self) {
-        if self
-            .group
-            .is_some_and(|(_, at)| at.elapsed() > crate::keys::GROUP_WINDOW)
-        {
-            self.group = None;
-            self.status.clear();
-        }
         self.pump_job();
         self.reap_terminals();
         self.background();
@@ -1025,13 +1019,9 @@ impl App {
     /// A key of the open group: run it and keep the group open. `false` when the key is
     /// not one of the group's, which closes it.
     fn in_group(&mut self, k: KeyEvent) -> bool {
-        let Some((first, at)) = self.group.take() else {
+        let Some(first) = self.group.take() else {
             return false;
         };
-        if at.elapsed() > crate::keys::GROUP_WINDOW {
-            self.status.clear();
-            return false;
-        }
         if matches!(k.code, KeyCode::Enter | KeyCode::Esc) {
             self.status.clear();
             return true;
@@ -1040,7 +1030,7 @@ impl App {
             self.status.clear();
             return false;
         };
-        self.group = Some((first, Instant::now()));
+        self.group = Some(first);
         self.status = self.group_hint(first);
         self.run_bound(a, k);
         // An action may have put up its own message; the group's comes back next key.
@@ -1066,20 +1056,33 @@ impl App {
             return;
         };
         let i = n as usize - 1;
-        if self.focus_is_term() {
-            if let Some(p) = self.panel() {
-                if i < p.tab_count() {
-                    p.select_tab(i);
-                    return;
-                }
+        // The tabs of whatever has focus. A file pane with one tab shows no tab bar,
+        // while the terminal's numbered tabs are on screen: say which were counted.
+        let (count, whose) = if self.focus_is_term() {
+            let c = self.panel().map_or(0, |p| p.tab_count());
+            if let Some(p) = self.panel().filter(|_| i < c) {
+                p.select_tab(i);
+                return;
             }
-        } else if let Some(t) = self.focused_tabs() {
-            if i < t.len() {
+            (c, "the terminal")
+        } else {
+            let c = self.focused_tabs().map_or(0, |t| t.len());
+            if let Some(t) = self.focused_tabs().filter(|_| i < c) {
                 t.select(i);
                 return;
             }
-        }
-        self.status = format!("there is no tab {n}");
+            (c, "this file pane")
+        };
+        let has = if count == 1 {
+            "one tab".to_string()
+        } else {
+            format!("{count} tabs")
+        };
+        self.status = if whose == "this file pane" && self.term_shown {
+            format!("no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then Alt+{n} picks its tabs")
+        } else {
+            format!("no tab {n}: {whose} has {has}")
+        };
     }
 
     fn on_key(&mut self, k: KeyEvent) {
@@ -1104,7 +1107,7 @@ impl App {
                 .iter()
                 .all(|(_, a)| a.is_global());
             if !self.focus_is_term() || all_global {
-                self.group = Some((first, Instant::now()));
+                self.group = Some(first);
                 self.status = self.group_hint(first);
                 return;
             }
@@ -1467,6 +1470,10 @@ impl App {
     }
 
     fn on_mouse(&mut self, m: MouseEvent) {
+        // The mouse closes an open key group: arrows typed after a click are arrows.
+        if self.group.take().is_some() {
+            self.status.clear();
+        }
         if self.modal.is_some() {
             return self.on_modal_mouse(m);
         }

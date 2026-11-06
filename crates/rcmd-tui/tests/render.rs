@@ -286,6 +286,49 @@ fn alt_r_then_arrows_resizes_as_alt_shift_arrows_do() {
 }
 
 #[test]
+fn alt_digit_in_the_terminal_picks_the_terminals_tab() {
+    // Alt+N opens a second terminal tab and moves focus into it; Alt+1 goes back to the
+    // first, whose shell is in `a`, not in `sub` where the second was started.
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("sub")).unwrap();
+    let panel_title = |s: &str| {
+        s.lines()
+            .rfind(|l| l.starts_with('\u{250c}') && l.contains("\u{2302}"))
+            .unwrap_or_default()
+            .to_string()
+    };
+    let keys = "/,s,u,b,Enter,Enter,Alt+n";
+    let s = shot_keys("110x24", keys, &a, &b);
+    assert!(panel_title(&s).contains("sub"), "tab 2 started in sub\n{s}");
+    let s = shot_keys("110x24", &format!("{keys},Alt+1"), &a, &b);
+    assert!(
+        !panel_title(&s).contains("sub"),
+        "Alt+1: the first tab\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_group_stays_open_until_a_key_outside_it() {
+    // No timeout: while the hint is up, arrows resize; after another key, they do not.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Alt+r,Left,Ctrl+r", &a, &b);
+    assert!(
+        !s.contains("Enter or Esc: done"),
+        "another key closed it\n{s}"
+    );
+    let after = shot_keys("110x24", "Alt+r,Left,Ctrl+r,Left", &a, &b);
+    let once = shot_keys("110x24", "Alt+r,Left", &a, &b);
+    let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
+    assert_eq!(
+        border(&after),
+        border(&once),
+        "the second Left was a plain Left\n{after}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_group_says_what_it_takes_and_enter_closes_it() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Alt+r", &a, &b);
@@ -320,7 +363,10 @@ fn alt_digit_goes_to_that_tab() {
     let s = shot_keys("110x24", &format!("{keys},Alt+1,Alt+2"), &a, &b);
     assert!(title(&s).contains(&inside), "Alt+2: the second\n{s}");
     let s = shot_keys("110x24", &format!("{keys},Alt+9"), &a, &b);
-    assert!(s.contains("there is no tab 9"), "{s}");
+    assert!(s.contains("no tab 9: this file pane has 2 tabs"), "{s}");
+    // With one tab, the numbered tabs on screen are the terminal's: say so.
+    let s = shot_keys("110x24", "Alt+2", &a, &b);
+    assert!(s.contains("this file pane has one tab"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

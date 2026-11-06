@@ -196,6 +196,11 @@ const KEYS_WIDTH: usize = 30;
 fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
     let th = theme::t();
     let mut out = Vec::new();
+    let name_width = crate::keys::BINDINGS
+        .iter()
+        .map(|b| b.name.len())
+        .max()
+        .unwrap_or(0);
     for (i, (group, rows)) in crate::keys::grouped().into_iter().enumerate() {
         if i > 0 {
             out.push(Line::raw(""));
@@ -225,8 +230,14 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                     format!("{shown:<KEYS_WIDTH$} "),
                     Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{:<40}", b.about), Style::new().fg(th.fg)),
-                Span::styled(b.name.to_string(), Style::new().fg(th.fg_dim)),
+                // The name before the description: names are short, so the column after
+                // them starts in the same place on every row, and the description, the
+                // one of varying length, comes last.
+                Span::styled(
+                    format!("{:<name_width$} ", b.name),
+                    Style::new().fg(th.fg_dim),
+                ),
+                Span::styled(b.about.to_string(), Style::new().fg(th.fg)),
             ];
             if b.action.is_global() {
                 spans.push(Span::styled(
@@ -280,7 +291,7 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 ),
                 (
                     "Enter \u{b7} Esc",
-                    "Done with them (or stop for two seconds)",
+                    "Done with them; so is any other key, or the mouse",
                 ),
                 ("rcmd --show-keys", "What each key really sends"),
                 ("More", TROUBLESHOOTING),
@@ -303,7 +314,7 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
     }
     out.push(Line::raw(""));
     out.push(Line::from(Span::styled(
-        "  \u{2022} marks a key you changed in config.toml. Rebind under [keys], using the name on the right.",
+        "  \u{2022} marks a key you changed in config.toml. Rebind under [keys], using the name after the keys.",
         Style::new().fg(th.fg_dim),
     )));
     out

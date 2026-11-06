@@ -770,9 +770,6 @@ impl Action {
 
 pub type Chord = (KeyCode, KeyModifiers);
 
-/// How long a group of two-key bindings stays open after its last key.
-pub const GROUP_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
-
 /// A binding: one key, or two in a row — `"Alt+r Left"`, Alt+R and then Left.
 /// Two-key bindings that start with the same key form a group: after that key, any
 /// of the group's second keys may be pressed again and again (see `App::on_key`).

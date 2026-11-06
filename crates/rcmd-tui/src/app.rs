@@ -17,7 +17,11 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::Frame;
+
+/// The real terminal: crossterm on stdout, behind the backend that skips idle frames.
+pub type Term =
+    ratatui::Terminal<crate::quiet::Quiet<ratatui::backend::CrosstermBackend<std::io::Stdout>>>;
 
 use rcmd_core::format::{elide_middle, human_size};
 use rcmd_core::ops::{self, Request};
@@ -154,6 +158,8 @@ pub struct App {
     zoom: Option<PaneId>,
     /// The boundary being dragged; `true` when it is inside the terminal panel.
     resizing: Option<(Divider, bool)>,
+    /// A file pane's scrollbar being dragged, and where on the thumb it was held.
+    scrolling: Option<(PaneId, u16)>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -245,6 +251,7 @@ impl App {
             mru: Vec::new(),
             zoom: None,
             resizing: None,
+            scrolling: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -493,7 +500,7 @@ impl App {
         }
     }
 
-    pub fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
@@ -1232,6 +1239,19 @@ impl App {
             Action::Top => self.with_files(|f| f.go_to(0)),
             Action::Bottom => self.with_files(|f| f.go_end()),
             Action::Parent => self.with_files(|f| f.go_up()),
+            Action::GoHome => {
+                let home = crate::bookmarks::expand_tilde("~");
+                if home.is_absolute() {
+                    self.with_files(|f| f.set_cwd(&home));
+                } else {
+                    self.status = "no home directory: neither HOME nor USERPROFILE is set".into();
+                }
+            }
+            Action::GoRoot => self.with_files(|f| {
+                if let Some(root) = f.cwd.ancestors().last().map(Path::to_path_buf) {
+                    f.set_cwd(&root);
+                }
+            }),
             Action::EnterDir => {
                 // Only ever into a directory: Enter already views files, and a key that
                 // sometimes navigates and sometimes opens a viewer is one you stop
@@ -1339,6 +1359,24 @@ impl App {
                 .map(|(a, _)| *a)
             {
                 return self.perform(a);
+            }
+            // A scrollbar sits on a pane's right border, which is also half of the
+            // boundary beside it; where there is a scrollbar, it wins. The boundary can
+            // still be dragged by the other pane's border, or above and below the bar.
+            if let Some(id) = self.pane_at(x, y) {
+                let grab = self
+                    .panes
+                    .get(&id)
+                    .and_then(Pane::as_files)
+                    .and_then(|f| f.bar_at(x, y));
+                if let Some(grab) = grab {
+                    self.focus = id;
+                    if let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) {
+                        f.drag_bar(y, grab);
+                    }
+                    self.scrolling = Some((id, grab));
+                    return;
+                }
             }
             // A boundary is grabbed before either pane it separates: it sits on their
             // borders, which are otherwise just part of each pane. The exception is a
@@ -1491,6 +1529,12 @@ impl App {
     }
 
     fn on_drag(&mut self, x: u16, y: u16) {
+        if let Some((id, grab)) = self.scrolling {
+            if let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) {
+                f.drag_bar(y, grab);
+            }
+            return;
+        }
         if let Some((d, in_panel)) = self.resizing {
             let pct = d.pct_at(x, y);
             if in_panel {
@@ -1583,6 +1627,9 @@ impl App {
     }
 
     fn on_release(&mut self, x: u16, y: u16) {
+        if self.scrolling.take().is_some() {
+            return;
+        }
         if self.resizing.take().is_some() {
             return;
         }
@@ -2017,11 +2064,6 @@ impl App {
     fn on_modal_mouse(&mut self, m: MouseEvent) {
         let p = Position::new(m.column, m.row);
         let left = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
-        let wheel: isize = match m.kind {
-            MouseEventKind::ScrollDown => 3,
-            MouseEventKind::ScrollUp => -3,
-            _ => 0,
-        };
         let hit = |rects: &[Rect], i: usize| rects.get(i).is_some_and(|r| r.contains(p));
         let mut act = ModalAct::None;
         // A click on a menu-bar title switches menus, whatever menu is open.
@@ -2082,7 +2124,7 @@ impl App {
                     act = ModalAct::Background;
                 }
             }
-            Some(Modal::View(v)) if wheel != 0 => v.scroll_by(wheel),
+            Some(Modal::View(v)) => v.on_mouse(m),
             Some(Modal::Rename(d)) if left => {
                 act = if hit(&d.buttons, 0) {
                     match d.confirm() {
@@ -2614,7 +2656,7 @@ impl App {
     /// the pane is a third of the screen, and an editor that small is not an editor.
     /// Suspending is what every orthodox manager does, and the editor gets the terminal
     /// it expects — full size, its own alternate screen, its own mouse handling.
-    fn edit_externally(&mut self, terminal: &mut DefaultTerminal, path: &Path) -> Result<()> {
+    fn edit_externally(&mut self, terminal: &mut Term, path: &Path) -> Result<()> {
         let configured = self.settings.config.commands.editor.trim().to_string();
         let spec = Some(configured)
             .filter(|s| !s.is_empty())
@@ -2655,6 +2697,8 @@ impl App {
         // reset BOTH diff buffers so the next draw repaints every cell. One swap only
         // resets one of them, and the diff against the stale frame comes out empty.
         let _ = terminal.backend_mut().clear_region(ClearType::All);
+        // The editor left the cursor wherever it liked.
+        terminal.backend_mut().forget();
         terminal.swap_buffers();
         terminal.swap_buffers();
 

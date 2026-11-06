@@ -29,6 +29,8 @@ These are the defaults. Press **F1** in rcmd to see your own, after any changes 
 | `Enter` | Enter a directory, or view a file |
 | `Alt+Right` | Enter the directory under the cursor |
 | `Alt+Left` `Backspace` | Go up one directory |
+| `~` | Go to your home directory |
+| `Ctrl+\` | Go to the root of this drive or filesystem |
 | `/` `Ctrl+s` | Jump to a name as you type it; Up/Down for the next match |
 | `Ctrl+f` | Show only names matching what you type (*.rs works too) |
 | `Ctrl+l` | Type a path to go to |

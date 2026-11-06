@@ -31,6 +31,8 @@ pub struct FilePane {
 
     // Geometry recorded during render, used to turn a click into a row.
     pub rows_rect: Rect,
+    /// The scrollbar as last drawn; `None` when everything fits.
+    pub bar: Option<crate::scrollbar::Bar>,
     pub header_cells: Vec<(SortKey, Rect)>,
     /// Something the pane refused to do and the user should hear about, collected by
     /// the app into the status line on the next draw.
@@ -149,6 +151,7 @@ impl FilePane {
             show_hidden,
             error: None,
             rows_rect: Rect::ZERO,
+            bar: None,
             header_cells: Vec::new(),
             notice: None,
             all: Vec::new(),
@@ -869,11 +872,29 @@ impl FilePane {
     }
 
     pub fn scroll(&mut self, lines: isize) {
-        let max_offset = self
-            .entries
-            .len()
-            .saturating_sub(self.rows_rect.height as usize);
-        self.offset = (self.offset as isize + lines).clamp(0, max_offset as isize) as usize;
+        self.set_offset((self.offset as isize + lines).max(0) as usize);
+    }
+
+    /// Show the list from `offset`. The cursor comes along to stay on screen, as the
+    /// wheel does in other managers; left behind, the next frame would scroll back to it.
+    fn set_offset(&mut self, offset: usize) {
+        let h = (self.rows_rect.height as usize).max(1);
+        let max_offset = self.entries.len().saturating_sub(h);
+        self.offset = offset.min(max_offset);
+        self.cursor = self.cursor.clamp(self.offset, self.offset + h - 1);
+        self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
+    }
+
+    /// The scrollbar under the pointer, and where on its thumb it took hold.
+    pub fn bar_at(&self, x: u16, y: u16) -> Option<u16> {
+        self.bar.filter(|b| b.contains(x, y)).map(|b| b.grab(y))
+    }
+
+    /// The thumb, held at `grab`, dragged to row `y`.
+    pub fn drag_bar(&mut self, y: u16, grab: u16) {
+        if let Some(b) = self.bar {
+            self.set_offset(b.offset_at(y, grab));
+        }
     }
 
     /// Turn a click position into a row index, if it landed on one.
@@ -1202,7 +1223,7 @@ impl FilePane {
             buf.set_line(rows.x, y, &Line::from(spans), rows.width);
         }
         // Over the right border, beside the rows: how long the list is, and where.
-        crate::scrollbar::draw(
+        self.bar = crate::scrollbar::draw(
             frame.buffer_mut(),
             crate::scrollbar::track(area, rows),
             self.entries.len(),

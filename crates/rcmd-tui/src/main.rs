@@ -18,6 +18,7 @@ mod menu;
 mod modal;
 mod opener;
 mod pane;
+mod quiet;
 mod rename_dialog;
 mod safety;
 mod scrollbar;
@@ -257,7 +258,12 @@ fn main() -> Result<()> {
         return screenshot(app, w, h, &cli.keys);
     }
 
-    let mut terminal = ratatui::init();
+    // init() for what it sets up (raw mode, the alternate screen, a panic hook that
+    // undoes them); then our own Terminal, whose backend stays quiet when idle.
+    drop(ratatui::init());
+    let mut terminal = ratatui::Terminal::new(quiet::Quiet::new(
+        ratatui::backend::CrosstermBackend::new(stdout()),
+    ))?;
     execute!(stdout(), EnableMouseCapture)?;
 
     // ratatui::init() installs a hook that restores the terminal; chain onto it so a

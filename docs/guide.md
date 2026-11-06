@@ -27,6 +27,7 @@ rcmd for yours, or see [keys.md](keys.md).
 ## Moving around
 
 - **Enter** opens a directory, or views a file. **Backspace** or **Alt+←** goes up.
+- **~** goes to your home directory. **Ctrl+\\** goes to the root of the drive.
 - **/** jumps to a name as you type. **↑ ↓** go to the next match.
 - **Ctrl+L** goes to a path you type. **Tab** completes it.
 - **Alt+,** and **Alt+.** go back and forward. **Alt+↓** lists where you have been.
@@ -112,6 +113,9 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - Click to select, double-click to open. **Ctrl+click** marks.
 - Drag down a pane to mark a range. Drag files onto the other pane to copy or move.
 - Drag a border to resize. Right-click for a menu. The wheel scrolls.
+- The bar on a long list's right border scrolls too: drag it, or click where to go.
+- In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
+  For part of a line, use your terminal's own selection (usually **Shift**+drag).
 
 ## Menus and help
 

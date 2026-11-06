@@ -258,25 +258,51 @@ fn f3_shows_the_file_with_line_numbers() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
-const THUMB: char = '\u{2503}';
+const THUMB: char = '\u{2588}';
+
+/// How many rows have the scrollbar's thumb in column `col`. By column, because the
+/// shell's cursor is the same block.
+fn thumb_rows(s: &str, col: usize) -> usize {
+    s.lines()
+        .filter(|l| l.chars().nth(col) == Some(THUMB))
+        .count()
+}
 
 #[test]
 fn a_long_list_gets_a_scrollbar_and_a_short_one_does_not() {
     let (a, b) = fixture();
     let short = shot("80x24", &a, &b);
-    assert!(
-        !short.contains(THUMB),
-        "nothing to scroll, nothing drawn\n{short}"
-    );
+    assert_eq!(thumb_rows(&short, 39), 0, "nothing to scroll\n{short}");
     for i in 0..60 {
         fs::write(a.join(format!("f{i:02}.txt")), b"").unwrap();
     }
     let long = shot("80x24", &a, &b);
-    let rows: Vec<&str> = long.lines().filter(|l| l.contains(THUMB)).collect();
-    assert!(!rows.is_empty(), "the left pane overflows\n{long}");
-    // On the left pane's right border, not inside it: the right pane starts after it.
-    let col = rows[0].chars().position(|c| c == THUMB).unwrap();
-    assert!(col < 40, "on the left pane's border\n{long}");
+    assert!(
+        thumb_rows(&long, 39) > 0,
+        "on the left pane's right border\n{long}"
+    );
+    assert_eq!(thumb_rows(&long, 79), 0, "the right pane fits\n{long}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn dragging_the_scrollbar_scrolls_the_list_and_the_cursor_follows() {
+    let (a, b) = files(&[]);
+    for i in 0..60 {
+        fs::write(a.join(format!("f{i:02}.txt")), b"").unwrap();
+    }
+    // Rows start on screen row 3; the thumb is at the top of the right border.
+    let s = shot_keys("80x24", "drag:39:3:39:14", &a, &b);
+    assert!(s.contains("f59") && !s.contains("f10"), "at the end\n{s}");
+    assert!(
+        status(&s).contains("f48"),
+        "the cursor stays on screen\n{s}"
+    );
+    // A click on the track centres the thumb there: the last row is the end.
+    let s = shot_keys("80x24", "click:39:14", &a, &b);
+    assert!(s.contains("f59"), "{s}");
+    let s = shot_keys("80x24", "click:39:9", &a, &b);
+    assert!(s.contains("f30") && !s.contains("f59"), "the middle\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -285,14 +311,32 @@ fn the_viewer_shows_a_scrollbar_for_a_long_file_in_text_and_hex() {
     let body: String = (0..300).map(|i| format!("line {i}\n")).collect();
     let (a, b) = with_file("doc.txt", body.as_bytes());
     let text = shot_keys("100x16", "Down,F3", &a, &b);
-    assert!(text.contains(THUMB), "text view\n{text}");
+    assert!(thumb_rows(&text, 99) > 0, "text view\n{text}");
     let hex = shot_keys("100x16", "Down,F3,h", &a, &b);
-    assert!(hex.contains(THUMB), "hex view\n{hex}");
+    assert!(thumb_rows(&hex, 99) > 0, "hex view\n{hex}");
+    // Dragged to the bottom, the end of the file shows.
+    let end = shot_keys("100x16", "Down,F3,drag:99:2:99:14", &a, &b);
+    assert!(end.contains("line 299"), "{end}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 
     let (a, b) = with_file("doc.txt", b"one\ntwo\n");
     let short = shot_keys("100x16", "Down,F3", &a, &b);
-    assert!(!short.contains(THUMB), "it all fits\n{short}");
+    assert_eq!(thumb_rows(&short, 99), 0, "it all fits\n{short}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn dragging_over_lines_in_the_viewer_selects_them_for_y() {
+    let body: String = (0..300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    // Rows 3 to 5 are lines 2 to 4.
+    let s = shot_keys("110x16", "Down,F3,drag:10:3:10:5", &a, &b);
+    assert!(s.contains("3 lines selected"), "{s}");
+    let s = shot_keys("110x16", "Down,F3,drag:10:3:10:5,y", &a, &b);
+    assert!(s.contains("copied 3 lines"), "{s}");
+    // Esc lets go of the selection before it closes anything.
+    let s = shot_keys("110x16", "Down,F3,drag:10:3:10:5,Esc,y", &a, &b);
+    assert!(s.contains("copied 1 line"), "back to the top line\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -1832,6 +1876,37 @@ fn a_pattern_that_gives_two_files_one_name_renames_nothing() {
         "Enter keeps the dialog open\n{s}"
     );
     assert!(a.join("one.txt").exists() && a.join("two.txt").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn tilde_goes_home_and_ctrl_backslash_to_the_root() {
+    let (a, b) = fixture();
+    let home = a.parent().unwrap().join("home");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("in-home.txt"), "").unwrap();
+    let out = isolated()
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .arg("--screenshot=100x24")
+        .arg("--keys=~")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains(" in-home "),
+        "the name, with txt in its own column\n{s}"
+    );
+
+    let s = shot_keys("100x24", "Ctrl+\\", &a, &b);
+    let root = a.ancestors().last().unwrap().display().to_string();
+    let title = s.lines().nth(1).unwrap();
+    assert!(
+        title.starts_with(&format!("\u{250c} {root} ")),
+        "{root}\n{s}"
+    );
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

@@ -41,6 +41,8 @@ pub enum Action {
     Open,
     EnterDir,
     Parent,
+    GoHome,
+    GoRoot,
     Mark,
     MarkAndNext,
     InvertMarks,
@@ -201,6 +203,20 @@ pub const BINDINGS: &[Binding] = &[
         group: "Navigate",
         about: "Go up one directory",
         keys: &["Backspace", "Alt+Left"],
+    },
+    Binding {
+        action: Action::GoHome,
+        name: "go_home",
+        group: "Navigate",
+        about: "Go to your home directory",
+        keys: &["~"],
+    },
+    Binding {
+        action: Action::GoRoot,
+        name: "go_root",
+        group: "Navigate",
+        about: "Go to the root of this drive or filesystem",
+        keys: &["Ctrl+\\"],
     },
     Binding {
         action: Action::Mark,
@@ -829,6 +845,10 @@ fn normalise(k: KeyEvent) -> Chord {
             }
         }
     }
+    // Ctrl+\ is the byte 0x1C in a legacy terminal, which crossterm reports as Ctrl+4.
+    if m.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('4') {
+        code = KeyCode::Char('\\');
+    }
     // Terminals that speak the Kitty protocol add these; nothing here binds them.
     m.remove(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META);
     (code, m)
@@ -973,6 +993,8 @@ mod tests {
             Action::Open,
             Action::EnterDir,
             Action::Parent,
+            Action::GoHome,
+            Action::GoRoot,
             Action::Mark,
             Action::MarkAndNext,
             Action::InvertMarks,
@@ -1080,6 +1102,17 @@ mod tests {
         assert_eq!(
             parse_key("Space").unwrap(),
             (KeyCode::Char(' '), KeyModifiers::NONE)
+        );
+    }
+
+    #[test]
+    fn ctrl_backslash_arrives_as_ctrl_4_from_a_legacy_terminal() {
+        let legacy = KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL);
+        assert_eq!(normalise(legacy), parse_key("Ctrl+\\").unwrap());
+        assert_eq!(
+            Keymap::default().action_for(legacy),
+            Some(Action::GoRoot),
+            "the binding fires either way"
         );
     }
 

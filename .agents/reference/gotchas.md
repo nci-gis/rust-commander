@@ -80,6 +80,16 @@
   everywhere a canonical path reaches the user or the policy: it drops the prefix when
   the plain form means the same file, and keeps both sides of the root check in one
   form. Found on the first Windows run.
+- **An identical frame is not a silent one.** ratatui's crossterm backend writes a
+  colour reset after every draw, empty diff or not, and the terminal hides the cursor
+  again every frame: about 600 bytes a second with rcmd idle. `quiet.rs` wraps the
+  backend and drops what changes nothing; call `forget()` after anything else has used
+  the terminal (an editor), or a needed cursor move is skipped.
+- **A file pane scrolls back to its cursor on every frame** (`scroll_into_view` in
+  `render`). Changing only `offset` — the wheel, the scrollbar — was undone by the next
+  frame; `set_offset` brings the cursor along instead.
+- **`Ctrl+\` arrives as `Ctrl+4`** from a legacy terminal (byte 0x1C); `normalise` maps
+  it back, as it folds `Ctrl+letter` case.
 - **`vt100::Parser` has no `set_size`** — it lives on the screen:
   `parser.screen_mut().set_size(rows, cols)`.
 

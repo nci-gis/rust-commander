@@ -2286,3 +2286,18 @@ fn the_readme_tagline_is_the_cargo_description() {
     let v = String::from_utf8_lossy(&out.stdout);
     assert!(v.contains("MIT") && v.contains("XDevTeam"), "{v}");
 }
+
+/// macOS found this: its temp directory is under /var, a link to /private/var. A pane
+/// opened through a link lists the resolved path after moving, so Enter on a Find
+/// result has to find the file by name, not by the path the search walked.
+#[cfg(unix)]
+#[test]
+fn enter_on_a_result_lands_on_the_file_when_the_pane_was_opened_through_a_link() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src")).unwrap();
+    fs::write(a.join("src/main.rs"), "fn main() {}").unwrap();
+    let link = a.parent().unwrap().join("via-link");
+    std::os::unix::fs::symlink(&a, &link).unwrap();
+    let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,Enter", &link, &b);
+    assert!(status(&s).contains("main.rs"), "{s}");
+}

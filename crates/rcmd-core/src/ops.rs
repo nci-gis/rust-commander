@@ -1064,10 +1064,14 @@ mod tests {
 
         let info = fs::read_to_string(trash_root.join("info/note.txt.trashinfo")).unwrap();
         assert!(info.starts_with("[Trash Info]\n"), "{info}");
+        // The XDG trash is the Linux one; the absolute-path form is Unix's. Elsewhere
+        // this code only runs here, in its test.
+        #[cfg(unix)]
         assert!(
             info.contains("Path=/"),
             "the original path must be recorded\n{info}"
         );
+        assert!(info.contains("note.txt"), "{info}");
         assert!(info.contains("DeletionDate="), "{info}");
 
         fs::remove_dir_all(&root).unwrap();

@@ -552,9 +552,13 @@ impl FilePane {
         // you search for a file to do. F3 still views it.
         if self.results.is_some() && !e.is_dir() {
             let file = e.path.clone();
-            if let Some(dir) = file.parent() {
+            if let (Some(dir), Some(name)) = (file.parent(), file.file_name()) {
                 self.set_cwd(dir);
-                self.select_path(&file);
+                // By name in the directory as it now reads: set_cwd resolves links, so
+                // the path the search found (/var/… on macOS) may not be the path the
+                // listing has (/private/var/…).
+                let here = self.cwd.join(name);
+                self.select_path(&here);
             }
             return None;
         }

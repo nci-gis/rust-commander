@@ -11,10 +11,13 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
-- Esc as a prefix in the file panes, for keyboards and terminals without Alt or
-  F-keys (a Mac's Option key types characters; its F-keys are media keys): Esc then a
-  key is Alt+key, Esc then 1…9, 0 is F1…F10. `[general] esc_as_meta = false` turns
-  it off.
+- Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
+  start with the same key form a group, and its second keys can be pressed again and
+  again: **Alt+R, then arrows** resizes panes, on every system (macOS Terminal.app
+  drops the modifiers from Alt+Shift+arrows).
+- **Alt+1**…**Alt+9** go to tab N. Ctrl+PageUp / PageDown cannot be typed on a laptop
+  (Ctrl+Fn+↑ loses Ctrl), and the terminal or desktop takes Ctrl+Tab.
+- **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
   to do; F1 links to it.
 - Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends
@@ -25,6 +28,8 @@ that heading and starts a new, empty one here. -->
 
 ### Changed
 - About: the credit sits at the bottom right, beside the close button.
+- Two actions given the same key in `[keys]` are now an error that names both; before,
+  the one written later silently took it.
 - The config documentation lists every file rcmd keeps, and where.
 
 ### Fixed

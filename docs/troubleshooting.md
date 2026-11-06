@@ -16,14 +16,15 @@ any bug report.
 
 ## Every system
 
-**A key does nothing, or there is no Alt key or no F-keys.** In the file panes, Esc
-works as a Meta (Alt) prefix, as in Midnight Commander: press Esc, let go, then
+**A key does nothing.** Run `rcmd --show-keys` and press it. If nothing prints, the
+terminal or the desktop keeps that key; if something else prints, rcmd gets a different
+key. Either way, give the action another key under `[keys]` (see
+[config.md](config.md#keys)). Measured so far, on every system:
 
-- a key: **Alt** + that key. **Esc F7** finds files, **Esc ,** goes back.
-- **1**…**9**, **0**: **F1**…**F10**. **Esc 5** copies, **Esc 8** deletes.
-- **Esc** again: never mind.
-
-Turn it off with `esc_as_meta = false` under `[general]` (see [config.md](config.md)).
+- **Ctrl+PageUp / PageDown** (previous / next tab) lose Ctrl on a laptop, where PageUp
+  is Fn+↑. Use **Alt+1**…**Alt+9** for tab N.
+- **Ctrl+Tab** belongs to the terminal or the desktop.
+- **F11** is the terminal's full screen. rcmd does not use it.
 
 **Colours look muted over SSH.** rcmd uses 24-bit colour only when it knows the
 terminal takes it, usually from `COLORTERM`, which SSH does not pass on. On the server:
@@ -41,12 +42,24 @@ export RCMD_COLORS=truecolor   # or 256, or 16
 
 **Option+key does nothing** (Option types `ç`, `ƒ`, … instead). Terminal.app:
 Settings → Profiles → your profile → Keyboard → **Use Option as Meta key**. iTerm2:
-Profiles → Keys → Left Option key → **Esc+**. Or use the Esc prefix above, which needs
-no setting.
+Profiles → Keys → Left Option key → **Esc+**. rcmd says so the first time Option types
+a character in a file pane.
+
+**Some Option keys still do nothing with Option as Meta on.** Terminal.app sends
+Option+← / → as word left / right, Option+↑ / ↓ as three separate keys, and drops Shift
+or Ctrl from Option+Shift and Ctrl+Shift arrows. rcmd has a key for each that does
+arrive:
+
+| To | Instead of | Press |
+|---|---|---|
+| Go up / into a directory | Alt+← / → | Option+← / → (they arrive as Alt+B / Alt+F) |
+| Directory history | Alt+↓ | **Alt+J** |
+| Resize panes | Alt+Shift+arrows | **Alt+R**, then arrows; Enter when done |
+| Previous / next tab | Ctrl+PageUp / PageDown | **Alt+1**…**Alt+9** |
 
 **F1–F12 change the brightness or volume.** Hold **Fn** with them, or System Settings
 → Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
-function keys**. Or **Esc 1**…**Esc 0**.
+function keys**.
 
 **Green or red backgrounds, hard-to-read text** (rcmd 0.1.0 in Terminal.app before
 macOS 26). Terminal.app there cannot show 24-bit colour and misreads it. Fixed after

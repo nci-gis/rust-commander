@@ -1,6 +1,6 @@
 # Round 004: Key sequences, and built-in keymaps for each system
 
-**Status**: Planning
+**Status**: In Progress
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 5
 **Date started**: 2026-11-07
 **Date completed**:
@@ -175,11 +175,39 @@ other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / Page
 (its tabs) and Shift+F10 (context menu). If Alt+F7 is lost, Find needs a second key in
 the `linux` set.
 
+**2026-11-07, decided and built.** The owner chose one set for every system ("Yes,
+build it"): the measurements showed Windows and Linux take today's keys unchanged, and
+macOS needs only two actions moved, so three per-system sets would have been two copies
+of one. Keymap presets (`preset`, `keymaps/*.toml`, Settings → Keys) are deferred until
+a second set is really wanted (`mc`, or a user's own). Design §2 stands as the plan for
+then; §1 and §3 are built:
+
+- `keys.rs`: `Keys::{One, Two}`, `parse_binding`, `binding_name`; `Keymap` gains `seqs`,
+  `starts_group`, `in_group`, `group`, `GROUP_WINDOW` (2 s). `apply` checks clashes as in
+  the table: user-vs-user is an error (it used to be silent), user beats default.
+- New keys: resize also `Alt+r Left/Right/Up/Down`; history also `Alt+j`; `go_tab` on
+  `Alt+1`…`Alt+9` (global, file pane or terminal). Alt+B / Alt+F from Round 003 stay.
+- `App::on_key`: a group opens on its first key (in the shell only if every action in
+  it works there), runs its second keys again and again, and closes on Enter / Esc,
+  another key, or two idle seconds (`tick`). The status line lists the group.
+- Esc as Meta removed (step 5): `after_esc`, `esc_armed`, `[general] esc_as_meta`, its
+  tests, F1 section and docs. The Option hint now points at Option as Meta only.
+- F1: two-key bindings shown as written (`Alt+r Left`); more than three keys collapse to
+  `first … last`; the key column is 30 wide; the "rebound" mark understands two-key
+  bindings (it marked every resize row before the fix).
+- Docs: guide, troubleshooting (a table of what to press on a Mac), keys.md, CHANGELOG.
+
 ## Check
 
 - [ ] The measurement tables for all three systems are here, with what was not tested.
 - [ ] Tests: sequences, groups (repeat, Enter / Esc / timeout / other key closes), every
       conflict case in the table, one per built-in set, user files, `auto` per OS.
+      Done: parsing, the default table has no clash and no key that both runs and
+      starts a group, every conflict case, repeat (three Lefts equal three
+      Alt+Shift+Left), Enter closes, the hint, Alt+digit, Alt+J, Esc no longer a
+      prefix. **Not tested:** the two-second timeout (needs a clock), Esc closing a
+      group (same path as Enter, untested by itself). Sets, user files and `auto` are
+      deferred with the presets.
 - [ ] Render tests: F1 and the key bar under each set; a sequence on the status line.
 - [ ] Esc as Meta is gone: Esc then 7 in a file pane does not open MkDir, and Esc there
       does what it did before Round 003 (stop, take the filter off, or nothing).

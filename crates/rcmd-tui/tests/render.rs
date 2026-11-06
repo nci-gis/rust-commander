@@ -260,17 +260,88 @@ fn f7_prompts_for_a_name() {
 }
 
 #[test]
-fn esc_then_a_digit_is_an_f_key_for_terminals_without_them() {
-    // A Mac keyboard sends media keys for F1-F12 unless Fn is held; Esc 7 is F7.
+fn alt_r_then_arrows_resizes_as_alt_shift_arrows_do() {
+    // Terminal.app drops the modifiers from Alt+Shift+arrows: Alt+R, then plain arrows.
     let (a, b) = fixture();
-    let s = shot_keys("110x24", "Esc,7,d,o,c,s", &a, &b);
-    assert!(s.contains("Create directory"), "{s}");
-    assert!(s.contains("docs"), "{s}");
-    // Esc says what it is waiting for.
-    let s = shot_keys("110x24", "Esc", &a, &b);
-    assert!(s.contains("the next key is Alt+key"), "{s}");
-    // A second Esc cancels: 7 is just 7 again.
-    let s = shot_keys("110x24", "Esc,Esc,7", &a, &b);
+    let shift = shot_keys(
+        "110x24",
+        "Alt+Shift+Left,Alt+Shift+Left,Alt+Shift+Left",
+        &a,
+        &b,
+    );
+    let group = shot_keys("110x24", "Alt+r,Left,Left,Left", &a, &b);
+    let plain = shot_keys("110x24", "", &a, &b);
+    let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
+    assert_ne!(
+        border(&shift),
+        border(&plain),
+        "Alt+Shift+Left moved it\n{shift}"
+    );
+    assert_eq!(
+        border(&group),
+        border(&shift),
+        "the same three steps\n{group}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_group_says_what_it_takes_and_enter_closes_it() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Alt+r", &a, &b);
+    assert!(s.contains("Alt+r, then: Down Left Right Up"), "{s}");
+    assert!(s.contains("Enter or Esc: done"), "{s}");
+    // After Enter, Left is a plain key again: it does not resize.
+    let closed = shot_keys("110x24", "Alt+r,Enter,Left", &a, &b);
+    let plain = shot_keys("110x24", "Left", &a, &b);
+    let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
+    assert_eq!(border(&closed), border(&plain), "{closed}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn alt_digit_goes_to_that_tab() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("sub")).unwrap();
+    // The left pane's title: the first line that opens a box (the tab bar is above it).
+    let title = |s: &str| {
+        s.lines()
+            .find(|l| l.starts_with('\u{250c}'))
+            .unwrap_or_default()
+            .to_string()
+    };
+    let inside = format!("{}sub", std::path::MAIN_SEPARATOR);
+    // A second tab, moved into sub; then Alt+1 is the first tab again, Alt+2 the second.
+    let keys = "Ctrl+t,/,s,u,b,Enter,Enter";
+    let s = shot_keys("110x24", keys, &a, &b);
+    assert!(title(&s).contains(&inside), "tab 2 is in sub\n{s}");
+    let s = shot_keys("110x24", &format!("{keys},Alt+1"), &a, &b);
+    assert!(!title(&s).contains(&inside), "Alt+1: the first tab\n{s}");
+    let s = shot_keys("110x24", &format!("{keys},Alt+1,Alt+2"), &a, &b);
+    assert!(title(&s).contains(&inside), "Alt+2: the second\n{s}");
+    let s = shot_keys("110x24", &format!("{keys},Alt+9"), &a, &b);
+    assert!(s.contains("there is no tab 9"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn alt_j_opens_the_history_as_alt_down_does() {
+    // Somewhere to have been first: into sub and back out.
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("sub")).unwrap();
+    let been = "/,s,u,b,Enter,Enter,Backspace";
+    for key in ["Alt+Down", "Alt+j"] {
+        let s = shot_keys("110x24", &format!("{been},{key}"), &a, &b);
+        assert!(s.contains("History"), "{key}\n{s}");
+    }
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn esc_is_not_a_prefix_any_more() {
+    // Esc as Meta was replaced by two-key bindings: Esc then 7 is just 7.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Esc,7", &a, &b);
     assert!(!s.contains("Create directory"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
@@ -287,31 +358,6 @@ fn alt_f_and_alt_b_enter_and_leave_as_option_arrows_do_on_a_mac() {
     assert!(title(&s).contains(&inside), "Alt+F went in\n{s}");
     let s = shot_keys("110x24", "/,s,u,b,Enter,Alt+f,Alt+b", &a, &b);
     assert!(!title(&s).contains(&inside), "Alt+B came back out\n{s}");
-    let _ = fs::remove_dir_all(a.parent().unwrap());
-}
-
-#[test]
-fn esc_as_meta_can_be_turned_off() {
-    let (a, b) = fixture();
-    let cfg = write_config(a.parent().unwrap(), "[general]\nesc_as_meta = false\n");
-    let s = shot_with(&cfg, "Esc,7", &a, &b);
-    assert!(!s.contains("Create directory"), "{s}");
-    assert!(!s.contains("the next key is Alt+key"), "{s}");
-    let _ = fs::remove_dir_all(a.parent().unwrap());
-}
-
-#[test]
-fn esc_then_a_key_is_alt_and_key() {
-    // Alt+F7 is Find; Esc F7 must be the same.
-    let (a, b) = fixture();
-    let alt = shot_keys("110x24", "Alt+F7", &a, &b);
-    let esc = shot_keys("110x24", "Esc,F7", &a, &b);
-    assert!(alt.contains("Find files"), "{alt}");
-    assert!(esc.contains("Find files"), "{esc}");
-    // Esc still takes a filter off first, without arming anything.
-    let s = shot_keys("110x24", "Ctrl+f,v,Enter,Esc,7", &a, &b);
-    assert!(s.contains("filter off"), "{s}");
-    assert!(!s.contains("Create directory"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

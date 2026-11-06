@@ -222,6 +222,12 @@ impl TermPanel {
         self.tabs.iter().map(|t| t.terms.len()).sum()
     }
 
+    pub fn select_tab(&mut self, i: usize) {
+        if i < self.tabs.len() {
+            self.active = i;
+        }
+    }
+
     pub fn tab_count(&self) -> usize {
         self.tabs.len()
     }

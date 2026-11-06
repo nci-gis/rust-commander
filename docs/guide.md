@@ -17,9 +17,10 @@ rcmd for yours, or see [keys.md](keys.md).
 
 - Two file panes to start. **Tab** moves between them.
 - **Alt+S** splits a pane side by side, **Alt+D** top and bottom, **Alt+W** closes one.
-- **Alt+Shift+arrows** move a border. **Alt+Z** fills the screen with one pane, and
-  again puts it back.
-- **Ctrl+T** opens a tab in a pane, **Ctrl+W** closes it, **Ctrl+PgUp/PgDn** switch.
+- **Alt+Shift+arrows** move a border, or **Alt+R** then arrows (Enter when done).
+  **Alt+Z** fills the screen with one pane, and again puts it back.
+- **Ctrl+T** opens a tab in a pane, **Ctrl+W** closes it, **Ctrl+PgUp/PgDn** switch,
+  **Alt+1**…**Alt+9** go to tab N.
 - **Ctrl+U** swaps two panes. **Alt+=** shows this pane's directory in the other one.
 - rcmd remembers your panes, tabs and directories, and opens them again next time.
   Start with `--no-restore`, or name directories on the command line, to start fresh.
@@ -30,7 +31,7 @@ rcmd for yours, or see [keys.md](keys.md).
 - **~** goes to your home directory. **Ctrl+\\** goes to the root of the drive.
 - **/** jumps to a name as you type. **↑ ↓** go to the next match.
 - **Ctrl+L** goes to a path you type. **Tab** completes it.
-- **Alt+,** and **Alt+.** go back and forward. **Alt+↓** lists where you have been.
+- **Alt+,** and **Alt+.** go back and forward. **Alt+↓** (or **Alt+J**) lists where you have been.
 - **Ctrl+D** is the hotlist: your bookmarks. You can add the current directory there.
 - Panes refresh by themselves when files change on disk.
 
@@ -117,12 +118,13 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).
 
-## No Alt key, or no F-keys
+## Keys a terminal does not send
 
-In the file panes, **Esc** works as a Meta (Alt) prefix, as in Midnight Commander:
-press it, let go, then a key for **Alt** + that key, or **1**…**9**, **0** for
-**F1**…**F10**. **Esc** again cancels. For a Mac's Option key and F-keys, and other
-known problems, see [troubleshooting.md](troubleshooting.md).
+Some terminals keep keys for themselves, or drop Ctrl or Shift on the way. rcmd gives
+those actions a second key that arrives everywhere: **Alt+R, then arrows** resizes
+panes (as often as you like; Enter when done), **Alt+J** opens the directory history,
+**Alt+1**…**Alt+9** go to a tab. `rcmd --show-keys` shows what your terminal sends, and
+[troubleshooting.md](troubleshooting.md) lists what is known for each system.
 
 ## Menus and help
 

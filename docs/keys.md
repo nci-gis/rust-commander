@@ -36,7 +36,7 @@ These are the defaults. Press **F1** in rcmd to see your own, after any changes 
 | `Ctrl+l` | Type a path to go to |
 | `Alt+,` | Back to the previous directory |
 | `Alt+.` | Forward again |
-| `Alt+Down` | Directories visited in this tab |
+| `Alt+Down` `Alt+j` | Directories visited in this tab |
 | `Ctrl+d` | Bookmarks: go to one, or bookmark this directory |
 
 ## Select
@@ -92,10 +92,10 @@ These are the defaults. Press **F1** in rcmd to see your own, after any changes 
 | `Alt+s` | Split the pane, or the shell, side by side |
 | `Alt+d` | Split the pane, or the shell, top and bottom |
 | `Alt+w` | Close the pane, or the focused shell |
-| `Alt+Shift+Left` | Move the pane's border left |
-| `Alt+Shift+Right` | Move the pane's border right |
-| `Alt+Shift+Up` | Move the pane's border up |
-| `Alt+Shift+Down` | Move the pane's border down |
+| `Alt+Shift+Left` `Alt+r Left` | Move the pane's border left |
+| `Alt+Shift+Right` `Alt+r Right` | Move the pane's border right |
+| `Alt+Shift+Up` `Alt+r Up` | Move the pane's border up |
+| `Alt+Shift+Down` `Alt+r Down` | Move the pane's border down |
 | `Alt+z` | Fill the screen with this pane, or put it back |
 | `Alt+o` | Next split, in the shell or the file panes |
 | `Ctrl+u` | Swap this pane with the other one |
@@ -112,6 +112,7 @@ These are the defaults. Press **F1** in rcmd to see your own, after any changes 
 | `Ctrl+w` | Close the tab |
 | `Ctrl+PageDown` | Next tab, of the file pane or the terminal |
 | `Ctrl+PageUp` | Previous tab, of the file pane or the terminal |
+| `Alt+1` `Alt+2` `Alt+3` `Alt+4` `Alt+5` `Alt+6` `Alt+7` `Alt+8` `Alt+9` | Go to tab N, the digit in the key |
 
 ## Terminal
 

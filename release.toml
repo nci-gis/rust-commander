@@ -1,0 +1,12 @@
+# cargo-release (`cargo install --locked cargo-release`): the mechanical half of a
+# release — the version, the CHANGELOG headings, the commit and the tag. The steps are
+# in docs/development.md, "Releasing". The notes themselves are written by hand.
+allow-branch = ["dev", "main"]
+# Not on crates.io: the release is the GitHub one that the tag starts.
+publish = false
+# rcmd-core and rcmd-tui share [workspace.package] version; one commit, one tag.
+shared-version = true
+consolidate-commits = true
+tag-name = "v{{version}}"
+tag-message = "rcmd {{version}}"
+pre-release-commit-message = "Release {{version}}"

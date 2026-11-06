@@ -24,3 +24,7 @@ zune-jpeg = "0.5.15"
 # cannot honour the request it asks instead of deciding.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 trash = "5"
+
+# Released with rcmd-tui, never on its own; see release.toml.
+[package.metadata.release]
+release = false

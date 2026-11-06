@@ -4,9 +4,11 @@ All notable changes to rcmd. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+<!-- Write under the newest heading. `cargo release` puts the version and the date into
+that heading and starts a new, empty one here. -->
+<!-- next-header -->
 
-## [0.1.0] - unreleased
+## [Unreleased] - ReleaseDate
 
 The first release.
 
@@ -50,6 +52,3 @@ The first release.
 - On Windows: the terminal cannot tell whether a program is running in it, the config
   file's permissions are not checked, and the usage view does not measure memory.
 - The fish and PowerShell versions of the cd-on-exit function have not been tested.
-
-[Unreleased]: https://github.com/nci-gis/rust-commander/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/nci-gis/rust-commander/releases/tag/v0.1.0

@@ -10,6 +10,14 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+# What `cargo release` does to the CHANGELOG; see release.toml at the top.
+[package.metadata.release]
+pre-release-replacements = [
+  { file = "../../CHANGELOG.md", search = "Unreleased", replace = "{{version}}", exactly = 1 },
+  { file = "../../CHANGELOG.md", search = "ReleaseDate", replace = "{{date}}", exactly = 1 },
+  { file = "../../CHANGELOG.md", search = "<!-- next-header -->", replace = "<!-- next-header -->\n\n## [Unreleased] - ReleaseDate", exactly = 1 },
+]
+
 [[bin]]
 name = "rcmd"
 path = "src/main.rs"

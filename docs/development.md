@@ -68,13 +68,33 @@ Work on `dev`. `main` changes only through a pull request from `dev`, with CI gr
 
 ## Releasing
 
-1. Move the `[Unreleased]` notes in `CHANGELOG.md` under the new version, and set
-   `version` in `Cargo.toml` to match.
-2. Merge `dev` into `main` by pull request.
-3. Tag `main`: `git tag v0.1.0 && git push origin v0.1.0`.
-4. The `release` workflow builds Linux (glibc and static musl), macOS (ARM and Intel)
-   and Windows, and opens a **draft** release with the archives, `SHA256SUMS`, and
-   `THIRD-PARTY.md` (the licences of everything inside). Read it, then Publish.
+Write the notes as you go: every change that a user would notice gets a line under the
+newest heading of `CHANGELOG.md`, in the same commit. A release then takes four steps.
+`cargo release` needs installing once: `cargo install --locked cargo-release`.
+
+1. **On `dev`**, date the notes and commit (add `minor`, `patch` or a version number to
+   also raise the version; leave it out to release the version `Cargo.toml` has):
+
+   ```bash
+   cargo release minor --no-tag --no-push          # look at what it would do
+   cargo release minor --no-tag --no-push --execute
+   git push origin dev
+   ```
+
+2. **Pull request `dev` → `main`**, merged with a merge commit once CI passes.
+3. **On `main`**, tag the release and push the tag:
+
+   ```bash
+   git checkout main && git pull --ff-only
+   cargo release tag --execute
+   git push origin v0.2.0
+   ```
+
+4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
+   dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (glibc
+   and static musl), macOS (ARM and Intel) and Windows, and opens a **draft** release with
+   the archives, `SHA256SUMS`, `THIRD-PARTY.md` and that CHANGELOG section as its notes.
+   Read it, then Publish.
 
 The packaging runs, without releasing, on any push to `dev` that changes
 `.github/workflows/release.yml`, `about.toml` or `about.hbs`.

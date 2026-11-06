@@ -56,6 +56,18 @@ where that is impossible, with one clear line telling the user which setting to 
       with no setting: Esc then a key within a second is Alt+key; Esc then 1…0 is
       F1…F10. Only where Esc alone does nothing (file panes, not dialogs, not the
       terminal panel), so closing a dialog is never delayed.
+- [ ] 3b. **Read Option's characters as Alt**, on macOS only, in file panes only (never
+      in a text field or the terminal panel), with a setting to turn it off. With the
+      default US / ABC layout Option+letter types a fixed character: å ∫ ç ∂ ƒ © ˙ ∆ ˚ ¬
+      µ ø π œ ® ß † √ ∑ ≈ ¥ Ω for a b c d f g h j k l m o p q r s t v w x y z, and ≤ ≥ ≠
+      for `,` `.` `=`. A table maps them back to Alt+letter, so Option works with no
+      Terminal.app setting. Two limits, said in the docs: Option+E, I, N, U and `
+      are dead keys that type nothing until the next key (Alt+N needs Esc N or the
+      setting), and another keyboard layout types other characters (the table is only
+      for US / ABC; the setting and Esc-prefix cover the rest).
+- [ ] 3c. **Option+← / →**: Terminal.app sends `ESC b` / `ESC f` for them by default (to
+      confirm), which crossterm reads as Alt+B / Alt+F. Bind those to back and forward
+      as well, so history works on a Mac out of the box.
 - [ ] 4. **Say what to change.** When a character that Option produces arrives where
       typing means nothing (a file pane), say once per session: "Option is typing
       characters: turn on Use Option as Meta key in Terminal → Settings → Profiles →
@@ -74,13 +86,28 @@ where that is impossible, with one clear line telling the user which setting to 
 - **Esc-prefix delays nothing only if scoped.** Applied globally, every Esc that closes
   a dialog waits for a possible second key. Scope it to file panes, and test that Esc
   still closes every dialog at once.
-- **Guessing from characters is layout-dependent.** `ç` is Option+C on a US layout only.
-  The hint fires on "a non-ASCII character in a file pane on macOS", which is enough
-  to suggest the setting, never to act on it as a key.
+- **Reading characters as keys is layout-dependent.** `ç` is Option+C on US / ABC
+  only. Step 3b acts on the table only on macOS and only in file panes, where typing
+  `ç` would otherwise start a quick search for a name beginning with it; a setting
+  turns it off for anyone whose file names start with those characters. Anything not
+  in the table only triggers step 4's hint.
 - **CI cannot press keys in Terminal.app.** The macOS runner has no Terminal.app
   session. Everything in step 1 and the end check is by hand on a Mac.
 
 ## Do
+
+**2026-11-07, first report from the owner's Intel Mac** (Terminal.app; version not yet
+sent):
+
+- Colours right after Round 001: no green or red backgrounds.
+- Clicking in rcmd selects text in Terminal.app's own blue selection, and the pointer
+  is the I-beam, not an arrow. Terminal.app shows the arrow only while a program has
+  mouse reporting on, so **mouse reports are not reaching rcmd**: either View → Allow
+  Mouse Reporting (⌘R) is off, or Terminal.app does not accept the modes crossterm
+  turns on. Asked which. rcmd cannot set the pointer shape itself: the escape for it
+  (OSC 22) is not something Terminal.app understands.
+- Option does not act as Alt, as expected. "Esc + Option + key" did nothing, also as
+  expected: Esc-prefix is step 3, not built yet.
 
 ## Check
 

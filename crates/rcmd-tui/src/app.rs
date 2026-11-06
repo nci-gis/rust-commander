@@ -1917,18 +1917,7 @@ impl App {
                 let req = Request::sync(pairs);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
-            Cmd::CopyText(_) if self.settings.mode == Mode::Restricted => {
-                self.status = "restricted mode \u{2014} the clipboard is turned off".into();
-            }
-            Cmd::CopyText(t) => {
-                if self.interactive {
-                    let seq = format!("\x1b]52;c;{}\x07", base64(t.as_bytes()));
-                    let mut out = stdout();
-                    let _ = out.write_all(seq.as_bytes());
-                    let _ = out.flush();
-                }
-                self.status = "sent to the clipboard".into();
-            }
+            Cmd::CopyText(t) => self.copy_text(t),
             Cmd::BatchRename(moves) => {
                 let out = rcmd_core::batch_rename::apply(&moves);
                 self.reload_all();
@@ -1951,6 +1940,31 @@ impl App {
                 self.modal = Some(Modal::Job(Job::new(kind, ops::start(request))));
             }
         }
+    }
+
+    /// Put text on the clipboard with OSC 52, unless the mode forbids it or the text
+    /// could act when pasted.
+    fn copy_text(&mut self, t: String) {
+        if self.settings.mode == Mode::Restricted {
+            // Short: it also has to fit beside the viewer's key hints.
+            self.status = "restricted mode: no clipboard".into();
+            return;
+        }
+        if let Some(why) = crate::safety::unsafe_to_paste(&t) {
+            self.status = why;
+            return;
+        }
+        if self.interactive {
+            let seq = format!("\x1b]52;c;{}\x07", base64(t.as_bytes()));
+            let mut out = stdout();
+            let _ = out.write_all(seq.as_bytes());
+            let _ = out.flush();
+        }
+        let lines = t.lines().count().max(1);
+        self.status = match lines {
+            1 => "copied 1 line to the clipboard".into(),
+            n => format!("copied {n} lines to the clipboard"),
+        };
     }
 
     /// Put the selection's paths on the clipboard with OSC 52.
@@ -2680,11 +2694,19 @@ impl App {
                     }
                 }
             },
-            Some(Modal::View(v)) => {
-                if matches!(v.on_key(k), viewer::Action::Close) {
-                    act = ModalAct::Close;
+            Some(Modal::View(v)) => match v.on_key(k) {
+                viewer::Action::Close => act = ModalAct::Close,
+                viewer::Action::Copy(text) => {
+                    // Not Run(…): that closes the viewer first, and copying should not.
+                    self.copy_text(text);
+                    let said = self.status.clone();
+                    if let Some(Modal::View(v)) = self.modal.as_mut() {
+                        v.note(&said);
+                    }
+                    return;
                 }
-            }
+                viewer::Action::Stay => {}
+            },
             Some(Modal::Help(h)) => {
                 if matches!(h.on_key(k), viewer::Action::Close) {
                     act = ModalAct::Close;

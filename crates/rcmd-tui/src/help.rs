@@ -242,6 +242,7 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 ("/", "Search; Enter to jump"),
                 ("n \u{b7} N", "Next / previous match"),
                 ("g \u{b7} G", "Top / bottom"),
+                ("y \u{b7} Y", "Copy the top line / the screen"),
                 ("Esc \u{b7} q", "Close the viewer"),
             ],
         ),

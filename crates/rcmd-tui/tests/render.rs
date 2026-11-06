@@ -2407,3 +2407,18 @@ fn autosave_is_configurable_with_a_floor_and_an_off() {
         assert_eq!(out.status.success(), ok, "{body}");
     }
 }
+
+#[test]
+fn y_and_cap_y_copy_from_the_viewer_and_control_characters_are_refused() {
+    let (a, b) = files(&[]);
+    fs::write(a.join("notes.txt"), "first line\nsecond line\nthird line\n").unwrap();
+    fs::write(a.join("evil.txt"), "rm -rf ~\u{15}echo hi\n").unwrap();
+    let s = shot_keys("100x20", "/,n,o,t,Enter,F3,y", &a, &b);
+    assert!(s.contains("copied 1 line"), "{s}");
+    let s = shot_keys("100x20", "/,n,o,t,Enter,F3,Y", &a, &b);
+    assert!(s.contains("copied 3 lines"), "{s}");
+    let s = shot_keys("100x20", "/,e,v,i,Enter,F3,y", &a, &b);
+    assert!(s.contains("not copied"), "a Ctrl+U in the text\n{s}");
+    let s = shot_flags(&["--restricted"], "/,n,o,t,Enter,F3,y", &a, &b);
+    assert!(s.contains("restricted mode: no clipboard"), "{s}");
+}

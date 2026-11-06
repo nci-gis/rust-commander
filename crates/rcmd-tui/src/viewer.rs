@@ -18,6 +18,8 @@ use crate::theme;
 pub enum Action {
     Stay,
     Close,
+    /// Put this on the clipboard: `y` the top line, `Y` the screen.
+    Copy(String),
 }
 
 pub struct Viewer {
@@ -63,6 +65,12 @@ impl Viewer {
             Mode::Text => self.doc.line_count().saturating_sub(1),
             Mode::Hex => self.doc.hex_rows().saturating_sub(1),
         }
+    }
+
+    /// Say something on the viewer's own message line, which is what shows while it
+    /// covers the screen.
+    pub fn note(&mut self, text: &str) {
+        self.message = text.to_string();
     }
 
     pub fn scroll_by(&mut self, delta: isize) {
@@ -154,6 +162,14 @@ impl Viewer {
                     Mode::Hex => "hex".into(),
                     Mode::Text => "text".into(),
                 };
+            }
+            KeyCode::Char('y' | 'Y') if self.mode == Mode::Hex => {
+                self.message = "copy works in text view \u{2014} h".into();
+            }
+            KeyCode::Char(c @ ('y' | 'Y')) => {
+                let n = if c == 'y' { 1 } else { self.page.max(1) };
+                let text = self.doc.lines_from(self.top, n).join("\n");
+                return Action::Copy(text);
             }
             KeyCode::Char('w') => {
                 self.wrap = !self.wrap;
@@ -385,6 +401,7 @@ impl Viewer {
             ("Esc", "close"),
             ("h", "hex"),
             ("w", "wrap"),
+            ("y/Y", "copy"),
             ("/", "search"),
             ("n/N", "next"),
             ("g/G", "ends"),

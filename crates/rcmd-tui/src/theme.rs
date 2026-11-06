@@ -1,16 +1,18 @@
 //! The palette. Dark, high-contrast, a single teal accent that marks what has focus.
 //!
-//! Set once at startup from `[theme]` in the config, then read everywhere through
-//! [`t`]. A process-wide value rather than a parameter threaded through every render
-//! function: there is exactly one theme, and it never changes while running.
+//! Set at startup from `[theme]` in the config, then read everywhere through [`t`]. A
+//! process-wide value rather than a parameter threaded through every render function:
+//! there is one theme at a time. It can be swapped while running ([`set`], View →
+//! Theme…); `t` hands out a copy, sixteen colours, so a frame never sees half of one
+//! theme and half of another.
 
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use ratatui::style::{Color, Modifier, Style};
 use rcmd_core::color::Depth;
 use rcmd_core::{Entry, Kind};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     pub bg: Color,
     pub bg_panel: Color,
@@ -118,16 +120,92 @@ fn ansi(i: u8) -> Color {
     NAMED[usize::from(i & 15)]
 }
 
-static THEME: OnceLock<Theme> = OnceLock::new();
+/// The themes rcmd has built in, by name. A theme file in `themes/` starts from one of
+/// these (`base = "dark"`); built-in names cannot be taken by a file.
+pub const BUILT_IN: &[&str] = &["dark", "light", "ansi", "blue", "high-contrast"];
 
-/// Install the theme. Only the first call counts.
+/// A built-in theme by name.
+pub fn built_in(name: &str) -> Option<Theme> {
+    let rgb = Color::Rgb;
+    Some(match name {
+        "dark" => Theme::default(),
+        "ansi" => Theme::ansi(),
+        "light" => Theme {
+            bg: rgb(246, 247, 249),
+            bg_panel: rgb(255, 255, 255),
+            bg_bar: rgb(230, 234, 239),
+            border: rgb(190, 197, 206),
+            border_active: rgb(0, 122, 112),
+            accent: rgb(0, 122, 112),
+            fg: rgb(28, 33, 40),
+            fg_dim: rgb(105, 114, 125),
+            dir: rgb(0, 84, 190),
+            exec: rgb(0, 120, 50),
+            link: rgb(125, 55, 175),
+            archive: rgb(160, 90, 0),
+            err: rgb(196, 30, 30),
+            mark: rgb(176, 110, 0),
+            row_cursor: rgb(224, 229, 236),
+            row_cursor_active: rgb(188, 226, 222),
+        },
+        // Blue panels, cyan text, yellow marks: the DOS-era commanders' look.
+        "blue" => Theme {
+            bg: rgb(0, 0, 128),
+            bg_panel: rgb(0, 0, 160),
+            bg_bar: rgb(0, 128, 128),
+            border: rgb(85, 255, 255),
+            border_active: rgb(255, 255, 255),
+            accent: rgb(255, 255, 85),
+            fg: rgb(85, 255, 255),
+            fg_dim: rgb(160, 170, 200),
+            dir: rgb(255, 255, 255),
+            exec: rgb(85, 255, 85),
+            link: rgb(255, 170, 255),
+            archive: rgb(255, 85, 255),
+            err: rgb(255, 85, 85),
+            mark: rgb(255, 255, 85),
+            row_cursor: rgb(0, 0, 100),
+            row_cursor_active: rgb(0, 110, 110),
+        },
+        "high-contrast" => Theme {
+            bg: rgb(0, 0, 0),
+            bg_panel: rgb(0, 0, 0),
+            bg_bar: rgb(38, 38, 38),
+            border: rgb(200, 200, 200),
+            border_active: rgb(255, 215, 0),
+            accent: rgb(255, 215, 0),
+            fg: rgb(255, 255, 255),
+            fg_dim: rgb(190, 190, 190),
+            dir: rgb(110, 180, 255),
+            exec: rgb(100, 255, 100),
+            link: rgb(255, 130, 255),
+            archive: rgb(255, 200, 0),
+            err: rgb(255, 90, 90),
+            mark: rgb(255, 255, 0),
+            row_cursor: rgb(64, 64, 64),
+            row_cursor_active: rgb(0, 80, 160),
+        },
+        _ => return None,
+    })
+}
+
+static THEME: RwLock<Option<Theme>> = RwLock::new(None);
+
+/// Install the theme at start-up.
 pub fn init(theme: Theme) {
-    let _ = THEME.set(theme);
+    set(theme);
+}
+
+/// Swap the theme while running; the next frame draws with it.
+pub fn set(theme: Theme) {
+    if let Ok(mut t) = THEME.write() {
+        *t = Some(theme);
+    }
 }
 
 /// The active theme, or the default one if nothing installed it (unit tests).
-pub fn t() -> &'static Theme {
-    THEME.get_or_init(Theme::default)
+pub fn t() -> Theme {
+    THEME.read().ok().and_then(|t| *t).unwrap_or_default()
 }
 
 const ARCHIVE_EXT: &[&str] = &[
@@ -209,6 +287,30 @@ mod tests {
             ("cursor_active", t.row_cursor_active, "directory", t.dir),
             ("cursor_active", t.row_cursor_active, "marked", t.mark),
         ]
+    }
+
+    #[test]
+    fn every_built_in_theme_keeps_its_rows_apart_at_full_and_256_colours() {
+        for name in BUILT_IN {
+            let t = built_in(name).unwrap();
+            let depths: &[Depth] = if *name == "ansi" {
+                &[Depth::Ansi16]
+            } else {
+                &[Depth::True, Depth::X256]
+            };
+            for depth in depths {
+                for (a, ca, b, cb) in apart(&t) {
+                    if ca == Color::Reset && cb == Color::Reset {
+                        continue;
+                    }
+                    assert_ne!(
+                        fit(ca, *depth),
+                        fit(cb, *depth),
+                        "{name} at {depth:?}: {a} and {b} become the same colour"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

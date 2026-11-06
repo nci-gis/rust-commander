@@ -212,10 +212,11 @@ fn main() -> Result<()> {
         None => settings.colors,
     }
     .unwrap_or_else(|| rcmd_core::color::detect(|k| std::env::var(k).ok(), cfg!(windows)));
+    settings.depth = depth;
     theme::init(if depth == rcmd_core::color::Depth::Ansi16 {
-        settings.theme16.clone()
+        settings.theme16
     } else {
-        settings.theme.clone()
+        settings.theme
     });
     if cli.show_keys {
         return show_keys(&settings.keymap, depth);

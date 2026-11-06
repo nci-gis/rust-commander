@@ -53,6 +53,10 @@ pub enum Cmd {
     QuitAnyway,
     /// Help → About.
     About,
+    /// View → Theme…: the list of themes.
+    ThemeMenu,
+    /// Switch to this theme now (not saved: Settings saves it).
+    SetTheme(String),
 }
 
 pub struct Item {

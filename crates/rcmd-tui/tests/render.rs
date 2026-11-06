@@ -1972,6 +1972,72 @@ fn shot_cfg_env(
 }
 
 #[test]
+fn a_theme_file_beside_the_config_is_a_theme() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("cfgdir");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    fs::write(
+        dir.join("themes/mine.toml"),
+        "base = \"light\"\naccent = \"#123456\"\n",
+    )
+    .unwrap();
+    let cfg = write_config(&dir, "[theme]\nname = \"mine\"\n");
+    let check = |cfg: &std::path::Path| {
+        isolated()
+            .env("RCMD_CONFIG", cfg)
+            .arg("--check-config")
+            .output()
+            .unwrap()
+    };
+    let out = check(&cfg);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    // View → Theme… lists it after the built-in ones.
+    let out = isolated()
+        .env("RCMD_CONFIG", &cfg)
+        .args(["--screenshot=100x40", "--keys=F9,Right,Up,Enter"])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    for name in ["dark", "light", "ansi", "blue", "high-contrast", "mine"] {
+        assert!(s.contains(name), "{name}\n{s}");
+    }
+    // A bad colour in the file names the file.
+    fs::write(dir.join("themes/mine.toml"), "accent = \"mauve\"\n").unwrap();
+    let out = check(&cfg);
+    let said =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains("mine.toml") && said.contains("mauve"),
+        "{said}"
+    );
+    // An unknown name lists what there is.
+    let cfg = write_config(&dir, "[theme]\nname = \"nope\"\n");
+    let out = check(&cfg);
+    let said =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("no such theme") && said.contains("high-contrast"),
+        "{said}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn view_theme_switches_while_running() {
+    let (a, b) = fixture();
+    let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Enter", &a, &b);
+    assert!(s.contains("theme: light"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_opens_a_file_with_its_program_as_total_commander_does() {
     let (a, b) = fixture();
     let s = shot_cfg_env("", &[], "Down,Enter", &a, &b);
@@ -2886,7 +2952,20 @@ fn every_toml_example_in_the_docs_is_a_valid_config() {
         while let Some(start) = rest.find("```toml\n") {
             let body = &rest[start + 8..];
             let end = body.find("```").expect("a closed code block");
-            let cfg = write_config(&dir, &body[..end]);
+            // A theme file's example says so on its first line, "# themes/x.toml": put
+            // it there, and check a config that names it.
+            let first = body.lines().next().unwrap_or_default();
+            let cfg = if let Some(file) = first
+                .strip_prefix("# themes/")
+                .and_then(|r| r.split_whitespace().next())
+            {
+                fs::create_dir_all(dir.join("themes")).unwrap();
+                fs::write(dir.join("themes").join(file), &body[..end]).unwrap();
+                let name = file.trim_end_matches(".toml");
+                write_config(&dir, &format!("[theme]\nname = \"{name}\"\n"))
+            } else {
+                write_config(&dir, &body[..end])
+            };
             let out = rcmd(&[
                 OsStr::new("--config"),
                 cfg.as_os_str(),

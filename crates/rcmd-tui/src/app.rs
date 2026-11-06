@@ -166,6 +166,8 @@ pub struct App {
     group: Option<crate::keys::Chord>,
     /// The Option-key hint has been shown this session.
     option_hinted: bool,
+    /// The theme in use, by name (View → Theme… marks it).
+    theme_name: String,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -238,6 +240,7 @@ impl App {
     pub fn new(left: &Path, right: &Path, settings: Settings, outcome: Outcome) -> Self {
         let notice = outcome.message();
         let settings_height = settings.config.terminal.height_percent;
+        let theme_name = settings.config.theme.name.clone();
         let mut panes = BTreeMap::new();
         panes.insert(
             0,
@@ -277,6 +280,7 @@ impl App {
             scrolling: None,
             group: None,
             option_hinted: false,
+            theme_name,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -2106,6 +2110,8 @@ impl App {
             }
             Cmd::OpenFile(p) => self.launch(&p),
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
+            Cmd::ThemeMenu => self.theme_menu(),
+            Cmd::SetTheme(name) => self.set_theme(&name),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
             Cmd::UserCommand(i) => self.run_user_command(i),
             Cmd::About => {
@@ -4536,11 +4542,48 @@ impl App {
                 ),
             })
             .collect();
+        if i == 1 {
+            items.push(Item::sep());
+            items.push(Item::cmd("Theme\u{2026}", "", Cmd::ThemeMenu, true));
+        }
         if i == 2 {
             items.push(Item::sep());
             items.push(Item::cmd("About rcmd", "", Cmd::About, true));
         }
         items
+    }
+
+    /// View → Theme…: every theme, built in and from `themes/`, the current one marked.
+    fn theme_menu(&mut self) {
+        let current = self.theme_name.clone();
+        let items: Vec<Item> = crate::config::available_themes()
+            .into_iter()
+            .map(|name| {
+                let mark = if name == current { "\u{2022}" } else { "" };
+                Item::cmd(name.clone(), mark, Cmd::SetTheme(name), true)
+            })
+            .chain(std::iter::once(Item::cancel("Cancel", "Esc")))
+            .collect();
+        self.modal = Some(Modal::Menu(Menu::new(
+            Some("Theme".into()),
+            items,
+            self.pane_anchor(),
+        )));
+    }
+
+    /// Switch themes now. The colours set in `[theme]` stay on top, as at start-up.
+    fn set_theme(&mut self, name: &str) {
+        let s = &self.settings;
+        match crate::config::theme_for(name, &s.config.theme, s.depth) {
+            Ok(t) => {
+                theme::set(t);
+                self.theme_name = name.to_string();
+                self.status = format!(
+                    "theme: {name} \u{2014} [theme] name = \"{name}\" in config.toml keeps it"
+                );
+            }
+            Err(e) => self.status = e,
+        }
     }
 
     fn open_bar(&mut self, i: usize) {

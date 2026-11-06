@@ -150,7 +150,11 @@ Mac in Terminal.app with Option as Meta, only history (Alt+↓) and resize
 (Alt+Shift+arrows) cannot be typed. Three per-system sets would be two copies of
 `classic` and one with two changes; the design is reconsidered with the owner.
 
-Suspected, to confirm: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
+**2026-11-07, Linux again:** Alt+F5, Alt+F7, Alt+F9 **do** arrive (pack, find_files,
+unpack); the desktop does not take them on the owner's Ubuntu. Still not seen on Linux
+or Windows: Shift+F1–F10 and Ctrl+PageUp / PageDown — not pressed, or swallowed; asked.
+
+Suspected earlier, now mostly disproved: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
 other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown
 (its tabs) and Shift+F10 (context menu). If Alt+F7 is lost, Find needs a second key in
 the `linux` set.

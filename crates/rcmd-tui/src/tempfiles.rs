@@ -186,8 +186,11 @@ mod tests {
         let old_list = b.join("rcmd-rename-1-0.txt");
         std::fs::write(&old_list, "a").unwrap();
         age_by(&old_list, hour * 2);
-        let fd = std::fs::File::open(&old_view).unwrap();
-        let _ = fd.set_modified(SystemTime::now() - hour * 2);
+        // Ageing a directory needs it opened as a file, which Windows refuses; the test
+        // asserts nothing about this one.
+        if let Ok(fd) = std::fs::File::open(&old_view) {
+            let _ = fd.set_modified(SystemTime::now() - hour * 2);
+        }
         let fresh_view = b.join("rcmd-view-2-0");
         std::fs::create_dir_all(&fresh_view).unwrap();
         // Someone else's file.

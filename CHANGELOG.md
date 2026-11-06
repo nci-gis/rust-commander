@@ -17,6 +17,8 @@ that heading and starts a new, empty one here. -->
   it off.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
   to do; F1 links to it.
+- Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends
+  Option+← and Option+→ as those, even with Option as Meta.
 - `rcmd --show-keys` prints each key, click and scroll as rcmd receives it, and what
   it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.

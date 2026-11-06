@@ -27,8 +27,8 @@ These are the defaults. Press **F1** in rcmd to see your own, after any changes 
 | `Home` | First entry |
 | `End` | Last entry |
 | `Enter` | Enter a directory, or view a file |
-| `Alt+Right` | Enter the directory under the cursor |
-| `Alt+Left` `Backspace` | Go up one directory |
+| `Alt+Right` `Alt+f` | Enter the directory under the cursor |
+| `Alt+Left` `Alt+b` `Backspace` | Go up one directory |
 | `~` | Go to your home directory |
 | `Ctrl+\` | Go to the root of this drive or filesystem |
 | `/` `Ctrl+s` | Jump to a name as you type it; Up/Down for the next match |

@@ -195,14 +195,17 @@ pub const BINDINGS: &[Binding] = &[
         name: "enter_dir",
         group: "Navigate",
         about: "Enter the directory under the cursor",
-        keys: &["Alt+Right"],
+        // Alt+F too: macOS Terminal.app sends Option+Right as ESC f (word right),
+        // whatever its "Option as Meta" setting, so Alt+Right never arrives there.
+        keys: &["Alt+Right", "Alt+f"],
     },
     Binding {
         action: Action::Parent,
         name: "parent",
         group: "Navigate",
         about: "Go up one directory",
-        keys: &["Backspace", "Alt+Left"],
+        // Alt+B: Terminal.app's Option+Left, as Alt+F above.
+        keys: &["Backspace", "Alt+Left", "Alt+b"],
     },
     Binding {
         action: Action::GoHome,

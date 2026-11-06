@@ -155,6 +155,20 @@ Terminal.app's own window rather than reaching rcmd, which would break PageUp /
 PageDown and Ctrl+PageUp / PageDown (tabs). The owner prefers a macOS keymap (ROADMAP
 item 5) to working around each key; its keys come from this measurement, not guesses.
 
+**Measured (2026-11-07, `--show-keys`, Terminal.app, Option as Meta on):**
+
+| Pressed | Arrives as | Usable |
+|---|---|---|
+| ⌥← / ⌥→ | Alt+B / Alt+F | yes: now bound to parent / enter, on every system |
+| ⌥↑ / ⌥↓ | three keys: Esc, `[`, Shift+A (or B): `ESC ESC [ A` that crossterm does not read as Alt+↑ | no |
+| ⌥⇧ + arrows | the same as without ⇧ | no: resize (Alt+Shift+arrows) cannot work |
+| ⇧ + arrows | plain arrows, Shift lost | no |
+| Ctrl+⇧ + arrows, Fn+↑ / ↓ / ← / →, F-keys | "seem to work", per the owner; not itemised | to confirm per key |
+
+So on a Mac in Terminal.app, history (Alt+↓) and resize (Alt+Shift+arrows) need other
+keys: the macOS keymap (ROADMAP item 5). Esc-prefix does not help with ⌥↑: Esc then ↑
+works, but ⌥↑ itself arrives as three separate keys.
+
 ## Check
 
 - [ ] Step 1's table recorded here: which keys arrived, with which settings. Partly:

@@ -276,6 +276,21 @@ fn esc_then_a_digit_is_an_f_key_for_terminals_without_them() {
 }
 
 #[test]
+fn alt_f_and_alt_b_enter_and_leave_as_option_arrows_do_on_a_mac() {
+    // Terminal.app sends Option+Right / Left as ESC f / ESC b even with Option as
+    // Meta, which arrive as Alt+F / Alt+B.
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("sub")).unwrap();
+    let title = |s: &str| s.lines().nth(1).unwrap_or_default().to_string();
+    let s = shot_keys("110x24", "/,s,u,b,Enter,Alt+f", &a, &b);
+    let inside = format!("{}sub", std::path::MAIN_SEPARATOR);
+    assert!(title(&s).contains(&inside), "Alt+F went in\n{s}");
+    let s = shot_keys("110x24", "/,s,u,b,Enter,Alt+f,Alt+b", &a, &b);
+    assert!(!title(&s).contains(&inside), "Alt+B came back out\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn esc_as_meta_can_be_turned_off() {
     let (a, b) = fixture();
     let cfg = write_config(a.parent().unwrap(), "[general]\nesc_as_meta = false\n");

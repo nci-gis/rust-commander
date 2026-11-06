@@ -235,15 +235,9 @@ impl App {
     /// visible by default. Separate from `run` so a screenshot can do it too.
     pub fn boot(&mut self, area: Rect) {
         self.screen = area;
-        if self.status.is_empty() {
-            let k = |a| self.footer_key(a).unwrap_or_else(|| "?".into());
-            self.status = format!(
-                "{} help \u{b7} {} terminal \u{b7} {} quit",
-                k(Action::Help),
-                k(Action::FocusTerminal),
-                k(Action::Quit)
-            );
-        }
+        // No startup hint in the status line: the key bar already shows F1, F10 and F12,
+        // and a hint that vanished at the first message and never came back looked
+        // random. The right of the status line is for messages only.
         let restore = self.restore_terminal.take();
         if self.settings.mode == Mode::Restricted {
             return;
@@ -3980,19 +3974,6 @@ impl App {
             self.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
             x += w + 1;
         }
-        let hint = format!(
-            "{} menu ",
-            self.footer_key(Action::MenuBar).unwrap_or_default()
-        );
-        let hw = hint.chars().count() as u16;
-        if area.width > x - area.x + hw + 2 {
-            frame.buffer_mut().set_line(
-                area.x + area.width - hw,
-                area.y,
-                &Line::from(Span::styled(hint, Style::new().fg(th.fg_dim))),
-                hw,
-            );
-        }
     }
 
     fn holding(&self) -> crate::usage::Holding {
@@ -4142,14 +4123,15 @@ impl App {
                 )
             }
             Some(Pane::Term(p)) => format!(
-                " terminal {}/{}{}  \u{b7}  F12 back to files",
+                " terminal {}/{}{}  \u{b7}  {} back to files",
                 p.active_tab() + 1,
                 p.tab_count(),
                 if p.split_count() > 1 {
                     format!("  \u{b7}  split {}/{}", p.focused_split(), p.split_count())
                 } else {
                     String::new()
-                }
+                },
+                self.footer_key(Action::FocusTerminal).unwrap_or_default()
             ),
             None => String::new(),
         };

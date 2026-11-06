@@ -2205,7 +2205,7 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
     let (a, b) = fixture();
     let s = shot_keys("100x34", "", &a, &b);
     assert!(
-        s.lines().next().unwrap().contains(" File   View   Help "),
+        s.lines().next().unwrap().contains(" File   View   Help"),
         "{s}"
     );
     let s = shot_keys("100x34", "F9", &a, &b);
@@ -2358,4 +2358,19 @@ fn every_toml_example_in_the_docs_is_a_valid_config() {
         }
     }
     assert!(checked >= 6, "found only {checked} examples");
+}
+
+#[test]
+fn the_key_to_leave_the_terminal_follows_a_rebind_and_hints_are_not_repeated() {
+    let (a, b) = fixture();
+    let cfg_dir = a.parent().unwrap().join("cfg-term");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    let cfg = write_config(&cfg_dir, "[keys]\nfocus_terminal = [\"F11\"]\n");
+    let s = shot_with(&cfg, "F11", &a, &b);
+    assert!(status(&s).contains("F11 back to files"), "{s}");
+    // F9 is on the key bar; the menu bar does not say it again, and there is no
+    // startup hint repeating F1 / F10 / F12 in the status line.
+    let s = shot_keys(SIZE, "", &a, &b);
+    assert!(!s.lines().next().unwrap().contains("F9"), "{s}");
+    assert!(!status(&s).contains("help \u{b7}"), "{s}");
 }

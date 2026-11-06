@@ -38,6 +38,7 @@ that heading and starts a new, empty one here. -->
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
 ### Changed
+- About shows rcmd's logo, drawn in the terminal.
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
   extension, else the system's program; programs still ask "Run it?" first. Over SSH,
   without a desktop or in read-only mode it views the file and says why.

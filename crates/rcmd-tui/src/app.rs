@@ -222,6 +222,10 @@ pub struct App {
     last_autosave: Instant,
 }
 
+/// rcmd's icon, 24 pixels square, for About: drawn in half blocks, 24 × 12 cells.
+/// Rendered from `assets/icon.svg` (`resvg -w 24 -h 24`).
+const LOGO: &[u8] = include_bytes!("../../../assets/icon-24.png");
+
 /// What rcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
 /// rcmd ends with the viewer still open, or with an extraction still running.
@@ -2137,6 +2141,13 @@ impl App {
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
                     )),
+                    picture: {
+                        let bg = match theme::t().bg_panel {
+                            ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
+                            _ => [0, 0, 0],
+                        };
+                        rcmd_core::image::png_bytes(LOGO, 24, 24, bg).ok()
+                    },
                 }));
             }
             Cmd::QuitAnyway => {
@@ -3687,6 +3698,7 @@ impl App {
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
     }
 
@@ -3927,6 +3939,7 @@ impl App {
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
     }
 
@@ -4050,6 +4063,7 @@ impl App {
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
         true
     }
@@ -4184,6 +4198,7 @@ impl App {
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
     }
 
@@ -4460,24 +4475,7 @@ impl App {
         let rows = pic.height.div_ceil(2);
         let x0 = inner.x + (inner.width.saturating_sub(pic.width as u16)) / 2;
         let y0 = inner.y + (inner.height.saturating_sub(rows as u16)) / 2;
-        let rgb = |p: [u8; 3]| ratatui::style::Color::Rgb(p[0], p[1], p[2]);
-        let buf = frame.buffer_mut();
-        for r in 0..rows {
-            for x in 0..pic.width {
-                let top = pic.rgb[(2 * r) * pic.width + x];
-                let bottom = pic
-                    .rgb
-                    .get((2 * r + 1) * pic.width + x)
-                    .copied()
-                    .unwrap_or(bg);
-                let pos = Position::new(x0 + x as u16, y0 + r as u16);
-                if let Some(cell) = buf.cell_mut(pos) {
-                    cell.set_symbol("\u{2580}")
-                        .set_fg(rgb(top))
-                        .set_bg(rgb(bottom));
-                }
-            }
-        }
+        modal::paint_picture(frame, x0, y0, pic, bg);
     }
 
     // ── menu bar, usage ────────────────────────────────────────────────────────────

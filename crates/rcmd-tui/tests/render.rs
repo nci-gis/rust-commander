@@ -2895,6 +2895,12 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
         .find(|l| l.contains("Developed by"))
         .unwrap_or_else(|| panic!("no credit\n{s}"));
     assert!(row.contains("close"), "credit not on the button row\n{s}");
+    // The logo, 24 pixels square in half blocks: 12 rows of 24 cells, beside the text.
+    let logo_rows = s
+        .lines()
+        .filter(|l| l.contains(&"\u{2580}".repeat(24)))
+        .count();
+    assert_eq!(logo_rows, 12, "the logo\n{s}");
     assert!(
         row.find("close") < row.find("Developed by"),
         "credit not right of the button\n{s}"

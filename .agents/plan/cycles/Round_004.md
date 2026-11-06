@@ -164,8 +164,9 @@ except Ctrl+PageUp / PageDown (previous / next tab), which lose Ctrl on both (if
 was held: asked). On macOS Terminal.app, with Option as Meta, history and resize
 cannot be typed. F11 is the terminal's everywhere; rcmd does not use it. Tab switching
 therefore needs a second key on every system: candidates Alt+1…9 (tab N, measured to
-arrive on Linux and Windows) and Ctrl+Tab / Ctrl+Shift+Tab (Total Commander's; not yet
-measured).
+arrive on Linux and Windows) and Ctrl+Tab / Ctrl+Shift+Tab (Total Commander's). Measured:
+Ctrl+Tab is taken on both — Linux by the terminal or desktop, Windows by switching
+away (focus lost, focus gained) — so it is out.
 
 Suspected earlier, now mostly disproved: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
 other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown

@@ -20,6 +20,10 @@ that heading and starts a new, empty one here. -->
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
 - `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
   window or a terminal tab, for some systems only, or only where there is a screen.
+- **File → Settings…**: tabs for General, Files, Theme and Terminal; ←/→ to change,
+  Enter to save. Only the changed lines of `config.toml` are rewritten, comments kept;
+  the result is read back before it is written. Rows say which apply at the next start.
+  Not in read-only or restricted mode.
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
   `[theme] name`, or a file of your own in `themes/` that starts from one of them.
   **View → Theme…** switches while rcmd runs.

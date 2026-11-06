@@ -43,6 +43,7 @@ use crate::pane::{FilePane, FileTabs, Pane, TermPanel};
 use crate::rename_dialog::{self, RenameDialog};
 use crate::search::{self, Search};
 use crate::session::{self, Saved, SavedTab, SavedTerminal, Session};
+use crate::settings_dialog::{self, SettingsDialog};
 use crate::theme;
 use crate::viewer::{self, Viewer};
 
@@ -80,6 +81,8 @@ enum ModalAct {
     StartFind,
     /// F4 in the rename dialog: these names, one per file, into the editor.
     BatchEditor(String),
+    /// Enter in File → Settings….
+    SaveSettings,
     Background,
     /// Left/Right in a menu-bar menu.
     Bar(isize),
@@ -2111,6 +2114,7 @@ impl App {
             Cmd::OpenFile(p) => self.launch(&p),
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
             Cmd::ThemeMenu => self.theme_menu(),
+            Cmd::Settings => self.open_settings(),
             Cmd::SetTheme(name) => self.set_theme(&name),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
             Cmd::UserCommand(i) => self.run_user_command(i),
@@ -2987,6 +2991,25 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Settings(d)) => match d.on_key(k) {
+                settings_dialog::Outcome::Stay => {}
+                settings_dialog::Outcome::Preview(name) => {
+                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
+                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
+                        theme::set(t);
+                    }
+                }
+                settings_dialog::Outcome::Cancel => {
+                    // Put back the theme the preview replaced.
+                    let name = self.theme_name.clone();
+                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
+                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
+                        theme::set(t);
+                    }
+                    act = ModalAct::Close;
+                }
+                settings_dialog::Outcome::Save => act = ModalAct::SaveSettings,
+            },
             Some(Modal::Rename(d)) => match d.on_key(k) {
                 rename_dialog::Outcome::Stay => {}
                 rename_dialog::Outcome::Close => act = ModalAct::Close,
@@ -3077,6 +3100,7 @@ impl App {
                             .into();
                 }
             }
+            ModalAct::SaveSettings => self.save_settings(),
             ModalAct::BatchEditor(text) => {
                 if let Some(Modal::Rename(d)) = self.modal.take() {
                     self.begin_batch(d.files, &text);
@@ -4490,6 +4514,7 @@ impl App {
             None,
             Some(("Quit", A::Quit)),
         ];
+        // Settings… is put in just above Quit, below.
         let view: &[Option<(&str, A)>] = &[
             Some(("Quick search", A::QuickSearch)),
             Some(("Filter\u{2026}", A::Filter)),
@@ -4542,6 +4567,11 @@ impl App {
                 ),
             })
             .collect();
+        if i == 0 {
+            // Above Quit, which is last.
+            let at = items.len().saturating_sub(1);
+            items.insert(at, Item::cmd("Settings\u{2026}", "", Cmd::Settings, true));
+        }
         if i == 1 {
             items.push(Item::sep());
             items.push(Item::cmd("Theme\u{2026}", "", Cmd::ThemeMenu, true));
@@ -4551,6 +4581,97 @@ impl App {
             items.push(Item::cmd("About rcmd", "", Cmd::About, true));
         }
         items
+    }
+
+    /// File → Settings….
+    fn open_settings(&mut self) {
+        let cannot_save = if self.settings.mode.read_only() {
+            Some(format!(
+                "{} mode \u{2014} rcmd writes nothing, its settings included",
+                self.settings.mode.label()
+            ))
+        } else if let Outcome::Rejected { .. } = self.config_outcome {
+            Some(
+                "config.toml has an error (F1 \u{203a} Settings says which): fix it by hand first"
+                    .into(),
+            )
+        } else {
+            None
+        };
+        self.modal = Some(Modal::Settings(Box::new(SettingsDialog::new(
+            &self.settings.config,
+            crate::config::available_themes(),
+            cannot_save,
+        ))));
+    }
+
+    /// Enter in Settings: write what changed into the config file, keeping the rest of
+    /// it as it was, then use the new settings. The edited file is read back first, and
+    /// nothing is written unless it says exactly what the dialog showed.
+    fn save_settings(&mut self) {
+        let Some(Modal::Settings(d)) = self.modal.take() else {
+            return;
+        };
+        let changes = d.changed();
+        if changes.is_empty() {
+            self.status = "settings: nothing changed".into();
+            return;
+        }
+        let Some(path) = crate::config::path_in_use() else {
+            self.status = "nowhere to save: no config location (HOME is not set)".into();
+            return;
+        };
+        let before = match std::fs::read(&path) {
+            Ok(b) => match String::from_utf8(b) {
+                Ok(t) => t,
+                Err(_) => {
+                    self.status = format!("{} is not UTF-8: change it by hand", path.display());
+                    return;
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                self.status = format!("cannot read {}: {e}", path.display());
+                return;
+            }
+        };
+        let mut text = before;
+        for (f, v) in &changes {
+            text = crate::config_edit::set(&text, f.section, f.key, &settings_dialog::value(f, v));
+        }
+        let parsed = match crate::config::parse(&text) {
+            Ok(s) if s.config == d.now => s,
+            Ok(_) | Err(_) => {
+                self.status = format!(
+                    "{} is written in a way Settings cannot change safely: change it by hand",
+                    path.display()
+                );
+                return;
+            }
+        };
+        if let Err(e) = session::write_private(&path, text.as_bytes()) {
+            self.status = format!("cannot save {}: {e}", path.display());
+            return;
+        }
+        // The new settings, keeping what start-up decided: the mode (a flag may have
+        // made it stricter), the root, the colour depth.
+        let mut s = parsed;
+        s.mode = self.settings.mode;
+        s.root = self.settings.root.clone();
+        s.depth = self.settings.depth;
+        self.settings = s;
+        self.config_outcome = Outcome::Loaded(path.clone());
+        let name = self.settings.config.theme.name.clone();
+        self.set_theme(&name);
+        let later = d.need_restart();
+        self.status = if later.is_empty() {
+            format!("settings saved to {}", path.display())
+        } else {
+            format!(
+                "settings saved; at the next start: {}",
+                later.join(", ").to_lowercase()
+            )
+        };
     }
 
     /// View → Theme…: every theme, built in and from `themes/`, the current one marked.

@@ -7,6 +7,7 @@
 mod app;
 mod bookmarks;
 mod config;
+mod config_edit;
 mod find_dialog;
 mod git;
 mod help;
@@ -25,6 +26,7 @@ mod safety;
 mod scrollbar;
 mod search;
 mod session;
+mod settings_dialog;
 mod tempfiles;
 mod theme;
 mod usage;

@@ -2038,6 +2038,76 @@ fn view_theme_switches_while_running() {
 }
 
 #[test]
+fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings");
+    fs::create_dir_all(&dir).unwrap();
+    let original = "# mine\n[general]\nmenu_bar = true   # keep this comment\n\n[[menu]]\nkey = \"t\"\nlabel = \"top\"\ncommand = \"top\"\n";
+    let cfg = write_config(&dir, original);
+    // File menu, Settings… (just above Quit, the last item); then the second row,
+    // "F8 moves to the trash", switched off; then a theme on the Theme tab.
+    let s = shot_with(&cfg, "F9,Up,Up,Enter", &a, &b);
+    assert!(
+        s.contains("Settings") && s.contains("F8 moves to the trash"),
+        "{s}"
+    );
+    let s = shot_with(
+        &cfg,
+        "F9,Up,Up,Enter,Down,Space,Tab,Tab,Right,Enter",
+        &a,
+        &b,
+    );
+    assert!(s.contains("settings saved"), "{s}");
+    let after = fs::read_to_string(&cfg).unwrap();
+    assert!(
+        after.starts_with("# mine\n[general]\nmenu_bar = true   # keep this comment\n"),
+        "{after}"
+    );
+    assert!(after.contains("delete_to_trash = false"), "{after}");
+    assert!(after.contains("[theme]\nname = \"light\""), "{after}");
+    assert!(after.contains("[[menu]]\nkey = \"t\""), "{after}");
+    // What was saved is what the next start reads.
+    let out = isolated()
+        .arg("--config")
+        .arg(&cfg)
+        .arg("--check-config")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn settings_in_read_only_mode_shows_but_never_saves() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings-ro");
+    fs::create_dir_all(&dir).unwrap();
+    let cfg = write_config(&dir, "[general]\nmenu_bar = true\n");
+    let out = isolated()
+        .args(["--read-only", "--config"])
+        .arg(&cfg)
+        .args([
+            "--screenshot=110x24",
+            "--keys=F9,Up,Up,Enter,Down,Space,Enter",
+        ])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("rcmd writes nothing"), "{s}");
+    assert_eq!(
+        fs::read_to_string(&cfg).unwrap(),
+        "[general]\nmenu_bar = true\n"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_opens_a_file_with_its_program_as_total_commander_does() {
     let (a, b) = fixture();
     let s = shot_cfg_env("", &[], "Down,Enter", &a, &b);

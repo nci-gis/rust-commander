@@ -558,6 +558,14 @@ struct ThemeFile {
 /// `--config`, that file's, not the default one's.
 static CONFIG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
+/// The config file in use, once `load` has chosen it (it may not exist yet).
+static CONFIG_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The config file rcmd reads, whether or not it exists: where Settings saves.
+pub fn path_in_use() -> Option<PathBuf> {
+    CONFIG_PATH.get().cloned().or_else(default_path)
+}
+
 /// Where theme files are looked for: `themes/` beside the config file in use, then
 /// beside the rcmd binary (a portable copy keeps its themes with it).
 pub fn theme_dirs() -> Vec<PathBuf> {
@@ -831,6 +839,7 @@ pub fn load(explicit: Option<&Path>) -> (Settings, Outcome) {
     if let Some(d) = path.parent() {
         let _ = CONFIG_DIR.set(d.to_path_buf());
     }
+    let _ = CONFIG_PATH.set(path.clone());
     let text = match std::fs::read(&path).and_then(|b| decode(&b)) {
         Ok(t) => t,
         // A missing default file is the normal case. A missing file someone named on

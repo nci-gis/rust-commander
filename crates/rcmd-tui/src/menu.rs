@@ -55,6 +55,8 @@ pub enum Cmd {
     About,
     /// View → Theme…: the list of themes.
     ThemeMenu,
+    /// File → Settings….
+    Settings,
     /// Switch to this theme now (not saved: Settings saves it).
     SetTheme(String),
 }

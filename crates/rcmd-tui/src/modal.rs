@@ -21,6 +21,7 @@ use crate::help::Help;
 use crate::line_edit::LineEdit;
 use crate::menu::{Cmd, Menu};
 use crate::rename_dialog::{self, RenameDialog};
+use crate::settings_dialog::{self, SettingsDialog};
 use crate::theme;
 use crate::viewer::Viewer;
 
@@ -36,6 +37,8 @@ pub enum Modal {
     Find(Box<FindDialog>),
     /// Shift+F2: rename many with a pattern.
     Rename(Box<RenameDialog>),
+    /// File → Settings….
+    Settings(Box<SettingsDialog>),
     Ask(Ask),
     /// Help → Usage. Drawn by the app, which holds the numbers.
     Usage,
@@ -372,6 +375,7 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut Modal) {
         Modal::Menu(m) => m.render(frame, area),
         Modal::Find(d) => find_dialog::render(frame, area, d),
         Modal::Rename(d) => rename_dialog::render(frame, area, d),
+        Modal::Settings(d) => settings_dialog::render(frame, area, d),
         Modal::Ask(a) => render_ask(frame, area, a),
         Modal::Usage => {}
     }

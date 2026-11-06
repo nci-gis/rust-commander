@@ -138,6 +138,10 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
 ## Menus and help
 
 - **F9** opens the menu bar: File, View, Help. You can click it too.
+- **File → Settings…** changes the common settings: ←/→ or Space to change one, Tab
+  for the next tab, Enter to save. Only the lines that changed are written to
+  `config.toml`; your comments stay. Rows marked *next start* apply after a restart.
+- **View → Theme…** tries a theme at once.
 - **F1** lists every key and setting.
 - **Shift+F1** shows what rcmd is using: memory, CPU, and whether memory keeps growing.
 - **Shift+F9** runs your own commands. See [config.md](config.md#your-own-commands).

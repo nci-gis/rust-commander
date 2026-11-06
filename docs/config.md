@@ -16,6 +16,10 @@ Keep only the lines you change. Anything you leave out keeps its default.
 **If the file has a mistake**, rcmd ignores the whole file, starts with the defaults,
 and the status line names the problem. **F1 → Settings** shows what is in use.
 
+**File → Settings…** inside rcmd changes the common settings and saves them here,
+writing only the lines that changed. Everything else, keys included, is set in this
+file.
+
 ## Common settings
 
 ```toml

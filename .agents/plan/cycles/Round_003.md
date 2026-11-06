@@ -162,11 +162,15 @@ item 5) to working around each key; its keys come from this measurement, not gue
 | ⌥← / ⌥→ | Alt+B / Alt+F | yes: now bound to parent / enter, on every system |
 | ⌥↑ / ⌥↓ | three keys: Esc, `[`, Shift+A (or B): `ESC ESC [ A` that crossterm does not read as Alt+↑ | no |
 | ⌥⇧ + arrows | the same as without ⇧ | no: resize (Alt+Shift+arrows) cannot work |
-| ⇧ + arrows | plain arrows, Shift lost | no |
-| Ctrl+⇧ + arrows, Fn+↑ / ↓ / ← / →, F-keys | "seem to work", per the owner; not itemised | to confirm per key |
+| ⇧← / ⇧→ | Shift+Left / Shift+Right (owner re-tested) | yes |
+| ⇧↑ / ⇧↓ | first report: Shift lost; not re-tested | to confirm |
+| Ctrl+⇧← | a plain Left: Ctrl and Shift both lost | no |
+| Fn+↑ / ↓ / ← / →, F-keys | "seem to work", per the owner; not itemised | to confirm per key |
 
 So on a Mac in Terminal.app, history (Alt+↓) and resize (Alt+Shift+arrows) need other
-keys: the macOS keymap (ROADMAP item 5). Esc-prefix does not help with ⌥↑: Esc then ↑
+keys. A macOS keymap cannot supply them from arrows with modifiers, which Terminal.app
+mostly drops; proposed instead, for every terminal: a resize mode (Alt+R, then plain
+arrows, Enter or Esc to finish). History already has Esc then ↓ and View → History. Esc-prefix does not help with ⌥↑: Esc then ↑
 works, but ⌥↑ itself arrives as three separate keys.
 
 ## Check

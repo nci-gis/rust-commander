@@ -652,6 +652,55 @@ pub const BINDINGS: &[Binding] = &[
     },
 ];
 
+/// The order groups are shown in, F1 and `--print-keys` alike. A group not listed here
+/// still shows, after these.
+const GROUP_ORDER: &[&str] = &[
+    "General", "Navigate", "Select", "Files", "Sort", "Panes", "Tabs", "Terminal",
+];
+
+/// The bindings by group, each group once, in `GROUP_ORDER`; within a group, in table
+/// order. Rows were added to `BINDINGS` over time wherever they landed, so walking it
+/// in order showed some groups twice.
+pub fn grouped() -> Vec<(&'static str, Vec<&'static Binding>)> {
+    let mut groups: Vec<&'static str> = GROUP_ORDER.to_vec();
+    for b in BINDINGS {
+        if !groups.contains(&b.group) {
+            groups.push(b.group);
+        }
+    }
+    groups
+        .into_iter()
+        .map(|g| (g, BINDINGS.iter().filter(|b| b.group == g).collect()))
+        .filter(|(_, v): &(&str, Vec<&Binding>)| !v.is_empty())
+        .collect()
+}
+
+/// Every key as Markdown, for `docs/keys.md`.
+pub fn markdown(keymap: &Keymap) -> String {
+    let mut out = String::from(
+        "# Keys\n\n\
+         These are the defaults. Press **F1** in rcmd to see your own, after any changes in\n\
+         `[keys]` in the config. This file is generated: `rcmd --print-keys > docs/keys.md`.\n",
+    );
+    for (group, rows) in grouped() {
+        let _ = write!(out, "\n## {group}\n\n| Keys | Does |\n|---|---|\n");
+        for b in rows {
+            let keys: Vec<String> = keymap
+                .keys_for(b.action)
+                .iter()
+                .map(|k| format!("`{}`", k.replace('|', "\\|")))
+                .collect();
+            let keys = if keys.is_empty() {
+                "—".into()
+            } else {
+                keys.join(" ")
+            };
+            let _ = writeln!(out, "| {keys} | {} |", b.about.replace('|', "\\|"));
+        }
+    }
+    out
+}
+
 impl Action {
     pub fn from_name(s: &str) -> Option<Action> {
         BINDINGS

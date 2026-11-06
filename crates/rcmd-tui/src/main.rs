@@ -55,6 +55,7 @@ Usage:
                             shell function can cd there (Q quits without it)
   rcmd --config PATH        use this config file instead of the default one
   rcmd --print-config       print every setting at its default, ready to save
+  rcmd --print-keys         print every key as Markdown (as configured)
   rcmd --check-config       validate the config file; exit 1 if it is wrong
   rcmd --screenshot[=WxH]   render one frame as plain text and exit
        --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
@@ -79,6 +80,7 @@ struct Cli {
     screenshot: Option<(u16, u16)>,
     keys: String,
     print_config: bool,
+    print_keys: bool,
     check_config: bool,
     no_restore: bool,
     read_only: bool,
@@ -97,6 +99,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "-h" | "--help" => cli.help = true,
             "-V" | "--version" => cli.version = true,
             "--print-config" => cli.print_config = true,
+            "--print-keys" => cli.print_keys = true,
             "--check-config" => cli.check_config = true,
             "--no-restore" => cli.no_restore = true,
             "--read-only" => cli.read_only = true,
@@ -177,6 +180,10 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        return Ok(());
+    }
+    if cli.print_keys {
+        print!("{}", keys::markdown(&settings.keymap));
         return Ok(());
     }
     theme::init(settings.theme.clone());

@@ -14,7 +14,6 @@ use ratatui::widgets::{Block, Clear};
 use ratatui::Frame;
 
 use crate::config::{self, Config, Outcome, Settings};
-use crate::keys::BINDINGS;
 use crate::theme;
 use crate::viewer::Action as Close;
 
@@ -188,52 +187,50 @@ fn heading(text: &str) -> Line<'static> {
 fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
     let th = theme::t();
     let mut out = Vec::new();
-    let mut group = "";
-    for b in BINDINGS {
-        if b.group != group {
-            if !group.is_empty() {
-                out.push(Line::raw(""));
+    for (i, (group, rows)) in crate::keys::grouped().into_iter().enumerate() {
+        if i > 0 {
+            out.push(Line::raw(""));
+        }
+        out.push(heading(group));
+        for b in rows {
+            let keys = settings.keymap.keys_for(b.action);
+            let shown = if keys.is_empty() {
+                "(unbound)".to_string()
+            } else {
+                keys.join(" \u{b7} ")
+            };
+            let rebound = keys.iter().map(String::as_str).collect::<HashSet<_>>()
+                != b.keys
+                    .iter()
+                    .map(|k| {
+                        crate::keys::parse_key(k)
+                            .map(|(c, m)| crate::keys::key_name(c, m))
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<HashSet<_>>();
+            let mut spans = vec![
+                Span::styled(
+                    if rebound { "  \u{2022} " } else { "    " },
+                    Style::new().fg(th.mark),
+                ),
+                Span::styled(
+                    format!("{shown:<22}"),
+                    Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{:<40}", b.about), Style::new().fg(th.fg)),
+                Span::styled(b.name.to_string(), Style::new().fg(th.fg_dim)),
+            ];
+            if b.action.is_global() {
+                spans.push(Span::styled(
+                    "  works in the shell",
+                    Style::new().fg(th.fg_dim),
+                ));
             }
-            out.push(heading(b.group));
-            group = b.group;
+            out.push(Line::from(spans));
         }
-        let keys = settings.keymap.keys_for(b.action);
-        let shown = if keys.is_empty() {
-            "(unbound)".to_string()
-        } else {
-            keys.join(" \u{b7} ")
-        };
-        let rebound = keys.iter().map(String::as_str).collect::<HashSet<_>>()
-            != b.keys
-                .iter()
-                .map(|k| {
-                    crate::keys::parse_key(k)
-                        .map(|(c, m)| crate::keys::key_name(c, m))
-                        .unwrap_or_default()
-                })
-                .collect::<Vec<_>>()
-                .iter()
-                .map(String::as_str)
-                .collect::<HashSet<_>>();
-        let mut spans = vec![
-            Span::styled(
-                if rebound { "  \u{2022} " } else { "    " },
-                Style::new().fg(th.mark),
-            ),
-            Span::styled(
-                format!("{shown:<22}"),
-                Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(format!("{:<40}", b.about), Style::new().fg(th.fg)),
-            Span::styled(b.name.to_string(), Style::new().fg(th.fg_dim)),
-        ];
-        if b.action.is_global() {
-            spans.push(Span::styled(
-                "  works in the shell",
-                Style::new().fg(th.fg_dim),
-            ));
-        }
-        out.push(Line::from(spans));
     }
 
     let fixed: &[(&str, &[(&str, &str)])] = &[

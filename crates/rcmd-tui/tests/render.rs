@@ -473,7 +473,9 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
     assert!(keys.contains("Keys") && keys.contains("Settings"), "{keys}");
     assert!(keys.contains("Quit rcmd"), "{keys}");
 
-    let rebound = shot_with(&cfg, "F1,PageDown", &a, &b);
+    // Wherever its group lands as the table grows: the next two pages.
+    let rebound =
+        shot_with(&cfg, "F1,PageDown", &a, &b) + &shot_with(&cfg, "F1,PageDown,PageDown", &a, &b);
     assert!(
         rebound.contains("\u{2022} F2"),
         "a rebound key should be listed, and marked as changed\n{rebound}"
@@ -2305,4 +2307,52 @@ fn enter_on_a_result_lands_on_the_file_when_the_pane_was_opened_through_a_link()
     std::os::unix::fs::symlink(&a, &link).unwrap();
     let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,Enter", &link, &b);
     assert!(status(&s).contains("main.rs"), "{s}");
+}
+
+// ── docs stay true ─────────────────────────────────────────────────────────────────
+
+const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+
+#[test]
+fn docs_keys_md_is_what_print_keys_prints() {
+    let out = rcmd(&[OsStr::new("--print-keys")]);
+    assert!(out.status.success());
+    let now = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+    let doc = fs::read_to_string(format!("{REPO}/docs/keys.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert!(
+        doc == now,
+        "docs/keys.md is out of date: run `rcmd --print-keys > docs/keys.md`"
+    );
+}
+
+#[test]
+fn every_toml_example_in_the_docs_is_a_valid_config() {
+    let dir = std::env::temp_dir().join(format!("rcmd-doc-toml-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let mut checked = 0;
+    for file in ["README.md", "docs/config.md", "docs/security.md"] {
+        let text = fs::read_to_string(format!("{REPO}/{file}")).unwrap();
+        let mut rest = text.as_str();
+        while let Some(start) = rest.find("```toml\n") {
+            let body = &rest[start + 8..];
+            let end = body.find("```").expect("a closed code block");
+            let cfg = write_config(&dir, &body[..end]);
+            let out = rcmd(&[
+                OsStr::new("--config"),
+                cfg.as_os_str(),
+                OsStr::new("--check-config"),
+            ]);
+            assert!(
+                out.status.success(),
+                "{file}: an example does not load:\n{}\n{}",
+                &body[..end],
+                String::from_utf8_lossy(&out.stderr)
+            );
+            checked += 1;
+            rest = &body[end..];
+        }
+    }
+    assert!(checked >= 6, "found only {checked} examples");
 }

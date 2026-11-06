@@ -4239,16 +4239,20 @@ impl App {
         }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still
         // says "5 Copy" is lying, and this is the line people look at most.
+        // In F-key order, as in every orthodox manager. On a narrow screen the ones that
+        // do not fit are left off whole, from the end, rather than cut mid-word.
         const KEYS: &[(Action, &str)] = &[
             (Action::Help, "Help"),
+            (Action::Rename, "Ren"),
             (Action::View, "View"),
             (Action::Edit, "Edit"),
             (Action::Copy, "Copy"),
             (Action::Move, "Move"),
             (Action::MkDir, "MkDir"),
             (Action::Delete, "Del"),
-            (Action::FocusTerminal, "Term"),
+            (Action::MenuBar, "Menu"),
             (Action::Quit, "Quit"),
+            (Action::FocusTerminal, "Term"),
         ];
         let mut spans = Vec::new();
         let mut hits = Vec::new();
@@ -4265,6 +4269,9 @@ impl App {
                 .filter(|d| d.parse::<u8>().is_ok())
                 .unwrap_or(&key);
             let w = (k.chars().count() + label.chars().count() + 3) as u16;
+            if cx + w > area.x + area.width {
+                break;
+            }
             hits.push((*action, Rect::new(cx, area.y, w, 1)));
             cx += w;
             spans.push(Span::styled(

@@ -1,14 +1,12 @@
 name: release
 
-# A tag v* builds rcmd for every platform and opens a DRAFT release with the archives,
-# SHA256SUMS and the third-party licences; a person reads it and presses Publish.
-# A push to dev that changes this file, about.toml or about.hbs runs the same builds
-# without releasing anything, so the packaging is tested before a tag needs it.
+# A tag v* on main builds rcmd for every platform and opens a DRAFT release with the
+# archives, SHA256SUMS and the third-party licences; a person reads it and presses
+# Publish. Nothing else runs this workflow. A tag cannot be filtered by branch here, so
+# the first job refuses a tag that is not on main, and nothing is built after it.
 on:
   push:
     tags: ["v*"]
-    branches: [dev]
-    paths: [".github/workflows/release.yml", "about.toml", "about.hbs"]
 
 permissions:
   contents: read
@@ -21,7 +19,6 @@ jobs:
   # CHANGELOG section all name the same release, and the tag is on main.
   check:
     name: tag, version and changelog agree
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,8 +45,6 @@ jobs:
   licences:
     name: third-party licences
     needs: check
-    # On a push to dev the check is skipped, and a skipped need would skip this too.
-    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,9 +60,6 @@ jobs:
   build:
     name: ${{ matrix.target }}
     needs: licences
-    # Skipped is inherited through every later need, not just the next one: without
-    # this, the skipped check on dev skipped the builds after licences had passed.
-    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -94,9 +86,7 @@ jobs:
       - name: package
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME}"
-          [[ "$GITHUB_REF" == refs/tags/* ]] || version="dev-${GITHUB_SHA::7}"
-          name="rcmd-${version}-${{ matrix.target }}"
+          name="rcmd-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$name"
           cp LICENSE README.md THIRD-PARTY.md "$name/"
           if [[ "${{ matrix.target }}" == *windows* ]]; then
@@ -117,7 +107,6 @@ jobs:
   release:
     name: draft release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

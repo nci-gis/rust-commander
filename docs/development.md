@@ -96,8 +96,11 @@ newest heading of `CHANGELOG.md`, in the same commit. A release then takes four 
    the archives, `SHA256SUMS`, `THIRD-PARTY.md` and that CHANGELOG section as its notes.
    Read it, then Publish.
 
-The packaging runs, without releasing, on any push to `dev` that changes
-`.github/workflows/release.yml`, `about.toml` or `about.hbs`.
+CI runs on pushes to `dev` and `main` and on pull requests into them; the `release`
+workflow runs only for a `v*` tag on `main`. A change to the packaging
+(`release.yml`, `about.toml`, `about.hbs`) is therefore first exercised by the next
+tag. If that run fails, nothing is released: fix it on `dev`, merge, delete the tag
+(`git push origin :v0.2.0` and `git tag -d v0.2.0`) and tag `main` again.
 
 ## How the code is organised
 

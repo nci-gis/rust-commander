@@ -1,11 +1,13 @@
 name: ci
 
 on:
+  # Only the two long-lived branches: pushes to them, and pull requests into them.
   push:
     branches: [main, dev]
   pull_request:
+    branches: [main, dev]
   # Advisories are published after code is written. A weekly run catches a new one
-  # against dependencies that have not changed.
+  # against dependencies that have not changed. Scheduled runs use main.
   schedule:
     - cron: "0 3 * * 1"
 

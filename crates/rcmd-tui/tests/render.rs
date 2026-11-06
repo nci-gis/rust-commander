@@ -288,23 +288,13 @@ fn alt_r_then_arrows_resizes_as_alt_shift_arrows_do() {
 #[test]
 fn alt_digit_in_the_terminal_picks_the_terminals_tab() {
     // Alt+N opens a second terminal tab and moves focus into it; Alt+1 goes back to the
-    // first, whose shell is in `a`, not in `sub` where the second was started.
+    // first. The status line counts them ("terminal 2/2") on every system; the panel's
+    // title shows the shell's directory only where rcmd can read it (Linux).
     let (a, b) = fixture();
-    fs::create_dir_all(a.join("sub")).unwrap();
-    let panel_title = |s: &str| {
-        s.lines()
-            .rfind(|l| l.starts_with('\u{250c}') && l.contains("\u{2302}"))
-            .unwrap_or_default()
-            .to_string()
-    };
-    let keys = "/,s,u,b,Enter,Enter,Alt+n";
-    let s = shot_keys("110x24", keys, &a, &b);
-    assert!(panel_title(&s).contains("sub"), "tab 2 started in sub\n{s}");
-    let s = shot_keys("110x24", &format!("{keys},Alt+1"), &a, &b);
-    assert!(
-        !panel_title(&s).contains("sub"),
-        "Alt+1: the first tab\n{s}"
-    );
+    let s = shot_keys("110x24", "Alt+n", &a, &b);
+    assert!(s.contains("terminal 2/2"), "a second tab, in focus\n{s}");
+    let s = shot_keys("110x24", "Alt+n,Alt+1", &a, &b);
+    assert!(s.contains("terminal 1/2"), "Alt+1: the first tab\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

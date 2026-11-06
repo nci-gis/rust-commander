@@ -68,7 +68,7 @@ rcmd ~/src /tmp       # or with two directories
 - A real shell under the panes, with tabs and splits
 - Tabs, splits and zoom for the file panes; your layout is reopened next time
 - Quick search, filter, bookmarks, history, go to path
-- Find files by name and content; rename many files in your editor
+- Find files by name and content; rename many files with a pattern or in your editor
 - Zip and tar archives open like folders
 - Compare two folders, or make them match
 - Preview text and pictures; checksums; permissions

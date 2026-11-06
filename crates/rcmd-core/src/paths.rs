@@ -29,6 +29,16 @@ const RESERVED: &[&str] = &[
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// `p` without a `\\?\` prefix when the plain form means the same file; otherwise
+/// `p` as it is. No disk access: for paths rcmd kept from before, such as a session
+/// or bookmarks saved by a version that did not strip it.
+pub fn plain(p: &Path) -> PathBuf {
+    p.to_str()
+        .and_then(strip_verbatim)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| p.to_path_buf())
+}
+
 /// The plain form of a verbatim Windows path, or `None` when it has none that means the
 /// same file: too long for the 260-character limit, a reserved device name, or a part
 /// ending in a dot or space (Windows trims those from a plain path, not a verbatim one).
@@ -74,6 +84,18 @@ mod tests {
             Some(r"C:\Users\me\src".into())
         );
         assert_eq!(strip_verbatim(r"\\?\c:"), Some("c:".into()));
+    }
+
+    #[test]
+    fn plain_strips_kept_paths_and_leaves_others_alone() {
+        assert_eq!(plain(Path::new(r"\\?\D:\var")), PathBuf::from(r"D:\var"));
+        assert_eq!(plain(Path::new("/home/x")), PathBuf::from("/home/x"));
+        let con = Path::new(r"\\?\C:\CON");
+        assert_eq!(
+            plain(con),
+            con.to_path_buf(),
+            "a device name stays verbatim"
+        );
     }
 
     #[test]

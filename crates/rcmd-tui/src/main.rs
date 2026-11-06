@@ -18,6 +18,7 @@ mod menu;
 mod modal;
 mod opener;
 mod pane;
+mod rename_dialog;
 mod safety;
 mod scrollbar;
 mod search;

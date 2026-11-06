@@ -556,7 +556,7 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::BulkRename,
         name: "bulk_rename",
         group: "Files",
-        about: "Rename the selection by editing the names in $EDITOR",
+        about: "Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR",
         keys: &["Shift+F2"],
     },
     Binding {

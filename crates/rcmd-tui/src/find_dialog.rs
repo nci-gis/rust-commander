@@ -89,7 +89,7 @@ impl FindDialog {
     }
 }
 
-fn field_line(edit: &LineEdit, focused: bool, width: usize) -> Line<'static> {
+pub(crate) fn field_line(edit: &LineEdit, focused: bool, width: usize) -> Line<'static> {
     let th = theme::t();
     let chars = edit.chars();
     let cur = edit.cursor();

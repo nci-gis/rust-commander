@@ -865,6 +865,8 @@ fn shift_f2_renames_what_the_editor_changed_after_asking() {
     let mut rcmd = Session::start(&s, Some(&editor));
     rcmd.send(b"\x01"); // Ctrl+A: mark all
     rcmd.send(b"\x1b[1;2Q"); // Shift+F2
+    rcmd.wait_for("edit in editor");
+    rcmd.send(b"\x1bOS"); // F4: the editor route
     rcmd.wait_for("Rename 2 files");
     rcmd.wait_for("a.txt  \u{2192}  b.txt");
     assert_eq!(

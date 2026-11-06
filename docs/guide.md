@@ -50,7 +50,7 @@ rcmd for yours, or see [keys.md](keys.md).
 | **F5** / **F6** | copy / move to the other pane |
 | **Shift+F5** | copy next to itself, under a new name |
 | **F2** or **Shift+F6** | rename |
-| **Shift+F2** | rename many: the names open in your editor |
+| **Shift+F2** | rename many with a pattern; F4 there opens the names in your editor |
 | **F7** / **Shift+F4** | new directory / new file |
 | **F8** / **Shift+F8** | delete to the trash / delete for good |
 | **Ctrl+Shift+F5** | make a link in the other pane |
@@ -59,6 +59,28 @@ rcmd for yours, or see [keys.md](keys.md).
 - rcmd always asks before it deletes or overwrites anything.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
+
+### Renaming many files
+
+**Shift+F2** renames the selection with a pattern. Every new name shows before you press
+**Enter**, and nothing is renamed if one of them is wrong.
+
+| In Name or Extension | Becomes |
+|---|---|
+| `[N]` | the name, without the extension |
+| `[N2-5]` · `[N3-]` | its letters 2 to 5 · from the 3rd on |
+| `[E]` | the extension |
+| `[P]` | the folder the file is in |
+| `[C]` | a counter: 1, 2, 3… padded to the widest (`01`…`12`) |
+| `[C10+5:3]` | start at 10, step 5, three digits: `010`, `015`… |
+| `[[` | a `[` |
+
+Then **Find** / **Replace with** changes text in the whole name, and **Case** makes it
+lower, UPPER or Title Case. The counter follows the order the pane shows.
+
+**F4** opens the names in your editor instead, as the pattern has them so far. Save and
+close the editor; rcmd asks before it renames. The editor must wait until you close
+it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain `code`.
 
 ## Find, filter, compare
 

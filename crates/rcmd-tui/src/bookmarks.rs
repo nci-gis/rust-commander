@@ -28,7 +28,12 @@ pub fn load() -> Vec<PathBuf> {
     std::fs::read_to_string(p)
         .ok()
         .and_then(|t| toml::from_str::<File>(&t).ok())
-        .map(|f| f.paths.into_iter().map(PathBuf::from).collect())
+        .map(|f| {
+            f.paths
+                .iter()
+                .map(|p| rcmd_core::paths::plain(std::path::Path::new(p)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 

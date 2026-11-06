@@ -36,6 +36,7 @@ use crate::opener;
 use crate::pane::tabs::Click as TabClick;
 use crate::pane::terms::Click as TermClick;
 use crate::pane::{FilePane, FileTabs, Pane, TermPanel};
+use crate::rename_dialog::{self, RenameDialog};
 use crate::search::{self, Search};
 use crate::session::{self, Saved, SavedTab, SavedTerminal, Session};
 use crate::theme;
@@ -73,6 +74,8 @@ enum ModalAct {
     Finish,
     Run(Cmd),
     StartFind,
+    /// F4 in the rename dialog: these names, one per file, into the editor.
+    BatchEditor(String),
     Background,
     /// Left/Right in a menu-bar menu.
     Bar(isize),
@@ -1104,7 +1107,14 @@ impl App {
             Action::MirrorPane => self.mirror_pane(),
             Action::MarkPattern => self.begin_pattern(true),
             Action::UnmarkPattern => self.begin_pattern(false),
-            Action::BulkRename => self.begin_batch(),
+            Action::BulkRename => {
+                let files = self.selection_in_view();
+                if files.is_empty() {
+                    self.status = "nothing selected".into();
+                } else {
+                    self.modal = Some(Modal::Rename(Box::new(RenameDialog::new(files))));
+                }
+            }
             Action::NewFile => {
                 let dir = self.focused_cwd();
                 self.modal = Some(Modal::Input(Input {
@@ -2073,6 +2083,26 @@ impl App {
                 }
             }
             Some(Modal::View(v)) if wheel != 0 => v.scroll_by(wheel),
+            Some(Modal::Rename(d)) if left => {
+                act = if hit(&d.buttons, 0) {
+                    match d.confirm() {
+                        rename_dialog::Outcome::Rename(m) => ModalAct::Run(Cmd::BatchRename(m)),
+                        _ => ModalAct::None,
+                    }
+                } else if hit(&d.buttons, 1) {
+                    match d.to_editor() {
+                        rename_dialog::Outcome::Editor(t) => ModalAct::BatchEditor(t),
+                        _ => ModalAct::None,
+                    }
+                } else if hit(&d.buttons, 2) {
+                    d.next_field(false);
+                    ModalAct::None
+                } else if hit(&d.buttons, 3) {
+                    ModalAct::Close
+                } else {
+                    ModalAct::None
+                };
+            }
             Some(Modal::Find(d)) if left => {
                 if hit(&d.buttons, 0) {
                     act = ModalAct::StartFind;
@@ -2115,6 +2145,21 @@ impl App {
     // ── file operations ────────────────────────────────────────────────────────────
 
     /// What the keys act on: everything marked, or the row under the cursor.
+    /// The selection in the order the pane shows it, which is what a counter counts.
+    fn selection_in_view(&self) -> Vec<PathBuf> {
+        let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
+            return Vec::new();
+        };
+        if f.marked.is_empty() {
+            return self.selection();
+        }
+        f.entries
+            .iter()
+            .filter(|e| f.marked.contains(&e.path))
+            .map(|e| e.path.clone())
+            .collect()
+    }
+
     fn selection(&self) -> Vec<PathBuf> {
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return Vec::new();
@@ -2712,6 +2757,12 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Rename(d)) => match d.on_key(k) {
+                rename_dialog::Outcome::Stay => {}
+                rename_dialog::Outcome::Close => act = ModalAct::Close,
+                rename_dialog::Outcome::Rename(m) => act = ModalAct::Run(Cmd::BatchRename(m)),
+                rename_dialog::Outcome::Editor(t) => act = ModalAct::BatchEditor(t),
+            },
             Some(Modal::Find(d)) => match d.on_key(k) {
                 find_dialog::Outcome::Stay => {}
                 find_dialog::Outcome::Close => act = ModalAct::Close,
@@ -2794,6 +2845,11 @@ impl App {
                     self.status =
                         "running in the background \u{2014} it comes back if it has a question"
                             .into();
+                }
+            }
+            ModalAct::BatchEditor(text) => {
+                if let Some(Modal::Rename(d)) = self.modal.take() {
+                    self.begin_batch(d.files, &text);
                 }
             }
             ModalAct::StartFind => {
@@ -3118,17 +3174,11 @@ impl App {
 
     // ── bulk rename, quick view ────────────────────────────────────────────────────
 
-    /// Shift+F2: the selection's names into a file for the editor, one per line.
-    fn begin_batch(&mut self) {
-        let files = self.selection();
-        if files.is_empty() {
-            self.status = "nothing selected".into();
-            return;
-        }
+    /// F4 in the rename dialog: `text`, one name per file, into a file for the editor.
+    fn begin_batch(&mut self, files: Vec<PathBuf>, text: &str) {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let list = std::env::temp_dir().join(format!("rcmd-rename-{}-{n}.txt", std::process::id()));
-        let text = rcmd_core::batch_rename::names_text(&files);
         if let Err(e) = session::write_private(&list, text.as_bytes()) {
             self.status = format!("cannot write the list of names: {e}");
             return;

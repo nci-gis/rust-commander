@@ -139,7 +139,8 @@ pub fn filter_matches(text: &str, name: &str, is_dir: bool) -> bool {
 impl FilePane {
     pub fn new(cwd: &Path, sort: Sort, show_hidden: bool) -> Self {
         let mut p = Self {
-            cwd: cwd.to_path_buf(),
+            // A session saved by an older build may hold `\\?\D:\…`.
+            cwd: rcmd_core::paths::plain(cwd),
             entries: Vec::new(),
             cursor: 0,
             offset: 0,

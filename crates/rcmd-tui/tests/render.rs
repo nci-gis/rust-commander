@@ -1238,6 +1238,20 @@ fn session_file(
     p
 }
 
+/// A session saved before `\\?\` was stripped still holds it; reopening it must not
+/// bring it back into the titles.
+#[cfg(windows)]
+#[test]
+fn a_session_saved_with_verbatim_paths_reopens_without_them() {
+    let (a, b) = files(&["alpha.txt"]);
+    fs::create_dir(a.join("sub")).unwrap();
+    let verbatim = |p: &std::path::Path| PathBuf::from(format!(r"\\?\{}", p.display()));
+    let state = session_file(a.parent().unwrap(), &verbatim(&a), &verbatim(&b), 2);
+    let s = shot_session(&state, &[]);
+    assert!(s.contains("alpha.txt"), "the session came back\n{s}");
+    assert!(!s.contains(r"\\?\"), "{s}");
+}
+
 #[test]
 fn starting_without_directories_reopens_the_last_session() {
     let (a, b) = files(&["alpha.txt"]);
@@ -1779,6 +1793,45 @@ fn alt_q_previews_the_file_under_the_cursor_in_the_other_pane() {
         top.contains("/b ") || top.contains("\\b "),
         "taking the focus there ends it\n{s}"
     );
+}
+
+#[test]
+fn shift_f2_renames_with_a_pattern_and_shows_it_first() {
+    let (a, b) = files(&[]);
+    for n in ["IMG_7.JPG", "IMG_8.JPG", "notes.txt"] {
+        fs::write(a.join(n), n).unwrap();
+    }
+    // Mark the two pictures, then name them trip_1, trip_2 with a lower-case extension.
+    let mask = "Shift+F2,End,Backspace,Backspace,Backspace,t,r,i,p,_,[,C,]";
+    let keys = "Down,Insert,Insert,".to_string() + mask + ",Tab,Tab,Tab,Tab,Right";
+    let s = shot_keys("110x30", &keys, &a, &b);
+    assert!(s.contains("Rename 2 files"), "{s}");
+    assert!(s.contains("trip_1.jpg") && s.contains("trip_2.jpg"), "{s}");
+    assert!(s.contains("Enter renames 2 of 2"), "{s}");
+    assert!(a.join("IMG_7.JPG").exists(), "nothing renamed before Enter");
+
+    shot_keys("110x30", &(keys + ",Enter"), &a, &b);
+    let read = |n: &str| fs::read_to_string(a.join(n)).unwrap();
+    assert_eq!(
+        (read("trip_1.jpg"), read("trip_2.jpg")),
+        ("IMG_7.JPG".into(), "IMG_8.JPG".into())
+    );
+    assert_eq!(read("notes.txt"), "notes.txt", "not selected, not touched");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_pattern_that_gives_two_files_one_name_renames_nothing() {
+    let (a, b) = files(&["one.txt", "two.txt"]);
+    let keys = "Insert,Insert,Insert,Shift+F2,Ctrl+a,x,Enter";
+    let s = shot_keys("110x30", keys, &a, &b);
+    assert!(s.contains("two files would be named x.txt"), "{s}");
+    assert!(
+        s.contains("Rename 2 files"),
+        "Enter keeps the dialog open\n{s}"
+    );
+    assert!(a.join("one.txt").exists() && a.join("two.txt").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
 #[test]

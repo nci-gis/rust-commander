@@ -13,7 +13,8 @@ The first release.
 ### Files
 - Copy, move, delete (to the trash or for good), rename, with progress, cancel, and a
   question before anything is overwritten. Jobs can run in the background.
-- Rename many files at once by editing their names in your editor.
+- Rename many files at once with a pattern (name, extension, counter, find and replace,
+  case) and a live preview, or by editing the names in your editor.
 - Copy beside itself, new file, symlink, permissions, SHA-256 checksums.
 - Zip, tar and tar.gz archives open like folders; extract, pack and unpack.
 - Compare two folders, and make two folder trees match from a plan you approve.

@@ -18,6 +18,7 @@ pub mod format;
 pub mod glob;
 pub mod image;
 pub mod listing;
+pub mod name_mask;
 pub mod ops;
 pub mod paths;
 pub mod policy;

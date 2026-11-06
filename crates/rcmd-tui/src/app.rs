@@ -4234,7 +4234,6 @@ impl App {
             (Action::Delete, "Del"),
             (Action::MenuBar, "Menu"),
             (Action::Quit, "Quit"),
-            (Action::FocusTerminal, "Term"),
         ];
         let mut spans = Vec::new();
         let mut hits = Vec::new();

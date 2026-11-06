@@ -260,7 +260,7 @@ fn starts_draws_both_panes_and_quits_cleanly() {
 
     let screen = rcmd.screen();
     for want in [
-        "left", "right", "Name", "Size", "<DIR>", "notes", "10 Quit", "12 Term",
+        "left", "right", "Name", "Size", "<DIR>", "notes", "10 Quit", "9 Menu",
     ] {
         assert!(screen.contains(want), "{want:?} missing:\n{screen}");
     }

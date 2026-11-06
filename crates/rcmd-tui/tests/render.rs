@@ -74,10 +74,8 @@ fn draws_both_panes_the_shell_and_the_key_bar() {
         s.contains("10 Quit"),
         "the function key bar should be drawn\n{s}"
     );
-    assert!(
-        s.contains("12 Term"),
-        "the terminal key should be offered\n{s}"
-    );
+    // F12 is in View > Terminal and F1, not on the key bar, which keeps to files.
+    assert!(!s.contains("12 Term"), "{s}");
     assert!(
         s.contains("items"),
         "the status line should count entries\n{s}"

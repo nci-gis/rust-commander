@@ -3,7 +3,7 @@
 A terminal-style file commander, written in Rust.
 
 ```
-  File   View   Help                                                                        F9 menu
+  File   View   Help
 ┌ /usr/share ────────────────────────────────────┐┌ /usr/include ──────────────────────────────────┐
 │ Name ▼                          Ext        Size││ Name ▼                          Ext        Size│
 │ ..                                        <DIR>││ ..                                        <DIR>│
@@ -29,8 +29,8 @@ A terminal-style file commander, written in Rust.
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
- ..  ·  266 items  ·  sort name ▼                               F1 help · F12 terminal · F10 quit
- 1 Help  2 Ren  3 View  4 Edit  5 Copy  6 Move  7 MkDir  8 Del  9 Menu  10 Quit  12 Term
+ ..  ·  266 items  ·  sort name ▼
+ 1 Help  2 Ren  3 View  4 Edit  5 Copy  6 Move  7 MkDir  8 Del  9 Menu  10 Quit
 ```
 
 Two file panes, a terminal underneath, and the familiar keys of two-pane file managers:

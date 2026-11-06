@@ -91,8 +91,8 @@ Naming an action replaces all of its default keys. The names are in
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
 Left. Bindings that start with the same key form a group: after its first key, the
-second keys can be pressed again and again, until Enter, Esc, another key, or two
-seconds without one. That is how **Alt+R, then arrows** resizes.
+second keys can be pressed again and again, until Enter, Esc, another key or a click.
+The status line shows the group while it is open. That is how **Alt+R, then arrows** resizes.
 
 ```toml
 [keys]

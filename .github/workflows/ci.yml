@@ -2,10 +2,17 @@ name: ci
 
 on:
   # Only the two long-lived branches: pushes to them, and pull requests into them.
+  # Work on a feat/ branch runs nothing until its pull request, or until someone asks
+  # for a run (below), for instance for a build to try on another system.
   push:
     branches: [main, dev]
+    # Nothing a test reads: the plan and the changelog. (The tests read README.md and
+    # files under docs/, so those still run CI.)
+    paths-ignore: [".agents/**", "CHANGELOG.md"]
   pull_request:
     branches: [main, dev]
+  # Actions -> ci -> Run workflow, or `gh workflow run ci --ref feat/topic`.
+  workflow_dispatch:
   # Advisories are published after code is written. A weekly run catches a new one
   # against dependencies that have not changed. Scheduled runs use main.
   schedule:
@@ -51,13 +58,20 @@ jobs:
           lipo rcmd-universal -verify_arch x86_64 arm64
           mv rcmd-universal target/release/rcmd
           lipo -info target/release/rcmd
+      # "/" is not allowed in an artifact name, and branches have them (feat/topic), as
+      # does a pull request's own ref ("1/merge"): name it after the source branch,
+      # with "/" made "-".
+      - name: artifact name
+        id: artifact
+        shell: bash
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: echo "name=rcmd-${{ runner.os }}-${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
       # The build that passed, ready to run: try a branch on Windows or macOS without
       # installing Rust there. Under the run's Artifacts; kept for two weeks.
       - uses: actions/upload-artifact@v4
         with:
-          # A pull request's ref_name is "1/merge", and "/" is not allowed in a name:
-          # use the branch it comes from.
-          name: rcmd-${{ runner.os }}-${{ github.head_ref || github.ref_name }}
+          name: ${{ steps.artifact.outputs.name }}
           path: |
             target/release/rcmd
             target/release/rcmd.exe

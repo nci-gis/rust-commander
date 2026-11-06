@@ -64,7 +64,24 @@ without the icon, unless `RCMD_REQUIRE_ICON=1`, which CI and releases set.
 
 ## Branches
 
-Work on `dev`. `main` changes only through a pull request from `dev`, with CI green.
+- **`main`** is what people install. It changes only by a pull request from `dev`,
+  merged with a merge commit once CI is green; a ruleset on GitHub enforces both.
+- **`dev`** is where finished work collects. Every push to it runs CI, except one that
+  touches only `.agents/` or `CHANGELOG.md`, which no test reads.
+- **`feat/<topic>`** holds anything bigger than a commit or two, such as a round of the
+  plan. Pushing it runs nothing, so commit as often as you like. When it is ready, open
+  a pull request into `dev`: CI runs on it, then merge.
+
+A build to try on another system, from any branch: **Actions → ci → Run workflow**
+and pick the branch, or
+
+```bash
+gh workflow run ci --ref feat/topic
+```
+
+The binaries are under that run's **Artifacts** (the macOS one runs on Intel and Apple
+Silicon). GitHub offers this only once the workflow with `workflow_dispatch` is on
+`main`; before that, a draft pull request into `dev` gets the same builds.
 
 ## Releasing
 

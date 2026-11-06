@@ -35,7 +35,7 @@ users want Enter to open files.
 | **Next: Total Commander feel** | | | | |
 | 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning |
 | 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |
-| 5 | Keymaps as files: built-in sets (`classic`, `laptop`, `mc`) plus the user's own, chosen by name | M | — | same mechanism as 4 |
+| 5 | Key sequences (Alt+R then arrows), and keymaps: built-in sets per system (`windows`, `macos`, `linux`, `classic`, `auto` by default) plus the user's own | L | [004](cycles/Round_004.md) | Planning: needs Windows and Linux measurements |
 | 6 | Settings (File → Settings…): tabs General, Theme, Keys, Panels and layout | L | — | after 4 and 5 |
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | — | |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
@@ -58,20 +58,10 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
   panels in the tradition of the DOS-era commanders), `high-contrast`. A theme also
   says how it degrades at 256 and 16 colours (item 1). Today the theme is set once at
   start-up and "never changes while running"; switching needs that to change.
-- **5 Keymaps** (owner's idea, 2026-11-07: for what a Mac keyboard cannot fix).
-  `keymaps/<name>.toml` in the config directory; `[keys] preset = "…"` picks one and
-  any key named under `[keys]` still overrides it, as today. Built in, named for who
-  they suit:
-  - `classic` (default): today's keys, F-keys as in Total Commander.
-  - `laptop`: no F-key or Alt needed. Every main action also on Ctrl+letter or a
-    plain letter in the file panes, for Mac laptops and compact keyboards.
-  - `mc`: Midnight Commander habits, taken from its manual and from using it, never
-    from its source (GPL).
-
-  F1, the key bar and the menus already read the one table (`BINDINGS`), so they show
-  whichever set is in force. A test per set: no key runs two actions, and none uses a
-  key a terminal or shell keeps for itself (Ctrl+C, Ctrl+Z, Ctrl+D; Cmd never reaches
-  a terminal program on macOS).
+- **5 Keymaps and sequences**: see [Round 004](cycles/Round_004.md). Changed on
+  2026-11-07 from `classic` / `laptop` / `mc` to one set per system, after Round 003
+  found that macOS Terminal.app drops the modifiers of most arrow keys, and Windows
+  Terminal is believed to keep Alt+arrows for itself. `mc` may come later.
 - **6 Settings.** Tabs: **General** (confirmations, trash, session, Esc as Meta),
   **Theme** (pick a theme and the colour depth, with a live preview), **Keys** (pick a
   keymap; the list of keys, editing them later), **Panels and layout** (how many file

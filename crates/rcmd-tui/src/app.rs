@@ -89,6 +89,35 @@ type Shrunk = (
     Result<rcmd_core::image::Picture, String>,
 );
 
+/// Where a confirmation's count goes until the count has been made.
+const COUNTING: &str = "counting\u{2026}";
+
+/// Hooks for extracting one entry to view: no questions, stoppable.
+struct ViewHooks(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl rcmd_core::archive::Hooks for ViewHooks {
+    fn stopped(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn begin(&mut self, _: &Path) {}
+    fn conflict(&mut self, _: &Path, _: u64) -> Option<bool> {
+        Some(true)
+    }
+    fn wrote(&mut self, _: u64) {}
+    fn done(&mut self) {}
+    fn skipped(&mut self, _: &Path, _: &str) {}
+    fn failed(&mut self, _: &Path, _: &std::io::Error) {}
+}
+
+/// An archive entry being extracted for F3: the result, its directory, its name, and
+/// the flag that stops it.
+type PendingView = (
+    Receiver<std::io::Result<()>>,
+    PathBuf,
+    String,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+);
+
 /// The menu bar, left to right.
 pub const BAR: &[&str] = &["File", "View", "Help"];
 
@@ -166,6 +195,8 @@ pub struct App {
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
+    /// F3 inside a big archive, extracting on a thread.
+    pending_view: Option<PendingView>,
 }
 
 impl App {
@@ -228,6 +259,7 @@ impl App {
             quick_image: None,
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
+            pending_view: None,
         }
     }
 
@@ -508,6 +540,7 @@ impl App {
                 for f in t.tabs_mut() {
                     f.poll_sizes();
                     f.poll_git();
+                    f.poll_opening();
                     let was = f.results.as_ref().is_some_and(|r| r.running());
                     f.poll_results();
                     if let Some(r) = f.results.as_ref().filter(|r| was && !r.running()) {
@@ -531,6 +564,22 @@ impl App {
             self.status = n;
         }
         self.pump_background_jobs();
+        let viewed = self
+            .pending_view
+            .as_ref()
+            .and_then(|(rx, ..)| rx.try_recv().ok());
+        if let (Some(out), Some((_, tmp, name, _))) = (viewed, self.pending_view.take()) {
+            self.show_extracted(out, tmp, name);
+        }
+        // A count for the open confirmation, if it has come in.
+        if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
+            let got = c.counting.as_ref().and_then(|(n, _)| n.rx.try_recv().ok());
+            if let (Some((files, bytes)), Some((_, line))) = (got, c.counting.take()) {
+                if let Some(l) = c.body.get_mut(line) {
+                    *l = Self::count_label(files, bytes);
+                }
+            }
+        }
         let viewing = matches!(self.modal, Some(Modal::Usage));
         self.usage.tick(viewing);
         let hashed = self
@@ -891,6 +940,15 @@ impl App {
         if action.is_none() && k.code == KeyCode::Esc && !self.focus_is_term() {
             if self.focused_files().is_some_and(|f| f.stop_search()) {
                 self.status = "search stopped".into();
+                return;
+            }
+            if let Some((_, _, name, stop)) = self.pending_view.take() {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.status = format!("stopped extracting {name}");
+                return;
+            }
+            if self.focused_files().is_some_and(|f| f.stop_opening()) {
+                self.status = "stopped opening the archive".into();
                 return;
             }
             if let Some(f) = self.focused_files().filter(|f| f.filter.is_some()) {
@@ -2141,7 +2199,6 @@ impl App {
             self.status = "no second pane to copy to — Alt+S splits one".into();
             return;
         };
-        let (files, bytes) = ops::scan(&sources);
         let request = match kind {
             ops::Kind::Copy => Request::copy(sources.clone(), dest.clone()),
             _ => Request::mv(sources.clone(), dest.clone()),
@@ -2158,7 +2215,7 @@ impl App {
                 Self::describe(&sources),
                 String::new(),
                 format!("to    {}", dest.display()),
-                Self::count_label(files, bytes),
+                COUNTING.into(),
             ],
             danger: false,
             request,
@@ -2166,6 +2223,7 @@ impl App {
             choices,
             choice: 0,
             source_dir: Some(self.focused_cwd()),
+            counting: Some((ops::count(sources), 3)),
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -2178,12 +2236,8 @@ impl App {
             self.status = "nothing selected".into();
             return;
         }
-        let (files, bytes) = ops::scan(&targets);
-        let mut body = vec![
-            Self::describe(&targets),
-            String::new(),
-            Self::count_label(files, bytes),
-        ];
+        let mut body = vec![Self::describe(&targets), String::new(), COUNTING.into()];
+        let counting = Some((ops::count(targets.clone()), 2));
         if permanent {
             body.push(String::new());
             body.push("Deleted permanently. This cannot be undone.".into());
@@ -2203,6 +2257,7 @@ impl App {
             choices: Vec::new(),
             choice: 0,
             source_dir: None,
+            counting,
         }));
     }
 
@@ -3591,17 +3646,26 @@ impl App {
             self.status = "nothing selected".into();
             return;
         }
-        let (n, bytes) = match rcmd_core::archive::list(&file) {
-            Ok(l) => rcmd_core::archive::expand(&l.items, &inner)
+        // Browsing it, the listing is in memory already; from outside (Alt+F9) it is
+        // counted on a thread, as F5's count is, so a big .tar.gz does not freeze.
+        let open = self.focused_archive().filter(|a| a.file == file).map(|a| {
+            rcmd_core::archive::expand(&a.listing().items, &inner)
                 .iter()
                 .filter(|i| i.kind == rcmd_core::archive::ItemKind::File)
-                .fold((0u64, 0u64), |(n, b), i| (n + 1, b + i.size)),
-            Err(e) => {
-                self.status = format!("cannot read the archive: {e}");
-                return;
+                .fold((0u64, 0u64), |(n, b), i| (n + 1, b + i.size))
+        });
+        let (count_line, counting) = match open {
+            Some((n, bytes)) => (Self::count_label(n, bytes), None),
+            None => {
+                let (f, chosen) = (file.clone(), inner.clone());
+                let work = move |stop: &std::sync::atomic::AtomicBool| {
+                    rcmd_core::archive::count_until(&f, &chosen, stop)
+                };
+                (COUNTING.to_string(), Some((ops::Count::spawn(work), 3)))
             }
         };
         let what = match inner.as_slice() {
+            [all] if all.is_empty() => "everything".to_string(),
             [one] => one.rsplit('/').next().unwrap_or(one).to_string(),
             many => format!("{} items", many.len()),
         };
@@ -3617,7 +3681,7 @@ impl App {
                 format!("{what}  from {name}"),
                 String::new(),
                 format!("to    {}", dest.display()),
-                Self::count_label(n, bytes),
+                count_line,
             ],
             danger: false,
             request,
@@ -3625,6 +3689,7 @@ impl App {
             choices,
             choice: 0,
             source_dir: None,
+            counting,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -3641,16 +3706,9 @@ impl App {
                 "Alt+F9 unpacks a .zip, .tar or .tar.gz \u{2014} the cursor is not on one".into();
             return;
         };
-        let top: Vec<String> = match rcmd_core::archive::list(&file) {
-            Ok(l) => rcmd_core::archive::children(&l.items, "")
-                .into_iter()
-                .map(|(n, _)| n)
-                .collect(),
-            Err(e) => {
-                self.status = format!("cannot read the archive: {e}");
-                return;
-            }
-        };
+        // The whole archive, named by the empty path: listing it to find its top level
+        // would be the freeze this avoids.
+        let top = vec![String::new()];
         let choices = self.transfer_targets();
         let Some(dest) = choices.first().cloned() else {
             self.status = "unpacking goes into another pane \u{2014} Alt+S splits one".into();
@@ -3744,34 +3802,52 @@ impl App {
             self.status = format!("cannot make a temporary directory: {err}");
             return;
         }
-        struct Quiet;
-        impl rcmd_core::archive::Hooks for Quiet {
-            fn stopped(&self) -> bool {
-                false
-            }
-            fn begin(&mut self, _: &Path) {}
-            fn conflict(&mut self, _: &Path, _: u64) -> Option<bool> {
-                Some(true)
-            }
-            fn wrote(&mut self, _: u64) {}
-            fn done(&mut self) {}
-            fn skipped(&mut self, _: &Path, _: &str) {}
-            fn failed(&mut self, _: &Path, _: &std::io::Error) {}
-        }
         // The guard on writes is the engine's; viewing is reading, so it is allowed
         // in read-only mode — into a directory rcmd made for it and removes after.
-        let out = rcmd_core::archive::extract(&file, &inner, &prefix, &tmp, &mut Quiet);
-        let path = tmp.join(&e.name);
+        // A small archive is read at once; a big one on a thread, since reaching one
+        // entry of a .tar.gz means decompressing everything before it.
+        let small = std::fs::metadata(&file).map_or(true, |m| m.len() < (8 << 20));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let name = e.name.clone();
+        if small {
+            let out =
+                rcmd_core::archive::extract(&file, &inner, &prefix, &tmp, &mut ViewHooks(stop));
+            return self.show_extracted(out, tmp, name);
+        }
+        let (tx, rx) = mpsc::channel();
+        let (dir, flag) = (tmp.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let out = rcmd_core::archive::extract(
+                &file,
+                &inner,
+                &prefix,
+                &dir,
+                &mut ViewHooks(flag.clone()),
+            );
+            // Given up on: nobody will view it, so nothing is left behind either.
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            let _ = tx.send(out);
+        });
+        self.status = format!("extracting {name} to view it\u{2026} Esc stops it");
+        self.pending_view = Some((rx, tmp, name, stop));
+    }
+
+    /// Open the viewer on an entry extracted for it, or say why not.
+    fn show_extracted(&mut self, out: std::io::Result<()>, tmp: PathBuf, name: String) {
+        let path = tmp.join(&name);
         match out.and_then(|_| Document::open(&path)) {
             Ok(doc) => {
                 let v = &self.settings.config.viewer;
                 let viewer = Viewer::open(doc, v.wrap, v.tab_width);
                 self.modal = Some(Modal::View(Box::new(viewer)));
                 self.view_temp = Some(tmp);
+                self.status.clear();
             }
             Err(err) => {
                 let _ = std::fs::remove_dir_all(&tmp);
-                self.status = format!("cannot view {}: {err}", e.name);
+                self.status = format!("cannot view {name}: {err}");
             }
         }
     }

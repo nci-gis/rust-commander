@@ -27,3 +27,6 @@ portable-pty = "0.9"
 vt100 = "0.16"
 toml = "1.2.0"
 serde = { version = "1.0.229", features = ["derive"] }
+
+[dev-dependencies]
+tar = { version = "0.4.46", default-features = false }

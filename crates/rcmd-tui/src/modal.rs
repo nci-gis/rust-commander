@@ -61,6 +61,10 @@ pub struct Confirm {
     pub choices: Vec<PathBuf>,
     pub choice: usize,
     pub source_dir: Option<PathBuf>,
+    /// Files and bytes still being counted on another thread, and the body line that
+    /// says "counting…" until they arrive. The dialog does not wait for the count:
+    /// Enter starts the job, Esc closes it, and either stops the count.
+    pub counting: Option<(ops::Count, usize)>,
 }
 
 impl Confirm {

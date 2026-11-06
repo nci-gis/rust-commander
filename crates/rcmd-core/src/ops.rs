@@ -767,28 +767,74 @@ impl crate::archive::Hooks for Worker {
 
 /// Count what the job is about to touch, so a progress bar means something.
 pub fn scan(sources: &[PathBuf]) -> (u64, u64) {
-    fn walk(p: &Path, files: &mut u64, bytes: &mut u64) {
+    scan_until(sources, &AtomicBool::new(false)).unwrap_or((0, 0))
+}
+
+/// As [`scan`], stopping when `stop` is set: `None` then. A count of a large tree on a
+/// slow disk takes seconds, and the dialog asking about it must not wait for it.
+pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> {
+    fn walk(p: &Path, files: &mut u64, bytes: &mut u64, stop: &AtomicBool) -> bool {
+        if stop.load(Ordering::Relaxed) {
+            return false;
+        }
         let Ok(meta) = fs::symlink_metadata(p) else {
-            return;
+            return true;
         };
         if meta.file_type().is_symlink() {
             *files += 1;
         } else if meta.is_dir() {
             if let Ok(it) = fs::read_dir(p) {
                 for e in it.flatten() {
-                    walk(&e.path(), files, bytes);
+                    if !walk(&e.path(), files, bytes, stop) {
+                        return false;
+                    }
                 }
             }
         } else {
             *files += 1;
             *bytes += meta.len();
         }
+        true
     }
     let (mut f, mut b) = (0, 0);
     for s in sources {
-        walk(s, &mut f, &mut b);
+        if !walk(s, &mut f, &mut b, stop) {
+            return None;
+        }
     }
-    (f, b)
+    Some((f, b))
+}
+
+/// [`scan_until`] on its own thread. Dropping the handle stops it.
+pub struct Count {
+    pub rx: Receiver<(u64, u64)>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Count {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+pub fn count(sources: Vec<PathBuf>) -> Count {
+    Count::spawn(move |stop| scan_until(&sources, stop))
+}
+
+impl Count {
+    /// Any count, run on its own thread: `work` checks the flag and gives up with
+    /// `None` when it is set.
+    pub fn spawn(work: impl FnOnce(&AtomicBool) -> Option<(u64, u64)> + Send + 'static) -> Self {
+        let (tx, rx) = channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        std::thread::spawn(move || {
+            if let Some(n) = work(&flag) {
+                let _ = tx.send(n);
+            }
+        });
+        Count { rx, stop }
+    }
 }
 
 pub fn remove_tree(p: &Path) -> io::Result<()> {
@@ -931,6 +977,25 @@ mod tests {
                 Err(e) => panic!("worker never finished: {e}"),
             }
         }
+    }
+
+    #[test]
+    fn a_count_can_be_stopped_and_otherwise_arrives() {
+        let root = std::env::temp_dir().join(format!("rcmd-ops-count-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("a/b")).unwrap();
+        fs::write(root.join("a/b/f"), "1234").unwrap();
+        fs::write(root.join("g"), "56").unwrap();
+        assert_eq!(
+            scan_until(std::slice::from_ref(&root), &AtomicBool::new(true)),
+            None
+        );
+        let c = count(vec![root.clone()]);
+        let got =
+            c.rx.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+        assert_eq!(got, (2, 6));
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn run(req: Request) -> Summary {

@@ -1337,6 +1337,7 @@ dependencies = [
  "ratatui",
  "rcmd-core",
  "serde",
+ "tar",
  "toml",
  "tui-term",
  "vt100",

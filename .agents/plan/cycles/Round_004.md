@@ -160,8 +160,10 @@ Linux and Windows and are unbound, a candidate for "tab N". Windows, the rest: S
 all arrive; Ctrl+PageUp / PageDown also print plain PageUp / PageDown there.
 
 **Summary of the three systems:** every key rcmd binds arrives on Windows and Linux
-except Ctrl+PageUp / PageDown (previous / next tab), which lose Ctrl on both (if Ctrl
-was held: asked). On macOS Terminal.app, with Option as Meta, history and resize
+except Ctrl+PageUp / PageDown (previous / next tab), which lose Ctrl on both. Confirmed by the
+owner: Ctrl was held, on a laptop where PageUp is Fn+↑, and Ctrl+Fn+↑ arrives without
+Ctrl. A full keyboard's PageUp may behave differently (and GNOME Terminal takes
+Ctrl+PageUp for its own tabs); either way, laptops cannot type it. On macOS Terminal.app, with Option as Meta, history and resize
 cannot be typed. F11 is the terminal's everywhere; rcmd does not use it. Tab switching
 therefore needs a second key on every system: candidates Alt+1…9 (tab N, measured to
 arrive on Linux and Windows) and Ctrl+Tab / Ctrl+Shift+Tab (Total Commander's). Measured:

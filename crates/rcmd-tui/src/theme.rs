@@ -7,6 +7,7 @@
 use std::sync::OnceLock;
 
 use ratatui::style::{Color, Modifier, Style};
+use rcmd_core::color::Depth;
 use rcmd_core::{Entry, Kind};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +51,71 @@ impl Default for Theme {
             row_cursor_active: Color::Rgb(0, 74, 82),
         }
     }
+}
+
+impl Theme {
+    /// The palette for a 16-colour terminal: the 16 ANSI colours, so it is the
+    /// user's palette that decides what they look like, and the terminal's own
+    /// background and text colour. Blue cursor rows, as in the Norton tradition.
+    pub fn ansi() -> Self {
+        Self {
+            bg: Color::Reset,
+            bg_panel: Color::Reset,
+            bg_bar: Color::Reset,
+            border: Color::DarkGray,
+            border_active: Color::Cyan,
+            accent: Color::LightCyan,
+            fg: Color::Reset,
+            fg_dim: Color::DarkGray,
+            dir: Color::LightCyan,
+            exec: Color::LightGreen,
+            link: Color::LightMagenta,
+            archive: Color::Yellow,
+            err: Color::LightRed,
+            mark: Color::LightYellow,
+            row_cursor: Color::DarkGray,
+            row_cursor_active: Color::Blue,
+        }
+    }
+}
+
+/// `c` as a terminal of this depth can show it. 24-bit colours become the nearest
+/// palette entry; at 16 colours, palette entries above 15 become the nearest of the
+/// first 16, which are the user's own palette. (crossterm sends those as `38;5;N`
+/// too, N from 0 to 15.)
+pub fn fit(c: Color, depth: Depth) -> Color {
+    use rcmd_core::color::{nearest_16, nearest_256, palette_rgb};
+    match (depth, c) {
+        (Depth::True, _) => c,
+        (Depth::X256, Color::Rgb(r, g, b)) => Color::Indexed(nearest_256((r, g, b))),
+        (Depth::Ansi16, Color::Rgb(r, g, b)) => ansi(nearest_16((r, g, b))),
+        (Depth::Ansi16, Color::Indexed(i)) if i > 15 => ansi(nearest_16(palette_rgb(i))),
+        (Depth::Ansi16, Color::Indexed(i)) => ansi(i),
+        _ => c,
+    }
+}
+
+/// ANSI colour `i` (0–15) by name.
+fn ansi(i: u8) -> Color {
+    const NAMED: [Color; 16] = [
+        Color::Black,
+        Color::Red,
+        Color::Green,
+        Color::Yellow,
+        Color::Blue,
+        Color::Magenta,
+        Color::Cyan,
+        Color::Gray,
+        Color::DarkGray,
+        Color::LightRed,
+        Color::LightGreen,
+        Color::LightYellow,
+        Color::LightBlue,
+        Color::LightMagenta,
+        Color::LightCyan,
+        Color::White,
+    ];
+    NAMED[usize::from(i & 15)]
 }
 
 static THEME: OnceLock<Theme> = OnceLock::new();
@@ -124,5 +190,91 @@ pub fn title_style(active: bool) -> Style {
         Style::new().fg(t().accent).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(t().fg_dim)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Slots that are drawn on top of or next to each other, and must stay apart.
+    fn apart(t: &Theme) -> Vec<(&'static str, Color, &'static str, Color)> {
+        vec![
+            ("panel", t.bg_panel, "cursor", t.row_cursor),
+            ("panel", t.bg_panel, "cursor_active", t.row_cursor_active),
+            ("cursor", t.row_cursor, "cursor_active", t.row_cursor_active),
+            ("panel", t.bg_panel, "bar", t.bg_bar),
+            ("panel", t.bg_panel, "border", t.border),
+            ("panel", t.bg_panel, "text_dim", t.fg_dim),
+            ("cursor_active", t.row_cursor_active, "directory", t.dir),
+            ("cursor_active", t.row_cursor_active, "marked", t.mark),
+        ]
+    }
+
+    #[test]
+    fn the_cursor_row_does_not_vanish_at_256_colours() {
+        // The palette is coarse at the dark end: the panel, the bar and the cursor row
+        // could all land on one grey.
+        for (a, ca, b, cb) in apart(&Theme::default()) {
+            assert_ne!(
+                fit(ca, Depth::X256),
+                fit(cb, Depth::X256),
+                "{a} and {b} become the same colour"
+            );
+        }
+    }
+
+    #[test]
+    fn the_16_colour_theme_keeps_its_rows_apart() {
+        for (a, ca, b, cb) in apart(&Theme::ansi()) {
+            if ca == Color::Reset && cb == Color::Reset {
+                continue;
+            }
+            assert_ne!(
+                fit(ca, Depth::Ansi16),
+                fit(cb, Depth::Ansi16),
+                "{a} and {b} become the same colour"
+            );
+        }
+    }
+
+    #[test]
+    fn fitting_keeps_what_the_terminal_already_has() {
+        assert_eq!(fit(Color::Rgb(1, 2, 3), Depth::True), Color::Rgb(1, 2, 3));
+        assert_eq!(fit(Color::Reset, Depth::X256), Color::Reset);
+        assert_eq!(fit(Color::Indexed(100), Depth::X256), Color::Indexed(100));
+        assert_eq!(fit(Color::Blue, Depth::Ansi16), Color::Blue);
+        assert_eq!(fit(Color::Rgb(255, 0, 0), Depth::X256), Color::Indexed(196));
+        assert_eq!(fit(Color::Rgb(255, 0, 0), Depth::Ansi16), Color::LightRed);
+        assert_eq!(fit(Color::Indexed(196), Depth::Ansi16), Color::LightRed);
+        assert_eq!(fit(Color::Indexed(4), Depth::Ansi16), Color::Blue);
+    }
+
+    #[test]
+    fn the_16_colour_theme_uses_names_only() {
+        let t = Theme::ansi();
+        for c in [
+            t.bg,
+            t.bg_panel,
+            t.bg_bar,
+            t.border,
+            t.border_active,
+            t.accent,
+            t.fg,
+            t.fg_dim,
+            t.dir,
+            t.exec,
+            t.link,
+            t.archive,
+            t.err,
+            t.mark,
+            t.row_cursor,
+            t.row_cursor_active,
+        ] {
+            assert!(
+                !matches!(c, Color::Rgb(..) | Color::Indexed(_)),
+                "{c:?} is not one of the 16"
+            );
+        }
     }
 }

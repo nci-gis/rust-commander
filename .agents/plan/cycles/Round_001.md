@@ -1,6 +1,6 @@
 # Round 001: Colours on terminals without 24-bit colour
 
-**Status**: Planning
+**Status**: In Progress
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 1
 **Date started**: 2026-11-06
 **Date completed**:
@@ -93,13 +93,43 @@ reversed rule in step 3.
 
 ## Do
 
+**2026-11-06.** Steps 2–5 done; step 1 (the reporter's Mac) is still open, so the
+cause and the build-464 cut-off remain unconfirmed on real hardware.
+
+- `rcmd-core/src/color.rs`: `Depth`, `detect` (environment only, read through a
+  closure so tests never touch the real one), `nearest_256` (cube or grey ramp, never
+  0–15), `nearest_16`, `palette_rgb`.
+- `theme.rs`: `Theme::ansi()` and `fit(colour, depth)`. `config.rs`: `[theme] colors`,
+  and a second theme `theme16` built from the same settings over `Theme::ansi()`, so a
+  colour the user set applies at every depth and the rest keep the 16-colour palette.
+- `quiet.rs`: below 24-bit, the changed cells are copied and fitted before the inner
+  backend writes them — foreground, background and underline colour (ratatui's
+  `underline-color` feature is on). Every source goes through it: theme, `LS_COLORS`,
+  pictures, the terminal panel.
+- `main.rs`: `RCMD_COLORS` (a bad value stops start-up, as a bad flag does), then
+  `[theme] colors`, then `detect`.
+
+**Deviation.** The plan said the 16 colours would go out "by name" (`ESC[3Xm`).
+crossterm sends every named colour as `38;5;N` with N from 0 to 15; those are the user's
+own palette entries, which is what was wanted, so nothing changed but the comment and
+the test.
+
+**Contrast at 256** (default theme): `bg` and `bg_panel` both become grey 233 (they were
+nearly equal anyway); `bg_bar` 234; `row_cursor` 235; `row_cursor_active` 23 (teal);
+`fg_dim` 66. No pair that must differ collapsed, so no per-slot fallback was needed.
+
 ## Check
 
-- [ ] Unit tests: the RGB → 256 and → 16 mappings (cube, grey ramp, the theme's
+- [x] Unit tests: the RGB → 256 and → 16 mappings (cube, grey ramp, the theme's
       colours), `auto` from each environment combination (including `Apple_Terminal`
       with `COLORTERM=truecolor`), and the contrast check above.
-- [ ] A byte test through `Quiet` (as its existing tests do): with 256 colours, no
+      (`color.rs` 10, `theme.rs` 4, `config.rs` 2.)
+- [x] A byte test through `Quiet` (as its existing tests do): with 256 colours, no
       `38;2;` or `48;2;` reaches the terminal, including from the terminal panel.
+      Fails with the fitting switched off, passes with it. Plus two pty tests on the
+      real binary: an old Terminal.app environment gets `48;5;` and no `48;2;` even with
+      `COLORTERM=truecolor`; iTerm2 gets `48;2;`; `RCMD_COLORS=16` sends only palette
+      entries 0–15.
 - [ ] The reporter runs the build on the Mac that showed the problem. **CI cannot see
       colours**: `--screenshot` is text only, and macOS CI has no Terminal.app.
 

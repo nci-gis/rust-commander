@@ -59,6 +59,9 @@ impl Drop for Scratch {
 
 struct Session {
     parser: Arc<Mutex<vt100::Parser>>,
+    /// Every byte rcmd wrote, for the few tests about the bytes themselves (colours);
+    /// anything about text asks the screen instead.
+    raw: Arc<Mutex<Vec<u8>>>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
 }
@@ -73,6 +76,16 @@ impl Session {
 
     /// As `start`, with chosen directory arguments — none at all reopens the session.
     fn start_with(s: &Scratch, editor: Option<&Path>, dirs: &[PathBuf]) -> Self {
+        Self::start_env(s, editor, dirs, &[])
+    }
+
+    /// As `start_with`, with environment variables set on top.
+    fn start_env(
+        s: &Scratch,
+        editor: Option<&Path>,
+        dirs: &[PathBuf],
+        env: &[(&str, &str)],
+    ) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: ROWS,
@@ -99,21 +112,27 @@ impl Session {
             Some(e) => cmd.env("EDITOR", e),
             None => cmd.env_remove("EDITOR"),
         }
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
 
         let child = pair.slave.spawn_command(cmd).expect("rcmd starts");
         // Without dropping our copy of the slave, the reader never sees EOF.
         drop(pair.slave);
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let raw = Arc::new(Mutex::new(Vec::new()));
         let mut reader = pair.master.try_clone_reader().unwrap();
         {
             let parser = parser.clone();
+            let raw = raw.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16384];
                 while let Ok(n) = reader.read(&mut buf) {
                     if n == 0 {
                         break;
                     }
+                    raw.lock().unwrap().extend_from_slice(&buf[..n]);
                     parser.lock().unwrap().process(&buf[..n]);
                 }
             });
@@ -124,6 +143,7 @@ impl Session {
 
         let session = Self {
             parser,
+            raw,
             writer,
             child,
         };
@@ -1094,4 +1114,71 @@ fn a_killed_rcmd_still_reopens_where_it_was() {
     let again = Session::start_with(&s, None, &[]);
     again.wait_for(" 2 deeper ");
     again.quit();
+}
+
+/// What rcmd writes while starting, in an environment that looks like this terminal.
+fn first_frame_bytes(tag: &str, env: &[(&str, &str)]) -> String {
+    let s = Scratch::new(tag);
+    std::fs::write(s.left().join("a.txt"), "a").unwrap();
+    let session = Session::start_env(&s, None, &[s.left(), s.right()], env);
+    // Let the shell pane print its prompt too: its colours go the same way.
+    std::thread::sleep(Duration::from_millis(300));
+    let bytes = String::from_utf8_lossy(&session.raw.lock().unwrap()).into_owned();
+    session.quit();
+    bytes
+}
+
+#[test]
+fn an_old_terminal_app_is_never_sent_24_bit_colour() {
+    // Terminal.app before macOS 26 reads 48;2;R;G;B as five attributes: the cursor
+    // row (28, 42, 58) came out with a green background. COLORTERM is set to show it
+    // does not win: people export it in their dotfiles.
+    let old = [
+        ("TERM_PROGRAM", "Apple_Terminal"),
+        ("TERM_PROGRAM_VERSION", "455.1"),
+        ("COLORTERM", "truecolor"),
+        ("RCMD_COLORS", ""),
+    ];
+    let bytes = first_frame_bytes("old-terminal-app", &old);
+    assert!(
+        !bytes.contains("38;2;") && !bytes.contains("48;2;"),
+        "24-bit colour sent to an old Terminal.app"
+    );
+    assert!(
+        bytes.contains("48;5;"),
+        "and the 256-colour palette used instead"
+    );
+
+    // The same start in a terminal that says it takes 24-bit colour gets it.
+    let new = [
+        ("TERM_PROGRAM", "iTerm.app"),
+        ("COLORTERM", "truecolor"),
+        ("RCMD_COLORS", ""),
+    ];
+    assert!(first_frame_bytes("truecolor-terminal", &new).contains("48;2;"));
+}
+
+#[test]
+fn rcmd_colors_overrides_what_the_terminal_seems_to_be() {
+    let env = [
+        ("TERM_PROGRAM", "iTerm.app"),
+        ("COLORTERM", "truecolor"),
+        ("RCMD_COLORS", "16"),
+    ];
+    let bytes = first_frame_bytes("rcmd-colors-16", &env);
+    assert!(!bytes.contains("38;2;") && !bytes.contains("48;2;"));
+    // crossterm sends even the 16 ANSI colours as `38;5;N`; at 16 colours N is the
+    // user's own palette, 0 to 15, and nothing above.
+    let mut seen = 0;
+    for part in bytes.split(";5;").skip(1) {
+        let n: u32 = part
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse()
+            .unwrap_or(0);
+        assert!(n < 16, "palette entry {n} sent to a 16-colour terminal");
+        seen += 1;
+    }
+    assert!(seen > 0, "some colour was sent");
 }

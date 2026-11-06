@@ -189,7 +189,25 @@ fn main() -> Result<()> {
         print!("{}", keys::markdown(&settings.keymap));
         return Ok(());
     }
-    theme::init(settings.theme.clone());
+    // How many colours this terminal shows: RCMD_COLORS, then [theme] colors, then
+    // what the environment says. The 16-colour theme is a palette of its own, not the
+    // 24-bit one squeezed.
+    let depth = match std::env::var("RCMD_COLORS")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        Some(v) => match rcmd_core::color::Depth::parse(&v) {
+            Ok(d) => d,
+            Err(e) => fail(&format!("RCMD_COLORS={v}: {e}")),
+        },
+        None => settings.colors,
+    }
+    .unwrap_or_else(|| rcmd_core::color::detect(|k| std::env::var(k).ok(), cfg!(windows)));
+    theme::init(if depth == rcmd_core::color::Depth::Ansi16 {
+        settings.theme16.clone()
+    } else {
+        settings.theme.clone()
+    });
 
     // The command line may only tighten what the config says. A wrapper that sets
     // restricted mode cannot be escaped by adding a flag.
@@ -261,9 +279,9 @@ fn main() -> Result<()> {
     // init() for what it sets up (raw mode, the alternate screen, a panic hook that
     // undoes them); then our own Terminal, whose backend stays quiet when idle.
     drop(ratatui::init());
-    let mut terminal = ratatui::Terminal::new(quiet::Quiet::new(
-        ratatui::backend::CrosstermBackend::new(stdout()),
-    ))?;
+    let mut terminal = ratatui::Terminal::new(
+        quiet::Quiet::new(ratatui::backend::CrosstermBackend::new(stdout())).with_depth(depth),
+    )?;
     execute!(stdout(), EnableMouseCapture)?;
 
     // ratatui::init() installs a hook that restores the terminal; chain onto it so a

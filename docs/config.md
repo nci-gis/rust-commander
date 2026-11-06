@@ -56,7 +56,26 @@ opener = ""               # what `o` uses; empty: the system's own
 [theme]
 accent = "#ff8800"        # "#rrggbb", "reset" (the terminal's own), or 0-255
 background = "reset"      # let the terminal's background show through
+colors = "auto"           # how many colours the terminal shows: auto, truecolor, 256, 16
 ```
+
+**`colors = "auto"`** sends 24-bit colour only where the terminal is known to take it:
+`COLORTERM=truecolor` (or `24bit`), iTerm2, WezTerm, kitty, Ghostty, VS Code, Windows
+Terminal and the Windows console, and Terminal.app from macOS 26. Everywhere else it uses
+the 256-colour palette, which every current terminal shows; the Linux console
+(`TERM=linux`) gets a 16-colour theme drawn in your terminal's own palette. An older
+Terminal.app is never sent 24-bit colour, whatever `COLORTERM` says, because it shows
+it as green and red backgrounds.
+
+Over SSH, `COLORTERM` does not usually reach the server, so rcmd there uses 256 colours.
+To get 24-bit colour back, set it for that host:
+
+```bash
+export RCMD_COLORS=truecolor   # in the server's shell profile; overrides [theme] colors
+```
+
+`RCMD_COLORS` takes the same values, and is the way to set colours per machine when one
+config file is shared between several.
 
 `rcmd --print-config` lists every colour you can set.
 

@@ -10,6 +10,14 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+- Colours on terminals without 24-bit colour. macOS Terminal.app before macOS 26 showed
+  green and red backgrounds and hard-to-read text, because it reads 24-bit colour codes
+  as other attributes. rcmd now sends 24-bit colour only where the terminal is known to
+  take it and the 256-colour palette everywhere else; the Linux console gets a
+  16-colour theme. `[theme] colors` (`auto`, `truecolor`, `256`, `16`) or `RCMD_COLORS`
+  sets it by hand.
+
 ## [0.1.0] - 2026-11-06
 
 The first release.

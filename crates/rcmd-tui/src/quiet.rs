@@ -6,16 +6,23 @@
 //! with rcmd sitting idle: harmless to a fast terminal, wasted work for one that redraws
 //! on every byte, and noise over SSH. This wrapper drops an empty draw, and a cursor
 //! hide, show or move that changes nothing.
+//!
+//! It is also where colours are fitted to the terminal ([`crate::theme::fit`]): every
+//! cell passes through here — the theme, `LS_COLORS`, pictures, and whatever a program
+//! prints in the terminal panel — so a terminal without 24-bit colour is never sent a
+//! 24-bit sequence.
 
 use ratatui::backend::{Backend, ClearType, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
+use rcmd_core::color::Depth;
 
 pub struct Quiet<B> {
     inner: B,
     /// What the terminal was last told; `None` when it is not known.
     shown: Option<bool>,
     at: Option<Position>,
+    depth: Depth,
 }
 
 impl<B> Quiet<B> {
@@ -24,7 +31,14 @@ impl<B> Quiet<B> {
             inner,
             shown: None,
             at: None,
+            depth: Depth::True,
         }
+    }
+
+    /// Fit every colour to a terminal of this depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
     }
 
     /// The terminal was used behind our back (an editor ran): assume nothing about it.
@@ -47,7 +61,20 @@ impl<B: Backend> Backend for Quiet<B> {
         }
         // Writing cells moves the terminal's cursor.
         self.at = None;
-        self.inner.draw(content)
+        if self.depth == Depth::True {
+            return self.inner.draw(content);
+        }
+        // Only the cells that changed come through here, so the copies are few.
+        let fitted: Vec<(u16, u16, Cell)> = content
+            .map(|(x, y, c)| {
+                let mut c = c.clone();
+                c.fg = crate::theme::fit(c.fg, self.depth);
+                c.bg = crate::theme::fit(c.bg, self.depth);
+                c.underline_color = crate::theme::fit(c.underline_color, self.depth);
+                (x, y, c)
+            })
+            .collect();
+        self.inner.draw(fitted.iter().map(|(x, y, c)| (*x, *y, c)))
     }
 
     fn append_lines(&mut self, n: u16) -> Result<(), Self::Error> {
@@ -172,5 +199,60 @@ mod tests {
             sizes[2] > 0,
             "a change redraws and puts the cursor back: {sizes:?}"
         );
+    }
+
+    /// Keeps what the backend writes.
+    #[derive(Clone, Default)]
+    struct Keep(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+    impl std::io::Write for Keep {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The bytes one frame of 24-bit coloured text produces at this depth.
+    fn written_at(depth: Depth) -> String {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+        let options = TerminalOptions {
+            viewport: Viewport::Fixed(Rect::new(0, 0, 20, 1)),
+        };
+        let keep = Keep::default();
+        let backend = Quiet::new(CrosstermBackend::new(keep.clone())).with_depth(depth);
+        let mut t = Terminal::with_options(backend, options).unwrap();
+        t.draw(|f| {
+            // The theme's cursor row: (28, 42, 58) was a green background on an old
+            // Terminal.app, and (101, 119, 139) a bright red one.
+            let style = Style::new()
+                .fg(Color::Rgb(101, 119, 139))
+                .bg(Color::Rgb(28, 42, 58));
+            f.render_widget(Line::from(Span::styled("row", style)), f.area());
+        })
+        .unwrap();
+        let out = String::from_utf8_lossy(&keep.0.borrow()).into_owned();
+        out
+    }
+
+    #[test]
+    fn no_24_bit_colour_reaches_a_terminal_that_cannot_show_it() {
+        let full = written_at(Depth::True);
+        assert!(full.contains("38;2;101;119;139"), "{full:?}");
+        assert!(full.contains("48;2;28;42;58"), "{full:?}");
+
+        for depth in [Depth::X256, Depth::Ansi16] {
+            let out = written_at(depth);
+            assert!(
+                !out.contains("38;2;") && !out.contains("48;2;"),
+                "{depth:?}: {out:?}"
+            );
+            assert!(out.contains("row"), "{out:?}");
+        }
+        let out = written_at(Depth::X256);
+        assert!(out.contains("38;5;") && out.contains("48;5;"), "{out:?}");
     }
 }

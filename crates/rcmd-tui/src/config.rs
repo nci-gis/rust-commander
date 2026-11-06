@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
+use rcmd_core::color::Depth;
 use rcmd_core::{Sort, SortKey};
 
 use crate::keys::Keymap;
@@ -218,6 +219,9 @@ impl Mode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ThemeSpec {
+    /// How many colours the terminal shows: "auto", "truecolor", "256" or "16".
+    /// `RCMD_COLORS` in the environment overrides it.
+    pub colors: String,
     pub background: String,
     pub panel: String,
     pub bar: String,
@@ -241,6 +245,7 @@ impl Default for ThemeSpec {
         let t = Theme::default();
         let s = |c: Color| color_name(c);
         Self {
+            colors: "auto".into(),
             background: s(t.bg),
             panel: s(t.bg_panel),
             bar: s(t.bg_bar),
@@ -266,6 +271,11 @@ impl Default for ThemeSpec {
 pub struct Settings {
     pub config: Config,
     pub theme: Theme,
+    /// The theme for a 16-colour terminal: [`Theme::ansi`] with the colours the user
+    /// set on top.
+    pub theme16: Theme,
+    /// `[theme] colors`; `None` is `auto`.
+    pub colors: Option<Depth>,
     pub keymap: Keymap,
     pub sort: Sort,
     /// The mode in effect — after the command line has had its say.
@@ -332,28 +342,10 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         ));
     }
 
-    let t = &config.theme;
-    let c = |field: &str, v: &str| -> Result<Color, String> {
-        parse_color(v).map_err(|e| format!("[theme] {field} = \"{v}\": {e}"))
-    };
-    let theme = Theme {
-        bg: c("background", &t.background)?,
-        bg_panel: c("panel", &t.panel)?,
-        bg_bar: c("bar", &t.bar)?,
-        border: c("border", &t.border)?,
-        border_active: c("border_active", &t.border_active)?,
-        accent: c("accent", &t.accent)?,
-        fg: c("text", &t.text)?,
-        fg_dim: c("text_dim", &t.text_dim)?,
-        dir: c("directory", &t.directory)?,
-        exec: c("executable", &t.executable)?,
-        link: c("symlink", &t.symlink)?,
-        archive: c("archive", &t.archive)?,
-        err: c("error", &t.error)?,
-        mark: c("marked", &t.marked)?,
-        row_cursor: c("cursor", &t.cursor)?,
-        row_cursor_active: c("cursor_active", &t.cursor_active)?,
-    };
+    let colors = Depth::parse(&config.theme.colors)
+        .map_err(|e| format!("[theme] colors = \"{}\": {e}", config.theme.colors))?;
+    let theme = build_theme(&config.theme, &Theme::default())?;
+    let theme16 = build_theme(&config.theme, &Theme::ansi())?;
 
     let mode = match config.security.mode.as_str() {
         "normal" => Mode::Normal,
@@ -404,10 +396,53 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
     Ok(Settings {
         config,
         theme,
+        theme16,
+        colors,
         keymap,
         sort,
         mode,
         root,
+    })
+}
+
+/// The theme `spec` describes over `base`: a colour the user left at its default
+/// takes `base`'s, so the 16-colour theme keeps its own palette where nothing was set.
+fn build_theme(spec: &ThemeSpec, base: &Theme) -> Result<Theme, String> {
+    let default = ThemeSpec::default();
+    let c = |field: &str, v: &str, d: &str, b: Color| -> Result<Color, String> {
+        if v == d {
+            return Ok(b);
+        }
+        parse_color(v).map_err(|e| format!("[theme] {field} = \"{v}\": {e}"))
+    };
+    let (s, d) = (spec, &default);
+    Ok(Theme {
+        bg: c("background", &s.background, &d.background, base.bg)?,
+        bg_panel: c("panel", &s.panel, &d.panel, base.bg_panel)?,
+        bg_bar: c("bar", &s.bar, &d.bar, base.bg_bar)?,
+        border: c("border", &s.border, &d.border, base.border)?,
+        border_active: c(
+            "border_active",
+            &s.border_active,
+            &d.border_active,
+            base.border_active,
+        )?,
+        accent: c("accent", &s.accent, &d.accent, base.accent)?,
+        fg: c("text", &s.text, &d.text, base.fg)?,
+        fg_dim: c("text_dim", &s.text_dim, &d.text_dim, base.fg_dim)?,
+        dir: c("directory", &s.directory, &d.directory, base.dir)?,
+        exec: c("executable", &s.executable, &d.executable, base.exec)?,
+        link: c("symlink", &s.symlink, &d.symlink, base.link)?,
+        archive: c("archive", &s.archive, &d.archive, base.archive)?,
+        err: c("error", &s.error, &d.error, base.err)?,
+        mark: c("marked", &s.marked, &d.marked, base.mark)?,
+        row_cursor: c("cursor", &s.cursor, &d.cursor, base.row_cursor)?,
+        row_cursor_active: c(
+            "cursor_active",
+            &s.cursor_active,
+            &d.cursor_active,
+            base.row_cursor_active,
+        )?,
     })
 }
 
@@ -588,6 +623,7 @@ pub fn render_default() -> String {
         "# rcmd configuration - every setting, at its default.\n\
          # Delete what you do not change; a missing key keeps its default.\n\
          # Colours: \"#rrggbb\", \"reset\" (the terminal's own), or \"0\"-\"255\".\n\
+         # [theme] colors: \"auto\", \"truecolor\", \"256\" or \"16\"; RCMD_COLORS overrides it.\n\
          # Under [keys], listing an action replaces all of its default keys.\n\n{body}"
     )
 }
@@ -641,6 +677,29 @@ mod tests {
         }
         assert!(decode(&[0xFF, 0xFE, 0x41]).is_err(), "odd UTF-16");
         assert!(decode(b"menu_bar = \xff").is_err(), "neither");
+    }
+
+    #[test]
+    fn colour_depth_is_a_setting() {
+        assert_eq!(parse("").unwrap().colors, None, "auto by default");
+        let s = parse("[theme]\ncolors = \"256\"\n").unwrap();
+        assert_eq!(s.colors, Some(Depth::X256));
+        let s = parse("[theme]\ncolors = \"16\"\n").unwrap();
+        assert_eq!(s.colors, Some(Depth::Ansi16));
+        let e = parse("[theme]\ncolors = \"8\"\n").unwrap_err();
+        assert!(e.contains("[theme] colors"), "{e}");
+    }
+
+    #[test]
+    fn the_16_colour_theme_keeps_its_palette_under_the_users_colours() {
+        let s = parse("[theme]\naccent = \"#ff8800\"\n").unwrap();
+        assert_eq!(s.theme16.accent, Color::Rgb(0xff, 0x88, 0x00), "set: kept");
+        assert_eq!(
+            s.theme16.dir,
+            Theme::ansi().dir,
+            "not set: the 16-colour one"
+        );
+        assert_eq!(s.theme.dir, Theme::default().dir);
     }
 
     #[test]

@@ -30,7 +30,7 @@ users want Enter to open files.
 | # | Item | Size | Round | Status |
 |---|---|---|---|---|
 | **Now: fix what is broken** | | | | |
-| 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Planning |
+| 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | In Progress: built, awaiting a Mac |
 | 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Planning |
 | **Next: Total Commander feel** | | | | |
 | 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning |
@@ -69,9 +69,12 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
   extra is choosing the set (Nerd Font, plain Unicode, none) and per-extension icons in
   a theme-like file.
 
-## Decisions waiting on a person
+## Decisions
 
-| Decision | Options | Recommended |
+The owner accepted every recommendation below on 2026-11-06 ("mình đồng ý theo đề xuất
+của bro"). What the one name is remains open.
+
+| Decision | Options | Decided |
 |---|---|---|
 | Colour `auto` | downgrade only old Terminal.app / truecolor only on positive evidence | positive evidence; 256 colours over SSH unless `COLORTERM` arrives |
 | Default theme | `dark` (today) / `ansi` | keep `dark`; revisit after the launch |

@@ -145,6 +145,16 @@ shows the first screen (the shell, with blank rows) above rcmd's second one. rcm
 hide that; `docs/troubleshooting.md` says so. Alternate-scroll mode (`?1007h`) is not
 needed.
 
+**2026-11-07, third report.** Esc-prefix works on the Mac. With "Use Option as Meta
+key" on, still not working: going up and into directories with Alt+← / → (and probably
+Alt+↓, history), and resizing with Alt+Shift+arrows. Likely, to measure with
+`--show-keys`: Terminal.app's profile maps ⌥← / ⌥→ to `ESC b` / `ESC f` (word left /
+right) whatever the Meta setting, so rcmd gets Alt+B / Alt+F; what ⌥↑ / ⌥↓ and
+⌥⇧-arrows send is unknown. Also suspect: Fn+↑ / ↓ (PageUp / PageDown) scroll
+Terminal.app's own window rather than reaching rcmd, which would break PageUp /
+PageDown and Ctrl+PageUp / PageDown (tabs). The owner prefers a macOS keymap (ROADMAP
+item 5) to working around each key; its keys come from this measurement, not guesses.
+
 ## Check
 
 - [ ] Step 1's table recorded here: which keys arrived, with which settings. Partly:

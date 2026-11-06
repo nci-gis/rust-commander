@@ -10,6 +10,7 @@ mod config;
 mod find_dialog;
 mod git;
 mod help;
+mod keyfix;
 mod keys;
 mod layout;
 mod line_edit;
@@ -60,6 +61,8 @@ Usage:
   rcmd --print-config       print every setting at its default, ready to save
   rcmd --print-keys         print every key as Markdown (as configured)
   rcmd --check-config       validate the config file; exit 1 if it is wrong
+  rcmd --show-keys          print each key, click and scroll as rcmd receives it, and
+                            what it would do (for a key that does nothing)
   rcmd --screenshot[=WxH]   render one frame as plain text and exit
        --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
                             click:X:Y rclick:X:Y ctrl-click:X:Y drag:X1:Y1:X2:Y2
@@ -84,6 +87,7 @@ struct Cli {
     keys: String,
     print_config: bool,
     print_keys: bool,
+    show_keys: bool,
     check_config: bool,
     no_restore: bool,
     read_only: bool,
@@ -103,6 +107,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "-V" | "--version" => cli.version = true,
             "--print-config" => cli.print_config = true,
             "--print-keys" => cli.print_keys = true,
+            "--show-keys" => cli.show_keys = true,
             "--check-config" => cli.check_config = true,
             "--no-restore" => cli.no_restore = true,
             "--read-only" => cli.read_only = true,
@@ -208,6 +213,9 @@ fn main() -> Result<()> {
     } else {
         settings.theme.clone()
     });
+    if cli.show_keys {
+        return show_keys(&settings.keymap, depth);
+    }
 
     // The command line may only tighten what the config says. A wrapper that sets
     // restricted mode cannot be escaped by adding a flag.
@@ -423,6 +431,92 @@ fn parse_mouse(tok: &str) -> Option<Vec<MouseEvent>> {
         }
         _ => return None,
     })
+}
+
+/// `--show-keys`: what the terminal actually sends, one line per event, and what rcmd
+/// would do with it. For "key X does nothing" reports: the answer is usually that the
+/// terminal never sent X, and this shows it.
+fn show_keys(keymap: &keys::Keymap, depth: rcmd_core::color::Depth) -> Result<()> {
+    use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseEventKind};
+    use ratatui::crossterm::terminal;
+    use std::io::Write;
+
+    let var = |k: &str| std::env::var(k).unwrap_or_default();
+    println!("rcmd --show-keys: press keys, click, scroll. Esc twice, or Ctrl+C, quits.");
+    println!(
+        "terminal: TERM={} TERM_PROGRAM={} {} COLORTERM={} -> colours: {}",
+        var("TERM"),
+        var("TERM_PROGRAM"),
+        var("TERM_PROGRAM_VERSION"),
+        var("COLORTERM"),
+        depth.label()
+    );
+    println!();
+    let name_of = |a: keys::Action| {
+        keys::BINDINGS
+            .iter()
+            .find(|b| b.action == a)
+            .map_or("?", |b| b.name)
+    };
+    let does = |k: KeyEvent| keymap.action_for(k).map_or("-", name_of);
+
+    terminal::enable_raw_mode()?;
+    execute!(stdout(), EnableMouseCapture)?;
+    let mut out = stdout();
+    let mut last_esc = false;
+    let mut moved = false;
+    let run = (|| -> Result<()> {
+        loop {
+            let line = match event::read()? {
+                Event::Key(k) if k.kind != KeyEventKind::Release => {
+                    let quit = (k.code == KeyCode::Esc && last_esc)
+                        || (k.code == KeyCode::Char('c')
+                            && k.modifiers.contains(KeyModifiers::CONTROL));
+                    last_esc = k.code == KeyCode::Esc;
+                    let line = format!(
+                        "key    {:<18} {}",
+                        keys::key_name(k.code, k.modifiers),
+                        does(k)
+                    );
+                    if quit {
+                        write!(out, "{line}\r\n")?;
+                        out.flush()?;
+                        return Ok(());
+                    }
+                    line
+                }
+                Event::Key(_) => continue,
+                Event::Mouse(m) if m.kind == MouseEventKind::Moved => {
+                    // Reported on every cell crossed: say so once.
+                    if moved {
+                        continue;
+                    }
+                    moved = true;
+                    "mouse  movement is reported (shown once)".to_string()
+                }
+                Event::Mouse(m) => format!(
+                    "mouse  {:?} at column {}, row {}{}",
+                    m.kind,
+                    m.column,
+                    m.row,
+                    if m.modifiers.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" with {:?}", m.modifiers)
+                    }
+                ),
+                Event::Resize(w, h) => format!("resize {w}x{h}"),
+                Event::Paste(p) => format!("paste  {} characters", p.chars().count()),
+                Event::FocusGained => "focus  gained".into(),
+                Event::FocusLost => "focus  lost".into(),
+            };
+            write!(out, "{line}\r\n")?;
+            out.flush()?;
+        }
+    })();
+    let _ = execute!(stdout(), DisableMouseCapture);
+    let _ = terminal::disable_raw_mode();
+    run
 }
 
 fn fail(msg: &str) -> ! {

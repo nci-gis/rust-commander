@@ -223,6 +223,37 @@ fn f7_prompts_for_a_name() {
 }
 
 #[test]
+fn esc_then_a_digit_is_an_f_key_for_terminals_without_them() {
+    // A Mac keyboard sends media keys for F1-F12 unless Fn is held; Esc 7 is F7.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Esc,7,d,o,c,s", &a, &b);
+    assert!(s.contains("Create directory"), "{s}");
+    assert!(s.contains("docs"), "{s}");
+    // Esc says what it is waiting for.
+    let s = shot_keys("110x24", "Esc", &a, &b);
+    assert!(s.contains("the next key is Alt+key"), "{s}");
+    // A second Esc cancels: 7 is just 7 again.
+    let s = shot_keys("110x24", "Esc,Esc,7", &a, &b);
+    assert!(!s.contains("Create directory"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn esc_then_a_key_is_alt_and_key() {
+    // Alt+F7 is Find; Esc F7 must be the same.
+    let (a, b) = fixture();
+    let alt = shot_keys("110x24", "Alt+F7", &a, &b);
+    let esc = shot_keys("110x24", "Esc,F7", &a, &b);
+    assert!(alt.contains("Find files"), "{alt}");
+    assert!(esc.contains("Find files"), "{esc}");
+    // Esc still takes a filter off first, without arming anything.
+    let s = shot_keys("110x24", "Ctrl+f,v,Enter,Esc,7", &a, &b);
+    assert!(s.contains("filter off"), "{s}");
+    assert!(!s.contains("Create directory"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn copying_with_no_second_pane_refuses_instead_of_guessing() {
     let (a, b) = fixture();
     // Tab to the right pane, close it, then try to copy out of the only pane left.

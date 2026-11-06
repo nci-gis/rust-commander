@@ -160,6 +160,11 @@ pub struct App {
     resizing: Option<(Divider, bool)>,
     /// A file pane's scrollbar being dragged, and where on the thumb it was held.
     scrolling: Option<(PaneId, u16)>,
+    /// When Esc was pressed in a file pane with nothing to stop: the next key is
+    /// Alt+key (`keyfix::after_esc`).
+    esc_armed: Option<Instant>,
+    /// The Option-key hint has been shown this session.
+    option_hinted: bool,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -252,6 +257,8 @@ impl App {
             zoom: None,
             resizing: None,
             scrolling: None,
+            esc_armed: None,
+            option_hinted: false,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -963,6 +970,31 @@ impl App {
         self.background();
     }
 
+    /// The key a file-pane keystroke stands for: Alt+key after an Esc prefix. `None`
+    /// when the key was used up (a second Esc cancelling the prefix). On macOS, a
+    /// character Option typed gets a one-time hint. Keys for the shell pass untouched.
+    fn translate_key(&mut self, k: KeyEvent) -> Option<KeyEvent> {
+        if self.focus_is_term() {
+            self.esc_armed = None;
+            return Some(k);
+        }
+        if let Some(at) = self.esc_armed.take() {
+            if at.elapsed() <= crate::keyfix::ESC_WINDOW {
+                self.status.clear();
+                return crate::keyfix::after_esc(k);
+            }
+        }
+        if cfg!(target_os = "macos") && !self.option_hinted {
+            if let Some(c) = crate::keyfix::typed_by_option(k)
+                .filter(|_| self.settings.keymap.action_for(k).is_none())
+            {
+                self.option_hinted = true;
+                self.status = crate::keyfix::option_hint(c);
+            }
+        }
+        Some(k)
+    }
+
     fn on_key(&mut self, k: KeyEvent) {
         if self.modal.is_some() {
             return self.on_modal_key(k);
@@ -970,6 +1002,10 @@ impl App {
         if self.search.is_some() && self.on_search_key(k) {
             return;
         }
+        let k = match self.translate_key(k) {
+            Some(k) => k,
+            None => return,
+        };
         let action = self.settings.keymap.action_for(k);
         // Esc in a filtered pane shows everything again: a filter left on is files you
         // cannot see, so taking it off should be the most obvious key there is.
@@ -992,6 +1028,11 @@ impl App {
                 self.status = "filter off".into();
                 return;
             }
+            // Nothing to stop: Esc is a prefix, for terminals that send no Alt or no
+            // F-keys. It delays nothing, since Esc here would otherwise do nothing.
+            self.esc_armed = Some(Instant::now());
+            self.status = "Esc: the next key is Alt+key; 1\u{2026}9, 0 are F1\u{2026}F10".into();
+            return;
         }
 
         // Layout and terminal actions work from anywhere, the shell pane included.

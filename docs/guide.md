@@ -117,6 +117,27 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).
 
+## No Alt key, or no F-keys
+
+Some keyboards and terminals never send them: on a Mac, Option types characters (`ç`,
+`ƒ`) instead of acting as Alt, and F1–F12 are brightness and volume unless you hold
+**Fn**. In the file panes, **Esc** works as a prefix, as in Midnight Commander — press
+it, let go, then:
+
+- a key: **Alt** + that key. **Esc F7** is Alt+F7, **Esc ,** is Alt+, (back).
+- **1**…**9**, **0**: **F1**…**F10**. **Esc 5** copies, **Esc 8** deletes.
+- **Esc** again: never mind.
+
+`rcmd --show-keys` prints each key, click and scroll as rcmd receives it and what it
+would do. If a key shows nothing there, your terminal is not sending it.
+
+**On macOS Terminal.app**, two settings make it all work directly:
+
+- **Option as Alt**: Terminal → Settings → Profiles → Keyboard → **Use Option as Meta
+  key**. (iTerm2: Profiles → Keys → Left Option key → **Esc+**.)
+- **F-keys**: System Settings → Keyboard → Keyboard Shortcuts → Function Keys → **Use
+  F1, F2, etc. keys as standard function keys**, or hold **Fn**.
+
 ## Menus and help
 
 - **F9** opens the menu bar: File, View, Help. You can click it too.

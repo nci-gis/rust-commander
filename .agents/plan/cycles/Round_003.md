@@ -1,6 +1,6 @@
 # Round 003: macOS keys and mouse
 
-**Status**: Planning
+**Status**: In Progress
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 2
 **Date started**: 2026-11-06
 **Date completed**:
@@ -56,7 +56,7 @@ where that is impossible, with one clear line telling the user which setting to 
       with no setting: Esc then a key within a second is Alt+key; Esc then 1…0 is
       F1…F10. Only where Esc alone does nothing (file panes, not dialogs, not the
       terminal panel), so closing a dialog is never delayed.
-- [ ] 3b. **Read Option's characters as Alt**, on macOS only, in file panes only (never
+- [ ] ~~3b.~~ **Dropped 2026-11-07 by the owner** ("Use Option as Meta key" works; Esc-prefix is enough). Was: **Read Option's characters as Alt**, on macOS only, in file panes only (never
       in a text field or the terminal panel), with a setting to turn it off. With the
       default US / ABC layout Option+letter types a fixed character: å ∫ ç ∂ ƒ © ˙ ∆ ˚ ¬
       µ ø π œ ® ß † √ ∑ ≈ ¥ Ω for a b c d f g h j k l m o p q r s t v w x y z, and ≤ ≥ ≠
@@ -65,7 +65,7 @@ where that is impossible, with one clear line telling the user which setting to 
       are dead keys that type nothing until the next key (Alt+N needs Esc N or the
       setting), and another keyboard layout types other characters (the table is only
       for US / ABC; the setting and Esc-prefix cover the rest).
-- [ ] 3c. **Option+← / →**: Terminal.app sends `ESC b` / `ESC f` for them by default (to
+- [ ] ~~3c.~~ **Dropped with 3b.** Was: **Option+← / →**: Terminal.app sends `ESC b` / `ESC f` for them by default (to
       confirm), which crossterm reads as Alt+B / Alt+F. Bind those to back and forward
       as well, so history works on a Mac out of the box.
 - [ ] 4. **Say what to change.** When a character that Option produces arrives where
@@ -108,6 +108,29 @@ sent):
   (OSC 22) is not something Terminal.app understands.
 - Option does not act as Alt, as expected. "Esc + Option + key" did nothing, also as
   expected: Esc-prefix is step 3, not built yet.
+
+**2026-11-07, second report.** "Use Option as Meta key" on: Option works as Alt. The
+owner asks only for Esc-prefix on top ("nhấn Esc rồi nhả"), so 3b and 3c are dropped.
+View → Allow Mouse Reporting was already on, and the mouse still does not reach rcmd;
+the blue area in the terminal panel was the owner's Terminal.app profile background
+showing through cells with the default colour, not a selection as first thought.
+
+**Built (2026-11-07):**
+
+- Step 2, `rcmd --show-keys`: prints the terminal's variables and the colour depth,
+  then each key with the action it runs, each click and wheel event, and once that
+  movement is reported. Esc Esc or Ctrl+C quits. Checked in a pty on Linux: F7, Alt+C,
+  an SGR click and a wheel all print.
+- Step 3, Esc-prefix (`keyfix.rs`, `App::translate_key`): only in file panes, and only
+  when Esc has nothing to stop (search, extraction, archive listing, filter), so no
+  Esc is ever delayed. A status line says it is waiting. Esc Esc cancels.
+- Step 4, partly: on macOS a non-ASCII character with no binding, typed in a file pane,
+  shows the Option hint once per session. The F-key advice is in F1 and the guide, not
+  a hint: rcmd sees nothing when a media key is pressed.
+- Step 6: guide section "No Alt key, or no F-keys", an F1 section, CHANGELOG.
+
+**Open: the mouse (step 5).** Waiting for `rcmd --show-keys` on the owner's Mac: if
+clicks print nothing there, Terminal.app is not reporting to rcmd at all.
 
 ## Check
 

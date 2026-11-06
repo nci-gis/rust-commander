@@ -130,7 +130,10 @@ nearly equal anyway); `bg_bar` 234; `row_cursor` 235; `row_cursor_active` 23 (te
       real binary: an old Terminal.app environment gets `48;5;` and no `48;2;` even with
       `COLORTERM=truecolor`; iTerm2 gets `48;2;`; `RCMD_COLORS=16` sends only palette
       entries 0–15.
-- [ ] The reporter runs the build on the Mac that showed the problem. **CI cannot see
+- [x] The reporter runs the build on the Mac that showed the problem. 2026-11-07, the
+      CI build on the owner's Intel Mac in Terminal.app: no green or red backgrounds,
+      cursor rows and dimmed text readable (screenshot). Still not sent: the macOS and
+      Terminal.app versions, so the build-464 cut-off itself is unconfirmed. **CI cannot see
       colours**: `--screenshot` is text only, and macOS CI has no Terminal.app.
 
 Record what you could **not** verify as explicitly as what you could.

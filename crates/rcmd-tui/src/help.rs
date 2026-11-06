@@ -266,6 +266,15 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 ("wheel", "Scroll; over a shell, back through its history"),
             ],
         ),
+        (
+            "No Alt or F-keys? (a Mac, some terminals) \u{2014} in the file panes",
+            &[
+                ("Esc, then a key", "Alt+that key: Esc F7 is Alt+F7"),
+                ("Esc, then 1\u{2026}9, 0", "F1\u{2026}F10: Esc 5 copies"),
+                ("Esc Esc", "Never mind"),
+                ("rcmd --show-keys", "Shows what each key really sends"),
+            ],
+        ),
     ];
     for (title, rows) in fixed {
         out.push(Line::raw(""));

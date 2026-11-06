@@ -171,6 +171,8 @@ pub struct App {
     option_hinted: bool,
     /// The theme in use, by name (View → Theme… marks it).
     theme_name: String,
+    /// The last operation that wrote to the disk, for Ctrl+Z.
+    last_undo: Option<rcmd_core::undo::Undo>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -288,6 +290,7 @@ impl App {
             group: None,
             option_hinted: false,
             theme_name,
+            last_undo: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -1202,6 +1205,7 @@ impl App {
             Action::MkDir => "creating directories",
             Action::Edit => "editing",
             Action::OpenWith => "opening files in other programs",
+            Action::Undo => "undoing",
             _ if mode == Mode::Restricted
                 && matches!(
                     a,
@@ -1455,6 +1459,7 @@ impl App {
                 }
             }
             Action::OpenWithMenu => self.open_with_menu(),
+            Action::Undo => self.ask_undo(),
             // Space on a directory also works out its size, as in Total Commander: the
             // moment you select a directory is the moment you want to know.
             Action::Mark => self.with_files(|f| {
@@ -2119,6 +2124,7 @@ impl App {
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
             Cmd::ThemeMenu => self.theme_menu(),
             Cmd::Settings => self.open_settings(),
+            Cmd::Undo => self.undo(),
             Cmd::SetTheme(name) => self.set_theme(&name),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
             Cmd::UserCommand(i) => self.run_user_command(i),
@@ -2173,11 +2179,13 @@ impl App {
             }
             Cmd::Sync(pairs) => {
                 let req = Request::sync(pairs);
+                self.last_undo = Some(rcmd_core::undo::Undo::Cannot("a synchronisation".into()));
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             Cmd::CopyText(t) => self.copy_text(t),
             Cmd::BatchRename(moves) => {
                 let out = rcmd_core::batch_rename::apply(&moves);
+                self.last_undo = Some(rcmd_core::undo::Undo::Rename(moves.clone()));
                 self.reload_all();
                 self.status = match (out.renamed, out.errors.first()) {
                     (n, None) => format!("renamed {n}"),
@@ -2195,6 +2203,7 @@ impl App {
                     ops::Kind::Move => Request::mv(sources, dest),
                     _ => Request::copy(sources, dest),
                 };
+                self.remember_job(&request);
                 self.modal = Some(Modal::Job(Job::new(kind, ops::start(request))));
             }
         }
@@ -2534,6 +2543,7 @@ impl App {
         // Overwrites still raise a question mid-job; this only skips the "are you sure"
         // before starting, which is all the setting claims to do.
         if !self.settings.config.general.confirm_transfer {
+            self.remember_job(&request);
             self.modal = Some(Modal::Job(Job::new(kind, ops::start(request))));
             return;
         }
@@ -2637,8 +2647,13 @@ impl App {
                     self.status = e.to_string();
                     return;
                 }
+                let first = rcmd_core::undo::first_missing(&target);
+                let existed = target.exists();
                 match std::fs::create_dir_all(&target) {
                     Ok(()) => {
+                        if !existed {
+                            self.last_undo = Some(rcmd_core::undo::Undo::MadeDir(first));
+                        }
                         self.status = format!("created {name}");
                         self.reload_all();
                     }
@@ -2696,7 +2711,10 @@ impl App {
                     .create_new(true)
                     .open(&target);
                 match made {
-                    Ok(_) => self.status = format!("created {name}"),
+                    Ok(_) => {
+                        self.last_undo = Some(rcmd_core::undo::Undo::MadeFile(target.clone()));
+                        self.status = format!("created {name}");
+                    }
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                         if target.is_dir() {
                             self.status = format!("{name} is a directory");
@@ -2723,9 +2741,13 @@ impl App {
                 }
                 let mut req = Request::copy(vec![from.clone()], i.dir.clone());
                 req.rename_to = Some(name.into());
+                self.remember_job(&req);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             InputKind::Permissions { targets } => {
+                self.last_undo = Some(rcmd_core::undo::Undo::Cannot(
+                    "a change of permissions".into(),
+                ));
                 let setting = match rcmd_core::attrs::parse(&text) {
                     Ok(s) => s,
                     Err(e) => {
@@ -2774,6 +2796,7 @@ impl App {
                     return;
                 }
                 let req = Request::pack(sources.clone(), dest);
+                self.remember_job(&req);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Pack, ops::start(req))));
             }
             InputKind::Pattern { mark } => {
@@ -2794,6 +2817,12 @@ impl App {
             }
             InputKind::Rename { from } => match rcmd_core::rename::rename(from, &text) {
                 Ok(to) => {
+                    if to != *from {
+                        self.last_undo = Some(rcmd_core::undo::Undo::Rename(vec![(
+                            from.clone(),
+                            to.clone(),
+                        )]));
+                    }
                     let old = from.file_name().map(|s| s.to_string_lossy().into_owned());
                     self.status = format!("renamed {} \u{2192} {text}", old.unwrap_or_default());
                     self.reload_all();
@@ -3079,6 +3108,7 @@ impl App {
             ModalAct::Start => {
                 if let Some(Modal::Confirm(c)) = self.modal.take() {
                     let kind = c.request.kind;
+                    self.remember_job(&c.request);
                     self.modal = Some(Modal::Job(Job::new(kind, ops::start(c.request))));
                 }
             }
@@ -3808,6 +3838,7 @@ impl App {
     }
 
     fn make_symlink(&mut self) {
+        self.last_undo = Some(rcmd_core::undo::Undo::Cannot("making a link".into()));
         let Some(e) = self
             .panes
             .get(&self.focus)
@@ -4579,6 +4610,115 @@ impl App {
             items.push(Item::cmd("About rcmd", "", Cmd::About, true));
         }
         items
+    }
+
+    /// What a job about to start means for Ctrl+Z: a move can be undone; the rest say
+    /// that they cannot, so an older rename is never undone behind them.
+    fn remember_job(&mut self, r: &Request) {
+        use rcmd_core::undo::Undo;
+        self.last_undo = Some(match r.kind {
+            ops::Kind::Move => Undo::Move {
+                sources: r.sources.clone(),
+                dest: r.dest.clone().unwrap_or_default(),
+                rename_to: r.rename_to.clone(),
+            },
+            ops::Kind::Copy => Undo::Cannot("a copy".into()),
+            ops::Kind::Delete => Undo::Cannot(if r.to_trash {
+                "a delete to the trash (your system's trash can restore it)".into()
+            } else {
+                "a permanent delete".into()
+            }),
+            ops::Kind::Extract => Undo::Cannot("an extraction".into()),
+            ops::Kind::Pack => Undo::Cannot("packing".into()),
+        });
+    }
+
+    /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
+    fn ask_undo(&mut self) {
+        let Some(u) = &self.last_undo else {
+            self.status = "nothing to undo".into();
+            return;
+        };
+        let plan = match u.plan() {
+            Ok(p) => p,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        use rcmd_core::undo::Plan;
+        let what = match &plan {
+            Plan::Rename(m) => m
+                .iter()
+                .take(8)
+                .map(|(f, t)| {
+                    format!(
+                        "{}  \u{2192}  {}",
+                        Self::describe(std::slice::from_ref(f)),
+                        Self::describe(std::slice::from_ref(t))
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Plan::Move { back, into } => vec![format!(
+                "move {} back to {}",
+                Self::describe(back),
+                tidy(into)
+            )],
+            Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+        };
+        let mut body = vec![format!("Undo the {}?", u.describe()), String::new()];
+        body.extend(what);
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Undo".into(),
+            body,
+            danger: false,
+            yes: Some(("undo".into(), Cmd::Undo)),
+            buttons: Vec::new(),
+            footnote: None,
+            picture: None,
+        }));
+    }
+
+    /// Carry out the undo, checking the disk once more.
+    fn undo(&mut self) {
+        use rcmd_core::undo::Plan;
+        let Some(u) = self.last_undo.clone() else {
+            return;
+        };
+        let plan = match u.plan() {
+            Ok(p) => p,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        match plan {
+            Plan::Rename(moves) => {
+                let out = rcmd_core::batch_rename::apply(&moves);
+                self.status = match out.errors.first() {
+                    None => format!("undone: {}", u.describe()),
+                    Some(e) => format!(
+                        "undo: {} renamed back, {} failed \u{2014} {e}",
+                        out.renamed,
+                        out.errors.len()
+                    ),
+                };
+            }
+            Plan::Move { back, into } => {
+                let request = Request::mv(back, into);
+                self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
+                self.status = format!("undoing the {}", u.describe());
+            }
+            Plan::Remove(p) => {
+                self.status = match rcmd_core::undo::remove(&p) {
+                    Ok(()) => format!("undone: {}", u.describe()),
+                    Err(e) => format!("cannot undo: {e}"),
+                };
+            }
+        }
+        // One step: an undone operation is not undone again.
+        self.last_undo = None;
+        self.reload_all();
     }
 
     /// File → Settings….

@@ -27,6 +27,9 @@ that heading and starts a new, empty one here. -->
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
   `[theme] name`, or a file of your own in `themes/` that starts from one of them.
   **View → Theme…** switches while rcmd runs.
+- **Ctrl+Z** undoes the last rename, rename-many, move, new directory or new file,
+  after asking, and only while the disk still matches: nothing is overwritten or lost.
+  After a copy or a delete it says those cannot be undone.
 - **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
 - "Run it?" can run a program in a terminal tab, where its output stays after it ends.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what

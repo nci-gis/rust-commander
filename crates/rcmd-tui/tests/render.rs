@@ -2108,6 +2108,46 @@ fn settings_in_read_only_mode_shows_but_never_saves() {
 }
 
 #[test]
+fn ctrl_z_undoes_a_rename_a_new_directory_and_a_move_after_asking() {
+    let (a, b) = fixture();
+    // F2 selects the name part: typing replaces it.
+    let s = shot_keys("110x24", "Down,F2,x,Enter,Ctrl+z", &a, &b);
+    assert!(s.contains("Undo the rename of victim.txt to x.txt?"), "{s}");
+    // That run renamed it for real and stopped at the question: put it back by hand.
+    fs::rename(a.join("x.txt"), a.join("victim.txt")).unwrap();
+    shot_keys("110x24", "Down,F2,x,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists() && !a.join("x.txt").exists());
+
+    shot_keys("110x24", "F7,d,o,c,s,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(!a.join("docs").exists(), "the new directory went");
+
+    // A move, then its undo: back where it came from.
+    shot_keys("110x24", "Down,F6,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists() && !b.join("victim.txt").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn ctrl_z_says_what_cannot_be_undone_and_refuses_what_changed() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Ctrl+z", &a, &b);
+    assert!(s.contains("nothing to undo"), "{s}");
+    // A copy is not undone, and an older rename is not undone behind it.
+    let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,Ctrl+z", &a, &b);
+    assert!(
+        s.contains("the last operation, a copy, cannot be undone"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    // In read-only mode undo is refused, as every write is.
+    let (a, b) = fixture();
+    let s = shot_flags(&["--read-only"], "Ctrl+z", &a, &b);
+    assert!(s.contains("read-only mode") && s.contains("undoing"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_opens_a_file_with_its_program_as_total_commander_does() {
     let (a, b) = fixture();
     let s = shot_cfg_env("", &[], "Down,Enter", &a, &b);

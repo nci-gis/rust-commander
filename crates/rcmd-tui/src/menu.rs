@@ -57,6 +57,8 @@ pub enum Cmd {
     ThemeMenu,
     /// File → Settings….
     Settings,
+    /// Undo the last operation, confirmed.
+    Undo,
     /// Switch to this theme now (not saved: Settings saves it).
     SetTheme(String),
 }

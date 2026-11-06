@@ -67,6 +67,10 @@ rcmd for yours, or see [keys.md](keys.md).
 - Where nothing can be opened on a screen — over SSH, without a desktop, in read-only
   mode — Enter views the file instead and says why. `enter = "view"` under `[files]`
   makes Enter always view, as in rcmd 0.1.0.
+- **Ctrl+Z** undoes the last rename (one file or many), move, new directory or new
+  file, after showing what it will do. It checks the disk first: a file renamed since,
+  or a new directory with something in it now, is left alone. Copies and deletes are not
+  undone (your system's trash restores what F8 sent there), and Ctrl+Z says so.
 - rcmd always asks before it deletes or overwrites anything.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.

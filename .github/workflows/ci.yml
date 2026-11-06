@@ -41,7 +41,9 @@ jobs:
       # installing Rust there. Under the run's Artifacts; kept for two weeks.
       - uses: actions/upload-artifact@v4
         with:
-          name: rcmd-${{ runner.os }}-${{ github.ref_name }}
+          # A pull request's ref_name is "1/merge", and "/" is not allowed in a name:
+          # use the branch it comes from.
+          name: rcmd-${{ runner.os }}-${{ github.head_ref || github.ref_name }}
           path: |
             target/release/rcmd
             target/release/rcmd.exe

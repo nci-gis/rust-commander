@@ -121,6 +121,29 @@ Work on a `feat/keymaps` branch; CI runs on its pull request into `dev`.
 
 ## Do
 
+**2026-11-07, Linux measured** (`rcmd --show-keys`, the owner's Ubuntu desktop; which
+terminal and version not yet noted):
+
+| Pressed | Arrives | Bound today to |
+|---|---|---|
+| Alt+← → ↑ ↓ | yes, all four | parent, enter_dir, –, history |
+| Alt+Shift+← → ↑ ↓ | yes, all four | resize_* |
+| F1–F10, F12 | yes | help … quit, focus_terminal |
+| F11 | no: the terminal toggles full screen (two resize events) | nothing |
+| PageUp, PageDown, Home, End | yes | page_up, page_down, top, bottom |
+| Ctrl+Space | yes | calc_sizes |
+| Ctrl+\ | yes, as Ctrl+4 (normalised to go_root) | go_root |
+| Alt+, Alt+. Alt+= | yes | back, forward, mirror_pane |
+| Alt+1, Alt+2 | yes | nothing |
+| Alt+C N S D T W Z | yes | as bound |
+| Mouse | clicks yes | |
+| Shift+F1, F2, F4, F5, F6, F8, F9 · Alt+F5, F7, F9 · Ctrl+PageUp / PageDown | **absent from the output**: not pressed, or pressed and swallowed? Asked. | many: Alt+F7 is Find |
+
+Suspected, to confirm: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
+other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown
+(its tabs) and Shift+F10 (context menu). If Alt+F7 is lost, Find needs a second key in
+the `linux` set.
+
 ## Check
 
 - [ ] The measurement tables for all three systems are here, with what was not tested.

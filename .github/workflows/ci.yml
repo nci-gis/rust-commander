@@ -39,6 +39,18 @@ jobs:
       # actually says whether rcmd works on this platform.
       - run: cargo test --all
       - run: cargo build --release
+      # macos-latest is Apple Silicon, and an Intel Mac cannot run what it builds. Build
+      # the Intel half too and join the two, so the one file runs on either.
+      - name: universal macOS binary
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          lipo -create -output rcmd-universal \
+            target/release/rcmd target/x86_64-apple-darwin/release/rcmd
+          lipo rcmd-universal -verify_arch x86_64 arm64
+          mv rcmd-universal target/release/rcmd
+          lipo -info target/release/rcmd
       # The build that passed, ready to run: try a branch on Windows or macOS without
       # installing Rust there. Under the run's Artifacts; kept for two weeks.
       - uses: actions/upload-artifact@v4

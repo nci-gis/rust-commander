@@ -89,6 +89,20 @@ copy = ["F2", "Ctrl+c"]   # copy is now F2 or Ctrl+C, and no longer F5
 Naming an action replaces all of its default keys. The names are in
 `rcmd --print-config` and on the F1 screen.
 
+A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
+Left. Bindings that start with the same key form a group: after its first key, the
+second keys can be pressed again and again, until Enter, Esc, another key, or two
+seconds without one. That is how **Alt+R, then arrows** resizes.
+
+```toml
+[keys]
+resize_left = ["Alt+Shift+Left", "Alt+r Left", "Alt+r h"]
+```
+
+Two actions given the same key here is an error, and so is a key that both runs an
+action and starts a group. Taking a key that rcmd uses by default is fine: that action
+loses it.
+
 ## Bookmarks
 
 ```toml

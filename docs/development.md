@@ -46,6 +46,22 @@ Samples go to `target/tmp/soak-rss.csv`.
 - The tagline in `README.md` is the `description` in `Cargo.toml`. A test checks it.
 - The GitHub About box: `scripts/sync-about.sh --apply`.
 
+## Icon and logo
+
+The SVGs in `assets/` are the source: `icon.svg`, `icon-16.svg` (the same picture
+redrawn on whole pixels, because a scaled-down one blurs at 16 px), and the README's
+`logo-light.svg` / `logo-dark.svg`, whose wordmark is drawn as strokes so it looks the
+same without any font. After changing an icon SVG, rebuild `assets/rcmd.ico`:
+
+```bash
+cargo install --locked resvg   # once
+scripts/icons.sh
+```
+
+On Windows, `build.rs` puts the icon and the version details into `rcmd.exe`. It needs
+the Windows SDK's `rc.exe` (or MinGW's `windres`); without one it warns and builds
+without the icon, unless `RCMD_REQUIRE_ICON=1`, which CI and releases set.
+
 ## Branches
 
 Work on `dev`. `main` changes only through a pull request from `dev`, with CI green.

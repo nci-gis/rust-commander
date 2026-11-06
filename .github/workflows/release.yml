@@ -51,6 +51,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked -p rcmd-tui --target ${{ matrix.target }}
+        env:
+          # rcmd.exe without its icon is a broken release, not a warning.
+          RCMD_REQUIRE_ICON: ${{ contains(matrix.target, 'windows') && '1' || '' }}
       - uses: actions/download-artifact@v4
         with:
           name: licences

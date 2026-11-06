@@ -29,6 +29,7 @@ The first release.
 - A real shell underneath, with tabs and splits.
 - Menu bar (F9), help with every key and setting (F1), and a usage view (Shift+F1).
 - Mouse: click, drag and drop, right-click menus, drag borders to resize.
+- An icon, in `rcmd.exe` on Windows, and a logo.
 - Scrollbars on file panes, the viewer and the terminal's history, shown only when there is more than fits.
 - Optional: colours from `$LS_COLORS`, Nerd Font icons, a git status column.
 

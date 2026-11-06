@@ -17,6 +17,9 @@ jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # A Windows build fails rather than make rcmd.exe without its icon.
+      RCMD_REQUIRE_ICON: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     strategy:
       # Report every platform's result. A Windows failure must not hide a macOS one.
       fail-fast: false

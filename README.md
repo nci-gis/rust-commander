@@ -1,6 +1,11 @@
-# rcmd
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="rcmd" src="assets/logo-light.svg" width="330">
+  </picture>
+</p>
 
-A terminal-style file commander, written in Rust.
+<p align="center">A terminal-style file commander, written in Rust.</p>
 
 ```
   File   View   Help

@@ -1248,7 +1248,8 @@ fn a_session_saved_with_verbatim_paths_reopens_without_them() {
     let verbatim = |p: &std::path::Path| PathBuf::from(format!(r"\\?\{}", p.display()));
     let state = session_file(a.parent().unwrap(), &verbatim(&a), &verbatim(&b), 2);
     let s = shot_session(&state, &[]);
-    assert!(s.contains("alpha.txt"), "the session came back\n{s}");
+    // The session opens pane a on its second tab, `sub`.
+    assert!(s.contains(" 2 sub "), "the session came back\n{s}");
     assert!(!s.contains(r"\\?\"), "{s}");
 }
 
@@ -2372,7 +2373,14 @@ fn shift_f1_shows_what_rcmd_is_using() {
 fn the_readme_tagline_is_the_cargo_description() {
     // Cargo.toml is the one source; the README is the one place that cannot read it.
     let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
-    let tagline = readme.lines().nth(2).unwrap_or_default();
+    // The centred line under the logo.
+    let tagline = readme
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix(r#"<p align="center">"#)?
+                .strip_suffix("</p>")
+        })
+        .unwrap_or_default();
     assert_eq!(
         tagline,
         env!("CARGO_PKG_DESCRIPTION"),

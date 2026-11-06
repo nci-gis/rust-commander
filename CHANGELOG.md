@@ -18,6 +18,10 @@ that heading and starts a new, empty one here. -->
 - **Alt+1**…**Alt+9** go to tab N. Ctrl+PageUp / PageDown cannot be typed on a laptop
   (Ctrl+Fn+↑ loses Ctrl), and the terminal or desktop takes Ctrl+Tab.
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
+- `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
+  window or a terminal tab, for some systems only, or only where there is a screen.
+- **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
+- "Run it?" can run a program in a terminal tab, where its output stays after it ends.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
   to do; F1 links to it.
 - Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends
@@ -27,12 +31,18 @@ that heading and starts a new, empty one here. -->
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
 ### Changed
+- **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
+  extension, else the system's program; programs still ask "Run it?" first. Over SSH,
+  without a desktop or in read-only mode it views the file and says why.
+  `[files] enter = "view"` keeps the old Enter.
 - About: the credit sits at the bottom right, beside the close button.
 - Two actions given the same key in `[keys]` are now an error that names both; before,
   the one written later silently took it.
 - The config documentation lists every file rcmd keeps, and where.
 
 ### Fixed
+- `o` over SSH into a Mac or a Windows machine opened the file on that machine's own
+  screen; now it says there is no screen here, as it did on Linux.
 - A file viewed from inside an archive is no longer left in the temporary directory
   when rcmd ends with the viewer still open.
 - Colours on terminals without 24-bit colour. macOS Terminal.app before macOS 26 showed

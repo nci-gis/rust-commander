@@ -1,10 +1,10 @@
 # Round 005: Enter opens files the Total Commander way
 
-**Status**: Planning
+**Status**: Review
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 3
 **Replaces**: [Round 002](Round_002.md), the same plan, renumbered so rounds run in
 number order (owner, 2026-11-07)
-**Date started**: (when its branch is opened, after 0.2.0)
+**Date started**: 2026-11-07 (owner: "1->5 làm nhé", target v0.2.0)
 **Date completed**:
 
 ## Goal
@@ -115,17 +115,46 @@ ever passes through a shell, and running a program is still asked first.
 
 ## Do
 
+**2026-11-07.** Round 004 still waits for the owner's Mac test; this round started on the
+owner's go-ahead to work through the roadmap toward v0.2.0.
+
+- Step 0: `opener::no_screen()` — SSH (`SSH_CONNECTION` / `SSH_TTY`) on every system,
+  no `DISPLAY` / `WAYLAND_DISPLAY` on Linux and the BSDs. `o`, Enter and
+  `needs_display` rules all ask it. Fixes `o` over SSH into a Mac or Windows machine.
+- Step 1: `TermPane::spawn_argv` (argv, no splitting), `keep` and `ended` ("exit N");
+  `TermPanel::add_program_tab`, `focused_program_ended`; `reap` leaves kept tabs; the
+  pane's last row says "<name> ended (exit N) — Enter or Esc closes"; Enter or Esc closes
+  it and focus returns to the last file pane; kept tabs are not saved in the session.
+  "Run it?" now: Cancel, Run in a terminal tab (console programs: the exec bit on Unix,
+  .exe .com .bat .cmd on Windows), Run with the system.
+- Step 2: `[files] enter = "open"` (default) | `"view"`; `App::enter_file`. Inside an
+  archive Enter still views. Where nothing can be opened the file is viewed and the
+  reason is written in the viewer's own bar, which covers the status line (first try
+  wrote only the status line, invisible behind the viewer).
+- Step 3: `[[open]]` (`OpenRule`: ext, action, command, terminal, needs_display, os),
+  validated at load; first match wins; `command` is an argv.
+- Step 4: Shift+O, `open_with_menu`: matching rules (needs_display ones greyed out over
+  SSH), System default, View, Edit, Run in a terminal tab; in the File and right-click
+  menus.
+- Step 5: guide, config ("Opening files"), troubleshooting, CHANGELOG, keys.md.
+- Tests start as a local desktop session everywhere (render and pty strip the SSH
+  variables and set `DISPLAY`), so CI on three systems sees the same thing; this session
+  itself runs over SSH, which is how the need showed.
+
 ## Check
 
 - [ ] Unit tests: rule matching (case, several extensions, first match, `os`,
       `needs_display`), argv building with hostile names (spaces, `&`, `;`, quotes, a
-      leading `-`), config errors.
-- [ ] Render tests: Enter on a file says "would open … with …" under `--screenshot`;
+      leading `-`), config errors. Done: config errors (8 cases), matching (case, os,
+      extension). **Not done:** hostile names through a rule's argv — the argv is built
+      by pushing the path as one `OsString`, never joined, but no test proves it.
+- [x] Render tests: Enter on a file says "would open … with …" under `--screenshot`;
       Enter on a program shows "Run it?"; Enter in read-only views; Open with lists the
-      rules.
-- [ ] A pty test: "Run in a terminal tab" shows the program's output in a new tab, and
-      the tab is still there after the program ends.
-- [ ] Render tests with `SSH_CONNECTION` set: Enter views, `o` refuses with the reason,
+      rules. Plus: `enter = "view"`, each rule kind, a rule for another OS, a
+      needs_display rule over SSH.
+- [x] A pty test: "Run in a terminal tab" shows the program's output in a new tab, and
+      the tab is still there after the program ends. (Unix; Enter closes it.)
+- [x] Render tests with `SSH_CONNECTION` set: Enter views, `o` refuses with the reason,
       on every system (an environment variable, so CI covers all three).
 - [ ] By hand on each system (CI cannot open windows): a PDF opens; Enter over SSH on
       Linux views; a `.cmd` rule with a hostile name is refused, not run.

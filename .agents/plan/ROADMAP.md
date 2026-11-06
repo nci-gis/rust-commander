@@ -63,6 +63,10 @@ the file):
   exit 101) when the reader stops early; a closed pipe should end quietly, as `cat`
   does. Any output larger than the pipe's buffer is affected.
 - `rcmd --show-keys` has no automated test (Round 003).
+- **rcmd keeps track of its own temporary files** (owner, 2026-11-07): one directory per
+  run for everything it writes to the temp directory (viewer copies, the rename list),
+  touched while rcmd runs; at start, rcmd removes the directories of runs that are gone,
+  so a crash or a kill leaves nothing behind for good. Before v0.2.0.
 - The Alt+R group's Esc path has no test of its own (Round 004).
 
 Waiting on a person, at any point: the one name (item 8); the four promotions proposed
@@ -77,7 +81,7 @@ in Rounds 001 and 003; the read-only finding in
 | 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
 | 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
 | **Next: Total Commander feel** | | | | |
-| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Planning: next after 0.2.0 |
+| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Review |
 | 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |
 | 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | In Progress: built, in review |
 | 6 | Settings (File → Settings…): tabs General, Theme, Keys, Panels and layout | L | — | after 4 and 5 |

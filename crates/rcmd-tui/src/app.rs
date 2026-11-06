@@ -1142,6 +1142,25 @@ impl App {
             return self.run_bound(a, k);
         }
         if self.focus_is_term() {
+            let ended = matches!(self.panes.get(&self.focus), Some(Pane::Term(t)) if t.focused_program_ended());
+            if ended && matches!(k.code, KeyCode::Enter | KeyCode::Esc) {
+                let empty = self.panel().is_some_and(|p| p.close_focused());
+                if empty {
+                    self.remove_terminal_panel();
+                }
+                // Back to the files the program was started from.
+                let files = self.file_panes();
+                if let Some(id) = self
+                    .mru
+                    .iter()
+                    .copied()
+                    .find(|id| files.contains(id))
+                    .or_else(|| files.first().copied())
+                {
+                    self.focus = id;
+                }
+                return;
+            }
             if let Some(Pane::Term(t)) = self.panes.get(&self.focus) {
                 t.send_key(k);
             }
@@ -1415,11 +1434,13 @@ impl App {
                 }
             }
             Action::Open => {
-                // Entering a directory navigates; "entering" a file views it.
+                // Entering a directory navigates; on a file, Enter opens it (or views
+                // it, with `[files] enter = "view"`).
                 if self.focused_files().and_then(|f| f.activate()).is_some() {
-                    self.begin_view();
+                    self.enter_file();
                 }
             }
+            Action::OpenWithMenu => self.open_with_menu(),
             // Space on a directory also works out its size, as in Total Commander: the
             // moment you select a directory is the moment you want to know.
             Action::Mark => self.with_files(|f| {
@@ -1915,6 +1936,12 @@ impl App {
                     true,
                 ));
                 items.push(Item::act(
+                    "Open with\u{2026}",
+                    k(Action::OpenWithMenu),
+                    Action::OpenWithMenu,
+                    true,
+                ));
+                items.push(Item::act(
                     "Checksum (SHA-256)",
                     k(Action::Checksum),
                     Action::Checksum,
@@ -2075,6 +2102,8 @@ impl App {
                 self.save_bookmarks(format!("removed the bookmark for {}", tidy(&p)));
             }
             Cmd::OpenFile(p) => self.launch(&p),
+            Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
+            Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
             Cmd::UserCommand(i) => self.run_user_command(i),
             Cmd::About => {
                 self.modal = Some(Modal::Ask(modal::Ask {
@@ -3275,20 +3304,223 @@ impl App {
             return;
         }
         if opener::runs_something(&path) {
-            let name = Self::describe(std::slice::from_ref(&path));
-            let items = vec![
-                Item::cancel("Cancel", "Esc"),
-                Item::cmd(format!("Run {name}"), "", Cmd::OpenFile(path), true),
-            ];
-            self.status = format!("{name} is a program \u{2014} opening it runs it");
-            self.modal = Some(Modal::Menu(Menu::new(
-                Some("Run it?".into()),
-                items,
-                self.pane_anchor(),
-            )));
-            return;
+            return self.ask_to_run(path);
         }
         self.launch(&path);
+    }
+
+    /// "Run it?" for a program, a script or a launcher: Cancel first, then, for a
+    /// console program, a terminal tab (its output stays on screen), then the system.
+    fn ask_to_run(&mut self, path: PathBuf) {
+        let name = Self::describe(std::slice::from_ref(&path));
+        let mut items = vec![Item::cancel("Cancel", "Esc")];
+        if opener::console_program(&path) {
+            let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
+            items.push(Item::cmd(
+                format!("Run {name} in a terminal tab"),
+                "",
+                Cmd::RunInTerminal {
+                    argv: vec![path.clone().into_os_string()],
+                    cwd,
+                },
+                true,
+            ));
+        }
+        items.push(Item::cmd(
+            format!("Run {name} with the system"),
+            "",
+            Cmd::OpenFile(path),
+            true,
+        ));
+        self.status = format!("{name} is a program \u{2014} opening it runs it");
+        self.modal = Some(Modal::Menu(Menu::new(
+            Some("Run it?".into()),
+            items,
+            self.pane_anchor(),
+        )));
+    }
+
+    /// Enter on a file, as in Total Commander: an `[[open]]` rule for its extension,
+    /// else "Run it?" for a program, else the system's program; and where nothing can
+    /// be opened (over SSH, no display, read-only), the viewer, saying why.
+    fn enter_file(&mut self) {
+        if self.settings.config.files.enter == "view" || self.focused_archive().is_some() {
+            return self.begin_view();
+        }
+        let Some(path) = self.current_file() else {
+            return;
+        };
+        if !rcmd_core::policy::get().allows(&path) {
+            return self.begin_view();
+        }
+        let screen = opener::no_screen();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let rule = self.settings.config.open.iter().position(|r| {
+            r.matches(&ext, crate::config::this_os()) && !(r.needs_display && screen.is_some())
+        });
+        if let Some(i) = rule {
+            return self.apply_rule(i, path);
+        }
+        if self.refused(Action::OpenWith).is_some() {
+            let why = format!("{} mode", self.settings.mode.label());
+            return self.view_instead(&why);
+        }
+        if opener::runs_something(&path) {
+            return self.ask_to_run(path);
+        }
+        let configured = !self.settings.config.commands.opener.trim().is_empty();
+        if let (Some(why), false) = (screen, configured) {
+            return self.view_instead(&why);
+        }
+        self.launch(&path);
+    }
+
+    /// Enter could not open the file: view it, and say why where it will be seen — in
+    /// the viewer, which covers the status line.
+    fn view_instead(&mut self, why: &str) {
+        let note = format!("{why}: viewing it instead");
+        self.begin_view();
+        if let Some(Modal::View(v)) = &mut self.modal {
+            v.note(&note);
+        }
+        self.status = note;
+    }
+
+    /// Rule `i` of `[[open]]` on `path`.
+    fn apply_rule(&mut self, i: usize, path: PathBuf) {
+        let Some(rule) = self.settings.config.open.get(i).cloned() else {
+            return;
+        };
+        match rule.action.as_str() {
+            "view" => return self.begin_view(),
+            "edit" => return self.perform(Action::Edit),
+            _ => {}
+        }
+        // A command runs a program: not where programs may not run.
+        if self.refused(Action::OpenWith).is_some() {
+            let why = format!("{} mode", self.settings.mode.label());
+            return self.view_instead(&why);
+        }
+        let mut argv: Vec<std::ffi::OsString> = rule.command.iter().map(Into::into).collect();
+        argv.push(path.clone().into_os_string());
+        if rule.terminal {
+            let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
+            return self.run_in_terminal(argv, cwd);
+        }
+        let name = Self::describe(std::slice::from_ref(&path));
+        if !self.interactive {
+            self.status = format!("would open {name} with {}", rule.command[0]);
+            return;
+        }
+        let mut cmd = std::process::Command::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        self.status = match opener::spawn(cmd, name.clone(), self.notes.0.clone()) {
+            Ok(()) => format!("opened {name} with {}", rule.command[0]),
+            Err(e) => e,
+        };
+    }
+
+    /// A program in a terminal tab of its own, started by argv (no shell), kept after
+    /// it ends so its output can be read.
+    fn run_in_terminal(&mut self, argv: Vec<std::ffi::OsString>, cwd: PathBuf) {
+        let name = argv
+            .first()
+            .map(|p| Self::describe(&[PathBuf::from(p)]))
+            .unwrap_or_default();
+        if self.refused(Action::NewTerminal).is_some() || self.settings.mode.read_only() {
+            self.status = format!(
+                "{} mode \u{2014} running programs is turned off",
+                self.settings.mode.label()
+            );
+            return;
+        }
+        if !self.interactive {
+            self.status = format!("would run {name} in a terminal tab");
+            return;
+        }
+        let full = self.screen;
+        if self.term_id.is_none() || !self.term_shown {
+            self.toggle_term(full);
+        }
+        if !self.terminal_room() {
+            return;
+        }
+        match self.panel().map(|p| p.add_program_tab(&cwd, &argv)) {
+            Some(Ok(())) => self.status = format!("running {name}"),
+            Some(Err(e)) => self.status = format!("cannot run {name}: {e}"),
+            None => self.status = "no terminal panel".into(),
+        }
+        if let Some(id) = self.term_id {
+            self.focus = id;
+        }
+    }
+
+    /// Shift+O: every way to open the file under the cursor — the `[[open]]` rules that
+    /// match it, the system's program, the viewer, the editor.
+    fn open_with_menu(&mut self) {
+        let Some(path) = self.current_file() else {
+            self.status = "Open with\u{2026} is for a file".into();
+            return;
+        };
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let screen = opener::no_screen();
+        let mut items = Vec::new();
+        for (i, r) in self.settings.config.open.iter().enumerate() {
+            if r.matches(&ext, crate::config::this_os()) {
+                let usable = !(r.needs_display && screen.is_some());
+                items.push(Item::cmd(
+                    r.label(),
+                    if r.terminal { "in a tab" } else { "" },
+                    Cmd::ApplyRule(i, path.clone()),
+                    usable,
+                ));
+            }
+        }
+        items.push(Item::act(
+            "System default",
+            self.footer_key(Action::OpenWith).unwrap_or_default(),
+            Action::OpenWith,
+            self.refused(Action::OpenWith).is_none() && screen.is_none(),
+        ));
+        items.push(Item::act(
+            "View",
+            self.footer_key(Action::View).unwrap_or_default(),
+            Action::View,
+            true,
+        ));
+        items.push(Item::act(
+            "Edit",
+            self.footer_key(Action::Edit).unwrap_or_default(),
+            Action::Edit,
+            self.refused(Action::Edit).is_none(),
+        ));
+        if opener::console_program(&path) {
+            let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
+            items.push(Item::cmd(
+                "Run in a terminal tab",
+                "",
+                Cmd::RunInTerminal {
+                    argv: vec![path.clone().into_os_string()],
+                    cwd,
+                },
+                !self.settings.mode.read_only(),
+            ));
+        }
+        items.push(Item::cancel("Cancel", "Esc"));
+        let name = Self::describe(std::slice::from_ref(&path));
+        self.modal = Some(Modal::Menu(Menu::new(
+            Some(format!("Open {name} with")),
+            items,
+            self.pane_anchor(),
+        )));
     }
 
     fn launch(&mut self, path: &Path) {
@@ -4219,6 +4451,7 @@ impl App {
             Some(("View", A::View)),
             Some(("Edit", A::Edit)),
             Some(("Open with system app", A::OpenWith)),
+            Some(("Open with\u{2026}", A::OpenWithMenu)),
             None,
             Some(("Copy", A::Copy)),
             Some(("Move", A::Move)),

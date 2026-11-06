@@ -26,6 +26,11 @@ key. Either way, give the action another key under `[keys]` (see
 - **Ctrl+Tab** belongs to the terminal or the desktop.
 - **F11** is the terminal's full screen. rcmd does not use it.
 
+**Enter views a file instead of opening it.** Over SSH, without a desktop, or in
+read-only mode, there is no screen here to open it on, so rcmd views it and says why at
+the bottom of the viewer. Set an `[[open]]` rule with `terminal = true` for programs
+that work in a terminal (see [config.md](config.md#opening-files)).
+
 **Colours look muted over SSH.** rcmd uses 24-bit colour only when it knows the
 terminal takes it, usually from `COLORTERM`, which SSH does not pass on. On the server:
 

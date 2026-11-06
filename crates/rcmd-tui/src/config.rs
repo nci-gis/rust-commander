@@ -38,6 +38,61 @@ pub struct Config {
     /// directory, %D the other pane's, %% a percent sign. Each one is quoted for
     /// your shell.
     pub menu: Vec<MenuItem>,
+    /// How Enter opens files of these extensions, before the system's program: the
+    /// first rule that matches wins. Shift+O lists the rules that match a file.
+    pub open: Vec<OpenRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRule {
+    /// Extensions, without the dot; case does not matter.
+    pub ext: Vec<String>,
+    /// "view" or "edit": rcmd's viewer, or your editor. Or a `command` instead.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub action: String,
+    /// A program and its arguments, as a list; the file is added as one more argument.
+    /// No shell reads it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    /// Run `command` in a terminal tab instead of as a window of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal: bool,
+    /// Skip this rule where nothing can be shown on a screen (over SSH, no display),
+    /// so the next rule, or the viewer, is used.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_display: bool,
+    /// The systems this rule is for: "windows", "macos", "linux"; empty for all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub os: Vec<String>,
+}
+
+impl OpenRule {
+    /// Whether this rule is for `ext` (lower case, without the dot) on system `os`.
+    pub fn matches(&self, ext: &str, os: &str) -> bool {
+        (self.os.is_empty() || self.os.iter().any(|o| o == os))
+            && self.ext.iter().any(|e| e.eq_ignore_ascii_case(ext))
+    }
+
+    /// What it does, for a menu: "view", "edit", or the command.
+    pub fn label(&self) -> String {
+        if self.command.is_empty() {
+            self.action.clone()
+        } else {
+            self.command.join(" ")
+        }
+    }
+}
+
+/// The name `[[open]] os` uses for the system rcmd runs on.
+pub fn this_os() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,6 +155,9 @@ pub struct Files {
     /// open; a repository's own config can make git run programs (filters), so turn
     /// it on only where you trust the repositories. Never runs in restricted mode.
     pub git_status: bool,
+    /// What Enter does on a file: "open" it with its program, as Total Commander does
+    /// (an `[[open]]` rule first, else the system's), or "view" it (F3).
+    pub enter: String,
 }
 
 impl Default for Files {
@@ -114,6 +172,7 @@ impl Default for Files {
             ls_colors: false,
             icons: false,
             git_status: false,
+            enter: "open".into(),
         }
     }
 }
@@ -381,6 +440,57 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         if m.command.trim().is_empty() || m.label.trim().is_empty() {
             return Err(format!(
                 "[[menu]] #{n}: label and command must not be empty"
+            ));
+        }
+    }
+
+    if !matches!(config.files.enter.as_str(), "open" | "view") {
+        return Err(format!(
+            "[files] enter = \"{}\": expected open or view",
+            config.files.enter
+        ));
+    }
+    for (i, r) in config.open.iter().enumerate() {
+        let n = i + 1;
+        if r.ext.is_empty() || r.ext.iter().any(|e| e.trim().is_empty() || e.contains('.')) {
+            return Err(format!(
+                "[[open]] #{n}: ext lists extensions without the dot, e.g. [\"pdf\"]"
+            ));
+        }
+        match (r.action.as_str(), r.command.is_empty()) {
+            ("view" | "edit", true) => {}
+            ("", false) => {
+                if r.command[0].trim().is_empty() {
+                    return Err(format!(
+                        "[[open]] #{n}: command starts with an empty program"
+                    ));
+                }
+            }
+            ("", true) => {
+                return Err(format!(
+                    "[[open]] #{n}: needs action = \"view\" or \"edit\", or a command"
+                ))
+            }
+            (a, true) => {
+                return Err(format!(
+                    "[[open]] #{n} action = \"{a}\": expected view or edit"
+                ))
+            }
+            (_, false) => {
+                return Err(format!(
+                    "[[open]] #{n}: action and command together; it is one or the other"
+                ))
+            }
+        }
+        if r.terminal && r.command.is_empty() {
+            return Err(format!("[[open]] #{n}: terminal = true needs a command"));
+        }
+        if let Some(o) =
+            r.os.iter()
+                .find(|o| !matches!(o.as_str(), "windows" | "macos" | "linux"))
+        {
+            return Err(format!(
+                "[[open]] #{n} os: \"{o}\": expected windows, macos or linux"
             ));
         }
     }
@@ -677,6 +787,46 @@ mod tests {
         }
         assert!(decode(&[0xFF, 0xFE, 0x41]).is_err(), "odd UTF-16");
         assert!(decode(b"menu_bar = \xff").is_err(), "neither");
+    }
+
+    #[test]
+    fn enter_and_open_rules_are_checked() {
+        assert_eq!(parse("").unwrap().config.files.enter, "open");
+        assert!(parse("[files]\nenter = \"view\"\n").is_ok());
+        let e = parse("[files]\nenter = \"run\"\n").unwrap_err();
+        assert!(e.contains("[files] enter"), "{e}");
+        for (bad, says) in [
+            ("ext = [\".pdf\"]\naction = \"view\"", "without the dot"),
+            ("ext = []\naction = \"view\"", "without the dot"),
+            ("ext = [\"pdf\"]", "needs action"),
+            (
+                "ext = [\"pdf\"]\naction = \"print\"",
+                "expected view or edit",
+            ),
+            (
+                "ext = [\"pdf\"]\naction = \"view\"\ncommand = [\"x\"]",
+                "one or the other",
+            ),
+            (
+                "ext = [\"pdf\"]\naction = \"view\"\nterminal = true",
+                "needs a command",
+            ),
+            (
+                "ext = [\"pdf\"]\ncommand = [\"x\"]\nos = [\"amiga\"]",
+                "expected windows",
+            ),
+            ("ext = [\"pdf\"]\ncommand = [\"\"]", "empty program"),
+        ] {
+            let e = parse(&format!("[[open]]\n{bad}\n")).unwrap_err();
+            assert!(e.contains("[[open]] #1") && e.contains(says), "{bad}: {e}");
+        }
+        let ok = parse("[[open]]\next = [\"PDF\"]\ncommand = [\"zathura\"]\nos = [\"linux\"]\n")
+            .unwrap();
+        let r = &ok.config.open[0];
+        assert!(
+            r.matches("pdf", "linux") && !r.matches("pdf", "macos") && !r.matches("txt", "linux")
+        );
+        assert_eq!(r.label(), "zathura");
     }
 
     #[test]

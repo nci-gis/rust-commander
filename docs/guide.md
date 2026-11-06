@@ -27,7 +27,8 @@ rcmd for yours, or see [keys.md](keys.md).
 
 ## Moving around
 
-- **Enter** opens a directory, or views a file. **Backspace** or **Alt+←** goes up.
+- **Enter** opens a directory, or opens a file with its program (see below).
+  **Backspace** or **Alt+←** goes up.
 - **~** goes to your home directory. **Ctrl+\\** goes to the root of the drive.
 - **/** jumps to a name as you type. **↑ ↓** go to the next match.
 - **Ctrl+L** goes to a path you type. **Tab** completes it.
@@ -48,7 +49,9 @@ rcmd for yours, or see [keys.md](keys.md).
 |---|---|
 | **F3** | view (text or hex, with search) |
 | **F4** | edit in your editor (`$EDITOR`) |
+| **Enter** | open with its program: your `[[open]]` rule, else the system's (as Total Commander) |
 | **o** | open with the system's application |
+| **Shift+O** | open with…: your rules for this file, the system's program, view, edit |
 | **F5** / **F6** | copy / move to the other pane |
 | **Shift+F5** | copy next to itself, under a new name |
 | **F2** or **Shift+F6** | rename |
@@ -58,6 +61,12 @@ rcmd for yours, or see [keys.md](keys.md).
 | **Ctrl+Shift+F5** | make a link in the other pane |
 | **Alt+P** / **Alt+H** | permissions / SHA-256 checksum |
 
+- **Enter on a program or script** asks "Run it?" (Cancel first). **Run in a terminal
+  tab** shows its output and keeps it after the program ends; Enter or Esc closes the
+  tab.
+- Where nothing can be opened on a screen — over SSH, without a desktop, in read-only
+  mode — Enter views the file instead and says why. `enter = "view"` under `[files]`
+  makes Enter always view, as in rcmd 0.1.0.
 - rcmd always asks before it deletes or overwrites anything.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.

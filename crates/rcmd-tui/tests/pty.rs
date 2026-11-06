@@ -108,6 +108,9 @@ impl Session {
         cmd.env("SHELL", "/bin/sh");
         cmd.env("PS1", "$ ");
         cmd.env_remove("VISUAL");
+        cmd.env_remove("SSH_CONNECTION");
+        cmd.env_remove("SSH_TTY");
+        cmd.env("DISPLAY", ":0");
         match editor {
             Some(e) => cmd.env("EDITOR", e),
             None => cmd.env_remove("EDITOR"),
@@ -1187,4 +1190,26 @@ fn rcmd_colors_overrides_what_the_terminal_seems_to_be() {
         seen += 1;
     }
     assert!(seen > 0, "some colour was sent");
+}
+
+#[test]
+fn a_program_run_in_a_terminal_tab_keeps_its_output_after_it_ends() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("run-in-tab");
+    s.file("left/hello.sh", "#!/bin/sh\necho hello from the tab\n");
+    let script = s.left().join("hello.sh");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut rcmd = Session::start(&s, None);
+    rcmd.send(DOWN);
+    rcmd.send(ENTER);
+    rcmd.wait_for("Run it?");
+    // Cancel is first; the terminal tab is the next item.
+    rcmd.send(DOWN);
+    rcmd.send(ENTER);
+    rcmd.wait_for("hello from the tab");
+    rcmd.wait_for("hello.sh ended (exit 0)");
+    // Enter closes the finished program's tab, and nothing else.
+    rcmd.send(ENTER);
+    rcmd.wait_gone("hello from the tab");
+    rcmd.quit();
 }

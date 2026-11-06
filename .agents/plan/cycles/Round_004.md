@@ -156,8 +156,16 @@ arrive on Linux (usage, bulk_rename, new_file, copy_as, rename, delete_permanent
 user_menu; Shift+F7 and Shift+F10 unbound). Ctrl+PageUp / PageDown on Linux printed plain
 PageUp / PageDown: Ctrl lost (to confirm it was held). If so, previous / next tab
 (bound only to Ctrl+PageUp / PageDown) cannot be typed there; Alt+1, Alt+2 do arrive on
-Linux and Windows and are unbound, a candidate for "tab N". Still not seen: Shift+F1–F9
-and Ctrl+PageUp / PageDown on Windows.
+Linux and Windows and are unbound, a candidate for "tab N". Windows, the rest: Shift+F1–F10
+all arrive; Ctrl+PageUp / PageDown also print plain PageUp / PageDown there.
+
+**Summary of the three systems:** every key rcmd binds arrives on Windows and Linux
+except Ctrl+PageUp / PageDown (previous / next tab), which lose Ctrl on both (if Ctrl
+was held: asked). On macOS Terminal.app, with Option as Meta, history and resize
+cannot be typed. F11 is the terminal's everywhere; rcmd does not use it. Tab switching
+therefore needs a second key on every system: candidates Alt+1…9 (tab N, measured to
+arrive on Linux and Windows) and Ctrl+Tab / Ctrl+Shift+Tab (Total Commander's; not yet
+measured).
 
 Suspected earlier, now mostly disproved: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
 other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown

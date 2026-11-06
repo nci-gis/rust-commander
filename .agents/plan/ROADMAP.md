@@ -35,15 +35,16 @@ users want Enter to open files.
 | **Next: Total Commander feel** | | | | |
 | 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning |
 | 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |
-| 5 | Settings (File → Settings…): tabs for general, panels and layout, theme, keys | L | — | after 4 |
-| 6 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | — | |
-| 7 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
-| 8 | Undo for the last operation | M | — | |
-| 9 | Launch: Show HN with a GIF | S | — | after 1–7 |
+| 5 | Keymaps as files: built-in sets (`classic`, `laptop`, `mc`) plus the user's own, chosen by name | M | — | same mechanism as 4 |
+| 6 | Settings (File → Settings…): tabs General, Theme, Keys, Panels and layout | L | — | after 4 and 5 |
+| 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | — | |
+| 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
+| 9 | Undo for the last operation | M | — | |
+| 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
 | **Later: optional extras** | | | | |
-| 10 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |
-| 11 | Plugins v0: the user menu with documented variables and the selection, run in a tab | S–M | — | low priority |
-| 12 | Plugins: external programs over stdin/stdout, versioned | L | — | low priority, only for a need 11 cannot meet |
+| 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |
+| 12 | Plugins v0: the user menu with documented variables and the selection, run in a tab | S–M | — | low priority |
+| 13 | Plugins: external programs over stdin/stdout, versioned | L | — | low priority, only for a need 12 cannot meet |
 | ~~—~~ | ~~SFTP, remote panes, a file-source layer for remote writes~~ | — | — | dropped 2026-11-06 |
 
 Sizes are relative: **S** a day or two, **M** under a week, **L** one to two weeks.
@@ -53,19 +54,34 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
 - **4 Themes.** `themes/<name>.toml` in the config directory, each a full palette in
   the slots `--print-config` lists; `[theme] name = "…"` picks one and the existing
   per-colour settings still apply on top. Built in: `dark` (today's), `light`,
-  `ansi` (the 16 terminal colours, so it follows the user's palette), `classic` (blue
-  panels in the Norton / Total Commander tradition), `high-contrast`. A theme also
+  `ansi` (the 16 terminal colours, so it follows the user's palette), `blue` (blue
+  panels in the tradition of the DOS-era commanders), `high-contrast`. A theme also
   says how it degrades at 256 and 16 colours (item 1). Today the theme is set once at
   start-up and "never changes while running"; switching needs that to change.
-- **5 Settings.** Tabs: General, Panels and layout (how many file panes, the terminal
-  panel), Theme (pick with a live preview), Keys (list first, edit later), Security
-  (shows the mode; not editable from inside, or a restricted session could lift its own
-  restriction). Writes `config.toml` keeping the user's comments and order. Refused in
+- **5 Keymaps** (owner's idea, 2026-11-07: for what a Mac keyboard cannot fix).
+  `keymaps/<name>.toml` in the config directory; `[keys] preset = "…"` picks one and
+  any key named under `[keys]` still overrides it, as today. Built in, named for who
+  they suit:
+  - `classic` (default): today's keys, F-keys as in Total Commander.
+  - `laptop`: no F-key or Alt needed. Every main action also on Ctrl+letter or a
+    plain letter in the file panes, for Mac laptops and compact keyboards.
+  - `mc`: Midnight Commander habits, taken from its manual and from using it, never
+    from its source (GPL).
+
+  F1, the key bar and the menus already read the one table (`BINDINGS`), so they show
+  whichever set is in force. A test per set: no key runs two actions, and none uses a
+  key a terminal or shell keeps for itself (Ctrl+C, Ctrl+Z, Ctrl+D; Cmd never reaches
+  a terminal program on macOS).
+- **6 Settings.** Tabs: **General** (confirmations, trash, session, Esc as Meta),
+  **Theme** (pick a theme and the colour depth, with a live preview), **Keys** (pick a
+  keymap; the list of keys, editing them later), **Panels and layout** (how many file
+  panes, the terminal panel). Security shows the mode but is not editable from inside,
+  or a restricted session could lift its own restriction. Writes `config.toml` keeping the user's comments and order. Refused in
   read-only and restricted modes, where rcmd writes nothing.
-- **6 Logo.** Quick view already draws PNG and JPEG with half blocks, two pixels a cell,
+- **7 Logo.** Quick view already draws PNG and JPEG with half blocks, two pixels a cell,
   in any terminal: the icon can be an embedded PNG drawn the same way. At 256 colours
   it is quantised like everything else.
-- **10 File icons** already exist as `[files] icons = true` (needs a Nerd Font). The
+- **11 File icons** already exist as `[files] icons = true` (needs a Nerd Font). The
   extra is choosing the set (Nerd Font, plain Unicode, none) and per-extension icons in
   a theme-like file.
 

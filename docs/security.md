@@ -43,6 +43,14 @@ These modes protect against mistakes and hostile files. They do not stop someone
 can start rcmd without the flag. For a real boundary, use the operating system's own
 sandboxing.
 
+## The config file is trusted
+
+rcmd trusts its config file the way your shell trusts `.bashrc`: it names programs rcmd
+runs (the shell, the editor, the opener, your `[[menu]]` commands). Keep it yours. rcmd
+refuses one that every user can write (on Unix), and never reads a config from the
+directory you are browsing — but do not point `--config` or `RCMD_CONFIG` at a file
+someone else can change.
+
 ## Opt-in features that run programs
 
 `[files] git_status = true` runs `git` in each directory you open. A repository's own

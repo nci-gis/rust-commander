@@ -65,6 +65,15 @@
 - **Clear marks when an operation finishes.** Leaving them set means the next `F8`
   silently includes the files selected for the last `F5`. Found by an end-to-end test
   that deleted more than it selected; `finish_job` clears them now.
+- **ConPTY waits for an answer before the shell starts.** `portable-pty` creates the
+  Windows pseudoconsole with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes it ask the
+  host terminal where the cursor is (`ESC[6n`) and block until told. vt100 is a parser
+  and never answers, so on Windows the shell pane drew nothing and took no input,
+  whatever the shell. The output thread in `pane/term.rs` now answers every cursor
+  query from the vt100 screen (`cursor_queries`, which also catches a query split
+  across two reads). Found by the first person to run rcmd on Windows; CI could not, as
+  the pty tests are Unix-only. `the_terminal_answers_where_the_cursor_is` fails without
+  the answer.
 - **`vt100::Parser` has no `set_size`** — it lives on the screen:
   `parser.screen_mut().set_size(rows, cols)`.
 

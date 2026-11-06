@@ -1047,3 +1047,19 @@ fn soak_memory_settles_instead_of_growing() {
         m2 >> 10
     );
 }
+
+/// Windows found this: ConPTY asks its terminal where the cursor is (ESC[6n) before it
+/// lets the shell start, and an unanswered query left cmd.exe dead. The same query from
+/// a program on Unix must be answered too: here `dd` waits for the reply's first bytes,
+/// which never came before.
+#[test]
+fn the_terminal_answers_where_the_cursor_is() {
+    let s = Scratch::new("cpr");
+    let mut rcmd = Session::start(&s, None);
+    rcmd.send(F12);
+    rcmd.wait_for("$ ");
+    rcmd.send(b"stty -icanon -echo; printf '\\033[6n'; dd bs=1 count=2 2>/dev/null | od -An -c; stty sane\r");
+    rcmd.wait_for("033   [");
+    rcmd.send(F12);
+    rcmd.quit();
+}

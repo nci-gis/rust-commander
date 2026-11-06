@@ -14,7 +14,7 @@ Modelled on Double Commander / Total Commander **at the level of UI and feature 
    drags the whole repo under the GPL. Learning from the *running application*, its user
    manual, and Christian Ghisler's published plugin specs is fine and carries nothing —
    copyright does not cover layouts, keyboard conventions or feature lists. That
-   distinction is the entire reason this project can be `MIT OR Apache-2.0`.
+   distinction is the entire reason this project can be MIT-licensed.
    If you ever need to know "how does doublecmd do X", the answer is: open doublecmd and
    look at it, not at its repository.
 2. **No telemetry, no network calls.** A file manager has no business making any.
@@ -27,6 +27,15 @@ Modelled on Double Commander / Total Commander **at the level of UI and feature 
 5. **Never type untrusted text into a terminal, or put it on the clipboard, without
    `safety.rs`.** File and directory names are chosen by whoever made them. A control
    character in one, typed into a shell, is a command: this was exploited, see Security.
+
+## Name, description, licence: one place
+
+`[workspace.package]` in the root `Cargo.toml` holds the version, the one-line
+description, the authors (XDevTeam), the licence (MIT), the repository and the keywords.
+Help > About, `--help` and `--version` read them with `env!("CARGO_PKG_…")`;
+`scripts/sync-about.sh` copies the description and keywords (as topics) to the GitHub
+repository's About box. The README's tagline is the description, and a test fails if they
+drift. Change the text in `Cargo.toml`, run the script, done.
 
 ## Layout
 

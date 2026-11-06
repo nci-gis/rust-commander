@@ -1796,12 +1796,16 @@ impl App {
             Cmd::About => {
                 self.modal = Some(Modal::Ask(modal::Ask {
                     title: format!("rcmd {}", env!("CARGO_PKG_VERSION")),
+                    // All from [workspace.package] in Cargo.toml: one place to change.
                     body: vec![
-                        "A two-pane file manager for the terminal, in Rust.".into(),
-                        "MIT OR Apache-2.0.".into(),
+                        env!("CARGO_PKG_DESCRIPTION").into(),
                         String::new(),
-                        "Modelled on Total Commander and Double Commander by their".into(),
-                        "behaviour and manuals only; none of their code was read.".into(),
+                        format!(
+                            "Developed by {}",
+                            env!("CARGO_PKG_AUTHORS").replace(':', ", ")
+                        ),
+                        format!("{} licence", env!("CARGO_PKG_LICENSE")),
+                        env!("CARGO_PKG_REPOSITORY").into(),
                         String::new(),
                         "No network, no telemetry.".into(),
                     ],

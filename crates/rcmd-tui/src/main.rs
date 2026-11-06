@@ -42,9 +42,8 @@ use crate::app::App;
 use crate::config::{Mode, Outcome};
 use rcmd_core::policy::{self, Policy};
 
+/// Below the first line of --help, which comes from Cargo.toml.
 const USAGE: &str = "\
-rcmd — a two-pane file manager for the terminal
-
 Usage:
   rcmd [LEFT] [RIGHT]       start with these directories in the two panes
   rcmd --no-restore         start fresh instead of reopening the last session
@@ -143,11 +142,21 @@ fn main() -> Result<()> {
         }
     };
     if cli.help {
+        println!(
+            "rcmd {} \u{2014} {}\n",
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_DESCRIPTION")
+        );
         print!("{USAGE}");
         return Ok(());
     }
     if cli.version {
-        println!("rcmd {}", env!("CARGO_PKG_VERSION"));
+        println!(
+            "rcmd {} \u{b7} {} \u{b7} {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_LICENSE"),
+            env!("CARGO_PKG_AUTHORS").replace(':', ", ")
+        );
         return Ok(());
     }
     if cli.print_config {

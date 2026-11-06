@@ -1,7 +1,10 @@
 [package]
 name = "rcmd-core"
-version = "0.1.0"
-description = "Filesystem engine for rcmd: listing, sorting, formatting. No terminal code."
+version.workspace = true
+description = "rcmd's engine: listing, file operations, archives, find, compare. No terminal code."
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

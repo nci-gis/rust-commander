@@ -3,7 +3,7 @@
 # Four checks, each answering a different question:
 #   advisories  does any dependency have a known vulnerability (RustSec database),
 #               or is it unmaintained or yanked?
-#   licenses    is everything we ship compatible with rcmd's MIT OR Apache-2.0?
+#   licenses    is everything we ship compatible with rcmd's MIT licence?
 #               A GPL crate would put the whole binary under the GPL, which the
 #               provenance rule in CLAUDE.md exists to avoid.
 #   bans        are we pulling in duplicate versions or wildcard requirements?

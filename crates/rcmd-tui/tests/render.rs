@@ -2271,3 +2271,18 @@ fn shift_f1_shows_what_rcmd_is_using() {
     let s = shot_keys("100x34", "Shift+F1,Esc", &a, &b);
     assert!(!s.contains("holding"), "{s}");
 }
+
+#[test]
+fn the_readme_tagline_is_the_cargo_description() {
+    // Cargo.toml is the one source; the README is the one place that cannot read it.
+    let readme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"));
+    let tagline = readme.lines().nth(2).unwrap_or_default();
+    assert_eq!(
+        tagline,
+        env!("CARGO_PKG_DESCRIPTION"),
+        "edit one, edit the other"
+    );
+    let out = rcmd(&[OsStr::new("--version")]);
+    let v = String::from_utf8_lossy(&out.stdout);
+    assert!(v.contains("MIT") && v.contains("XDevTeam"), "{v}");
+}

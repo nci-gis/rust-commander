@@ -1,6 +1,6 @@
 # rcmd
 
-A two-pane (orthodox) file manager for the terminal, written in Rust.
+A terminal-style file commander, written in Rust.
 
 > **Status: usable.** Two file panes, a live shell below them, mouse, splittable layout,
 > copy / move / delete with conflict handling and an undoable trash, and a viewer that
@@ -293,15 +293,10 @@ cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 ./target/release/rcmd --screenshot  # draw one frame as plain text
 ```
 
-## Provenance and licence
+## Licence
 
-`rcmd` is an independent implementation. Its design follows the orthodox file-manager
-conventions established by Total Commander (proprietary) and Double Commander (GPL-2.0+),
-learned by **using those programs and reading their user documentation** — never by
-reading their source.
+[MIT](LICENSE). Developed by XDevTeam.
 
-Copyright does not cover UI layouts, keyboard conventions or feature lists; Double
-Commander is itself a clean reimplementation of Total Commander's design. That is why this
-repository carries no GPL obligation and is released under `MIT OR Apache-2.0`.
-
-See [CLAUDE.md](CLAUDE.md) for the working rules that keep it that way.
+rcmd is an independent implementation of the two-pane file-manager conventions, written
+without reading any other file manager's source; [CLAUDE.md](CLAUDE.md) has the rules
+that keep it that way.

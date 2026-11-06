@@ -325,6 +325,42 @@ fn a_group_stays_open_until_a_key_outside_it() {
 }
 
 #[test]
+fn esc_closes_a_group_too() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Alt+r,Esc", &a, &b);
+    assert!(!s.contains("Enter or Esc: done"), "{s}");
+    let closed = shot_keys("110x24", "Alt+r,Esc,Left", &a, &b);
+    let plain = shot_keys("110x24", "Left", &a, &b);
+    let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
+    assert_eq!(border(&closed), border(&plain), "{closed}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_reader_that_stops_early_ends_rcmd_quietly() {
+    // rcmd --screenshot | head: a closed pipe is the end, not a panic.
+    use std::io::Read;
+    let (a, b) = fixture();
+    let mut child = isolated()
+        .args(["--screenshot=200x400"])
+        .arg(&a)
+        .arg(&b)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut first = [0u8; 16];
+    child.stdout.take().unwrap().read_exact(&mut first).unwrap();
+    // The pipe is dropped here, as head drops it.
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{:?}", out.status);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("panicked"), "{err}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_group_says_what_it_takes_and_enter_closes_it() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Alt+r", &a, &b);

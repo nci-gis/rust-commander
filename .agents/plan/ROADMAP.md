@@ -56,18 +56,15 @@ were done first:
 enough for 0.2.0 — Round 001's colours above all, since 0.1.0 is hard to read on a Mac in
 Terminal.app — and the flow in `docs/development.md` is ready when asked.
 
-**Small fixes, no round of their own** (on `dev`, or inside the next round that touches
-the file):
+**Small fixes, no round of their own** — all done on `feat/v0.2.0` (2026-11-07):
 
-- `rcmd --screenshot … | head` panics ("failed printing to stdout: Broken pipe",
-  exit 101) when the reader stops early; a closed pipe should end quietly, as `cat`
-  does. Any output larger than the pipe's buffer is affected.
-- `rcmd --show-keys` has no automated test (Round 003).
-- **rcmd keeps track of its own temporary files** (owner, 2026-11-07): one directory per
-  run for everything it writes to the temp directory (viewer copies, the rename list),
-  touched while rcmd runs; at start, rcmd removes the directories of runs that are gone,
-  so a crash or a kill leaves nothing behind for good. Before v0.2.0.
-- The Alt+R group's Esc path has no test of its own (Round 004).
+- ~~`rcmd --screenshot … | head` panics~~: stdout goes through `emit()`, which ends
+  quietly on a closed pipe; a test fails without it.
+- ~~`rcmd --show-keys` has no automated test~~: a pty test (F7, Alt+J, a click, Esc Esc).
+- ~~The Alt+R group's Esc path has no test~~: a render test.
+- ~~rcmd keeps track of its own temporary files~~: `tempfiles.rs`, one `rcmd-run-<pid>`
+  directory per run, user-only; a marker refreshed while running; removed on exit; at
+  start, runs whose marker is over an hour old are removed (only marked directories).
 
 Waiting on a person, at any point: the one name (item 8); the four promotions proposed
 in Rounds 001 and 003; the read-only finding in

@@ -52,6 +52,12 @@ that heading and starts a new, empty one here. -->
 - The config documentation lists every file rcmd keeps, and where.
 
 ### Fixed
+- `rcmd --screenshot … | head`, and any long output cut short by its reader, ended in
+  a panic; it now ends quietly, as `cat` does.
+- rcmd keeps its temporary files in one directory per run, removes it on exit, and at
+  start removes what a crashed or killed run left behind.
+- Theme files are looked for beside the config in use, including one given with
+  `--config`.
 - `o` over SSH into a Mac or a Windows machine opened the file on that machine's own
   screen; now it says there is no screen here, as it did on Linux.
 - A file viewed from inside an archive is no longer left in the temporary directory

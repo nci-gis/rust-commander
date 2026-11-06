@@ -150,7 +150,14 @@ impl Session {
             writer,
             child,
         };
-        session.wait_for("Quit");
+        // The file panes are up once the key bar says Quit; --show-keys draws no panes,
+        // only its own first line.
+        let show_keys = dirs.iter().any(|d| d == Path::new("--show-keys"));
+        session.wait_for(if show_keys {
+            "rcmd --show-keys"
+        } else {
+            "Quit"
+        });
         session
     }
 
@@ -1212,4 +1219,31 @@ fn a_program_run_in_a_terminal_tab_keeps_its_output_after_it_ends() {
     rcmd.send(ENTER);
     rcmd.wait_gone("hello from the tab");
     rcmd.quit();
+}
+
+#[test]
+fn show_keys_prints_each_key_and_click_and_what_it_would_do() {
+    let s = Scratch::new("show-keys");
+    let mut rcmd = Session::start_flags(&s, &["--show-keys"]);
+    rcmd.send(b"\x1b[18~"); // F7
+    rcmd.wait_for("F7");
+    rcmd.wait_for("mkdir");
+    rcmd.send(b"\x1bj"); // Alt+J
+    rcmd.wait_for("history");
+    rcmd.mouse(0, 9, 4, false);
+    rcmd.wait_for("Down(Left) at column 9, row 4");
+    // Esc twice ends it, as the first line says.
+    rcmd.send(b"\x1b");
+    rcmd.send(b"\x1b");
+    let start = Instant::now();
+    loop {
+        match rcmd.child.try_wait() {
+            Ok(Some(st)) => {
+                assert!(st.success(), "{st:?}");
+                break;
+            }
+            _ if start.elapsed() > PATIENCE => panic!("--show-keys did not end on Esc Esc"),
+            _ => std::thread::sleep(Duration::from_millis(25)),
+        }
+    }
 }

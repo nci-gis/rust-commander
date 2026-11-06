@@ -334,7 +334,13 @@ fn dragging_the_scrollbar_scrolls_the_list_and_the_cursor_follows() {
     }
     // Rows start on screen row 3; the thumb is at the top of the right border.
     let s = shot_keys("80x24", "drag:39:3:39:14", &a, &b);
-    assert!(s.contains("f59") && !s.contains("f10"), "at the end\n{s}");
+    // By row, not anywhere on screen: the shell's prompt shows the host's name, and a
+    // macOS runner's (…191f1081bd77…) once contained "f10".
+    let row = |name: &str| {
+        s.lines()
+            .any(|l| l.starts_with(&format!("\u{2502} {name} ")))
+    };
+    assert!(row("f59") && !row("f10"), "at the end\n{s}");
     assert!(
         status(&s).contains("f48"),
         "the cursor stays on screen\n{s}"

@@ -60,6 +60,10 @@ pub struct General {
     pub restore_session: bool,
     /// The File | View | Help bar on the top row. F9 opens it either way.
     pub menu_bar: bool,
+    /// Save the session this often when it has changed, in seconds, so closing the
+    /// window instead of quitting keeps it. 0 turns it off (it is still saved on
+    /// quit); otherwise 5 to 3600.
+    pub autosave_secs: u64,
 }
 
 impl Default for General {
@@ -69,6 +73,7 @@ impl Default for General {
             delete_to_trash: true,
             restore_session: true,
             menu_bar: true,
+            autosave_secs: 5,
         }
     }
 }
@@ -306,6 +311,12 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         return Err(format!(
             "[terminal] max_terminals = {}: expected 1 to 16 (to start with no shell, use show = false)",
             config.terminal.max_terminals
+        ));
+    }
+    let a = config.general.autosave_secs;
+    if a != 0 && !(5..=3600).contains(&a) {
+        return Err(format!(
+            "[general] autosave_secs = {a}: expected 0 (off) or 5 to 3600"
         ));
     }
     let ms = config.files.auto_refresh_ms;

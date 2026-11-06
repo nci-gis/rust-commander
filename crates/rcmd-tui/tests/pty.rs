@@ -1076,9 +1076,16 @@ fn a_killed_rcmd_still_reopens_where_it_was() {
     rcmd.send(DOWN);
     rcmd.send(ENTER); // into deeper
     rcmd.wait_for(" 2 deeper ");
-    wait_file(&s.0.join("session.toml"), "saved without quitting", |c| {
-        c.is_some_and(|t| t.contains("deeper"))
-    });
+    // Autosave runs every 5 s by default: allow it two rounds.
+    let file = s.0.join("session.toml");
+    let start = Instant::now();
+    while !std::fs::read_to_string(&file).is_ok_and(|t| t.contains("deeper")) {
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "saved without quitting"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     let _ = rcmd.child.kill();
     drop(rcmd);
 

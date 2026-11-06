@@ -2387,3 +2387,23 @@ fn a_binary_file_switched_to_text_shows_its_lines_not_an_empty_screen() {
     assert!(s.contains("3 lines"), "{s}");
     assert!(s.contains("second line"), "{s}");
 }
+
+#[test]
+fn autosave_is_configurable_with_a_floor_and_an_off() {
+    let dir = std::env::temp_dir().join(format!("rcmd-cfg-autosave-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for (body, ok) in [
+        ("[general]\nautosave_secs = 0\n", true),
+        ("[general]\nautosave_secs = 5\n", true),
+        ("[general]\nautosave_secs = 2\n", false),
+        ("[general]\nautosave_secs = 99999\n", false),
+    ] {
+        let cfg = write_config(&dir, body);
+        let out = rcmd(&[
+            OsStr::new("--config"),
+            cfg.as_os_str(),
+            OsStr::new("--check-config"),
+        ]);
+        assert_eq!(out.status.success(), ok, "{body}");
+    }
+}

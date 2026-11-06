@@ -472,12 +472,15 @@ impl App {
         }
     }
 
-    /// Save the session when it has changed, every couple of seconds. Saving only on
+    /// Save the session when it has changed, every `[general] autosave_secs`. Saving only on
     /// quit lost everything when the window was closed instead — the X of Windows
     /// Terminal, closing an SSH session — because then rcmd is killed, not asked.
     fn autosave(&mut self) {
-        const EVERY: Duration = Duration::from_secs(2);
-        if !self.interactive || self.last_autosave.elapsed() < EVERY {
+        let every = self.settings.config.general.autosave_secs;
+        if every == 0
+            || !self.interactive
+            || self.last_autosave.elapsed() < Duration::from_secs(every)
+        {
             return;
         }
         self.last_autosave = Instant::now();

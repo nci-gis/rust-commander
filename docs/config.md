@@ -23,6 +23,7 @@ and the status line names the problem. **F1 → Settings** shows what is in use.
 confirm_transfer = true   # ask before copy and move start (delete always asks)
 delete_to_trash = true    # F8 uses the trash; Shift+F8 always deletes for good
 restore_session = true    # reopen last time's panes and tabs
+autosave_secs = 5         # save them this often when they change; 0 = only on quit
 menu_bar = true           # the File | View | Help bar
 
 [files]

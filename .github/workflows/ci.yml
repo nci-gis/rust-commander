@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   # Advisories are published after code is written. A weekly run catches a new one
   # against dependencies that have not changed.

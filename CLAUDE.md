@@ -28,6 +28,13 @@ Modelled on Double Commander / Total Commander **at the level of UI and feature 
    `safety.rs`.** File and directory names are chosen by whoever made them. A control
    character in one, typed into a shell, is a command: this was exploited, see Security.
 
+## Branches
+
+Work happens on **`dev`**; larger pieces on `feat/…` branches merged into `dev` by pull
+request. **`main` is what people install**: it moves only by a pull request from `dev`,
+with CI green on Linux, Windows and macOS, and is protected on GitHub so nothing else
+can. Commit as the repository's identity — see the git notes for this machine.
+
 ## Name, description, licence: one place
 
 `[workspace.package]` in the root `Cargo.toml` holds the version, the one-line

@@ -34,8 +34,9 @@ were done first:
   wait here, in the table below, without a round file.
 - **Rounds run in number order, one at a time.** A new round starts only when the one
   before is Complete or explicitly set aside (said in its Do section, with why).
-- Round 002 was numbered under the old habit; it is done next, which puts the order
-  back. Numbers are never changed afterwards: rounds are append-only (`PDCA.md`).
+- Round 002 was numbered under the old habit and then waited. At the owner's request it
+  is **Superseded** and its plan moved to Round 005, so numbers and order agree again.
+  Numbers are never changed afterwards: rounds are append-only (`PDCA.md`).
 - Each round works on its own `feat/…` branch and lands in `dev` by pull request.
 
 ## Next, in this order
@@ -46,9 +47,9 @@ were done first:
    troubleshooting page and the temp-file fixes: 0.1.0 on a Mac in Terminal.app is hard
    to read. The flow in `docs/development.md` (cargo release on `dev`, pull request into
    `main`, tag on `main`, publish the draft).
-3. **Round 002**: Enter opens files the Total Commander way (item 3).
-4. **Round 005**: themes as files (item 4).
-5. **Round 006**: Settings (item 6), which needs 4; keymap sets join it only if a second
+3. **Round 005**: Enter opens files the Total Commander way (item 3; was Round 002).
+4. **Round 006**: themes as files (item 4).
+5. **Round 007**: Settings (item 6), which needs 4; keymap sets join it only if a second
    set is wanted by then.
 6. Then items 7–10 in table order, each numbered when started.
 
@@ -64,7 +65,7 @@ in Rounds 001 and 003; the read-only finding in
 | 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
 | 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
 | **Next: Total Commander feel** | | | | |
-| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning: next after 0.2.0 |
+| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Planning: next after 0.2.0 |
 | 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |
 | 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | In Progress: built, in review |
 | 6 | Settings (File → Settings…): tabs General, Theme, Keys, Panels and layout | L | — | after 4 and 5 |

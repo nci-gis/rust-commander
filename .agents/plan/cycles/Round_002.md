@@ -1,9 +1,14 @@
 # Round 002: Enter opens files the Total Commander way
 
-**Status**: Planning
+**Status**: Superseded by [Round 005](Round_005.md)
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 3
 **Date started**: 2026-11-06
-**Date completed**:
+**Date completed**: 2026-11-07 (superseded, never started)
+
+> **Superseded on 2026-11-07, at the owner's request.** This round was numbered when
+> it was planned and then waited while 003 and 004 ran, which put the numbers out of
+> order. Its plan moves unchanged to [Round 005](Round_005.md); nothing here was done.
+> Kept as written: rounds are append-only.
 
 ## Goal
 

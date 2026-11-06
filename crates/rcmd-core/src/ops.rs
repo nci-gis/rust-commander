@@ -1,6 +1,6 @@
 //! Copy, move and delete, run on a worker thread.
 //!
-//! The rules this file exists to keep (see CLAUDE.md): nothing destructive happens
+//! The rules this file exists to keep (see .agents/context/project.md): nothing destructive happens
 //! silently, every operation is cancellable part-way through, and a filesystem that
 //! misbehaves produces a question rather than a panic or a half-finished tree with no
 //! explanation.

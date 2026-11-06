@@ -255,7 +255,7 @@ this section was written. A crafted directory name could run a command through A
 and a FIFO could freeze the UI; both are fixed and covered by tests, along with the
 attacks that did not work. `cargo deny check` scans dependencies for known
 vulnerabilities and non-permissive licences, in CI on every push and weekly. Details,
-including what is not covered: the Security section of [CLAUDE.md](CLAUDE.md).
+including what is not covered: [.agents/reference/security.md](.agents/reference/security.md).
 
 Two secure modes, from the command line or the config — a flag can only tighten the
 config, never loosen it:
@@ -298,5 +298,5 @@ cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 [MIT](LICENSE). Developed by XDevTeam.
 
 rcmd is an independent implementation of the two-pane file-manager conventions, written
-without reading any other file manager's source; [CLAUDE.md](CLAUDE.md) has the rules
+without reading any other file manager's source; [.agents/context/project.md](.agents/context/project.md) has the rules
 that keep it that way.

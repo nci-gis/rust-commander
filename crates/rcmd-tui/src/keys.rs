@@ -23,6 +23,7 @@ pub enum Action {
     CloseTab,
     NextTab,
     PrevTab,
+    GoTab,
     NextSplit,
     SplitRight,
     SplitDown,
@@ -373,28 +374,28 @@ pub const BINDINGS: &[Binding] = &[
         name: "resize_left",
         group: "Panes",
         about: "Move the pane's border left",
-        keys: &["Alt+Shift+Left"],
+        keys: &["Alt+Shift+Left", "Alt+r Left"],
     },
     Binding {
         action: Action::ResizeRight,
         name: "resize_right",
         group: "Panes",
         about: "Move the pane's border right",
-        keys: &["Alt+Shift+Right"],
+        keys: &["Alt+Shift+Right", "Alt+r Right"],
     },
     Binding {
         action: Action::ResizeUp,
         name: "resize_up",
         group: "Panes",
         about: "Move the pane's border up",
-        keys: &["Alt+Shift+Up"],
+        keys: &["Alt+Shift+Up", "Alt+r Up"],
     },
     Binding {
         action: Action::ResizeDown,
         name: "resize_down",
         group: "Panes",
         about: "Move the pane's border down",
-        keys: &["Alt+Shift+Down"],
+        keys: &["Alt+Shift+Down", "Alt+r Down"],
     },
     Binding {
         action: Action::Zoom,
@@ -460,6 +461,18 @@ pub const BINDINGS: &[Binding] = &[
         keys: &["Ctrl+PageUp"],
     },
     Binding {
+        action: Action::GoTab,
+        name: "go_tab",
+        group: "Tabs",
+        about: "Go to tab N, the digit in the key",
+        // Ctrl+PageUp / PageDown cannot be typed on a laptop, where PageUp is Fn+Up and
+        // Ctrl+Fn+Up arrives without Ctrl; Ctrl+Tab belongs to the terminal or desktop.
+        // Alt+digit arrives everywhere measured.
+        keys: &[
+            "Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5", "Alt+6", "Alt+7", "Alt+8", "Alt+9",
+        ],
+    },
+    Binding {
         action: Action::NextSplit,
         name: "next_split",
         group: "Panes",
@@ -513,7 +526,8 @@ pub const BINDINGS: &[Binding] = &[
         name: "history",
         group: "Navigate",
         about: "Directories visited in this tab",
-        keys: &["Alt+Down"],
+        // Alt+J too: macOS Terminal.app sends Option+Down as three separate keys.
+        keys: &["Alt+Down", "Alt+j"],
     },
     Binding {
         action: Action::Hotlist,
@@ -739,6 +753,7 @@ impl Action {
                 | Action::CdTerminalHere
                 | Action::NewTerminal
                 | Action::NextTab
+                | Action::GoTab
                 | Action::PrevTab
                 | Action::NextSplit
                 | Action::SplitRight
@@ -755,22 +770,68 @@ impl Action {
 
 pub type Chord = (KeyCode, KeyModifiers);
 
+/// How long a group of two-key bindings stays open after its last key.
+pub const GROUP_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A binding: one key, or two in a row — `"Alt+r Left"`, Alt+R and then Left.
+/// Two-key bindings that start with the same key form a group: after that key, any
+/// of the group's second keys may be pressed again and again (see `App::on_key`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Keys {
+    One(Chord),
+    Two(Chord, Chord),
+}
+
+/// A binding as written in the config: one key, or two separated by a space.
+pub fn parse_binding(s: &str) -> Result<Keys, String> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    match parts.as_slice() {
+        [one] => parse_key(one).map(Keys::One),
+        [first, second] => Ok(Keys::Two(parse_key(first)?, parse_key(second)?)),
+        _ => Err(format!(
+            "\"{s}\": a binding is one key, or two keys with a space between"
+        )),
+    }
+}
+
+/// A binding as it is written in the config.
+pub fn binding_name(k: Keys) -> String {
+    match k {
+        Keys::One((c, m)) => key_name(c, m),
+        Keys::Two((c1, m1), (c2, m2)) => format!("{} {}", key_name(c1, m1), key_name(c2, m2)),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Keymap {
     map: HashMap<Chord, Action>,
+    /// Two-key bindings: (first key, second key) → action.
+    seqs: HashMap<(Chord, Chord), Action>,
 }
 
 impl Default for Keymap {
     fn default() -> Self {
-        let mut map = HashMap::new();
+        let mut km = Self {
+            map: HashMap::new(),
+            seqs: HashMap::new(),
+        };
         for b in BINDINGS {
             for k in b.keys {
-                let chord = parse_key(k).expect("a default binding must parse");
-                map.insert(chord, b.action);
+                match parse_binding(k).expect("a default binding must parse") {
+                    Keys::One(c) => km.map.insert(c, b.action),
+                    Keys::Two(p, c) => km.seqs.insert((p, c), b.action),
+                };
             }
         }
-        Self { map }
+        km
     }
+}
+
+fn action_name(a: Action) -> &'static str {
+    BINDINGS
+        .iter()
+        .find(|b| b.action == a)
+        .map_or("?", |b| b.name)
 }
 
 impl Keymap {
@@ -778,12 +839,46 @@ impl Keymap {
         self.map.get(&normalise(k)).copied()
     }
 
+    /// The key as the keymap compares it: case folded under Ctrl, and so on.
+    pub fn chord(k: KeyEvent) -> Chord {
+        normalise(k)
+    }
+
+    /// Whether `k` starts a two-key binding.
+    pub fn starts_group(&self, k: KeyEvent) -> bool {
+        let c = normalise(k);
+        self.seqs.keys().any(|(p, _)| *p == c)
+    }
+
+    /// What `k` does in the group that `first` opened.
+    pub fn in_group(&self, first: Chord, k: KeyEvent) -> Option<Action> {
+        self.seqs.get(&(first, normalise(k))).copied()
+    }
+
+    /// The group `first` opens, as (second key, action), in a stable order.
+    pub fn group(&self, first: Chord) -> Vec<(Chord, Action)> {
+        let mut v: Vec<(Chord, Action)> = self
+            .seqs
+            .iter()
+            .filter(|((p, _), _)| *p == first)
+            .map(|((_, c), a)| (*c, *a))
+            .collect();
+        v.sort_by_key(|(c, _)| key_name(c.0, c.1));
+        v
+    }
+
     /// Apply `[keys]` from the config. An action named there replaces all of its default
     /// bindings, so a user who rebinds `copy` does not end up with both keys live.
+    ///
+    /// Clashes: two actions the user gave the same key, or a key the user gave an action
+    /// that also starts one of their two-key bindings, are errors. A clash with a default
+    /// is the user's rebinding winning: the default loses that key.
     pub fn apply(
         &mut self,
         table: &std::collections::BTreeMap<String, Vec<String>>,
     ) -> Result<(), String> {
+        let mut one: HashMap<Chord, (Action, String)> = HashMap::new();
+        let mut two: HashMap<(Chord, Chord), (Action, String)> = HashMap::new();
         for (name, keys) in table {
             let Some(action) = Action::from_name(name) else {
                 return Err(format!(
@@ -791,9 +886,56 @@ impl Keymap {
                 ));
             };
             self.map.retain(|_, a| *a != action);
+            self.seqs.retain(|_, a| *a != action);
             for k in keys {
-                let chord = parse_key(k).map_err(|e| format!("[keys] {name}: {e}"))?;
-                self.map.insert(chord, action);
+                let parsed = parse_binding(k).map_err(|e| format!("[keys] {name}: {e}"))?;
+                let clash = match parsed {
+                    Keys::One(c) => one.insert(c, (action, name.clone())),
+                    Keys::Two(p, c) => two.insert((p, c), (action, name.clone())),
+                };
+                if let Some((other, other_name)) = clash {
+                    if other != action {
+                        return Err(format!(
+                            "[keys] {other_name} and {name} both use {}",
+                            binding_name(parsed)
+                        ));
+                    }
+                }
+            }
+        }
+        for (c, (a, _)) in &one {
+            self.map.insert(*c, *a);
+        }
+        for (pc, (a, _)) in &two {
+            self.seqs.insert(*pc, *a);
+        }
+        // A key that runs an action cannot also start a group: which would it be?
+        let firsts: std::collections::HashSet<Chord> = self.seqs.keys().map(|(p, _)| *p).collect();
+        for p in firsts {
+            let Some(single) = self.map.get(&p).copied() else {
+                continue;
+            };
+            let user_single = one.contains_key(&p);
+            let user_group = two.iter().find(|((q, _), _)| *q == p);
+            match (user_single, user_group) {
+                (true, Some(((_, c), (_, seq_name)))) => {
+                    return Err(format!(
+                        "[keys] {} runs {} and also starts {} {} ({seq_name}): use a \
+                         different key for one of them",
+                        key_name(p.0, p.1),
+                        action_name(single),
+                        key_name(p.0, p.1),
+                        key_name(c.0, c.1),
+                    ));
+                }
+                // The user's key wins over the default group that starts with it.
+                (true, None) => self.seqs.retain(|(q, _), _| *q != p),
+                // The user's group wins over the default key.
+                (false, Some(_)) => {
+                    self.map.remove(&p);
+                }
+                // Two defaults: the table is wrong, and a test says so.
+                (false, None) => {}
             }
         }
         Ok(())
@@ -801,18 +943,10 @@ impl Keymap {
 
     /// Current bindings, grouped by action, for `--print-config`.
     pub fn to_table(&self) -> std::collections::BTreeMap<String, Vec<String>> {
-        let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-        for b in BINDINGS {
-            let mut keys: Vec<String> = self
-                .map
-                .iter()
-                .filter(|(_, a)| **a == b.action)
-                .map(|((c, m), _)| key_name(*c, *m))
-                .collect();
-            keys.sort();
-            out.insert(b.name.to_string(), keys);
-        }
-        out
+        BINDINGS
+            .iter()
+            .map(|b| (b.name.to_string(), self.keys_for(b.action)))
+            .collect()
     }
 
     /// The keys currently bound to `action`, as they would be written in the config.
@@ -821,15 +955,19 @@ impl Keymap {
             .map
             .iter()
             .filter(|(_, a)| **a == action)
-            .map(|((c, m), _)| key_name(*c, *m))
+            .map(|(c, _)| binding_name(Keys::One(*c)))
+            .chain(
+                self.seqs
+                    .iter()
+                    .filter(|(_, a)| **a == action)
+                    .map(|((p, c), _)| binding_name(Keys::Two(*p, *c))),
+            )
             .collect();
         keys.sort();
         keys
     }
 }
 
-/// A typed capital letter already carries its shift, so keep one spelling of it or the
-/// lookup misses depending on how the terminal reported the key.
 fn normalise(k: KeyEvent) -> Chord {
     let mut m = k.modifiers;
     let mut code = k.code;
@@ -956,13 +1094,12 @@ mod tests {
         for b in BINDINGS {
             assert!(!b.keys.is_empty(), "{} has no default key", b.name);
             for key in b.keys {
-                let chord = parse_key(key).unwrap_or_else(|e| panic!("{}: {key}: {e}", b.name));
-                assert_eq!(
-                    km.action_for(KeyEvent::new(chord.0, chord.1)),
-                    Some(b.action),
-                    "{key} should run {}",
-                    b.name
-                );
+                let runs =
+                    match parse_binding(key).unwrap_or_else(|e| panic!("{}: {key}: {e}", b.name)) {
+                        Keys::One((c, m)) => km.action_for(KeyEvent::new(c, m)),
+                        Keys::Two(first, (c, m)) => km.in_group(first, KeyEvent::new(c, m)),
+                    };
+                assert_eq!(runs, Some(b.action), "{key} should run {}", b.name);
             }
         }
     }
@@ -1020,6 +1157,7 @@ mod tests {
             Action::CloseTab,
             Action::NextTab,
             Action::PrevTab,
+            Action::GoTab,
             Action::NextSplit,
             Action::QuickSearch,
             Action::Filter,
@@ -1063,15 +1201,138 @@ mod tests {
 
     #[test]
     fn no_two_actions_claim_the_same_key() {
-        let mut seen: HashMap<Chord, &str> = HashMap::new();
+        let mut seen: HashMap<Keys, &str> = HashMap::new();
         for b in BINDINGS {
             for key in b.keys {
-                let chord = parse_key(key).unwrap();
-                if let Some(other) = seen.insert(chord, b.name) {
+                let k = parse_binding(key).unwrap();
+                if let Some(other) = seen.insert(k, b.name) {
                     panic!("{key} is bound to both {other} and {}", b.name);
                 }
             }
         }
+        // And no default key both runs an action and starts a two-key binding.
+        for k in seen.keys() {
+            if let Keys::Two(first, _) = k {
+                assert!(
+                    !seen.contains_key(&Keys::One(*first)),
+                    "{} both runs an action and starts {}",
+                    key_name(first.0, first.1),
+                    binding_name(*k)
+                );
+            }
+        }
+    }
+
+    fn table(rows: &[(&str, &[&str])]) -> std::collections::BTreeMap<String, Vec<String>> {
+        rows.iter()
+            .map(|(n, ks)| (n.to_string(), ks.iter().map(|k| k.to_string()).collect()))
+            .collect()
+    }
+
+    fn ev(s: &str) -> KeyEvent {
+        let (c, m) = parse_key(s).unwrap();
+        KeyEvent::new(c, m)
+    }
+
+    #[test]
+    fn a_binding_is_one_key_or_two() {
+        assert!(matches!(parse_binding("Alt+r"), Ok(Keys::One(_))));
+        assert!(matches!(parse_binding("Alt+r Left"), Ok(Keys::Two(..))));
+        assert!(matches!(
+            parse_binding("  Alt+r   Left "),
+            Ok(Keys::Two(..))
+        ));
+        assert!(parse_binding("Alt+r Left Right").is_err());
+        assert!(parse_binding("").is_err());
+        assert_eq!(
+            binding_name(parse_binding("Alt+r Left").unwrap()),
+            "Alt+r Left"
+        );
+    }
+
+    #[test]
+    fn alt_r_opens_the_resize_group() {
+        let km = Keymap::default();
+        assert!(km.starts_group(ev("Alt+r")));
+        assert_eq!(km.action_for(ev("Alt+r")), None, "Alt+R alone runs nothing");
+        let first = Keymap::chord(ev("Alt+r"));
+        assert_eq!(km.in_group(first, ev("Left")), Some(Action::ResizeLeft));
+        assert_eq!(km.in_group(first, ev("Down")), Some(Action::ResizeDown));
+        assert_eq!(km.in_group(first, ev("x")), None);
+        assert_eq!(km.group(first).len(), 4);
+    }
+
+    #[test]
+    fn two_actions_the_user_gives_one_key_is_an_error() {
+        // Before, the one written later silently took the key.
+        let mut km = Keymap::default();
+        let e = km
+            .apply(&table(&[("copy", &["F2"]), ("rename", &["F2"])]))
+            .unwrap_err();
+        assert!(
+            e.contains("copy") && e.contains("rename") && e.contains("F2"),
+            "{e}"
+        );
+        let mut km = Keymap::default();
+        let e = km
+            .apply(&table(&[
+                ("copy", &["Alt+x Left"]),
+                ("move", &["Alt+x Left"]),
+            ]))
+            .unwrap_err();
+        assert!(e.contains("Alt+x Left"), "{e}");
+    }
+
+    #[test]
+    fn taking_a_default_key_is_rebinding_not_an_error() {
+        let mut km = Keymap::default();
+        km.apply(&table(&[("copy", &["F6"])])).unwrap();
+        assert_eq!(km.action_for(ev("F6")), Some(Action::Copy));
+        assert!(
+            km.keys_for(Action::Move).is_empty(),
+            "move lost its only key"
+        );
+    }
+
+    #[test]
+    fn a_users_key_beats_a_default_group_that_starts_with_it() {
+        let mut km = Keymap::default();
+        km.apply(&table(&[("user_menu", &["Alt+r"])])).unwrap();
+        assert_eq!(km.action_for(ev("Alt+r")), Some(Action::UserMenu));
+        assert!(!km.starts_group(ev("Alt+r")));
+        assert_eq!(km.keys_for(Action::ResizeLeft), vec!["Alt+Shift+Left"]);
+    }
+
+    #[test]
+    fn a_users_group_beats_a_default_key_it_starts_with() {
+        // Alt+C is cd_terminal_here by default.
+        let mut km = Keymap::default();
+        km.apply(&table(&[("copy", &["Alt+c F5"])])).unwrap();
+        assert!(km.starts_group(ev("Alt+c")));
+        assert_eq!(km.action_for(ev("Alt+c")), None);
+        assert!(km.keys_for(Action::CdTerminalHere).is_empty());
+    }
+
+    #[test]
+    fn a_key_the_user_gives_both_ways_is_an_error() {
+        let mut km = Keymap::default();
+        let e = km
+            .apply(&table(&[
+                ("user_menu", &["Alt+x"]),
+                ("copy", &["Alt+x F5"]),
+            ]))
+            .unwrap_err();
+        assert!(e.contains("Alt+x"), "{e}");
+    }
+
+    #[test]
+    fn keys_for_lists_both_kinds_as_the_config_writes_them() {
+        let km = Keymap::default();
+        assert_eq!(
+            km.keys_for(Action::ResizeLeft),
+            vec!["Alt+Shift+Left", "Alt+r Left"]
+        );
+        assert_eq!(km.keys_for(Action::GoTab).len(), 9);
     }
 
     #[test]

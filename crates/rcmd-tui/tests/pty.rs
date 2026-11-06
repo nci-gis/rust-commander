@@ -161,6 +161,12 @@ impl Session {
         // A beat for the event loop to read it and repaint; the waits below do the
         // real synchronising.
         std::thread::sleep(Duration::from_millis(60));
+        // A lone Esc is only Esc if rcmd reads it before the next byte: Esc then q in
+        // one read is Alt+Q, as a terminal sends Alt+Q. On a loaded CI runner 60 ms was
+        // not enough, and read_only_mode… pressed Alt+Q instead of quitting.
+        if bytes == b"\x1b" {
+            std::thread::sleep(Duration::from_millis(250));
+        }
     }
 
     fn until(&self, what: &str, done: impl Fn(&str) -> bool) {

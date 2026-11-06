@@ -160,9 +160,9 @@ pub struct App {
     resizing: Option<(Divider, bool)>,
     /// A file pane's scrollbar being dragged, and where on the thumb it was held.
     scrolling: Option<(PaneId, u16)>,
-    /// When Esc was pressed in a file pane with nothing to stop: the next key is
-    /// Alt+key (`keyfix::after_esc`).
-    esc_armed: Option<Instant>,
+    /// The group of two-key bindings open, by its first key, and when it was last
+    /// used: Alt+R, then arrows to resize, as many as wanted (see `on_key`).
+    group: Option<(crate::keys::Chord, Instant)>,
     /// The Option-key hint has been shown this session.
     option_hinted: bool,
     /// The key bar's buttons as last drawn.
@@ -272,7 +272,7 @@ impl App {
             zoom: None,
             resizing: None,
             scrolling: None,
-            esc_armed: None,
+            group: None,
             option_hinted: false,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
@@ -980,34 +980,106 @@ impl App {
 
     /// One turn of the event loop without input: lets a running job report in.
     pub fn tick(&mut self) {
+        if self
+            .group
+            .is_some_and(|(_, at)| at.elapsed() > crate::keys::GROUP_WINDOW)
+        {
+            self.group = None;
+            self.status.clear();
+        }
         self.pump_job();
         self.reap_terminals();
         self.background();
     }
 
-    /// The key a file-pane keystroke stands for: Alt+key after an Esc prefix. `None`
-    /// when the key was used up (a second Esc cancelling the prefix). On macOS, a
-    /// character Option typed gets a one-time hint. Keys for the shell pass untouched.
-    fn translate_key(&mut self, k: KeyEvent) -> Option<KeyEvent> {
+    /// On macOS, a character Option typed in a file pane, where it means nothing, says
+    /// once how to make Option work as Alt.
+    fn option_hint(&mut self, k: KeyEvent) {
+        if !cfg!(target_os = "macos") || self.option_hinted || self.focus_is_term() {
+            return;
+        }
+        if let Some(c) = crate::keyfix::typed_by_option(k)
+            .filter(|_| self.settings.keymap.action_for(k).is_none())
+        {
+            self.option_hinted = true;
+            self.status = crate::keyfix::option_hint(c);
+        }
+    }
+
+    /// The status line while a group is open: its first key and the keys that follow.
+    fn group_hint(&self, first: crate::keys::Chord) -> String {
+        let keys: Vec<String> = self
+            .settings
+            .keymap
+            .group(first)
+            .iter()
+            .map(|((c, m), _)| crate::keys::key_name(*c, *m))
+            .collect();
+        format!(
+            "{}, then: {} \u{b7} Enter or Esc: done",
+            crate::keys::key_name(first.0, first.1),
+            keys.join(" ")
+        )
+    }
+
+    /// A key of the open group: run it and keep the group open. `false` when the key is
+    /// not one of the group's, which closes it.
+    fn in_group(&mut self, k: KeyEvent) -> bool {
+        let Some((first, at)) = self.group.take() else {
+            return false;
+        };
+        if at.elapsed() > crate::keys::GROUP_WINDOW {
+            self.status.clear();
+            return false;
+        }
+        if matches!(k.code, KeyCode::Enter | KeyCode::Esc) {
+            self.status.clear();
+            return true;
+        }
+        let Some(a) = self.settings.keymap.in_group(first, k) else {
+            self.status.clear();
+            return false;
+        };
+        self.group = Some((first, Instant::now()));
+        self.status = self.group_hint(first);
+        self.run_bound(a, k);
+        // An action may have put up its own message; the group's comes back next key.
+        true
+    }
+
+    /// Run `a`, which `k` was bound to.
+    fn run_bound(&mut self, a: Action, k: KeyEvent) {
+        if a == Action::GoTab {
+            return self.go_tab(k);
+        }
+        self.perform(a);
+    }
+
+    /// Alt+1…9: the tab whose number is the key's digit, in the file pane or the
+    /// terminal, whichever has focus.
+    fn go_tab(&mut self, k: KeyEvent) {
+        let Some(n) = (match k.code {
+            KeyCode::Char(c) => c.to_digit(10).filter(|n| *n > 0),
+            _ => None,
+        }) else {
+            self.status = "go_tab needs a key ending in a digit, 1 to 9".into();
+            return;
+        };
+        let i = n as usize - 1;
         if self.focus_is_term() {
-            self.esc_armed = None;
-            return Some(k);
-        }
-        if let Some(at) = self.esc_armed.take() {
-            if at.elapsed() <= crate::keyfix::ESC_WINDOW {
-                self.status.clear();
-                return crate::keyfix::after_esc(k);
+            if let Some(p) = self.panel() {
+                if i < p.tab_count() {
+                    p.select_tab(i);
+                    return;
+                }
+            }
+        } else if let Some(t) = self.focused_tabs() {
+            if i < t.len() {
+                t.select(i);
+                return;
             }
         }
-        if cfg!(target_os = "macos") && !self.option_hinted {
-            if let Some(c) = crate::keyfix::typed_by_option(k)
-                .filter(|_| self.settings.keymap.action_for(k).is_none())
-            {
-                self.option_hinted = true;
-                self.status = crate::keyfix::option_hint(c);
-            }
-        }
-        Some(k)
+        self.status = format!("there is no tab {n}");
     }
 
     fn on_key(&mut self, k: KeyEvent) {
@@ -1017,10 +1089,26 @@ impl App {
         if self.search.is_some() && self.on_search_key(k) {
             return;
         }
-        let k = match self.translate_key(k) {
-            Some(k) => k,
-            None => return,
-        };
+        if self.in_group(k) {
+            return;
+        }
+        self.option_hint(k);
+        // The first key of a group. In the shell only when everything in the group works
+        // there (resizing does); otherwise the key is the shell's.
+        if self.settings.keymap.starts_group(k) {
+            let first = crate::keys::Keymap::chord(k);
+            let all_global = self
+                .settings
+                .keymap
+                .group(first)
+                .iter()
+                .all(|(_, a)| a.is_global());
+            if !self.focus_is_term() || all_global {
+                self.group = Some((first, Instant::now()));
+                self.status = self.group_hint(first);
+                return;
+            }
+        }
         let action = self.settings.keymap.action_for(k);
         // Esc in a filtered pane shows everything again: a filter left on is files you
         // cannot see, so taking it off should be the most obvious key there is.
@@ -1043,20 +1131,12 @@ impl App {
                 self.status = "filter off".into();
                 return;
             }
-            // Nothing to stop: Esc is a Meta prefix, for terminals that send no Alt or
-            // no F-keys. It delays nothing, since Esc here would otherwise do nothing.
-            if self.settings.config.general.esc_as_meta {
-                self.esc_armed = Some(Instant::now());
-                self.status =
-                    "Esc: the next key is Alt+key; 1\u{2026}9, 0 are F1\u{2026}F10".into();
-                return;
-            }
         }
 
         // Layout and terminal actions work from anywhere, the shell pane included.
         // Everything else typed into the shell belongs to the shell.
         if let Some(a) = action.filter(|a| a.is_global()) {
-            return self.perform(a);
+            return self.run_bound(a, k);
         }
         if self.focus_is_term() {
             if let Some(Pane::Term(t)) = self.panes.get(&self.focus) {
@@ -1065,7 +1145,7 @@ impl App {
             return;
         }
         if let Some(a) = action {
-            self.perform(a);
+            self.run_bound(a, k);
         }
     }
 
@@ -1291,6 +1371,8 @@ impl App {
                 }
             }
             Action::NextSplit => self.next_split(),
+            // Only from a key, which carries the tab's number: see `run_bound`.
+            Action::GoTab => {}
             Action::CursorUp => self.with_files(|f| f.move_cursor(-1)),
             Action::CursorDown => self.with_files(|f| f.move_cursor(1)),
             Action::PageUp => self.with_files(|f| f.page(-1)),

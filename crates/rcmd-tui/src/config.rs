@@ -65,10 +65,6 @@ pub struct General {
     /// window instead of quitting keeps it. 0 turns it off (it is still saved on
     /// quit); otherwise 5 to 3600.
     pub autosave_secs: u64,
-    /// Esc as a Meta (Alt) prefix in the file panes, as in Midnight Commander: Esc then
-    /// a key is Alt+key, Esc then 1-9, 0 is F1-F10. For keyboards and terminals that
-    /// send no Alt or no F-keys. Esc arms only when it has nothing else to do.
-    pub esc_as_meta: bool,
 }
 
 impl Default for General {
@@ -79,7 +75,6 @@ impl Default for General {
             restore_session: true,
             menu_bar: true,
             autosave_secs: 5,
-            esc_as_meta: true,
         }
     }
 }

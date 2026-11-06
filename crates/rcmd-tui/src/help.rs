@@ -190,6 +190,9 @@ fn heading(text: &str) -> Line<'static> {
     ))
 }
 
+/// The key column of F1: wide enough for "Alt+Shift+Right · Alt+r Right".
+const KEYS_WIDTH: usize = 30;
+
 fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
     let th = theme::t();
     let mut out = Vec::new();
@@ -200,30 +203,26 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
         out.push(heading(group));
         for b in rows {
             let keys = settings.keymap.keys_for(b.action);
-            let shown = if keys.is_empty() {
-                "(unbound)".to_string()
-            } else {
-                keys.join(" \u{b7} ")
+            // Nine Alt+digit keys would push the row off the screen: first … last.
+            let shown = match keys.as_slice() {
+                [] => "(unbound)".to_string(),
+                [first, .., last] if keys.len() > 3 => format!("{first} \u{2026} {last}"),
+                _ => keys.join(" \u{b7} "),
             };
-            let rebound = keys.iter().map(String::as_str).collect::<HashSet<_>>()
-                != b.keys
-                    .iter()
-                    .map(|k| {
-                        crate::keys::parse_key(k)
-                            .map(|(c, m)| crate::keys::key_name(c, m))
-                            .unwrap_or_default()
-                    })
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<HashSet<_>>();
+            let defaults: HashSet<String> = b
+                .keys
+                .iter()
+                .filter_map(|k| crate::keys::parse_binding(k).ok())
+                .map(crate::keys::binding_name)
+                .collect();
+            let rebound = keys.iter().cloned().collect::<HashSet<_>>() != defaults;
             let mut spans = vec![
                 Span::styled(
                     if rebound { "  \u{2022} " } else { "    " },
                     Style::new().fg(th.mark),
                 ),
                 Span::styled(
-                    format!("{shown:<22}"),
+                    format!("{shown:<KEYS_WIDTH$} "),
                     Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(format!("{:<40}", b.about), Style::new().fg(th.fg)),
@@ -273,10 +272,16 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
             ],
         ),
         (
-            "Esc as Meta \u{2014} no Alt or F-keys (a Mac, some terminals)",
+            "Two-key bindings, and keys that do nothing",
             &[
-                ("Esc, then a key", "Alt+that key, in the file panes"),
-                ("Esc, then 1\u{2026}9, 0", "F1\u{2026}F10"),
+                (
+                    "Alt+R, then \u{2190}\u{2192}\u{2191}\u{2193}",
+                    "Keys written \"Alt+r Left\": Alt+R, then Left, again and again",
+                ),
+                (
+                    "Enter \u{b7} Esc",
+                    "Done with them (or stop for two seconds)",
+                ),
                 ("rcmd --show-keys", "What each key really sends"),
                 ("More", TROUBLESHOOTING),
             ],
@@ -289,7 +294,7 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
             out.push(Line::from(vec![
                 Span::raw("    "),
                 Span::styled(
-                    format!("{k:<22}"),
+                    format!("{k:<KEYS_WIDTH$} "),
                     Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(what.to_string(), Style::new().fg(th.fg)),

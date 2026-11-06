@@ -25,6 +25,37 @@ users want Enter to open files.
 - **No SFTP** (owner, 2026-11-06): `ssh` in the terminal panel and the many good
   existing tools cover it.
 
+## Working rules
+
+Agreed with the owner on 2026-11-07, after Round 002 sat in Planning while 003 and 004
+were done first:
+
+- **A round gets its number when its work starts**, not when it is first imagined. Ideas
+  wait here, in the table below, without a round file.
+- **Rounds run in number order, one at a time.** A new round starts only when the one
+  before is Complete or explicitly set aside (said in its Do section, with why).
+- Round 002 was numbered under the old habit; it is done next, which puts the order
+  back. Numbers are never changed afterwards: rounds are append-only (`PDCA.md`).
+- Each round works on its own `feat/…` branch and lands in `dev` by pull request.
+
+## Next, in this order
+
+1. **Close Round 004.** Merge the review fixes (PR #4); the owner tries Option+R and
+   arrows, Option+J and Option+1…9 on the Mac; then Complete.
+2. **Release 0.2.0.** `dev` holds Round 001's colours, Rounds 003–004's keys, the
+   troubleshooting page and the temp-file fixes: 0.1.0 on a Mac in Terminal.app is hard
+   to read. The flow in `docs/development.md` (cargo release on `dev`, pull request into
+   `main`, tag on `main`, publish the draft).
+3. **Round 002**: Enter opens files the Total Commander way (item 3).
+4. **Round 005**: themes as files (item 4).
+5. **Round 006**: Settings (item 6), which needs 4; keymap sets join it only if a second
+   set is wanted by then.
+6. Then items 7–10 in table order, each numbered when started.
+
+Waiting on a person, at any point: the one name (item 8); the four promotions proposed
+in Rounds 001 and 003; the read-only finding in
+`.agents/memory/2026-11-07-read-only-writes-a-temp-copy.md`.
+
 ## Order
 
 | # | Item | Size | Round | Status |
@@ -33,7 +64,7 @@ users want Enter to open files.
 | 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
 | 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
 | **Next: Total Commander feel** | | | | |
-| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning |
+| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [002](cycles/Round_002.md) | Planning: next after 0.2.0 |
 | 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |
 | 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | In Progress: built, in review |
 | 6 | Settings (File → Settings…): tabs General, Theme, Keys, Panels and layout | L | — | after 4 and 5 |

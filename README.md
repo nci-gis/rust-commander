@@ -98,5 +98,5 @@ Keep only the lines you change. See [docs/config.md](docs/config.md).
 
 [MIT](LICENSE). Developed by XDevTeam.
 
-rcmd is written from scratch. It follows the way two-pane file managers work, without
-using code from any of them.
+rcmd is written from scratch: a two-pane file manager with a terminal-style look and
+feel.

@@ -336,6 +336,9 @@ fn shift_f8_warns_then_deletes_for_real() {
         !s.0.join("data/Trash").exists(),
         "a permanent delete must not go through the trash"
     );
+    // The file goes before the progress box closes, and that box ignores q: wait for
+    // the result to reach the status line, or the q is swallowed (it was, once, on CI).
+    rcmd.wait_for("1 deleted");
     rcmd.quit();
 }
 
@@ -397,6 +400,7 @@ fn dragging_a_file_onto_the_other_pane_copies_it_after_asking() {
         !s.right().join("apple.txt").exists(),
         "only the grabbed file"
     );
+    rcmd.wait_for("1 copied"); // the progress box ignores q until it has closed
     rcmd.quit();
 }
 
@@ -421,6 +425,7 @@ fn ctrl_click_marks_and_the_mark_is_what_f5_copies() {
         !s.right().join("berry.txt").exists(),
         "the cursor's file stays put"
     );
+    rcmd.wait_for("1 copied"); // the progress box ignores q until it has closed
     rcmd.quit();
 }
 

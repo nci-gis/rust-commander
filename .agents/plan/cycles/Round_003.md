@@ -129,6 +129,11 @@ showing through cells with the default colour, not a selection as first thought.
   a hint: rcmd sees nothing when a media key is pressed.
 - Step 6: guide section "No Alt key, or no F-keys", an F1 section, CHANGELOG.
 
+**Owner's follow-up (2026-11-07):** a setting for Esc as Meta (`[general] esc_as_meta`,
+on by default); the how-to on GitHub, per system with known issues
+(`docs/troubleshooting.md`), and only a few lines plus the link in F1. The macOS
+settings moved there from the guide.
+
 **Open: the mouse (step 5).** Waiting for `rcmd --show-keys` on the owner's Mac: if
 clicks print nothing there, Terminal.app is not reporting to rcmd at all.
 

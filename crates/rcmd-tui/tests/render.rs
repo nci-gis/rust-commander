@@ -239,6 +239,16 @@ fn esc_then_a_digit_is_an_f_key_for_terminals_without_them() {
 }
 
 #[test]
+fn esc_as_meta_can_be_turned_off() {
+    let (a, b) = fixture();
+    let cfg = write_config(a.parent().unwrap(), "[general]\nesc_as_meta = false\n");
+    let s = shot_with(&cfg, "Esc,7", &a, &b);
+    assert!(!s.contains("Create directory"), "{s}");
+    assert!(!s.contains("the next key is Alt+key"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn esc_then_a_key_is_alt_and_key() {
     // Alt+F7 is Find; Esc F7 must be the same.
     let (a, b) = fixture();
@@ -2421,6 +2431,16 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
     );
     let s = shot_keys("100x34", "F9,Left,Up,Enter", &a, &b);
     assert!(s.contains("No network, no telemetry"), "About\n{s}");
+    // The credit is on the button row, at the right, not in the text.
+    let row = s
+        .lines()
+        .find(|l| l.contains("Developed by"))
+        .unwrap_or_else(|| panic!("no credit\n{s}"));
+    assert!(row.contains("close"), "credit not on the button row\n{s}");
+    assert!(
+        row.find("close") < row.find("Developed by"),
+        "credit not right of the button\n{s}"
+    );
 }
 
 #[test]

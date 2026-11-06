@@ -49,6 +49,11 @@ cargo install --git https://github.com/nci-gis/rust-commander rcmd-tui --locked
 
 Needs Rust 1.88 or newer. This installs the `rcmd` command.
 
+Or download a ready-made build for Linux, macOS or Windows from
+[Releases](https://github.com/nci-gis/rust-commander/releases). They are not signed, so
+macOS and Windows warn the first time: see
+[troubleshooting](docs/troubleshooting.md#macos).
+
 ## Quick start
 
 ```bash
@@ -97,6 +102,7 @@ Keep only the lines you change. See [docs/config.md](docs/config.md).
 - [Config](docs/config.md): settings, bookmarks, your own commands
 - [Shell](docs/shell.md): stay in the directory you were in when you quit
 - [Security](docs/security.md): what rcmd protects against, and safe modes
+- [Troubleshooting](docs/troubleshooting.md): known problems on each system, and fixes
 - [Development](docs/development.md): build, test, contribute
 
 ## Licence

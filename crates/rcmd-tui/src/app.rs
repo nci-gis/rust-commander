@@ -1028,11 +1028,14 @@ impl App {
                 self.status = "filter off".into();
                 return;
             }
-            // Nothing to stop: Esc is a prefix, for terminals that send no Alt or no
-            // F-keys. It delays nothing, since Esc here would otherwise do nothing.
-            self.esc_armed = Some(Instant::now());
-            self.status = "Esc: the next key is Alt+key; 1\u{2026}9, 0 are F1\u{2026}F10".into();
-            return;
+            // Nothing to stop: Esc is a Meta prefix, for terminals that send no Alt or
+            // no F-keys. It delays nothing, since Esc here would otherwise do nothing.
+            if self.settings.config.general.esc_as_meta {
+                self.esc_armed = Some(Instant::now());
+                self.status =
+                    "Esc: the next key is Alt+key; 1\u{2026}9, 0 are F1\u{2026}F10".into();
+                return;
+            }
         }
 
         // Layout and terminal actions work from anywhere, the shell pane included.
@@ -1976,10 +1979,6 @@ impl App {
                     body: vec![
                         env!("CARGO_PKG_DESCRIPTION").into(),
                         String::new(),
-                        format!(
-                            "Developed by {}",
-                            env!("CARGO_PKG_AUTHORS").replace(':', ", ")
-                        ),
                         format!("{} licence", env!("CARGO_PKG_LICENSE")),
                         env!("CARGO_PKG_REPOSITORY").into(),
                         String::new(),
@@ -1988,6 +1987,10 @@ impl App {
                     danger: false,
                     yes: None,
                     buttons: Vec::new(),
+                    footnote: Some(format!(
+                        "Developed by {}",
+                        env!("CARGO_PKG_AUTHORS").replace(':', ", ")
+                    )),
                 }));
             }
             Cmd::QuitAnyway => {
@@ -3311,6 +3314,7 @@ impl App {
             danger: false,
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
+            footnote: None,
         }));
     }
 
@@ -3550,6 +3554,7 @@ impl App {
             danger: bad,
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
+            footnote: None,
         }));
     }
 
@@ -3672,6 +3677,7 @@ impl App {
             danger: true,
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
+            footnote: None,
         }));
         true
     }
@@ -3805,6 +3811,7 @@ impl App {
             danger: overwrites > 0,
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
+            footnote: None,
         }));
     }
 

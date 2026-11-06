@@ -13,10 +13,16 @@ that heading and starts a new, empty one here. -->
 ### Added
 - Esc as a prefix in the file panes, for keyboards and terminals without Alt or
   F-keys (a Mac's Option key types characters; its F-keys are media keys): Esc then a
-  key is Alt+key, Esc then 1…9, 0 is F1…F10.
+  key is Alt+key, Esc then 1…9, 0 is F1…F10. `[general] esc_as_meta = false` turns
+  it off.
+- [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
+  to do; F1 links to it.
 - `rcmd --show-keys` prints each key, click and scroll as rcmd receives it, and what
   it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
+
+### Changed
+- About: the credit sits at the bottom right, beside the close button.
 
 ### Fixed
 - Colours on terminals without 24-bit colour. macOS Terminal.app before macOS 26 showed

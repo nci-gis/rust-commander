@@ -50,6 +50,8 @@ pub struct Ask {
     pub danger: bool,
     pub yes: Option<(String, Cmd)>,
     pub buttons: Vec<Rect>,
+    /// A quiet line at the bottom right, on the buttons' row: a credit, not content.
+    pub footnote: Option<String>,
 }
 
 pub struct Confirm {
@@ -418,6 +420,16 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
             &[("Enter", "close", th.accent)],
         ),
     };
+    if let Some(note) = &a.footnote {
+        // Right-aligned, and only where it clears the buttons.
+        let len = note.chars().count() as u16;
+        let x = inner.right().saturating_sub(len);
+        if a.buttons.iter().all(|b| b.right() < x) {
+            frame
+                .buffer_mut()
+                .set_string(x, y, note, Style::new().fg(th.fg_dim));
+        }
+    }
 }
 
 fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {

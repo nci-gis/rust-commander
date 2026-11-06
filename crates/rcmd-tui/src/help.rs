@@ -17,6 +17,12 @@ use crate::config::{self, Config, Outcome, Settings};
 use crate::theme;
 use crate::viewer::Action as Close;
 
+/// Known problems by system, and what to do; F1 points there rather than repeating it.
+const TROUBLESHOOTING: &str = concat!(
+    env!("CARGO_PKG_REPOSITORY"),
+    "/blob/main/docs/troubleshooting.md"
+);
+
 const TABS: [&str; 2] = ["Keys", "Settings"];
 
 pub struct Help {
@@ -267,12 +273,12 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
             ],
         ),
         (
-            "No Alt or F-keys? (a Mac, some terminals) \u{2014} in the file panes",
+            "Esc as Meta \u{2014} no Alt or F-keys (a Mac, some terminals)",
             &[
-                ("Esc, then a key", "Alt+that key: Esc F7 is Alt+F7"),
-                ("Esc, then 1\u{2026}9, 0", "F1\u{2026}F10: Esc 5 copies"),
-                ("Esc Esc", "Never mind"),
-                ("rcmd --show-keys", "Shows what each key really sends"),
+                ("Esc, then a key", "Alt+that key, in the file panes"),
+                ("Esc, then 1\u{2026}9, 0", "F1\u{2026}F10"),
+                ("rcmd --show-keys", "What each key really sends"),
+                ("More", TROUBLESHOOTING),
             ],
         ),
     ];

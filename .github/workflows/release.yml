@@ -65,6 +65,9 @@ jobs:
   build:
     name: ${{ matrix.target }}
     needs: licences
+    # Skipped is inherited through every later need, not just the next one: without
+    # this, the skipped check on dev skipped the builds after licences had passed.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

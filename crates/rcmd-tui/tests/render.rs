@@ -655,6 +655,11 @@ fn tab_bar(s: &str) -> (String, usize) {
         .unwrap_or_else(|| panic!("no tab bar:\n{s}"))
 }
 
+/// `name` after the platform's path separator: `/b` here, `\b` on Windows.
+fn sep(name: &str) -> String {
+    format!("{}{name}", std::path::MAIN_SEPARATOR)
+}
+
 fn col(line: &str, needle: &str) -> usize {
     let b = line
         .find(needle)
@@ -928,7 +933,10 @@ fn with_three_panes_f5_goes_to_the_pane_used_last_not_a_clone() {
         .lines()
         .find(|l| l.contains("to    "))
         .unwrap_or_else(|| panic!("{s}"));
-    assert!(to.contains("/b"), "should target the other directory\n{s}");
+    assert!(
+        to.contains(&sep("b")),
+        "should target the other directory\n{s}"
+    );
     assert!(
         s.contains("[Tab] other pane"),
         "with a choice, offer it\n{s}"
@@ -1640,10 +1648,7 @@ fn swap_trades_the_panes_and_mirror_copies_the_directory_across() {
     let top = |s: &str| s.lines().nth(1).unwrap().to_string();
     let s = shot_keys(SIZE, "Ctrl+u", &a, &b);
     let t = top(&s);
-    assert!(
-        col(&t, "/b") < col(&t, "/a") || col(&t, "\\b") < col(&t, "\\a"),
-        "{s}"
-    );
+    assert!(col(&t, &sep("b")) < col(&t, &sep("a")), "{s}");
     let s = shot_keys(SIZE, "Alt+=", &a, &b);
     assert!(!top(&s).contains("/b ") && !top(&s).contains("\\b "), "{s}");
 }

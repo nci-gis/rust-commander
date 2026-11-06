@@ -23,8 +23,11 @@ that heading and starts a new, empty one here. -->
 
 ### Changed
 - About: the credit sits at the bottom right, beside the close button.
+- The config documentation lists every file rcmd keeps, and where.
 
 ### Fixed
+- A file viewed from inside an archive is no longer left in the temporary directory
+  when rcmd ends with the viewer still open.
 - Colours on terminals without 24-bit colour. macOS Terminal.app before macOS 26 showed
   green and red backgrounds and hard-to-read text, because it reads 24-bit colour codes
   as other attributes. rcmd now sends 24-bit colour only where the terminal is known to

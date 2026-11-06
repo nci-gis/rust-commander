@@ -216,6 +216,21 @@ pub struct App {
     last_autosave: Instant,
 }
 
+/// What rcmd made for itself goes with it. A file viewed from inside an archive is
+/// extracted to a temporary directory, removed when the viewer closes — and here, when
+/// rcmd ends with the viewer still open, or with an extraction still running.
+impl Drop for App {
+    fn drop(&mut self) {
+        if let Some(t) = self.view_temp.take() {
+            let _ = std::fs::remove_dir_all(&t);
+        }
+        if let Some((_, tmp, _, stop)) = self.pending_view.take() {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+}
+
 impl App {
     pub fn new(left: &Path, right: &Path, settings: Settings, outcome: Outcome) -> Self {
         let notice = outcome.message();

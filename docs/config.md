@@ -134,3 +134,23 @@ root = ""                 # if set, rcmd never goes above this directory
 ```
 
 See [security.md](security.md).
+
+## Files rcmd keeps
+
+rcmd reads `config.toml` and never writes it. What it does write, and nothing else:
+
+| File | Where | What |
+|---|---|---|
+| `session.toml` | `~/.local/state/rcmd/` (Linux, macOS); `%LOCALAPPDATA%\rcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
+| `bookmarks.toml` | beside `session.toml` | Bookmarks added inside rcmd (Ctrl+D). Bookmarks in this config are not copied there. |
+| `rcmd-view-…/` | the system's temporary directory | A file from inside an archive, extracted for F3. Removed when the viewer closes, or when rcmd ends. |
+| `rcmd-rename-….txt` | the system's temporary directory | The list of names when renaming many files in your editor. Removed when the editor closes. |
+
+No logs, no cache, nothing sent anywhere. F8 moves files to your system's own trash.
+
+- `$XDG_STATE_HOME/rcmd/` replaces the state directory, and `RCMD_STATE` names the
+  session file itself (bookmarks go beside it).
+- `restore_session = false` stops the session being saved.
+- `--read-only` and `--restricted` save no session and no bookmarks. The one thing
+  they still write is the temporary copy of a file viewed from inside an archive,
+  removed as above.

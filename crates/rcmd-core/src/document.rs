@@ -289,9 +289,35 @@ mod tests {
 
     static N: AtomicU32 = AtomicU32::new(0);
 
+    /// One parent per run, `rcmd-doc-<pid>`; the first call removes the parents of runs
+    /// more than an hour old. These tests write a few megabytes each and never cleaned
+    /// up, which left gigabytes in a developer's temp directory over time.
     fn write(name: &str, body: &[u8]) -> PathBuf {
+        static SWEPT: std::sync::Once = std::sync::Once::new();
+        SWEPT.call_once(|| {
+            let own = format!("rcmd-doc-{}", std::process::id());
+            let hour = std::time::Duration::from_secs(3600);
+            for e in fs::read_dir(std::env::temp_dir())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let old = e
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age > hour);
+                if name.starts_with("rcmd-doc-") && name != own && old {
+                    let _ = fs::remove_dir_all(e.path());
+                }
+            }
+        });
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let d = std::env::temp_dir().join(format!("rcmd-doc-{}-{n}", std::process::id()));
+        let d = std::env::temp_dir()
+            .join(format!("rcmd-doc-{}", std::process::id()))
+            .join(n.to_string());
         fs::create_dir_all(&d).unwrap();
         let p = d.join(name);
         fs::write(&p, body).unwrap();

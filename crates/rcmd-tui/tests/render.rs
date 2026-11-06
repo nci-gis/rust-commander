@@ -7,9 +7,40 @@ use std::process::Command;
 
 /// rcmd, cut off from the config, trash and session of whoever runs the tests. A user who has
 /// rebound F5 must not see every copy test fail.
+/// Where a test keeps its files: `rcmd-tests-<pid>/<name>` in the temp directory, one
+/// parent for the whole run. Tests remove their own directories, but one that fails
+/// skips that; so the first call also removes the parents of runs more than an hour
+/// old, which no test still running can own. Two runs at once never touch each other.
+fn scratch(name: &str) -> PathBuf {
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    SWEPT.call_once(|| {
+        let own = format!("rcmd-tests-{}", std::process::id());
+        let hour = std::time::Duration::from_secs(3600);
+        for e in fs::read_dir(std::env::temp_dir())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let n = e.file_name().to_string_lossy().into_owned();
+            let old = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > hour);
+            if n.starts_with("rcmd-tests-") && n != own && old {
+                let _ = fs::remove_dir_all(e.path());
+            }
+        }
+    });
+    std::env::temp_dir()
+        .join(format!("rcmd-tests-{}", std::process::id()))
+        .join(name)
+}
+
 fn isolated() -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_rcmd"));
-    let sandbox = std::env::temp_dir().join(format!("rcmd-isolation-{}", std::process::id()));
+    let sandbox = scratch("isolation");
     c.env("RCMD_CONFIG", sandbox.join("no-such-config.toml"));
     c.env("XDG_DATA_HOME", sandbox.join("data"));
     // And from their session: a test must neither reopen their panes nor overwrite them.
@@ -32,7 +63,7 @@ fn shot(size: &str, left: &std::path::Path, right: &std::path::Path) -> String {
 /// the suite has to pass on Windows and macOS, where `/etc` and `/usr` do not exist.
 fn tree() -> (std::path::PathBuf, std::path::PathBuf) {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("rcmd-tree-{}-{n}", std::process::id()));
+    let root = scratch(&format!("tree-{n}"));
     let _ = std::fs::remove_dir_all(&root);
     let (a, b) = (root.join("alpha"), root.join("bravo"));
     std::fs::create_dir_all(a.join("nested")).unwrap();
@@ -144,7 +175,7 @@ static N: AtomicU32 = AtomicU32::new(0);
 /// elided before the assertion can see it.
 fn fixture() -> (PathBuf, PathBuf) {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("rcmd-ui-{}-{n}", std::process::id()));
+    let root = scratch(&format!("ui-{n}"));
     let _ = fs::remove_dir_all(&root);
     let (a, b) = (root.join("a"), root.join("b"));
     fs::create_dir_all(&a).unwrap();
@@ -174,8 +205,14 @@ fn f5_asks_before_copying_and_names_the_destination() {
         s.contains("victim.txt"),
         "it should name what is being copied\n{s}"
     );
+    // The end of the path: a long temp directory is shortened at the front.
+    let dest = format!(
+        "{}{}b",
+        a.parent().unwrap().file_name().unwrap().to_string_lossy(),
+        std::path::MAIN_SEPARATOR
+    );
     assert!(
-        s.contains(&b.display().to_string()),
+        s.contains(&dest),
         "it should show where the files are going\n{s}"
     );
     assert!(s.contains("[Enter] go"), "{s}");
@@ -1824,7 +1861,7 @@ fn o_opens_with_the_configured_program_and_asks_before_running_one() {
 
 #[test]
 fn auto_refresh_is_configurable_and_checked() {
-    let dir = std::env::temp_dir().join(format!("rcmd-cfg-refresh-{}", std::process::id()));
+    let dir = scratch("cfg-refresh");
     fs::create_dir_all(&dir).unwrap();
     for (body, ok) in [
         ("[files]\nauto_refresh_ms = 0\n", true),
@@ -2048,7 +2085,7 @@ fn the_new_writes_are_off_in_read_only_mode() {
 
 #[test]
 fn a_menu_entry_with_a_bad_key_rejects_the_config() {
-    let dir = std::env::temp_dir().join(format!("rcmd-cfg-menu-{}", std::process::id()));
+    let dir = scratch("cfg-menu");
     fs::create_dir_all(&dir).unwrap();
     for (body, ok) in [
         (
@@ -2090,6 +2127,35 @@ fn packed(a: &std::path::Path, b: &std::path::Path) {
         b.join("proj.zip").is_file(),
         "Alt+F5 packs into the other pane"
     );
+}
+
+#[test]
+fn a_file_viewed_from_an_archive_leaves_nothing_behind_when_rcmd_ends() {
+    // F3 inside an archive extracts the file to a temporary directory. --screenshot
+    // ends with the viewer still open, as a killed rcmd would; it must still go.
+    let (a, b) = fixture();
+    packed(&a, &b);
+    let tmp = a.parent().unwrap().join("tmp");
+    fs::create_dir_all(&tmp).unwrap();
+    let out = isolated()
+        .env("TMPDIR", &tmp)
+        .env("TMP", &tmp)
+        .env("TEMP", &tmp)
+        .arg(format!("--screenshot={SIZE}"))
+        .arg("--keys=Tab,/,p,r,o,j,Enter,Enter,Down,Enter,/,R,E,A,D,Enter,F3")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("read me"), "the file was viewed\n{s}");
+    let left: Vec<_> = fs::read_dir(&tmp)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(left.is_empty(), "left behind: {left:?}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
 #[test]
@@ -2390,7 +2456,7 @@ fn quick_view_draws_a_picture_in_half_blocks() {
 
 #[test]
 fn the_looks_are_off_by_default_and_valid_in_the_config() {
-    let dir = std::env::temp_dir().join(format!("rcmd-cfg-look-{}", std::process::id()));
+    let dir = scratch("cfg-look");
     fs::create_dir_all(&dir).unwrap();
     let cfg = write_config(
         &dir,
@@ -2558,7 +2624,7 @@ fn docs_keys_md_is_what_print_keys_prints() {
 
 #[test]
 fn every_toml_example_in_the_docs_is_a_valid_config() {
-    let dir = std::env::temp_dir().join(format!("rcmd-doc-toml-{}", std::process::id()));
+    let dir = scratch("doc-toml");
     fs::create_dir_all(&dir).unwrap();
     let mut checked = 0;
     for file in ["README.md", "docs/config.md", "docs/security.md"] {
@@ -2621,7 +2687,7 @@ fn a_binary_file_switched_to_text_shows_its_lines_not_an_empty_screen() {
 
 #[test]
 fn autosave_is_configurable_with_a_floor_and_an_off() {
-    let dir = std::env::temp_dir().join(format!("rcmd-cfg-autosave-{}", std::process::id()));
+    let dir = scratch("cfg-autosave");
     fs::create_dir_all(&dir).unwrap();
     for (body, ok) in [
         ("[general]\nautosave_secs = 0\n", true),

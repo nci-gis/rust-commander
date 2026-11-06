@@ -199,7 +199,7 @@ fn main() -> Result<()> {
     };
     settings.mode = settings.mode.max(cli_mode);
     if let Some(r) = &cli.root {
-        let r = match std::fs::canonicalize(r) {
+        let r = match rcmd_core::paths::canonical(r) {
             Ok(p) if p.is_dir() => p,
             Ok(_) => fail(&format!("--root {}: not a directory", r.display())),
             Err(e) => fail(&format!("--root {}: {e}", r.display())),

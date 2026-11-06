@@ -54,7 +54,7 @@ impl Policy {
         let Some(root) = &self.root else {
             return true;
         };
-        match std::fs::canonicalize(path) {
+        match crate::paths::canonical(path) {
             Ok(p) => p.starts_with(root),
             Err(_) => false,
         }
@@ -72,7 +72,7 @@ impl Policy {
     pub fn is_root(&self, dir: &Path) -> bool {
         self.root
             .as_ref()
-            .is_some_and(|r| std::fs::canonicalize(dir).is_ok_and(|d| &d == r))
+            .is_some_and(|r| crate::paths::canonical(dir).is_ok_and(|d| &d == r))
     }
 }
 
@@ -88,7 +88,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("inside/deeper")).unwrap();
         fs::create_dir_all(d.join("outside")).unwrap();
-        fs::canonicalize(&d).unwrap()
+        crate::paths::canonical(&d).unwrap()
     }
 
     #[test]

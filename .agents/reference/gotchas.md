@@ -74,6 +74,12 @@
   across two reads). Found by the first person to run rcmd on Windows; CI could not, as
   the pty tests are Unix-only. `the_terminal_answers_where_the_cursor_is` fails without
   the answer.
+- **`std::fs::canonicalize` on Windows returns `\\?\D:\…`.** It showed in pane titles
+  after going up, and would have reached Alt+C (`cmd.exe` cannot `cd` into it), copy
+  path, cd-on-exit, bookmarks and the session. Use `rcmd_core::paths::canonical`
+  everywhere a canonical path reaches the user or the policy: it drops the prefix when
+  the plain form means the same file, and keeps both sides of the root check in one
+  form. Found on the first Windows run.
 - **`vt100::Parser` has no `set_size`** — it lives on the screen:
   `parser.screen_mut().set_size(rows, cols)`.
 

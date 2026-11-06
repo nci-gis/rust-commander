@@ -356,7 +356,7 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
     };
     let root = match config.security.root.trim() {
         "" => None,
-        r => match std::fs::canonicalize(r) {
+        r => match rcmd_core::paths::canonical(r) {
             Ok(p) if p.is_dir() => Some(p),
             Ok(_) => return Err(format!("[security] root = \"{r}\": not a directory")),
             Err(e) => return Err(format!("[security] root = \"{r}\": {e}")),
@@ -652,7 +652,7 @@ mod tests {
             tmp.display().to_string()
         ))
         .unwrap();
-        assert_eq!(s.root, Some(std::fs::canonicalize(&tmp).unwrap()));
+        assert_eq!(s.root, Some(rcmd_core::paths::canonical(&tmp).unwrap()));
         assert!(Mode::Restricted > Mode::ReadOnly && Mode::ReadOnly > Mode::Normal);
     }
 

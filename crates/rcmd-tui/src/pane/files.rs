@@ -642,7 +642,7 @@ impl FilePane {
     /// Go to `path`. `record` puts the directory being left on the back list, which
     /// every move does except stepping through that list itself.
     fn navigate(&mut self, path: &Path, record: bool) -> bool {
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let canonical = rcmd_core::paths::canonical(path).unwrap_or_else(|_| path.to_path_buf());
         let policy = rcmd_core::policy::get();
         if !policy.allows(&canonical) {
             if let Some(root) = &policy.root {

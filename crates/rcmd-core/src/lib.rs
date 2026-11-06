@@ -19,6 +19,7 @@ pub mod glob;
 pub mod image;
 pub mod listing;
 pub mod ops;
+pub mod paths;
 pub mod policy;
 pub mod rename;
 pub mod sha256;

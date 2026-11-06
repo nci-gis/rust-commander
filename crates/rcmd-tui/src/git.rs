@@ -66,8 +66,8 @@ fn status(dir: &Path) -> Option<Marks> {
     if !out.status.success() {
         return None;
     }
-    let here = std::fs::canonicalize(dir).ok()?;
-    let top = std::fs::canonicalize(&top).ok()?;
+    let here = rcmd_core::paths::canonical(dir).ok()?;
+    let top = rcmd_core::paths::canonical(&top).ok()?;
     Some(parse(&out.stdout, &top, &here))
 }
 

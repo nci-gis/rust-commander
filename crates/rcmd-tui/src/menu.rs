@@ -34,6 +34,13 @@ pub enum Cmd {
     RemoveBookmark(PathBuf),
     /// Open with the system's application, already confirmed.
     OpenFile(PathBuf),
+    /// Run a program in a terminal tab of its own, by argv, in this directory.
+    RunInTerminal {
+        argv: Vec<std::ffi::OsString>,
+        cwd: PathBuf,
+    },
+    /// Rule `n` of `[[open]]` on this file (Shift+O).
+    ApplyRule(usize, PathBuf),
     /// A checked plan from Shift+F2: each file and its new path.
     BatchRename(Vec<(PathBuf, PathBuf)>),
     /// Entry `n` of `[[menu]]`.

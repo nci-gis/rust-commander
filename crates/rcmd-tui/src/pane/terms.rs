@@ -90,6 +90,30 @@ impl TermPanel {
         Ok((id, t))
     }
 
+    /// A tab running one program by its argv, kept after it ends; it becomes the
+    /// active tab.
+    pub fn add_program_tab(&mut self, cwd: &Path, argv: &[std::ffi::OsString]) -> Result<()> {
+        let rows = self.body.height.saturating_sub(2).max(1);
+        let cols = self.body.width.saturating_sub(2).max(1);
+        let t = TermPane::spawn_argv(cwd, rows, cols, argv)?;
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut terms = BTreeMap::new();
+        terms.insert(id, t);
+        self.tabs.push(Tab {
+            tree: Node::Leaf(id),
+            terms,
+            focus: id,
+        });
+        self.active = self.tabs.len() - 1;
+        Ok(())
+    }
+
+    /// The focused pane is a program run in a tab that has ended: Enter or Esc closes it.
+    pub fn focused_program_ended(&self) -> bool {
+        self.focused().is_some_and(|t| t.keeps() && t.has_exited())
+    }
+
     pub fn add_tab(&mut self, cwd: &Path) -> Result<()> {
         let (id, t) = self.spawn(cwd)?;
         let mut terms = BTreeMap::new();
@@ -172,7 +196,8 @@ impl TermPanel {
             let dead: Vec<PaneId> = self.tabs[tab]
                 .terms
                 .iter()
-                .filter(|(_, t)| t.has_exited())
+                // A program's own tab stays for its output; Enter or Esc closes it.
+                .filter(|(_, t)| t.has_exited() && !t.keeps())
                 .map(|(id, _)| *id)
                 .collect();
             for id in dead {
@@ -207,6 +232,8 @@ impl TermPanel {
     pub fn tab_dirs(&self) -> Vec<String> {
         self.tabs
             .iter()
+            // A tab started for one program is not reopened next time as a shell.
+            .filter(|t| t.terms.get(&t.focus).is_none_or(|p| !p.keeps()))
             .map(|t| {
                 t.terms
                     .get(&t.focus)

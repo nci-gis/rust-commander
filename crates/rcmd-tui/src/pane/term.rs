@@ -44,6 +44,11 @@ pub struct TermPane {
     /// What the shell is doing, re-read at most twice a second rather than on every
     /// frame: a few /proc reads per tab per frame add up across tabs and splits.
     activity: RefCell<(Option<Instant>, Option<String>)>,
+    /// Started for one program ("Run it?" → in a terminal tab), not a shell: the pane
+    /// stays when it ends, so its output can still be read.
+    keep: bool,
+    /// How the process ended, once it has: "exit 0", "exit 2".
+    ended: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// The cursor-position query a program sends to its terminal (DSR 6).
@@ -67,19 +72,9 @@ fn cursor_queries(tail: &mut Vec<u8>, chunk: &[u8]) -> usize {
 
 impl TermPane {
     pub fn spawn(cwd: &Path, rows: u16, cols: u16, shell: &str) -> Result<Self> {
-        let rows = rows.max(MIN_ROWS);
-        let cols = cols.max(MIN_COLS);
-
-        let pair = NativePtySystem::default().openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-
         // An explicit shell may carry arguments ("bash -l", "pwsh -NoLogo").
         let mut words = shell.split_whitespace();
-        let mut cmd = match words.next() {
+        let cmd = match words.next() {
             Some(program) => {
                 let mut c = CommandBuilder::new(program);
                 c.args(words);
@@ -87,11 +82,6 @@ impl TermPane {
             }
             None => CommandBuilder::new_default_prog(),
         };
-        cmd.cwd(cwd);
-        // vt100 understands xterm sequences; without this, programs probe for something
-        // else and draw garbage into the pane.
-        cmd.env("TERM", "xterm-256color");
-
         let label = shell
             .split_whitespace()
             .next()
@@ -111,6 +101,50 @@ impl TermPane {
                     .map(|n| n.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| "shell".to_string());
+        Self::start(cwd, rows, cols, cmd, label, false)
+    }
+
+    /// One program, by its argv: nothing is split and no shell reads it, so a path with
+    /// spaces or `&` is one argument. The pane stays after the program ends.
+    pub fn spawn_argv(
+        cwd: &Path,
+        rows: u16,
+        cols: u16,
+        argv: &[std::ffi::OsString],
+    ) -> Result<Self> {
+        let Some((program, args)) = argv.split_first() else {
+            anyhow::bail!("nothing to run");
+        };
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
+        let label = Path::new(program).file_name().map_or_else(
+            || "program".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        Self::start(cwd, rows, cols, cmd, label, true)
+    }
+
+    fn start(
+        cwd: &Path,
+        rows: u16,
+        cols: u16,
+        mut cmd: CommandBuilder,
+        label: String,
+        keep: bool,
+    ) -> Result<Self> {
+        let rows = rows.max(MIN_ROWS);
+        let cols = cols.max(MIN_COLS);
+
+        let pair = NativePtySystem::default().openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        cmd.cwd(cwd);
+        // vt100 understands xterm sequences; without this, programs probe for something
+        // else and draw garbage into the pane.
+        cmd.env("TERM", "xterm-256color");
 
         let slave = pair.slave;
         let master = pair.master;
@@ -119,15 +153,26 @@ impl TermPane {
 
         let exited = Arc::new(AtomicBool::new(false));
         let pid = Arc::new(AtomicU32::new(0));
+        let ended = Arc::new(std::sync::Mutex::new(None));
         {
             let exited = exited.clone();
             let pid = pid.clone();
+            let ended = ended.clone();
             std::thread::spawn(move || {
-                if let Ok(mut child) = slave.spawn_command(cmd) {
-                    if let Some(p) = child.process_id() {
-                        pid.store(p, Ordering::Relaxed);
+                let how = match slave.spawn_command(cmd) {
+                    Ok(mut child) => {
+                        if let Some(p) = child.process_id() {
+                            pid.store(p, Ordering::Relaxed);
+                        }
+                        match child.wait() {
+                            Ok(st) => format!("exit {}", st.exit_code()),
+                            Err(e) => format!("lost: {e}"),
+                        }
                     }
-                    let _ = child.wait();
+                    Err(e) => format!("could not start: {e}"),
+                };
+                if let Ok(mut e) = ended.lock() {
+                    *e = Some(how);
                 }
                 // Dropping the slave here is what lets the reader thread see EOF.
                 drop(slave);
@@ -183,7 +228,19 @@ impl TermPane {
             label,
             pid,
             activity: RefCell::new((None, None)),
+            keep,
+            ended,
         })
+    }
+
+    /// Started for one program: kept after it ends (see `keep`).
+    pub fn keeps(&self) -> bool {
+        self.keep
+    }
+
+    /// How the process ended, once it has.
+    pub fn ended(&self) -> Option<String> {
+        self.ended.lock().ok().and_then(|e| e.clone())
     }
 
     /// The program running in the foreground, or the shell's directory when it is idle
@@ -373,6 +430,25 @@ impl TermPane {
         };
         frame.render_widget(PseudoTerminal::new(guard.screen()), inner);
         drop(guard);
+        // A program run in its own tab has ended: say so on its last row, and how to
+        // close it, rather than leaving a screen that looks alive.
+        if self.keep && self.has_exited() {
+            let how = self.ended().unwrap_or_else(|| "ended".into());
+            let note = format!(
+                " {} ended ({how}) \u{2014} Enter or Esc closes ",
+                self.label
+            );
+            let y = inner.y + inner.height - 1;
+            frame.buffer_mut().set_string(
+                inner.x,
+                y,
+                &note,
+                Style::new()
+                    .fg(theme::t().bg)
+                    .bg(theme::t().mark)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            );
+        }
         if back > 0 {
             crate::scrollbar::draw(
                 frame.buffer_mut(),

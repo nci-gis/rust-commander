@@ -50,6 +50,36 @@ editor = ""               # empty: $VISUAL, then $EDITOR, then vi (notepad on Wi
 opener = ""               # what `o` uses; empty: the system's own
 ```
 
+## Opening files
+
+Enter on a file opens it as Total Commander does: with the first `[[open]]` rule for its
+extension, else with the system's program (`open`, `explorer.exe`, `xdg-open`, or
+`[commands] opener`). Programs are asked about first.
+
+```toml
+[files]
+enter = "open"            # or "view": Enter views files, as in rcmd 0.1.0
+
+[[open]]
+ext = ["txt", "log", "md"]
+action = "view"           # or "edit": rcmd's viewer, or your editor
+
+[[open]]
+ext = ["pdf"]
+command = ["zathura"]     # a program and its arguments; the file is added at the end
+needs_display = true      # skipped over SSH and without a desktop
+
+[[open]]
+ext = ["rs", "toml"]
+command = ["nvim"]
+terminal = true           # in a terminal tab, not a window of its own
+os = ["linux", "macos"]   # only on these systems
+```
+
+`command` is a list, never a line a shell reads, so a file name is always one argument.
+Shift+O lists the rules that match the file under the cursor, with the system's program,
+View and Edit.
+
 ## Colours
 
 ```toml

@@ -44,6 +44,53 @@ pub fn runs_something(path: &Path) -> bool {
     }
 }
 
+/// Why the system's program cannot open anything from here; `None` when it can. The
+/// one place that decides, for `o`, Enter and the `[[open]]` rules.
+///
+/// Over SSH, on any system, there is no screen in front of the user: `open` and
+/// `explorer.exe` would show the file on the remote machine's own screen, or fail. On
+/// Linux and the BSDs without a display, xdg-open falls back to a browser — possibly a
+/// text one, inside this very terminal.
+pub fn no_screen() -> Option<String> {
+    let set = |v: &str| std::env::var_os(v).is_some_and(|s| !s.is_empty());
+    if set("SSH_CONNECTION") || set("SSH_TTY") {
+        return Some("over SSH there is no screen here to open it on".into());
+    }
+    if cfg!(all(unix, not(target_os = "macos"))) && !set("DISPLAY") && !set("WAYLAND_DISPLAY") {
+        return Some("no desktop session to open it in (no DISPLAY)".into());
+    }
+    None
+}
+
+/// Whether `path` is a program that runs in a terminal: something "Run it?" can start
+/// in a terminal tab, by its path alone, with its output on screen.
+pub fn console_program(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "exe" | "com" | "bat" | "cmd"
+            )
+        })
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let desktop = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("desktop"));
+        !desktop
+            && std::fs::metadata(path)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        false
+    }
+}
+
 /// The command that opens `path`: the configured one, or the platform's own. `Err`
 /// says why nothing can be opened here.
 pub fn command(path: &Path, configured: &str) -> Result<Command, String> {
@@ -56,15 +103,22 @@ pub fn command(path: &Path, configured: &str) -> Result<Command, String> {
     platform(path)
 }
 
-#[cfg(target_os = "macos")]
 fn platform(path: &Path) -> Result<Command, String> {
+    if let Some(why) = no_screen() {
+        return Err(format!("{why} \u{2014} set [commands] opener"));
+    }
+    system(path)
+}
+
+#[cfg(target_os = "macos")]
+fn system(path: &Path) -> Result<Command, String> {
     let mut c = Command::new("open");
     c.arg("--").arg(path);
     Ok(c)
 }
 
 #[cfg(windows)]
-fn platform(path: &Path) -> Result<Command, String> {
+fn system(path: &Path) -> Result<Command, String> {
     use std::os::windows::process::CommandExt;
     // explorer.exe splits its arguments on commas unless the path is quoted, and a
     // Windows path can never contain a double quote, so quoting it is always safe.
@@ -74,17 +128,7 @@ fn platform(path: &Path) -> Result<Command, String> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn platform(path: &Path) -> Result<Command, String> {
-    // Over SSH there is no desktop to open things on, and xdg-open's fallback is to
-    // try a browser — possibly a text one, inside this very terminal.
-    let gui = ["DISPLAY", "WAYLAND_DISPLAY"]
-        .iter()
-        .any(|v| std::env::var_os(v).is_some_and(|s| !s.is_empty()));
-    if !gui {
-        return Err(
-            "no desktop session to open it in (no DISPLAY) \u{2014} set [commands] opener".into(),
-        );
-    }
+fn system(path: &Path) -> Result<Command, String> {
     let mut c = Command::new("xdg-open");
     c.arg(path);
     Ok(c)

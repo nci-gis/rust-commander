@@ -45,6 +45,12 @@ fn isolated() -> Command {
     c.env("XDG_DATA_HOME", sandbox.join("data"));
     // And from their session: a test must neither reopen their panes nor overwrite them.
     c.env("RCMD_STATE", sandbox.join("session.toml"));
+    // And from how they are connected: whether a file can be opened depends on SSH and
+    // a display, so every test starts as a local desktop session; a test about SSH
+    // sets the variable itself.
+    c.env_remove("SSH_CONNECTION");
+    c.env_remove("SSH_TTY");
+    c.env("DISPLAY", ":0");
     c
 }
 
@@ -748,8 +754,10 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
         "the file's status should be shown\n{settings}"
     );
 
-    // [viewer] sits below the fold at 24 rows; scroll to it the way a user would.
-    let viewer = shot_with(&cfg, "F1,Tab,PageDown", &a, &b);
+    // [viewer] sits below the fold at 24 rows; scroll to it the way a user would. Two
+    // pages, since the list grows as settings are added.
+    let viewer = shot_with(&cfg, "F1,Tab,PageDown", &a, &b)
+        + &shot_with(&cfg, "F1,Tab,PageDown,PageDown", &a, &b);
     assert!(
         viewer.contains("\u{2022} tab_width = 8"),
         "a changed value should be marked\n{viewer}"
@@ -1929,6 +1937,151 @@ fn swap_trades_the_panes_and_mirror_copies_the_directory_across() {
     assert!(col(&t, &sep("b")) < col(&t, &sep("a")), "{s}");
     let s = shot_keys(SIZE, "Alt+=", &a, &b);
     assert!(!top(&s).contains("/b ") && !top(&s).contains("\\b "), "{s}");
+}
+
+/// A screen after `keys`, with a config body and extra environment variables.
+fn shot_cfg_env(
+    body: &str,
+    env: &[(&str, &str)],
+    keys: &str,
+    a: &std::path::Path,
+    b: &std::path::Path,
+) -> String {
+    let cfg_dir = a.parent().unwrap().join("cfg");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    let cfg = write_config(&cfg_dir, body);
+    let mut c = isolated();
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let out = c
+        .arg("--config")
+        .arg(&cfg)
+        .arg("--screenshot=110x24")
+        .arg(format!("--keys={keys}"))
+        .arg(a)
+        .arg(b)
+        .output()
+        .expect("rcmd should run");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn enter_opens_a_file_with_its_program_as_total_commander_does() {
+    let (a, b) = fixture();
+    let s = shot_cfg_env("", &[], "Down,Enter", &a, &b);
+    assert!(s.contains("would open victim.txt with"), "{s}");
+    // enter = "view" keeps 0.1.0's Enter.
+    let s = shot_cfg_env("[files]\nenter = \"view\"\n", &[], "Down,Enter", &a, &b);
+    assert!(
+        !s.contains("would open") && s.contains("content"),
+        "viewed\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn over_ssh_enter_views_and_o_says_why() {
+    // On any system: over SSH the file would open on the remote machine's own screen.
+    let (a, b) = fixture();
+    let ssh = [("SSH_CONNECTION", "10.0.0.1 5000 10.0.0.2 22")];
+    let s = shot_cfg_env("", &ssh, "Down,Enter", &a, &b);
+    assert!(s.contains("content"), "viewed instead\n{s}");
+    assert!(
+        s.contains("over SSH there is no screen here"),
+        "and says why\n{s}"
+    );
+    let s = shot_cfg_env("", &ssh, "Down,o", &a, &b);
+    assert!(s.contains("over SSH there is no screen here"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn read_only_enter_views_and_says_why() {
+    let (a, b) = fixture();
+    let s = shot_flags(&["--read-only"], "Down,Enter", &a, &b);
+    assert!(
+        s.contains("content") && s.contains("viewing it instead"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn open_rules_come_before_the_system() {
+    let (a, b) = fixture();
+    let view = "[[open]]\next = [\"TXT\"]\naction = \"view\"\n";
+    let s = shot_cfg_env(view, &[], "Down,Enter", &a, &b);
+    assert!(
+        s.contains("content") && !s.contains("would open"),
+        "case does not matter\n{s}"
+    );
+
+    let cmd = "[[open]]\next = [\"txt\"]\ncommand = [\"my-viewer\", \"--x\"]\n";
+    let s = shot_cfg_env(cmd, &[], "Down,Enter", &a, &b);
+    assert!(s.contains("would open victim.txt with my-viewer"), "{s}");
+
+    let tab = "[[open]]\next = [\"txt\"]\ncommand = [\"my-pager\"]\nterminal = true\n";
+    let s = shot_cfg_env(tab, &[], "Down,Enter", &a, &b);
+    assert!(s.contains("would run my-pager in a terminal tab"), "{s}");
+
+    // A GUI-only rule is skipped over SSH; nothing else matches, so the viewer.
+    let gui = "[[open]]\next = [\"txt\"]\ncommand = [\"my-viewer\"]\nneeds_display = true\n";
+    let ssh = [("SSH_CONNECTION", "10.0.0.1 5000 10.0.0.2 22")];
+    let s = shot_cfg_env(gui, &ssh, "Down,Enter", &a, &b);
+    assert!(!s.contains("my-viewer") && s.contains("content"), "{s}");
+
+    // A rule for another system does not apply here.
+    let other = if cfg!(windows) { "linux" } else { "windows" };
+    let elsewhere =
+        format!("[[open]]\next = [\"txt\"]\ncommand = [\"my-viewer\"]\nos = [\"{other}\"]\n");
+    let s = shot_cfg_env(&elsewhere, &[], "Down,Enter", &a, &b);
+    assert!(!s.contains("my-viewer"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn shift_o_lists_every_way_to_open_the_file() {
+    let (a, b) = fixture();
+    let rules = "[[open]]\next = [\"txt\"]\ncommand = [\"my-viewer\"]\n\n\
+                 [[open]]\next = [\"md\"]\ncommand = [\"not-for-txt\"]\n";
+    let s = shot_cfg_env(rules, &[], "Down,O", &a, &b);
+    for item in [
+        "Open victim.txt with",
+        "my-viewer",
+        "System default",
+        "View",
+        "Edit",
+    ] {
+        assert!(s.contains(item), "{item}\n{s}");
+    }
+    assert!(
+        !s.contains("not-for-txt"),
+        "only the rules for this file\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_program_offers_a_terminal_tab_first_after_cancel() {
+    use std::os::unix::fs::PermissionsExt;
+    let (a, b) = fixture();
+    let prog = a.join("victim.txt");
+    fs::set_permissions(&prog, fs::Permissions::from_mode(0o755)).unwrap();
+    let s = shot_cfg_env("", &[], "Down,Enter", &a, &b);
+    assert!(
+        s.contains("Run it?") && s.contains("in a terminal tab"),
+        "{s}"
+    );
+    let s = shot_cfg_env("", &[], "Down,Enter,Down,Enter", &a, &b);
+    assert!(s.contains("would run victim.txt in a terminal tab"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
 #[test]

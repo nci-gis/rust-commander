@@ -153,8 +153,11 @@ Mac in Terminal.app with Option as Meta, only history (Alt+↓) and resize
 **2026-11-07, Linux again:** Alt+F5, Alt+F7, Alt+F9 **do** arrive (pack, find_files,
 unpack); the desktop does not take them on the owner's Ubuntu. Then Shift+F1–F10: all
 arrive on Linux (usage, bulk_rename, new_file, copy_as, rename, delete_permanent,
-user_menu; Shift+F7 and Shift+F10 unbound). Still not seen: Shift+F1–F9 on Windows, and
-Ctrl+PageUp / PageDown on both.
+user_menu; Shift+F7 and Shift+F10 unbound). Ctrl+PageUp / PageDown on Linux printed plain
+PageUp / PageDown: Ctrl lost (to confirm it was held). If so, previous / next tab
+(bound only to Ctrl+PageUp / PageDown) cannot be typed there; Alt+1, Alt+2 do arrive on
+Linux and Windows and are unbound, a candidate for "tab N". Still not seen: Shift+F1–F9
+and Ctrl+PageUp / PageDown on Windows.
 
 Suspected earlier, now mostly disproved: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
 other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown

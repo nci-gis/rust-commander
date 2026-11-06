@@ -53,16 +53,16 @@ macOS 26). Terminal.app there cannot show 24-bit colour and misreads it. Fixed a
 0.1.0: rcmd now sends it 256 colours, so upgrading is the fix. With 0.1.0 itself,
 setting every `[theme]` colour to a palette number (`"0"`–`"255"`) avoids it.
 
-**The mouse does not work in Terminal.app** — clicks select text, the wheel scrolls the
-window. *Open: being investigated.* Check View → **Allow Mouse Reporting** (⌘R) is
-ticked. If it is and the mouse still does nothing, run `rcmd --show-keys`, click and
-scroll, and add the output to the
-[issue](https://github.com/nci-gis/rust-commander/issues). Meanwhile iTerm2, Ghostty,
-WezTerm or kitty may be worth a try: they report the mouse the way Linux terminals do.
+**The mouse does nothing.** Check View → **Allow Mouse Reporting** (⌘R) is ticked; with
+it, clicks, the wheel, drags and double-clicks all reach rcmd. The pointer stays the
+text cursor (I-beam) inside rcmd: that is Terminal.app's pointer everywhere, and says
+nothing about whether the mouse works.
 
-**A scrollbar shows the terminal's history above rcmd.** That is Terminal.app's own
-scrollback, kept above the full-screen view rcmd uses; rcmd cannot hide it. Scroll back
-down, or set System Settings → Appearance → Show scroll bars → **When scrolling**.
+**Dragging the window's scrollbar up shows the shell, with empty space, above rcmd.**
+rcmd draws on the terminal's second screen, and Terminal.app keeps the first one, with
+your shell's history, reachable above it. rcmd cannot hide it, and nothing is wrong:
+drag back down, or use the wheel over rcmd, which scrolls rcmd. System Settings →
+Appearance → Show scroll bars → **When scrolling** hides the bar.
 
 **The terminal panel has a different background from the panes.** The panel shows
 what the shell prints, and where the shell sets no colour, your terminal profile's own

@@ -1,6 +1,6 @@
 # Round 003: macOS keys and mouse
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 2
 **Date started**: 2026-11-06
 **Date completed**:
@@ -136,17 +136,34 @@ on by default); the how-to on GitHub, per system with known issues
 (`docs/troubleshooting.md`), and only a few lines plus the link in F1. The macOS
 settings moved there from the guide.
 
-**Open: the mouse (step 5).** Waiting for `rcmd --show-keys` on the owner's Mac: if
-clicks print nothing there, Terminal.app is not reporting to rcmd at all.
+**Closed: the mouse (step 5), no change needed (2026-11-07).** `rcmd --show-keys` on
+the owner's Mac printed movement, clicks with their column and row, and ScrollUp /
+ScrollDown; and inside rcmd itself clicks, the wheel, selection and double-click all
+work. There was no mouse bug. What looked like one: the I-beam pointer (Terminal.app's
+pointer everywhere, a plain zsh included), and dragging the *window's* scrollbar, which
+shows the first screen (the shell, with blank rows) above rcmd's second one. rcmd cannot
+hide that; `docs/troubleshooting.md` says so. Alternate-scroll mode (`?1007h`) is not
+needed.
 
 ## Check
 
-- [ ] Step 1's table recorded here: which keys arrived, with which settings.
+- [ ] Step 1's table recorded here: which keys arrived, with which settings. Partly:
+      Option works as Alt once "Use Option as Meta key" is on; the mouse arrives. Not
+      recorded: which F-keys arrive with and without Fn.
 - [ ] Unit tests: the Esc-prefix state machine (timeout, Esc Esc, Esc + digit, Esc in a
-      dialog closes at once); the hint fires once and only in a file pane.
-- [ ] Render and pty tests for `--show-keys` and Esc-prefix on Linux.
+      dialog closes at once); the hint fires once and only in a file pane. Partly:
+      `keyfix` tests Esc + key, Esc + digit, Esc Esc, and what looks like Option.
+      **Not tested:** the two-second timeout, the hint firing only once (macOS-only
+      code, no Mac test), and Esc in a dialog — that one holds by construction, since
+      dialogs take keys before `translate_key` runs.
+- [x] Render and pty tests for `--show-keys` and Esc-prefix on Linux. Esc-prefix: three
+      render tests (Esc 7 is F7, Esc F7 is Alt+F7, Esc Esc cancels, a filter is taken
+      off first, `esc_as_meta = false`). `--show-keys`: run by hand in a pty (F7,
+      Alt+C, a click, a wheel); **no automated test**.
 - [ ] The reporter: every key on the F1 page works in Terminal.app with default
       settings via Esc-prefix, and directly once Option is Meta; the wheel scrolls rcmd.
+      Partly: Option as Meta works, the wheel scrolls rcmd. Esc-prefix on the Mac not
+      reported yet.
 
 Record what you could **not** verify as explicitly as what you could.
 

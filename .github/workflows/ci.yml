@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Advisories are published after code is written. A weekly run catches a new one
+  # against dependencies that have not changed.
+  schedule:
+    - cron: "0 3 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report every platform's result. A Windows failure must not hide a macOS one.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      # The suite starts a real pty and renders real frames, so this is the step that
+      # actually says whether rcmd works on this platform.
+      - run: cargo test --all
+      - run: cargo build --release
+
+  cross-check:
+    name: cross-check from linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      # Catches a broken #[cfg] on another platform in seconds, without waiting for
+      # that platform's runner.
+      - run: cargo check --all-targets --target x86_64-pc-windows-gnu
+      - run: cargo check --all-targets --target x86_64-apple-darwin
+
+  dependencies:
+    name: dependencies (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Known vulnerabilities, licences, duplicate versions and sources, against the
+      # rules in deny.toml.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+

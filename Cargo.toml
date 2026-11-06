@@ -1,0 +1,14 @@
+[workspace]
+members = ["crates/rcmd-core", "crates/rcmd-tui"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nci-gis/rust-commander"
+rust-version = "1.88"   # zip 9, the first release without RUSTSEC-2026-0367..0369 and -0429
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

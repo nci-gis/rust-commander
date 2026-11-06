@@ -1,0 +1,61 @@
+# cargo-deny: run `cargo deny check` locally; CI runs it on every push and weekly.
+#
+# Four checks, each answering a different question:
+#   advisories  does any dependency have a known vulnerability (RustSec database),
+#               or is it unmaintained or yanked?
+#   licenses    is everything we ship compatible with rcmd's MIT OR Apache-2.0?
+#               A GPL crate would put the whole binary under the GPL, which the
+#               provenance rule in CLAUDE.md exists to avoid.
+#   bans        are we pulling in duplicate versions or wildcard requirements?
+#   sources     does everything come from crates.io, not an unknown git repo?
+
+[graph]
+# Every platform rcmd ships on. Some dependencies are platform-only (the `trash`
+# crate is Windows and macOS only); checking just the host would miss them.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+# Any advisory fails the check. An entry in `ignore` must say why, with a date.
+ignore = []
+yanked = "deny"
+
+[licenses]
+# Permissive only. Measured on 2026-11-06 across all targets: these are every
+# license in the tree.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "BSL-1.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# rcmd's own crates are not published; their licence is in the workspace manifest.
+ignore = true
+
+[bans]
+# portable-pty still uses thiserror 1 where ratatui uses 2, which brings two syn and
+# two bitflags with it. Not ours to fix; a warning, so a new duplicate is noticed.
+multiple-versions = "warn"
+wildcards = "deny"
+# rcmd-tui depends on rcmd-core by path, with no version. Allowed only because
+# neither crate is published (publish = false); a published crate could not do this.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

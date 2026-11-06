@@ -25,6 +25,7 @@ mod safety;
 mod scrollbar;
 mod search;
 mod session;
+mod tempfiles;
 mod theme;
 mod usage;
 mod usermenu;
@@ -174,6 +175,9 @@ fn main() -> Result<()> {
         print!("{}", config::render_default());
         return Ok(());
     }
+
+    // What earlier runs left in the temporary directory, if they ended badly.
+    tempfiles::sweep();
 
     let (mut settings, outcome) = config::load(cli.config.as_deref());
     if cli.check_config {

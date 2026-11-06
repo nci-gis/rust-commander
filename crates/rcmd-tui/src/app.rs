@@ -229,6 +229,8 @@ impl Drop for App {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = std::fs::remove_dir_all(&tmp);
         }
+        // And everything else this run put in the temporary directory.
+        crate::tempfiles::remove();
     }
 }
 
@@ -981,6 +983,7 @@ impl App {
 
     /// One turn of the event loop without input: lets a running job report in.
     pub fn tick(&mut self) {
+        crate::tempfiles::touch();
         self.pump_job();
         self.reap_terminals();
         self.background();
@@ -3602,7 +3605,10 @@ impl App {
     fn begin_batch(&mut self, files: Vec<PathBuf>, text: &str) {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let list = std::env::temp_dir().join(format!("rcmd-rename-{}-{n}.txt", std::process::id()));
+        let Some(list) = crate::tempfiles::file(&format!("rename-{n}.txt")) else {
+            self.status = "cannot make a temporary directory for the list of names".into();
+            return;
+        };
         if let Err(e) = session::write_private(&list, text.as_bytes()) {
             self.status = format!("cannot write the list of names: {e}");
             return;
@@ -4312,7 +4318,10 @@ impl App {
             .unwrap_or_default();
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = std::env::temp_dir().join(format!("rcmd-view-{}-{n}", std::process::id()));
+        let Some(tmp) = crate::tempfiles::file(&format!("view-{n}")) else {
+            self.status = "cannot make a temporary directory".into();
+            return;
+        };
         let made = {
             // Mutable only where there is a mode to set.
             #[cfg_attr(not(unix), allow(unused_mut))]

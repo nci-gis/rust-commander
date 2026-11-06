@@ -50,6 +50,19 @@ Samples go to `target/tmp/soak-rss.csv`.
 
 Work on `dev`. `main` changes only through a pull request from `dev`, with CI green.
 
+## Releasing
+
+1. Move the `[Unreleased]` notes in `CHANGELOG.md` under the new version, and set
+   `version` in `Cargo.toml` to match.
+2. Merge `dev` into `main` by pull request.
+3. Tag `main`: `git tag v0.1.0 && git push origin v0.1.0`.
+4. The `release` workflow builds Linux (glibc and static musl), macOS (ARM and Intel)
+   and Windows, and opens a **draft** release with the archives, `SHA256SUMS`, and
+   `THIRD-PARTY.md` (the licences of everything inside). Read it, then Publish.
+
+The packaging runs, without releasing, on any push to `dev` that changes
+`.github/workflows/release.yml`, `about.toml` or `about.hbs`.
+
 ## How the code is organised
 
 Start with [.agents/context/project.md](../.agents/context/project.md): the rules,

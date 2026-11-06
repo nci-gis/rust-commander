@@ -50,6 +50,6 @@ git config can make git run other programs. Turn it on only for repositories you
 
 ## Reporting a problem
 
-Open an issue at https://github.com/nci-gis/rust-commander/issues. For something that
-should not be public yet, say so in the issue title and leave the details out; we will
-reply with a private way to share them.
+A security problem: report it privately, as [SECURITY.md](../SECURITY.md) explains —
+not in a public issue. Anything else: open an issue at
+https://github.com/nci-gis/rust-commander/issues.

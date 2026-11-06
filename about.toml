@@ -1,0 +1,26 @@
+# cargo-about: the licences of everything shipped inside an rcmd binary, written next
+# to it in every release. The same list deny.toml allows; a crate under anything else
+# fails the build here too.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "BSL-1.0",
+    "Unicode-3.0",
+]
+# Every platform a release is built for, so a Windows-only or macOS-only crate is
+# listed too.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+ignore-dev-dependencies = true
+ignore-build-dependencies = false

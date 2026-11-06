@@ -1063,3 +1063,26 @@ fn the_terminal_answers_where_the_cursor_is() {
     rcmd.send(F12);
     rcmd.quit();
 }
+
+/// Reported from Windows: closing the window instead of pressing q lost the session,
+/// since it was written only on quit and a closed window kills rcmd without asking.
+/// It is saved when it changes now, so a kill keeps what was open.
+#[test]
+fn a_killed_rcmd_still_reopens_where_it_was() {
+    let s = Scratch::new("killed");
+    std::fs::create_dir(s.left().join("deeper")).unwrap();
+    let mut rcmd = Session::start(&s, None);
+    rcmd.send(b"\x14"); // Ctrl+T: a second tab
+    rcmd.send(DOWN);
+    rcmd.send(ENTER); // into deeper
+    rcmd.wait_for(" 2 deeper ");
+    wait_file(&s.0.join("session.toml"), "saved without quitting", |c| {
+        c.is_some_and(|t| t.contains("deeper"))
+    });
+    let _ = rcmd.child.kill();
+    drop(rcmd);
+
+    let again = Session::start_with(&s, None, &[]);
+    again.wait_for(" 2 deeper ");
+    again.quit();
+}

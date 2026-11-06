@@ -197,6 +197,9 @@ pub struct App {
     pub usage: crate::usage::Usage,
     /// F3 inside a big archive, extracting on a thread.
     pending_view: Option<PendingView>,
+    /// The session as last written, and when the last check for changes ran.
+    saved: Option<Session>,
+    last_autosave: Instant,
 }
 
 impl App {
@@ -260,6 +263,8 @@ impl App {
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
             pending_view: None,
+            saved: None,
+            last_autosave: Instant::now(),
         }
     }
 
@@ -461,7 +466,24 @@ impl App {
         }
         if let Some(path) = session::default_path() {
             let s = self.snapshot();
-            let _ = session::save(&path, &s);
+            if session::save(&path, &s).is_ok() {
+                self.saved = Some(s);
+            }
+        }
+    }
+
+    /// Save the session when it has changed, every couple of seconds. Saving only on
+    /// quit lost everything when the window was closed instead — the X of Windows
+    /// Terminal, closing an SSH session — because then rcmd is killed, not asked.
+    fn autosave(&mut self) {
+        const EVERY: Duration = Duration::from_secs(2);
+        if !self.interactive || self.last_autosave.elapsed() < EVERY {
+            return;
+        }
+        self.last_autosave = Instant::now();
+        let now = self.snapshot();
+        if self.saved.as_ref() != Some(&now) {
+            self.save_session();
         }
     }
 
@@ -564,6 +586,7 @@ impl App {
             self.status = n;
         }
         self.pump_background_jobs();
+        self.autosave();
         let viewed = self
             .pending_view
             .as_ref()

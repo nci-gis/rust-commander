@@ -106,8 +106,10 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
+    // One temporary name per process: two rcmd windows saving at once must not write
+    // into the same file.
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".tmp");
+    name.push(format!(".{}.tmp", std::process::id()));
     let tmp = path.with_file_name(name);
     // A leftover from a crash keeps whatever mode it had if merely truncated; start
     // from nothing so the mode below is the one it gets.
@@ -193,9 +195,14 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "it lists your directories; owner only");
         }
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
         assert!(
-            !path.with_extension("toml.tmp").exists(),
-            "no temp file left behind"
+            leftovers.is_empty(),
+            "no temp file left behind: {leftovers:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

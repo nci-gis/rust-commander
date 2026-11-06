@@ -34,6 +34,16 @@ jobs:
       # actually says whether rcmd works on this platform.
       - run: cargo test --all
       - run: cargo build --release
+      # The build that passed, ready to run: try a branch on Windows or macOS without
+      # installing Rust there. Under the run's Artifacts; kept for two weeks.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rcmd-${{ runner.os }}-${{ github.ref_name }}
+          path: |
+            target/release/rcmd
+            target/release/rcmd.exe
+          if-no-files-found: error
+          retention-days: 14
 
   cross-check:
     name: cross-check from linux

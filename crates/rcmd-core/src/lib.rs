@@ -27,6 +27,7 @@ pub mod rename;
 pub mod sha256;
 pub mod size;
 pub mod sort;
+pub mod undo;
 
 pub use document::{Document, Mode};
 pub use entry::{special_kind, split_name, Entry, Kind};

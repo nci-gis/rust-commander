@@ -278,6 +278,9 @@ impl Mode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ThemeSpec {
+    /// The theme: a built-in one (dark, light, ansi, blue, high-contrast) or a file
+    /// `themes/<name>.toml` beside this config. The colours below change it further.
+    pub name: String,
     /// How many colours the terminal shows: "auto", "truecolor", "256" or "16".
     /// `RCMD_COLORS` in the environment overrides it.
     pub colors: String,
@@ -304,6 +307,7 @@ impl Default for ThemeSpec {
         let t = Theme::default();
         let s = |c: Color| color_name(c);
         Self {
+            name: "dark".into(),
             colors: "auto".into(),
             background: s(t.bg),
             panel: s(t.bg_panel),
@@ -335,6 +339,9 @@ pub struct Settings {
     pub theme16: Theme,
     /// `[theme] colors`; `None` is `auto`.
     pub colors: Option<Depth>,
+    /// The colours this terminal shows, as start-up decided (`main`): what View →
+    /// Theme… builds a theme for.
+    pub depth: Depth,
     pub keymap: Keymap,
     pub sort: Sort,
     /// The mode in effect — after the command line has had its say.
@@ -403,8 +410,15 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
 
     let colors = Depth::parse(&config.theme.colors)
         .map_err(|e| format!("[theme] colors = \"{}\": {e}", config.theme.colors))?;
-    let theme = build_theme(&config.theme, &Theme::default())?;
-    let theme16 = build_theme(&config.theme, &Theme::ansi())?;
+    let base = named_theme(&config.theme.name)?;
+    let theme = build_theme(&config.theme, &base)?;
+    // On a 16-colour terminal the default theme gives way to the one made of the 16
+    // colours; a theme someone chose is kept, its colours fitted to the 16.
+    let theme16 = if config.theme.name == "dark" {
+        build_theme(&config.theme, &Theme::ansi())?
+    } else {
+        theme
+    };
 
     let mode = match config.security.mode.as_str() {
         "normal" => Mode::Normal,
@@ -508,11 +522,173 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         theme,
         theme16,
         colors,
+        depth: Depth::True,
         keymap,
         sort,
         mode,
         root,
     })
+}
+
+/// A theme file, `themes/<name>.toml`: a built-in to start from and the colours that
+/// differ, in the same names as `[theme]`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ThemeFile {
+    base: Option<String>,
+    background: Option<String>,
+    panel: Option<String>,
+    bar: Option<String>,
+    border: Option<String>,
+    border_active: Option<String>,
+    accent: Option<String>,
+    text: Option<String>,
+    text_dim: Option<String>,
+    directory: Option<String>,
+    executable: Option<String>,
+    symlink: Option<String>,
+    archive: Option<String>,
+    error: Option<String>,
+    marked: Option<String>,
+    cursor: Option<String>,
+    cursor_active: Option<String>,
+}
+
+/// The directory of the config file in use, once `load` has chosen it: with
+/// `--config`, that file's, not the default one's.
+static CONFIG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The config file in use, once `load` has chosen it (it may not exist yet).
+static CONFIG_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The config file rcmd reads, whether or not it exists: where Settings saves.
+pub fn path_in_use() -> Option<PathBuf> {
+    CONFIG_PATH.get().cloned().or_else(default_path)
+}
+
+/// Where theme files are looked for: `themes/` beside the config file in use, then
+/// beside the rcmd binary (a portable copy keeps its themes with it).
+pub fn theme_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let config_dir = CONFIG_DIR.get().cloned().or_else(|| {
+        default_path()
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+    });
+    if let Some(d) = config_dir {
+        dirs.push(d.join("themes"));
+    }
+    if let Some(d) = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(Path::parent)
+    {
+        dirs.push(d.join("themes"));
+    }
+    dirs
+}
+
+/// Every theme that can be chosen: the built-in ones, then the files, by name.
+pub fn available_themes() -> Vec<String> {
+    let mut names: Vec<String> = crate::theme::BUILT_IN
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for d in theme_dirs() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        let mut found: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                if p.extension()? != "toml" {
+                    return None;
+                }
+                Some(p.file_stem()?.to_string_lossy().into_owned())
+            })
+            .filter(|n| !names.contains(n))
+            .collect();
+        found.sort();
+        names.extend(found);
+    }
+    names
+}
+
+/// The theme called `name`: built in, or read from a file in `theme_dirs`.
+pub fn named_theme(name: &str) -> Result<Theme, String> {
+    if let Some(t) = crate::theme::built_in(name) {
+        return Ok(t);
+    }
+    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        return Err(format!("[theme] name = \"{name}\": not a theme name"));
+    }
+    let Some(path) = theme_dirs()
+        .into_iter()
+        .map(|d| d.join(format!("{name}.toml")))
+        .find(|p| p.is_file())
+    else {
+        return Err(format!(
+            "[theme] name = \"{name}\": no such theme; there are {}",
+            available_themes().join(", ")
+        ));
+    };
+    let shown = path.display();
+    let text = std::fs::read(&path)
+        .and_then(|b| decode(&b))
+        .map_err(|e| format!("{shown}: {e}"))?;
+    let f: ThemeFile = toml::from_str(&text).map_err(|e| {
+        format!(
+            "{shown}: {}",
+            e.to_string()
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    })?;
+    let base_name = f.base.as_deref().unwrap_or("dark");
+    let mut t = crate::theme::built_in(base_name).ok_or_else(|| {
+        format!(
+            "{shown}: base = \"{base_name}\": expected one of {}",
+            crate::theme::BUILT_IN.join(", ")
+        )
+    })?;
+    let set = |slot: &mut Color, field: &str, v: &Option<String>| -> Result<(), String> {
+        if let Some(v) = v {
+            *slot = parse_color(v).map_err(|e| format!("{shown}: {field} = \"{v}\": {e}"))?;
+        }
+        Ok(())
+    };
+    set(&mut t.bg, "background", &f.background)?;
+    set(&mut t.bg_panel, "panel", &f.panel)?;
+    set(&mut t.bg_bar, "bar", &f.bar)?;
+    set(&mut t.border, "border", &f.border)?;
+    set(&mut t.border_active, "border_active", &f.border_active)?;
+    set(&mut t.accent, "accent", &f.accent)?;
+    set(&mut t.fg, "text", &f.text)?;
+    set(&mut t.fg_dim, "text_dim", &f.text_dim)?;
+    set(&mut t.dir, "directory", &f.directory)?;
+    set(&mut t.exec, "executable", &f.executable)?;
+    set(&mut t.link, "symlink", &f.symlink)?;
+    set(&mut t.archive, "archive", &f.archive)?;
+    set(&mut t.err, "error", &f.error)?;
+    set(&mut t.mark, "marked", &f.marked)?;
+    set(&mut t.row_cursor, "cursor", &f.cursor)?;
+    set(&mut t.row_cursor_active, "cursor_active", &f.cursor_active)?;
+    Ok(t)
+}
+
+/// The theme the user sees for `name`: the named theme with `[theme]`'s own colours on
+/// top, as start-up builds it; for View → Theme….
+pub fn theme_for(name: &str, spec: &ThemeSpec, depth: Depth) -> Result<Theme, String> {
+    let base = if depth == Depth::Ansi16 && name == "dark" {
+        Theme::ansi()
+    } else {
+        named_theme(name)?
+    };
+    build_theme(spec, &base)
 }
 
 /// The theme `spec` describes over `base`: a colour the user left at its default
@@ -660,6 +836,10 @@ pub fn load(explicit: Option<&Path>) -> (Settings, Outcome) {
             None => return (Settings::default(), Outcome::NoFile),
         },
     };
+    if let Some(d) = path.parent() {
+        let _ = CONFIG_DIR.set(d.to_path_buf());
+    }
+    let _ = CONFIG_PATH.set(path.clone());
     let text = match std::fs::read(&path).and_then(|b| decode(&b)) {
         Ok(t) => t,
         // A missing default file is the normal case. A missing file someone named on
@@ -827,6 +1007,19 @@ mod tests {
             r.matches("pdf", "linux") && !r.matches("pdf", "macos") && !r.matches("txt", "linux")
         );
         assert_eq!(r.label(), "zathura");
+    }
+
+    #[test]
+    fn a_theme_is_chosen_by_name() {
+        let s = parse("[theme]\nname = \"light\"\n").unwrap();
+        assert_eq!(s.theme, crate::theme::built_in("light").unwrap());
+        assert_eq!(s.theme16, s.theme, "a chosen theme is kept at 16 colours");
+        // The colours set in [theme] go on top of the named theme.
+        let s = parse("[theme]\nname = \"blue\"\naccent = \"#ff0000\"\n").unwrap();
+        assert_eq!(s.theme.accent, Color::Rgb(255, 0, 0));
+        assert_eq!(s.theme.bg, crate::theme::built_in("blue").unwrap().bg);
+        let e = parse("[theme]\nname = \"../evil\"\n").unwrap_err();
+        assert!(e.contains("not a theme name"), "{e}");
     }
 
     #[test]

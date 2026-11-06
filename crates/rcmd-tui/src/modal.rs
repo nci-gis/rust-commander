@@ -21,6 +21,7 @@ use crate::help::Help;
 use crate::line_edit::LineEdit;
 use crate::menu::{Cmd, Menu};
 use crate::rename_dialog::{self, RenameDialog};
+use crate::settings_dialog::{self, SettingsDialog};
 use crate::theme;
 use crate::viewer::Viewer;
 
@@ -36,6 +37,8 @@ pub enum Modal {
     Find(Box<FindDialog>),
     /// Shift+F2: rename many with a pattern.
     Rename(Box<RenameDialog>),
+    /// File → Settings….
+    Settings(Box<SettingsDialog>),
     Ask(Ask),
     /// Help → Usage. Drawn by the app, which holds the numbers.
     Usage,
@@ -52,6 +55,8 @@ pub struct Ask {
     pub buttons: Vec<Rect>,
     /// A quiet line at the bottom right, on the buttons' row: a credit, not content.
     pub footnote: Option<String>,
+    /// A picture to the left of the text: rcmd's logo, in About.
+    pub picture: Option<rcmd_core::image::Picture>,
 }
 
 pub struct Confirm {
@@ -331,6 +336,37 @@ pub(crate) fn put(frame: &mut Frame, area: Rect, row: u16, text: &str, style: St
         .set_line(area.x, area.y + row, &line, area.width);
 }
 
+/// Paint a picture in half blocks at (`x0`, `y0`): each cell two pixels, the upper as
+/// the foreground of `▀` and the lower as its background. An odd last row takes `bg`
+/// below.
+pub(crate) fn paint_picture(
+    frame: &mut Frame,
+    x0: u16,
+    y0: u16,
+    pic: &rcmd_core::image::Picture,
+    bg: [u8; 3],
+) {
+    let rows = pic.height.div_ceil(2);
+    let rgb = |p: [u8; 3]| ratatui::style::Color::Rgb(p[0], p[1], p[2]);
+    let buf = frame.buffer_mut();
+    for r in 0..rows {
+        for x in 0..pic.width {
+            let top = pic.rgb[(2 * r) * pic.width + x];
+            let bottom = pic
+                .rgb
+                .get((2 * r + 1) * pic.width + x)
+                .copied()
+                .unwrap_or(bg);
+            let pos = ratatui::layout::Position::new(x0 + x as u16, y0 + r as u16);
+            if let Some(cell) = buf.cell_mut(pos) {
+                cell.set_symbol("\u{2580}")
+                    .set_fg(rgb(top))
+                    .set_bg(rgb(bottom));
+            }
+        }
+    }
+}
+
 /// Draw `[Key] label` buttons in a row and return where each one landed.
 ///
 /// Recording the rectangles while drawing, rather than recomputing them in the click
@@ -372,6 +408,7 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut Modal) {
         Modal::Menu(m) => m.render(frame, area),
         Modal::Find(d) => find_dialog::render(frame, area, d),
         Modal::Rename(d) => rename_dialog::render(frame, area, d),
+        Modal::Settings(d) => settings_dialog::render(frame, area, d),
         Modal::Ask(a) => render_ask(frame, area, a),
         Modal::Usage => {}
     }
@@ -381,6 +418,10 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     let th = theme::t();
     let accent = if a.danger { th.err } else { th.accent };
     let shown = a.body.len().min(area.height.saturating_sub(6) as usize);
+    // Room for a picture on the left, with two columns before the text.
+    let (pic_w, pic_h) = a.picture.as_ref().map_or((0, 0), |p| {
+        (p.width as u16 + 2, p.height.div_ceil(2) as u16)
+    });
     let w = a
         .body
         .iter()
@@ -388,9 +429,24 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
         .max()
         .unwrap_or(0)
         .clamp(40, 100) as u16
-        + 4;
-    let r = centered(area, w, shown as u16 + 4);
-    let inner = frame_box(frame, r, &a.title, accent);
+        + 4
+        + pic_w;
+    let h = (shown as u16).max(pic_h) + 4;
+    let r = centered(area, w, h);
+    let full = frame_box(frame, r, &a.title, accent);
+    if let Some(p) = &a.picture {
+        let bg = match th.bg_panel {
+            ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
+            _ => [0, 0, 0],
+        };
+        paint_picture(frame, full.x, full.y, p, bg);
+    }
+    let inner = Rect::new(
+        full.x + pic_w,
+        full.y,
+        full.width.saturating_sub(pic_w),
+        full.height,
+    );
     for (i, line) in a.body.iter().take(shown).enumerate() {
         let last = i + 1 == shown && shown < a.body.len();
         let text = if last {
@@ -400,7 +456,8 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
         };
         put(frame, inner, i as u16, &text, Style::new().fg(th.fg));
     }
-    let y = inner.y + inner.height.saturating_sub(1);
+    let y = full.y + full.height.saturating_sub(1);
+    let inner = Rect::new(full.x, full.y, full.width, full.height);
     a.buttons = match &a.yes {
         Some((verb, _)) => buttons(
             frame,

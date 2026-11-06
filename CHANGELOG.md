@@ -20,6 +20,16 @@ that heading and starts a new, empty one here. -->
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
 - `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
   window or a terminal tab, for some systems only, or only where there is a screen.
+- **File → Settings…**: tabs for General, Files, Theme and Terminal; ←/→ to change,
+  Enter to save. Only the changed lines of `config.toml` are rewritten, comments kept;
+  the result is read back before it is written. Rows say which apply at the next start.
+  Not in read-only or restricted mode.
+- Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
+  `[theme] name`, or a file of your own in `themes/` that starts from one of them.
+  **View → Theme…** switches while rcmd runs.
+- **Ctrl+Z** undoes the last rename, rename-many, move, new directory or new file,
+  after asking, and only while the disk still matches: nothing is overwritten or lost.
+  After a copy or a delete it says those cannot be undone.
 - **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
 - "Run it?" can run a program in a terminal tab, where its output stays after it ends.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
@@ -31,6 +41,7 @@ that heading and starts a new, empty one here. -->
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
 ### Changed
+- About shows rcmd's logo, drawn in the terminal.
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
   extension, else the system's program; programs still ask "Run it?" first. Over SSH,
   without a desktop or in read-only mode it views the file and says why.
@@ -41,6 +52,12 @@ that heading and starts a new, empty one here. -->
 - The config documentation lists every file rcmd keeps, and where.
 
 ### Fixed
+- `rcmd --screenshot … | head`, and any long output cut short by its reader, ended in
+  a panic; it now ends quietly, as `cat` does.
+- rcmd keeps its temporary files in one directory per run, removes it on exit, and at
+  start removes what a crashed or killed run left behind.
+- Theme files are looked for beside the config in use, including one given with
+  `--config`.
 - `o` over SSH into a Mac or a Windows machine opened the file on that machine's own
   screen; now it says there is no screen here, as it did on Linux.
 - A file viewed from inside an archive is no longer left in the temporary directory

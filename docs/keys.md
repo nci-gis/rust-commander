@@ -65,6 +65,7 @@ These are the defaults. Press **F1** in rcmd to see your own, after any changes 
 | `Shift+F8` | Delete permanently |
 | `o` | Open with the system's default application |
 | `O` | Open with…: your [[open]] rules, the system's program, view, edit |
+| `Ctrl+z` | Undo the last rename, move, new directory or new file (asks first) |
 | `Ctrl+Space` | Work out the size of every directory shown |
 | `Alt+F7` | Find files by name and content; results open in a new tab |
 | `Shift+F2` | Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR |

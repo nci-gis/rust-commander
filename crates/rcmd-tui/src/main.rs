@@ -7,6 +7,7 @@
 mod app;
 mod bookmarks;
 mod config;
+mod config_edit;
 mod find_dialog;
 mod git;
 mod help;
@@ -25,6 +26,8 @@ mod safety;
 mod scrollbar;
 mod search;
 mod session;
+mod settings_dialog;
+mod tempfiles;
 mod theme;
 mod usage;
 mod usermenu;
@@ -153,35 +156,37 @@ fn main() -> Result<()> {
         }
     };
     if cli.help {
-        println!(
-            "rcmd {} \u{2014} {}\n",
+        emit(&format!(
+            "rcmd {} \u{2014} {}\n\n{USAGE}",
             env!("CARGO_PKG_VERSION"),
             env!("CARGO_PKG_DESCRIPTION")
-        );
-        print!("{USAGE}");
+        ));
         return Ok(());
     }
     if cli.version {
-        println!(
-            "rcmd {} \u{b7} {} \u{b7} {}",
+        emit(&format!(
+            "rcmd {} \u{b7} {} \u{b7} {}\n",
             env!("CARGO_PKG_VERSION"),
             env!("CARGO_PKG_LICENSE"),
             env!("CARGO_PKG_AUTHORS").replace(':', ", ")
-        );
+        ));
         return Ok(());
     }
     if cli.print_config {
-        print!("{}", config::render_default());
+        emit(&config::render_default());
         return Ok(());
     }
+
+    // What earlier runs left in the temporary directory, if they ended badly.
+    tempfiles::sweep();
 
     let (mut settings, outcome) = config::load(cli.config.as_deref());
     if cli.check_config {
         match &outcome {
-            Outcome::Loaded(p) => println!("ok: {}", p.display()),
+            Outcome::Loaded(p) => emit(&format!("ok: {}\n", p.display())),
             Outcome::NoFile => match config::default_path() {
-                Some(p) => println!("no config at {} — defaults in use", p.display()),
-                None => println!("no config location — defaults in use"),
+                Some(p) => emit(&format!("no config at {} — defaults in use\n", p.display())),
+                None => emit("no config location — defaults in use\n"),
             },
             Outcome::Rejected { .. } => {
                 eprintln!("{}", outcome.message().unwrap_or_default());
@@ -191,7 +196,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if cli.print_keys {
-        print!("{}", keys::markdown(&settings.keymap));
+        emit(&keys::markdown(&settings.keymap));
         return Ok(());
     }
     // How many colours this terminal shows: RCMD_COLORS, then [theme] colors, then
@@ -208,10 +213,11 @@ fn main() -> Result<()> {
         None => settings.colors,
     }
     .unwrap_or_else(|| rcmd_core::color::detect(|k| std::env::var(k).ok(), cfg!(windows)));
+    settings.depth = depth;
     theme::init(if depth == rcmd_core::color::Depth::Ansi16 {
-        settings.theme16.clone()
+        settings.theme16
     } else {
-        settings.theme.clone()
+        settings.theme
     });
     if cli.show_keys {
         return show_keys(&settings.keymap, depth);
@@ -343,14 +349,32 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     }
 
     let buf = terminal.backend().buffer();
+    let mut out = String::new();
     for y in 0..h {
         let mut line = String::new();
         for x in 0..w {
             line.push_str(buf.cell(Position::new(x, y)).map_or(" ", |c| c.symbol()));
         }
-        println!("{}", line.trim_end());
+        out.push_str(line.trim_end());
+        out.push('\n');
     }
+    emit(&out);
     Ok(())
+}
+
+/// Write to stdout. A reader that stops early (`rcmd --screenshot | head`) ends rcmd
+/// quietly with success, as it ends `cat`; `println!` panics there instead, once the
+/// output is larger than the pipe holds.
+fn emit(text: &str) {
+    use std::io::Write;
+    let mut out = stdout().lock();
+    if let Err(e) = out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("rcmd: {e}");
+        std::process::exit(1);
+    }
 }
 
 enum Input {

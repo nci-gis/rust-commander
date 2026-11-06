@@ -52,15 +52,22 @@ pub fn load(path: &Path, max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<
         .unwrap_or("")
         .to_ascii_lowercase();
     let (w, h, px) = if ext == "png" {
-        png(path, bg)?
+        png(BufReader::new(fs::File::open(path)?), bg)?
     } else {
         jpeg(path)?
     };
     Ok(shrink(w, h, &px, max_w.max(1), max_h.max(1)))
 }
 
-fn png(path: &Path, bg: [u8; 3]) -> io::Result<(usize, usize, Vec<[u8; 3]>)> {
-    let mut d = png::Decoder::new(BufReader::new(fs::File::open(path)?));
+/// A PNG already in memory — rcmd's own logo, built into the binary — shrunk to fit as
+/// [`load`] does.
+pub fn png_bytes(bytes: &[u8], max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<Picture> {
+    let (w, h, px) = png(Cursor::new(bytes), bg)?;
+    Ok(shrink(w, h, &px, max_w.max(1), max_h.max(1)))
+}
+
+fn png<R: io::BufRead + io::Seek>(r: R, bg: [u8; 3]) -> io::Result<(usize, usize, Vec<[u8; 3]>)> {
+    let mut d = png::Decoder::new(r);
     d.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut r = d.read_info().map_err(io::Error::other)?;
     let (w, h) = (r.info().width as u64, r.info().height as u64);

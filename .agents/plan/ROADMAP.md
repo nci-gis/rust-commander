@@ -56,18 +56,15 @@ were done first:
 enough for 0.2.0 — Round 001's colours above all, since 0.1.0 is hard to read on a Mac in
 Terminal.app — and the flow in `docs/development.md` is ready when asked.
 
-**Small fixes, no round of their own** (on `dev`, or inside the next round that touches
-the file):
+**Small fixes, no round of their own** — all done on `feat/v0.2.0` (2026-11-07):
 
-- `rcmd --screenshot … | head` panics ("failed printing to stdout: Broken pipe",
-  exit 101) when the reader stops early; a closed pipe should end quietly, as `cat`
-  does. Any output larger than the pipe's buffer is affected.
-- `rcmd --show-keys` has no automated test (Round 003).
-- **rcmd keeps track of its own temporary files** (owner, 2026-11-07): one directory per
-  run for everything it writes to the temp directory (viewer copies, the rename list),
-  touched while rcmd runs; at start, rcmd removes the directories of runs that are gone,
-  so a crash or a kill leaves nothing behind for good. Before v0.2.0.
-- The Alt+R group's Esc path has no test of its own (Round 004).
+- ~~`rcmd --screenshot … | head` panics~~: stdout goes through `emit()`, which ends
+  quietly on a closed pipe; a test fails without it.
+- ~~`rcmd --show-keys` has no automated test~~: a pty test (F7, Alt+J, a click, Esc Esc).
+- ~~The Alt+R group's Esc path has no test~~: a render test.
+- ~~rcmd keeps track of its own temporary files~~: `tempfiles.rs`, one `rcmd-run-<pid>`
+  directory per run, user-only; a marker refreshed while running; removed on exit; at
+  start, runs whose marker is over an hour old are removed (only marked directories).
 
 Waiting on a person, at any point: the one name (item 8); the four promotions proposed
 in Rounds 001 and 003; the read-only finding in
@@ -81,13 +78,13 @@ in Rounds 001 and 003; the read-only finding in
 | 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
 | 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
 | **Next: Total Commander feel** | | | | |
-| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Review |
-| 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | — | |
+| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Review: merged (PR #5) |
+| 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | [006](cycles/Round_006.md) | Review |
 | 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | In Progress: built, in review |
-| 6 | Settings (File → Settings…): tabs General, Theme, Keys, Panels and layout | L | — | after 4 and 5 |
-| 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | — | |
+| 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Review |
+| 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Review (About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
-| 9 | Undo for the last operation | M | — | |
+| 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Review |
 | 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
 | **Later: optional extras** | | | | |
 | 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |

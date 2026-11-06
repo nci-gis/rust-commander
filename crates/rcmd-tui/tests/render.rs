@@ -325,6 +325,42 @@ fn a_group_stays_open_until_a_key_outside_it() {
 }
 
 #[test]
+fn esc_closes_a_group_too() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Alt+r,Esc", &a, &b);
+    assert!(!s.contains("Enter or Esc: done"), "{s}");
+    let closed = shot_keys("110x24", "Alt+r,Esc,Left", &a, &b);
+    let plain = shot_keys("110x24", "Left", &a, &b);
+    let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
+    assert_eq!(border(&closed), border(&plain), "{closed}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_reader_that_stops_early_ends_rcmd_quietly() {
+    // rcmd --screenshot | head: a closed pipe is the end, not a panic.
+    use std::io::Read;
+    let (a, b) = fixture();
+    let mut child = isolated()
+        .args(["--screenshot=200x400"])
+        .arg(&a)
+        .arg(&b)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut first = [0u8; 16];
+    child.stdout.take().unwrap().read_exact(&mut first).unwrap();
+    // The pipe is dropped here, as head drops it.
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{:?}", out.status);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("panicked"), "{err}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_group_says_what_it_takes_and_enter_closes_it() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Alt+r", &a, &b);
@@ -1972,6 +2008,182 @@ fn shot_cfg_env(
 }
 
 #[test]
+fn a_theme_file_beside_the_config_is_a_theme() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("cfgdir");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    fs::write(
+        dir.join("themes/mine.toml"),
+        "base = \"light\"\naccent = \"#123456\"\n",
+    )
+    .unwrap();
+    let cfg = write_config(&dir, "[theme]\nname = \"mine\"\n");
+    let check = |cfg: &std::path::Path| {
+        isolated()
+            .env("RCMD_CONFIG", cfg)
+            .arg("--check-config")
+            .output()
+            .unwrap()
+    };
+    let out = check(&cfg);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    // View → Theme… lists it after the built-in ones.
+    let out = isolated()
+        .env("RCMD_CONFIG", &cfg)
+        .args(["--screenshot=100x40", "--keys=F9,Right,Up,Enter"])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    for name in ["dark", "light", "ansi", "blue", "high-contrast", "mine"] {
+        assert!(s.contains(name), "{name}\n{s}");
+    }
+    // A bad colour in the file names the file.
+    fs::write(dir.join("themes/mine.toml"), "accent = \"mauve\"\n").unwrap();
+    let out = check(&cfg);
+    let said =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains("mine.toml") && said.contains("mauve"),
+        "{said}"
+    );
+    // An unknown name lists what there is.
+    let cfg = write_config(&dir, "[theme]\nname = \"nope\"\n");
+    let out = check(&cfg);
+    let said =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("no such theme") && said.contains("high-contrast"),
+        "{said}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn view_theme_switches_while_running() {
+    let (a, b) = fixture();
+    let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Enter", &a, &b);
+    assert!(s.contains("theme: light"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings");
+    fs::create_dir_all(&dir).unwrap();
+    let original = "# mine\n[general]\nmenu_bar = true   # keep this comment\n\n[[menu]]\nkey = \"t\"\nlabel = \"top\"\ncommand = \"top\"\n";
+    let cfg = write_config(&dir, original);
+    // File menu, Settings… (just above Quit, the last item); then the second row,
+    // "F8 moves to the trash", switched off; then a theme on the Theme tab.
+    let s = shot_with(&cfg, "F9,Up,Up,Enter", &a, &b);
+    assert!(
+        s.contains("Settings") && s.contains("F8 moves to the trash"),
+        "{s}"
+    );
+    let s = shot_with(
+        &cfg,
+        "F9,Up,Up,Enter,Down,Space,Tab,Tab,Right,Enter",
+        &a,
+        &b,
+    );
+    assert!(s.contains("settings saved"), "{s}");
+    let after = fs::read_to_string(&cfg).unwrap();
+    assert!(
+        after.starts_with("# mine\n[general]\nmenu_bar = true   # keep this comment\n"),
+        "{after}"
+    );
+    assert!(after.contains("delete_to_trash = false"), "{after}");
+    assert!(after.contains("[theme]\nname = \"light\""), "{after}");
+    assert!(after.contains("[[menu]]\nkey = \"t\""), "{after}");
+    // What was saved is what the next start reads.
+    let out = isolated()
+        .arg("--config")
+        .arg(&cfg)
+        .arg("--check-config")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn settings_in_read_only_mode_shows_but_never_saves() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings-ro");
+    fs::create_dir_all(&dir).unwrap();
+    let cfg = write_config(&dir, "[general]\nmenu_bar = true\n");
+    let out = isolated()
+        .args(["--read-only", "--config"])
+        .arg(&cfg)
+        .args([
+            "--screenshot=110x24",
+            "--keys=F9,Up,Up,Enter,Down,Space,Enter",
+        ])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("rcmd writes nothing"), "{s}");
+    assert_eq!(
+        fs::read_to_string(&cfg).unwrap(),
+        "[general]\nmenu_bar = true\n"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn ctrl_z_undoes_a_rename_a_new_directory_and_a_move_after_asking() {
+    let (a, b) = fixture();
+    // F2 selects the name part: typing replaces it.
+    let s = shot_keys("110x24", "Down,F2,x,Enter,Ctrl+z", &a, &b);
+    assert!(s.contains("Undo the rename of victim.txt to x.txt?"), "{s}");
+    // That run renamed it for real and stopped at the question: put it back by hand.
+    fs::rename(a.join("x.txt"), a.join("victim.txt")).unwrap();
+    shot_keys("110x24", "Down,F2,x,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists() && !a.join("x.txt").exists());
+
+    shot_keys("110x24", "F7,d,o,c,s,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(!a.join("docs").exists(), "the new directory went");
+
+    // A move, then its undo: back where it came from.
+    shot_keys("110x24", "Down,F6,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists() && !b.join("victim.txt").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn ctrl_z_says_what_cannot_be_undone_and_refuses_what_changed() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Ctrl+z", &a, &b);
+    assert!(s.contains("nothing to undo"), "{s}");
+    // A copy is not undone, and an older rename is not undone behind it.
+    let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,Ctrl+z", &a, &b);
+    assert!(
+        s.contains("the last operation, a copy, cannot be undone"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    // In read-only mode undo is refused, as every write is.
+    let (a, b) = fixture();
+    let s = shot_flags(&["--read-only"], "Ctrl+z", &a, &b);
+    assert!(s.contains("read-only mode") && s.contains("undoing"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_opens_a_file_with_its_program_as_total_commander_does() {
     let (a, b) = fixture();
     let s = shot_cfg_env("", &[], "Down,Enter", &a, &b);
@@ -2759,6 +2971,12 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
         .find(|l| l.contains("Developed by"))
         .unwrap_or_else(|| panic!("no credit\n{s}"));
     assert!(row.contains("close"), "credit not on the button row\n{s}");
+    // The logo, 24 pixels square in half blocks: 12 rows of 24 cells, beside the text.
+    let logo_rows = s
+        .lines()
+        .filter(|l| l.contains(&"\u{2580}".repeat(24)))
+        .count();
+    assert_eq!(logo_rows, 12, "the logo\n{s}");
     assert!(
         row.find("close") < row.find("Developed by"),
         "credit not right of the button\n{s}"
@@ -2886,7 +3104,20 @@ fn every_toml_example_in_the_docs_is_a_valid_config() {
         while let Some(start) = rest.find("```toml\n") {
             let body = &rest[start + 8..];
             let end = body.find("```").expect("a closed code block");
-            let cfg = write_config(&dir, &body[..end]);
+            // A theme file's example says so on its first line, "# themes/x.toml": put
+            // it there, and check a config that names it.
+            let first = body.lines().next().unwrap_or_default();
+            let cfg = if let Some(file) = first
+                .strip_prefix("# themes/")
+                .and_then(|r| r.split_whitespace().next())
+            {
+                fs::create_dir_all(dir.join("themes")).unwrap();
+                fs::write(dir.join("themes").join(file), &body[..end]).unwrap();
+                let name = file.trim_end_matches(".toml");
+                write_config(&dir, &format!("[theme]\nname = \"{name}\"\n"))
+            } else {
+                write_config(&dir, &body[..end])
+            };
             let out = rcmd(&[
                 OsStr::new("--config"),
                 cfg.as_os_str(),

@@ -16,6 +16,10 @@ Keep only the lines you change. Anything you leave out keeps its default.
 **If the file has a mistake**, rcmd ignores the whole file, starts with the defaults,
 and the status line names the problem. **F1 → Settings** shows what is in use.
 
+**File → Settings…** inside rcmd changes the common settings and saves them here,
+writing only the lines that changed. Everything else, keys included, is set in this
+file.
+
 ## Common settings
 
 ```toml
@@ -84,10 +88,29 @@ View and Edit.
 
 ```toml
 [theme]
+name = "dark"             # dark, light, ansi, blue, high-contrast, or a file of yours
 accent = "#ff8800"        # "#rrggbb", "reset" (the terminal's own), or 0-255
 background = "reset"      # let the terminal's background show through
 colors = "auto"           # how many colours the terminal shows: auto, truecolor, 256, 16
 ```
+
+**Themes.** `dark` is the default; `light` is for a light terminal; `ansi` uses only
+your terminal's 16 colours, so it follows your terminal's palette; `blue` is the
+blue-panel look of the DOS-era commanders; `high-contrast` is black and white with
+bright colours. **View → Theme…** switches while rcmd runs; `name` keeps the choice.
+
+Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the rcmd
+binary, for a portable copy). It starts from a built-in theme and changes what it lists,
+with the same names as `[theme]`:
+
+```toml
+# themes/sunset.toml — then [theme] name = "sunset"
+base = "dark"
+accent = "#ff8800"
+cursor_active = "#5a3000"
+```
+
+Colours set in `[theme]` itself go on top of whichever theme is chosen.
 
 **`colors = "auto"`** sends 24-bit colour only where the terminal is known to take it:
 `COLORTERM=truecolor` (or `24bit`), iTerm2, WezTerm, kitty, Ghostty, VS Code, Windows

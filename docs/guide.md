@@ -67,6 +67,10 @@ rcmd for yours, or see [keys.md](keys.md).
 - Where nothing can be opened on a screen — over SSH, without a desktop, in read-only
   mode — Enter views the file instead and says why. `enter = "view"` under `[files]`
   makes Enter always view, as in rcmd 0.1.0.
+- **Ctrl+Z** undoes the last rename (one file or many), move, new directory or new
+  file, after showing what it will do. It checks the disk first: a file renamed since,
+  or a new directory with something in it now, is left alone. Copies and deletes are not
+  undone (your system's trash restores what F8 sent there), and Ctrl+Z says so.
 - rcmd always asks before it deletes or overwrites anything.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
@@ -138,6 +142,10 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
 ## Menus and help
 
 - **F9** opens the menu bar: File, View, Help. You can click it too.
+- **File → Settings…** changes the common settings: ←/→ or Space to change one, Tab
+  for the next tab, Enter to save. Only the lines that changed are written to
+  `config.toml`; your comments stay. Rows marked *next start* apply after a restart.
+- **View → Theme…** tries a theme at once.
 - **F1** lists every key and setting.
 - **Shift+F1** shows what rcmd is using: memory, CPU, and whether memory keeps growing.
 - **Shift+F9** runs your own commands. See [config.md](config.md#your-own-commands).

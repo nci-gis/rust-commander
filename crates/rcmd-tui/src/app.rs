@@ -43,6 +43,7 @@ use crate::pane::{FilePane, FileTabs, Pane, TermPanel};
 use crate::rename_dialog::{self, RenameDialog};
 use crate::search::{self, Search};
 use crate::session::{self, Saved, SavedTab, SavedTerminal, Session};
+use crate::settings_dialog::{self, SettingsDialog};
 use crate::theme;
 use crate::viewer::{self, Viewer};
 
@@ -80,6 +81,8 @@ enum ModalAct {
     StartFind,
     /// F4 in the rename dialog: these names, one per file, into the editor.
     BatchEditor(String),
+    /// Enter in File → Settings….
+    SaveSettings,
     Background,
     /// Left/Right in a menu-bar menu.
     Bar(isize),
@@ -166,6 +169,10 @@ pub struct App {
     group: Option<crate::keys::Chord>,
     /// The Option-key hint has been shown this session.
     option_hinted: bool,
+    /// The theme in use, by name (View → Theme… marks it).
+    theme_name: String,
+    /// The last operation that wrote to the disk, for Ctrl+Z.
+    last_undo: Option<rcmd_core::undo::Undo>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -217,6 +224,10 @@ pub struct App {
     last_autosave: Instant,
 }
 
+/// rcmd's icon, 24 pixels square, for About: drawn in half blocks, 24 × 12 cells.
+/// Rendered from `assets/icon.svg` (`resvg -w 24 -h 24`).
+const LOGO: &[u8] = include_bytes!("../../../assets/icon-24.png");
+
 /// What rcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
 /// rcmd ends with the viewer still open, or with an extraction still running.
@@ -229,6 +240,8 @@ impl Drop for App {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = std::fs::remove_dir_all(&tmp);
         }
+        // And everything else this run put in the temporary directory.
+        crate::tempfiles::remove();
     }
 }
 
@@ -236,6 +249,7 @@ impl App {
     pub fn new(left: &Path, right: &Path, settings: Settings, outcome: Outcome) -> Self {
         let notice = outcome.message();
         let settings_height = settings.config.terminal.height_percent;
+        let theme_name = settings.config.theme.name.clone();
         let mut panes = BTreeMap::new();
         panes.insert(
             0,
@@ -275,6 +289,8 @@ impl App {
             scrolling: None,
             group: None,
             option_hinted: false,
+            theme_name,
+            last_undo: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -981,6 +997,7 @@ impl App {
 
     /// One turn of the event loop without input: lets a running job report in.
     pub fn tick(&mut self) {
+        crate::tempfiles::touch();
         self.pump_job();
         self.reap_terminals();
         self.background();
@@ -1188,6 +1205,7 @@ impl App {
             Action::MkDir => "creating directories",
             Action::Edit => "editing",
             Action::OpenWith => "opening files in other programs",
+            Action::Undo => "undoing",
             _ if mode == Mode::Restricted
                 && matches!(
                     a,
@@ -1441,6 +1459,7 @@ impl App {
                 }
             }
             Action::OpenWithMenu => self.open_with_menu(),
+            Action::Undo => self.ask_undo(),
             // Space on a directory also works out its size, as in Total Commander: the
             // moment you select a directory is the moment you want to know.
             Action::Mark => self.with_files(|f| {
@@ -2103,6 +2122,10 @@ impl App {
             }
             Cmd::OpenFile(p) => self.launch(&p),
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
+            Cmd::ThemeMenu => self.theme_menu(),
+            Cmd::Settings => self.open_settings(),
+            Cmd::Undo => self.undo(),
+            Cmd::SetTheme(name) => self.set_theme(&name),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
             Cmd::UserCommand(i) => self.run_user_command(i),
             Cmd::About => {
@@ -2124,6 +2147,13 @@ impl App {
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
                     )),
+                    picture: {
+                        let bg = match theme::t().bg_panel {
+                            ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
+                            _ => [0, 0, 0],
+                        };
+                        rcmd_core::image::png_bytes(LOGO, 24, 24, bg).ok()
+                    },
                 }));
             }
             Cmd::QuitAnyway => {
@@ -2149,11 +2179,13 @@ impl App {
             }
             Cmd::Sync(pairs) => {
                 let req = Request::sync(pairs);
+                self.last_undo = Some(rcmd_core::undo::Undo::Cannot("a synchronisation".into()));
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             Cmd::CopyText(t) => self.copy_text(t),
             Cmd::BatchRename(moves) => {
                 let out = rcmd_core::batch_rename::apply(&moves);
+                self.last_undo = Some(rcmd_core::undo::Undo::Rename(moves.clone()));
                 self.reload_all();
                 self.status = match (out.renamed, out.errors.first()) {
                     (n, None) => format!("renamed {n}"),
@@ -2171,6 +2203,7 @@ impl App {
                     ops::Kind::Move => Request::mv(sources, dest),
                     _ => Request::copy(sources, dest),
                 };
+                self.remember_job(&request);
                 self.modal = Some(Modal::Job(Job::new(kind, ops::start(request))));
             }
         }
@@ -2510,6 +2543,7 @@ impl App {
         // Overwrites still raise a question mid-job; this only skips the "are you sure"
         // before starting, which is all the setting claims to do.
         if !self.settings.config.general.confirm_transfer {
+            self.remember_job(&request);
             self.modal = Some(Modal::Job(Job::new(kind, ops::start(request))));
             return;
         }
@@ -2613,8 +2647,13 @@ impl App {
                     self.status = e.to_string();
                     return;
                 }
+                let first = rcmd_core::undo::first_missing(&target);
+                let existed = target.exists();
                 match std::fs::create_dir_all(&target) {
                     Ok(()) => {
+                        if !existed {
+                            self.last_undo = Some(rcmd_core::undo::Undo::MadeDir(first));
+                        }
                         self.status = format!("created {name}");
                         self.reload_all();
                     }
@@ -2672,7 +2711,10 @@ impl App {
                     .create_new(true)
                     .open(&target);
                 match made {
-                    Ok(_) => self.status = format!("created {name}"),
+                    Ok(_) => {
+                        self.last_undo = Some(rcmd_core::undo::Undo::MadeFile(target.clone()));
+                        self.status = format!("created {name}");
+                    }
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                         if target.is_dir() {
                             self.status = format!("{name} is a directory");
@@ -2699,9 +2741,13 @@ impl App {
                 }
                 let mut req = Request::copy(vec![from.clone()], i.dir.clone());
                 req.rename_to = Some(name.into());
+                self.remember_job(&req);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             InputKind::Permissions { targets } => {
+                self.last_undo = Some(rcmd_core::undo::Undo::Cannot(
+                    "a change of permissions".into(),
+                ));
                 let setting = match rcmd_core::attrs::parse(&text) {
                     Ok(s) => s,
                     Err(e) => {
@@ -2750,6 +2796,7 @@ impl App {
                     return;
                 }
                 let req = Request::pack(sources.clone(), dest);
+                self.remember_job(&req);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Pack, ops::start(req))));
             }
             InputKind::Pattern { mark } => {
@@ -2770,6 +2817,12 @@ impl App {
             }
             InputKind::Rename { from } => match rcmd_core::rename::rename(from, &text) {
                 Ok(to) => {
+                    if to != *from {
+                        self.last_undo = Some(rcmd_core::undo::Undo::Rename(vec![(
+                            from.clone(),
+                            to.clone(),
+                        )]));
+                    }
                     let old = from.file_name().map(|s| s.to_string_lossy().into_owned());
                     self.status = format!("renamed {} \u{2192} {text}", old.unwrap_or_default());
                     self.reload_all();
@@ -2978,6 +3031,25 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Settings(d)) => match d.on_key(k) {
+                settings_dialog::Outcome::Stay => {}
+                settings_dialog::Outcome::Preview(name) => {
+                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
+                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
+                        theme::set(t);
+                    }
+                }
+                settings_dialog::Outcome::Cancel => {
+                    // Put back the theme the preview replaced.
+                    let name = self.theme_name.clone();
+                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
+                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
+                        theme::set(t);
+                    }
+                    act = ModalAct::Close;
+                }
+                settings_dialog::Outcome::Save => act = ModalAct::SaveSettings,
+            },
             Some(Modal::Rename(d)) => match d.on_key(k) {
                 rename_dialog::Outcome::Stay => {}
                 rename_dialog::Outcome::Close => act = ModalAct::Close,
@@ -3036,6 +3108,7 @@ impl App {
             ModalAct::Start => {
                 if let Some(Modal::Confirm(c)) = self.modal.take() {
                     let kind = c.request.kind;
+                    self.remember_job(&c.request);
                     self.modal = Some(Modal::Job(Job::new(kind, ops::start(c.request))));
                 }
             }
@@ -3068,6 +3141,7 @@ impl App {
                             .into();
                 }
             }
+            ModalAct::SaveSettings => self.save_settings(),
             ModalAct::BatchEditor(text) => {
                 if let Some(Modal::Rename(d)) = self.modal.take() {
                     self.begin_batch(d.files, &text);
@@ -3602,7 +3676,10 @@ impl App {
     fn begin_batch(&mut self, files: Vec<PathBuf>, text: &str) {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let list = std::env::temp_dir().join(format!("rcmd-rename-{}-{n}.txt", std::process::id()));
+        let Some(list) = crate::tempfiles::file(&format!("rename-{n}.txt")) else {
+            self.status = "cannot make a temporary directory for the list of names".into();
+            return;
+        };
         if let Err(e) = session::write_private(&list, text.as_bytes()) {
             self.status = format!("cannot write the list of names: {e}");
             return;
@@ -3651,6 +3728,7 @@ impl App {
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
     }
 
@@ -3760,6 +3838,7 @@ impl App {
     }
 
     fn make_symlink(&mut self) {
+        self.last_undo = Some(rcmd_core::undo::Undo::Cannot("making a link".into()));
         let Some(e) = self
             .panes
             .get(&self.focus)
@@ -3891,6 +3970,7 @@ impl App {
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
     }
 
@@ -4014,6 +4094,7 @@ impl App {
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
         true
     }
@@ -4148,6 +4229,7 @@ impl App {
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
             footnote: None,
+            picture: None,
         }));
     }
 
@@ -4312,7 +4394,10 @@ impl App {
             .unwrap_or_default();
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = std::env::temp_dir().join(format!("rcmd-view-{}-{n}", std::process::id()));
+        let Some(tmp) = crate::tempfiles::file(&format!("view-{n}")) else {
+            self.status = "cannot make a temporary directory".into();
+            return;
+        };
         let made = {
             // Mutable only where there is a mode to set.
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -4421,24 +4506,7 @@ impl App {
         let rows = pic.height.div_ceil(2);
         let x0 = inner.x + (inner.width.saturating_sub(pic.width as u16)) / 2;
         let y0 = inner.y + (inner.height.saturating_sub(rows as u16)) / 2;
-        let rgb = |p: [u8; 3]| ratatui::style::Color::Rgb(p[0], p[1], p[2]);
-        let buf = frame.buffer_mut();
-        for r in 0..rows {
-            for x in 0..pic.width {
-                let top = pic.rgb[(2 * r) * pic.width + x];
-                let bottom = pic
-                    .rgb
-                    .get((2 * r + 1) * pic.width + x)
-                    .copied()
-                    .unwrap_or(bg);
-                let pos = Position::new(x0 + x as u16, y0 + r as u16);
-                if let Some(cell) = buf.cell_mut(pos) {
-                    cell.set_symbol("\u{2580}")
-                        .set_fg(rgb(top))
-                        .set_bg(rgb(bottom));
-                }
-            }
-        }
+        modal::paint_picture(frame, x0, y0, pic, bg);
     }
 
     // ── menu bar, usage ────────────────────────────────────────────────────────────
@@ -4475,6 +4543,7 @@ impl App {
             None,
             Some(("Quit", A::Quit)),
         ];
+        // Settings… is put in just above Quit, below.
         let view: &[Option<(&str, A)>] = &[
             Some(("Quick search", A::QuickSearch)),
             Some(("Filter\u{2026}", A::Filter)),
@@ -4527,11 +4596,253 @@ impl App {
                 ),
             })
             .collect();
+        if i == 0 {
+            // Above Quit, which is last.
+            let at = items.len().saturating_sub(1);
+            items.insert(at, Item::cmd("Settings\u{2026}", "", Cmd::Settings, true));
+        }
+        if i == 1 {
+            items.push(Item::sep());
+            items.push(Item::cmd("Theme\u{2026}", "", Cmd::ThemeMenu, true));
+        }
         if i == 2 {
             items.push(Item::sep());
             items.push(Item::cmd("About rcmd", "", Cmd::About, true));
         }
         items
+    }
+
+    /// What a job about to start means for Ctrl+Z: a move can be undone; the rest say
+    /// that they cannot, so an older rename is never undone behind them.
+    fn remember_job(&mut self, r: &Request) {
+        use rcmd_core::undo::Undo;
+        self.last_undo = Some(match r.kind {
+            ops::Kind::Move => Undo::Move {
+                sources: r.sources.clone(),
+                dest: r.dest.clone().unwrap_or_default(),
+                rename_to: r.rename_to.clone(),
+            },
+            ops::Kind::Copy => Undo::Cannot("a copy".into()),
+            ops::Kind::Delete => Undo::Cannot(if r.to_trash {
+                "a delete to the trash (your system's trash can restore it)".into()
+            } else {
+                "a permanent delete".into()
+            }),
+            ops::Kind::Extract => Undo::Cannot("an extraction".into()),
+            ops::Kind::Pack => Undo::Cannot("packing".into()),
+        });
+    }
+
+    /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
+    fn ask_undo(&mut self) {
+        let Some(u) = &self.last_undo else {
+            self.status = "nothing to undo".into();
+            return;
+        };
+        let plan = match u.plan() {
+            Ok(p) => p,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        use rcmd_core::undo::Plan;
+        let what = match &plan {
+            Plan::Rename(m) => m
+                .iter()
+                .take(8)
+                .map(|(f, t)| {
+                    format!(
+                        "{}  \u{2192}  {}",
+                        Self::describe(std::slice::from_ref(f)),
+                        Self::describe(std::slice::from_ref(t))
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Plan::Move { back, into } => vec![format!(
+                "move {} back to {}",
+                Self::describe(back),
+                tidy(into)
+            )],
+            Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+        };
+        let mut body = vec![format!("Undo the {}?", u.describe()), String::new()];
+        body.extend(what);
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Undo".into(),
+            body,
+            danger: false,
+            yes: Some(("undo".into(), Cmd::Undo)),
+            buttons: Vec::new(),
+            footnote: None,
+            picture: None,
+        }));
+    }
+
+    /// Carry out the undo, checking the disk once more.
+    fn undo(&mut self) {
+        use rcmd_core::undo::Plan;
+        let Some(u) = self.last_undo.clone() else {
+            return;
+        };
+        let plan = match u.plan() {
+            Ok(p) => p,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        match plan {
+            Plan::Rename(moves) => {
+                let out = rcmd_core::batch_rename::apply(&moves);
+                self.status = match out.errors.first() {
+                    None => format!("undone: {}", u.describe()),
+                    Some(e) => format!(
+                        "undo: {} renamed back, {} failed \u{2014} {e}",
+                        out.renamed,
+                        out.errors.len()
+                    ),
+                };
+            }
+            Plan::Move { back, into } => {
+                let request = Request::mv(back, into);
+                self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
+                self.status = format!("undoing the {}", u.describe());
+            }
+            Plan::Remove(p) => {
+                self.status = match rcmd_core::undo::remove(&p) {
+                    Ok(()) => format!("undone: {}", u.describe()),
+                    Err(e) => format!("cannot undo: {e}"),
+                };
+            }
+        }
+        // One step: an undone operation is not undone again.
+        self.last_undo = None;
+        self.reload_all();
+    }
+
+    /// File → Settings….
+    fn open_settings(&mut self) {
+        let cannot_save = if self.settings.mode.read_only() {
+            Some(format!(
+                "{} mode \u{2014} rcmd writes nothing, its settings included",
+                self.settings.mode.label()
+            ))
+        } else if let Outcome::Rejected { .. } = self.config_outcome {
+            Some(
+                "config.toml has an error (F1 \u{203a} Settings says which): fix it by hand first"
+                    .into(),
+            )
+        } else {
+            None
+        };
+        self.modal = Some(Modal::Settings(Box::new(SettingsDialog::new(
+            &self.settings.config,
+            crate::config::available_themes(),
+            cannot_save,
+        ))));
+    }
+
+    /// Enter in Settings: write what changed into the config file, keeping the rest of
+    /// it as it was, then use the new settings. The edited file is read back first, and
+    /// nothing is written unless it says exactly what the dialog showed.
+    fn save_settings(&mut self) {
+        let Some(Modal::Settings(d)) = self.modal.take() else {
+            return;
+        };
+        let changes = d.changed();
+        if changes.is_empty() {
+            self.status = "settings: nothing changed".into();
+            return;
+        }
+        let Some(path) = crate::config::path_in_use() else {
+            self.status = "nowhere to save: no config location (HOME is not set)".into();
+            return;
+        };
+        let before = match std::fs::read(&path) {
+            Ok(b) => match String::from_utf8(b) {
+                Ok(t) => t,
+                Err(_) => {
+                    self.status = format!("{} is not UTF-8: change it by hand", path.display());
+                    return;
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                self.status = format!("cannot read {}: {e}", path.display());
+                return;
+            }
+        };
+        let mut text = before;
+        for (f, v) in &changes {
+            text = crate::config_edit::set(&text, f.section, f.key, &settings_dialog::value(f, v));
+        }
+        let parsed = match crate::config::parse(&text) {
+            Ok(s) if s.config == d.now => s,
+            Ok(_) | Err(_) => {
+                self.status = format!(
+                    "{} is written in a way Settings cannot change safely: change it by hand",
+                    path.display()
+                );
+                return;
+            }
+        };
+        if let Err(e) = session::write_private(&path, text.as_bytes()) {
+            self.status = format!("cannot save {}: {e}", path.display());
+            return;
+        }
+        // The new settings, keeping what start-up decided: the mode (a flag may have
+        // made it stricter), the root, the colour depth.
+        let mut s = parsed;
+        s.mode = self.settings.mode;
+        s.root = self.settings.root.clone();
+        s.depth = self.settings.depth;
+        self.settings = s;
+        self.config_outcome = Outcome::Loaded(path.clone());
+        let name = self.settings.config.theme.name.clone();
+        self.set_theme(&name);
+        let later = d.need_restart();
+        self.status = if later.is_empty() {
+            format!("settings saved to {}", path.display())
+        } else {
+            format!(
+                "settings saved; at the next start: {}",
+                later.join(", ").to_lowercase()
+            )
+        };
+    }
+
+    /// View → Theme…: every theme, built in and from `themes/`, the current one marked.
+    fn theme_menu(&mut self) {
+        let current = self.theme_name.clone();
+        let items: Vec<Item> = crate::config::available_themes()
+            .into_iter()
+            .map(|name| {
+                let mark = if name == current { "\u{2022}" } else { "" };
+                Item::cmd(name.clone(), mark, Cmd::SetTheme(name), true)
+            })
+            .chain(std::iter::once(Item::cancel("Cancel", "Esc")))
+            .collect();
+        self.modal = Some(Modal::Menu(Menu::new(
+            Some("Theme".into()),
+            items,
+            self.pane_anchor(),
+        )));
+    }
+
+    /// Switch themes now. The colours set in `[theme]` stay on top, as at start-up.
+    fn set_theme(&mut self, name: &str) {
+        let s = &self.settings;
+        match crate::config::theme_for(name, &s.config.theme, s.depth) {
+            Ok(t) => {
+                theme::set(t);
+                self.theme_name = name.to_string();
+                self.status = format!(
+                    "theme: {name} \u{2014} [theme] name = \"{name}\" in config.toml keeps it"
+                );
+            }
+            Err(e) => self.status = e,
+        }
     }
 
     fn open_bar(&mut self, i: usize) {

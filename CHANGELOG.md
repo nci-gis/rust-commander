@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.1.0] - 2026-11-06
+
 The first release.
 
 ### Files

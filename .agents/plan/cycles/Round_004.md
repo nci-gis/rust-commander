@@ -91,8 +91,17 @@ F1, the key bar, the menus, `--print-keys` and `docs/keys.md` already read one t
       `[keys] preset`.
 - [ ] 4. F1, key bar, menus, `--print-keys`, `--show-keys`; `docs/keys.md` per set;
       `docs/config.md`; `docs/troubleshooting.md` points to the set for each system.
-- [ ] 5. CHANGELOG. On macOS, the first start suggests nothing extra once `auto` picks
-      `macos` by itself; the Option hint stays.
+- [ ] 5. **Remove Esc as Meta** (owner, 2026-11-07: it gives Esc two meanings, and
+      sequences plus the sets replace it), in the same change that ships the sets, so
+      no release leaves a Mac without Option as Meta unable to type Alt. It never
+      shipped, so no config breaks. Goes: `keyfix::after_esc` and `ESC_WINDOW`,
+      `App::esc_armed` and its arming in `on_key`, `[general] esc_as_meta`, its three
+      render tests, the F1 section, the guide and troubleshooting entries, the
+      CHANGELOG lines. Stays: `--show-keys`; the Option hint, reworded to point at
+      Option as Meta and the `macos` set. Check that every action Esc as Meta reached
+      on a Mac has a key in `macos` first.
+- [ ] 6. CHANGELOG. On macOS, the first start suggests nothing extra once `auto` picks
+      `macos` by itself.
 
 Work on a `feat/keymaps` branch; CI runs on its pull request into `dev`.
 
@@ -118,6 +127,8 @@ Work on a `feat/keymaps` branch; CI runs on its pull request into `dev`.
 - [ ] Tests: sequences, groups (repeat, Enter / Esc / timeout / other key closes), every
       conflict case in the table, one per built-in set, user files, `auto` per OS.
 - [ ] Render tests: F1 and the key bar under each set; a sequence on the status line.
+- [ ] Esc as Meta is gone: Esc then 7 in a file pane does not open MkDir, and Esc there
+      does what it did before Round 003 (stop, take the filter off, or nothing).
 - [ ] The owner, on each system, in its default terminal: every key on F1 works.
 
 Record what you could **not** verify as explicitly as what you could.

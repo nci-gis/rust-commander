@@ -139,6 +139,17 @@ terminal and version not yet noted):
 | Mouse | clicks yes | |
 | Shift+F1, F2, F4, F5, F6, F8, F9 · Alt+F5, F7, F9 · Ctrl+PageUp / PageDown | **absent from the output**: not pressed, or pressed and swallowed? Asked. | many: Alt+F7 is Find |
 
+**2026-11-07, Windows measured** (`rcmd --show-keys`, Windows Terminal): the same as
+Linux. Alt+arrows and Alt+Shift+arrows **do** arrive — the belief above that Windows
+Terminal keeps them was wrong. F11 is the terminal's full screen. Shift+F10, Alt+F5,
+Alt+F7, Alt+F9 arrive; Ctrl+\ arrives as itself. Not in the output: Shift+F1–F9,
+Ctrl+PageUp / PageDown.
+
+**What the three tables say:** today's keys work on Windows and Linux as they are. On a
+Mac in Terminal.app with Option as Meta, only history (Alt+↓) and resize
+(Alt+Shift+arrows) cannot be typed. Three per-system sets would be two copies of
+`classic` and one with two changes; the design is reconsidered with the owner.
+
 Suspected, to confirm: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
 other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown
 (its tabs) and Shift+F10 (context menu). If Alt+F7 is lost, Find needs a second key in

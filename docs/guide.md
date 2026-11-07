@@ -131,7 +131,9 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - Click to select; double-click does what Enter does (into a directory, or open the
   file). **Ctrl+click** marks.
 - Drag down a pane to mark a range. Drag files onto the other pane to copy or move.
-- Drag a border to resize. Right-click for a menu. The wheel scrolls.
+- Click a directory's name in a pane's path, at the top, to go there.
+- Drag a border to resize; double-click it to share it evenly between the two panes on
+  either side (any others keep their size). Right-click for a menu. The wheel scrolls.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).

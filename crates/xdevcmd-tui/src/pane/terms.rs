@@ -318,6 +318,13 @@ impl TermPanel {
         out
     }
 
+    /// Share a boundary between this tab's shells evenly; see [`Node::even`].
+    pub fn even(&mut self, id: usize) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.tree.even(id);
+        }
+    }
+
     pub fn set_pct(&mut self, id: usize, pct: u16) {
         if let Some(tab) = self.tabs.get_mut(self.active) {
             tab.tree.set_pct(id, pct);

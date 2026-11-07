@@ -30,6 +30,10 @@ that heading and starts a new, empty one here. -->
 - The config documentation lists every file xdevcmd keeps, and where.
 
 ### Added
+- Click a directory's name in a pane's path, at the top, to go there.
+- Double-click a border to share it evenly between the two panes on either side of it;
+  with three or more, the others keep their size. The same between shells in a
+  terminal tab.
 - Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
   start with the same key form a group. Resizing repeats: **Alt+R, then arrows** resizes
   panes until Enter, Esc or another key, on every system (macOS Terminal.app drops the

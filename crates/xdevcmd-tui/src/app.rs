@@ -1607,8 +1607,15 @@ impl App {
             if !on_tab_button && self.zoom.is_none() {
                 self.tree.dividers(self.main, &mut dividers);
             }
+            // A double-click on a boundary shares it evenly between the two panes on
+            // either side, and only those two; a single press starts a drag.
             if let Some(d) = dividers.into_iter().find(|d| d.hit.contains(p)) {
-                self.resizing = Some((d, false));
+                if self.register_click(x, y) {
+                    self.tree.even(d.id);
+                    self.status = "shared evenly between the two panes".into();
+                } else {
+                    self.resizing = Some((d, false));
+                }
                 return;
             }
             let inner = self
@@ -1617,7 +1624,14 @@ impl App {
                 .flatten()
                 .unwrap_or_default();
             if let Some(d) = inner.into_iter().find(|d| d.hit.contains(p)) {
-                self.resizing = Some((d, true));
+                if self.register_click(x, y) {
+                    if let Some(panel) = self.panel() {
+                        panel.even(d.id);
+                    }
+                    self.status = "shared evenly between the two shells".into();
+                } else {
+                    self.resizing = Some((d, true));
+                }
                 return;
             }
         }
@@ -1677,6 +1691,11 @@ impl App {
                 let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) else {
                     return;
                 };
+                // A directory named in the title's path: go there, as Alt+G would.
+                if let Some(dir) = f.crumb_at(x, y) {
+                    f.set_cwd(&dir);
+                    return;
+                }
                 if let Some(key) = f.header_at(x, y) {
                     f.set_sort(key);
                     return;

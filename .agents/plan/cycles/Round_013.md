@@ -96,8 +96,10 @@ packaged version carries them.
       `undoing_a_move_asks_before_overwriting_what_appeared_meanwhile`.
 - [x] `cargo check` for macOS and Windows targets on Linux (the rename code is per
       system).
-- [ ] Not verified: the no-replace rename on a real Mac and Windows (CI runs the tests
-      there once the pull request opens); the logo on a real Mac or Windows screen (only Linux, and the
+- [x] CI on the branch, run by hand (no pull request yet, as the owner asked): Linux,
+      macOS, Windows, cross-check and cargo-deny all pass (run 42393054690), so the
+      no-replace rename tests passed on a real Mac and Windows.
+- [ ] Not verified: the logo on a real Mac or Windows screen (only Linux, and the
       plain-text screenshot cannot show colours); the archive layout, until a release
       build runs.
 

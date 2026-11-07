@@ -41,7 +41,15 @@ fn too_big(w: u64, h: u64) -> io::Result<()> {
 /// Decode `path` and shrink it to fit `max_w` × `max_h` pixels, keeping its shape.
 /// Transparency is laid over `bg`.
 pub fn load(path: &Path, max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<Picture> {
-    if fs::metadata(path)?.len() > MAX_FILE {
+    // Only a regular file, links followed: a FIFO named x.png would block the read
+    // forever, and /dev/zero behind z.jpg never ends — and both report a size of 0.
+    let meta = fs::metadata(path)?;
+    if !meta.is_file() {
+        return Err(io::Error::other(
+            "not a regular file \u{2014} not previewed",
+        ));
+    }
+    if meta.len() > MAX_FILE {
         return Err(io::Error::other(
             "larger than 64 MiB \u{2014} not previewed",
         ));
@@ -120,7 +128,17 @@ fn png<R: io::BufRead + io::Seek>(r: R, bg: [u8; 3]) -> io::Result<(usize, usize
 fn jpeg(path: &Path) -> io::Result<(usize, usize, Vec<[u8; 3]>)> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
-    let data = fs::read(path)?;
+    // Bounded as it is read, not only by the size reported beforehand.
+    let mut data = Vec::new();
+    io::Read::read_to_end(
+        &mut io::Read::take(fs::File::open(path)?, MAX_FILE + 1),
+        &mut data,
+    )?;
+    if data.len() as u64 > MAX_FILE {
+        return Err(io::Error::other(
+            "larger than 64 MiB \u{2014} not previewed",
+        ));
+    }
     let opts = DecoderOptions::default()
         .jpeg_set_out_colorspace(ColorSpace::RGB)
         .set_max_width(50_000)
@@ -182,6 +200,19 @@ fn shrink(w: usize, h: usize, px: &[[u8; 3]], max_w: usize, max_h: usize) -> Pic
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_regular_file_is_previewed() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-img-special-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        // A device behind a picture's name: it would be read until memory ran out.
+        std::os::unix::fs::symlink("/dev/zero", d.join("z.jpg")).unwrap();
+        let e = load(&d.join("z.jpg"), 10, 10, [0, 0, 0]).unwrap_err();
+        assert!(e.to_string().contains("not a regular file"), "{e}");
+        let _ = fs::remove_dir_all(&d);
+    }
 
     fn write_png(path: &Path, w: u32, h: u32, pixel: impl Fn(u32, u32) -> [u8; 4]) {
         let f = fs::File::create(path).unwrap();

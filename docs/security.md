@@ -13,12 +13,19 @@ your permissions. It was tested against attacks on all three before release.
   it claims is stopped.
 - **Huge images.** A picture claiming billions of pixels is refused before it is
   decoded.
-- **Running programs by accident.** Opening a program or script with **Enter** or
-  **o** asks "Run it?" first, and Cancel is the default.
+- **Running programs by accident.** Opening a program, a script, a launcher or an
+  installer with **Enter** or **o** asks "Run it?" first, and Cancel is the default.
+  Enter opens without asking only known document types (pictures, sound, video, PDF,
+  office files without macros, text); for any other type it asks "Open it?", since
+  what the system does with an unknown type is its choice, and some types run code.
 - **File names that a command line would misread.** Programs are started with their
   arguments as a list, never through a shell. On Windows, a batch file (`.bat`, `.cmd`)
   started in a terminal tab is refused when a file name holds a character `cmd.exe`
-  acts on (`&`, `%`, `^`…).
+  acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when the batch file's own folder has a
+  space in its name.
+- **Typing into the wrong program.** Alt+C and the user menu type a line into the
+  terminal only when a shell is at its prompt there, never into a program that owns
+  it — an editor, a password prompt, a program run in a terminal tab.
 - **A config file others can write.** xdevcmd refuses it on Unix, because it names the
   programs xdevcmd runs.
 

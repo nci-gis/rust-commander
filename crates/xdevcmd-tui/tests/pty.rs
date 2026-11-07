@@ -1222,6 +1222,38 @@ fn a_program_run_in_a_terminal_tab_keeps_its_output_after_it_ends() {
     xdevcmd.quit();
 }
 
+#[cfg(unix)]
+#[test]
+fn alt_c_does_not_type_into_a_program_run_in_a_terminal_tab() {
+    // A program tab has no shell: its process is the program, which once made it look
+    // like a shell at its prompt, so Alt+C typed a cd into it.
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("busy-tab");
+    s.file(
+        "left/ask.sh",
+        "#!/bin/sh\necho waiting\nread x\necho \"GOT:$x\" > typed.txt\n",
+    );
+    let script = s.left().join("ask.sh");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("Run it?");
+    xdevcmd.send(DOWN);
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("waiting");
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_C);
+    xdevcmd.wait_for("ask.sh is running in the terminal");
+    xdevcmd.send(F12);
+    xdevcmd.send(b"done\r");
+    xdevcmd.wait_for("ask.sh ended");
+    let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
+    assert_eq!(typed.trim(), "GOT:done", "the cd went into the program");
+    xdevcmd.send(ENTER);
+    xdevcmd.quit();
+}
+
 #[test]
 fn show_keys_prints_each_key_and_click_and_what_it_would_do() {
     let s = Scratch::new("show-keys");

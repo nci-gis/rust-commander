@@ -50,7 +50,7 @@ xdevcmd for yours, or see [keys.md](keys.md).
 |---|---|
 | **F3** | view (text or hex, with search) |
 | **F4** | edit in your editor (`[commands] editor`, else `$VISUAL` or `$EDITOR`) |
-| **Enter** | open with its program: your `[[open]]` rule, else the system's (as Total Commander does) |
+| **Enter** | open with its program: your `[[open]]` rule, else the system's (as Total Commander does); a type that is not a known document asks first |
 | **o** | open with the system's application |
 | **Shift+O** | open with…: your rules for this file, the system's program, view, edit |
 | **F5** / **F6** | copy / move to the other pane |

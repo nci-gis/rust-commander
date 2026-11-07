@@ -20,9 +20,10 @@ that heading and starts a new, empty one here. -->
   the old names. The repository stays `nci-gis/rust-commander`.
 - About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
-  extension, else the system's program; programs still ask "Run it?" first. Over SSH,
+  extension, else the system's program; programs, scripts and installers ask "Run
+  it?" first, and a type that is not a known document asks "Open it?". Over SSH,
   without a desktop or in read-only mode it views the file and says why.
-  `[files] enter = "view"` keeps the old Enter.
+  `[files] enter = "view"` keeps the old Enter. A double-click does what Enter does.
 - About: the credit sits at the bottom right, beside the close button.
 - Two actions given the same key in `[keys]` are now an error that names both; before,
   the one written later silently took it.
@@ -63,6 +64,22 @@ that heading and starts a new, empty one here. -->
 - `xdevcmd --show-keys` prints each key, click and scroll as xdevcmd receives it, and what
   it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
+
+### Security
+- Alt+C and the user menu no longer type into a program run in a terminal tab; such a
+  tab has no shell, and it was taken for one at its prompt.
+- With `--root`, Open with… (Shift+O), F4 and F7 respect the root as Enter and F3 do;
+  F7 refuses a name that climbs out with `..`.
+- Quick view of a picture refuses anything that is not a regular file: a FIFO named
+  like a picture froze xdevcmd, and a link to `/dev/zero` read until memory ran out.
+- Undo removes a new directory tree bottom up, each directory only while empty, so a
+  file that appears meanwhile is never deleted with it.
+- Saving Settings is refused in read-only and restricted mode by the save itself, not
+  only by the dialog; a `config.toml` that is a link is written where it points.
+- A theme name with `:` is refused (on Windows `C:name` left the theme directory).
+- The temporary directory's "still running" marker is refreshed by a thread, so a long
+  editor session no longer lets a second xdevcmd remove files in use; a run directory
+  that has gone is never re-created under the same name.
 
 ### Fixed
 - `xdevcmd --screenshot … | head`, and any long output cut short by its reader, ended in

@@ -168,12 +168,25 @@ pub fn remove(p: &Path) -> io::Result<()> {
         if !only_dirs(p) {
             return Err(io::Error::other("not empty any more"));
         }
-        fs::remove_dir_all(p)
+        remove_empty_tree(p)
     } else if m.is_file() && m.len() == 0 {
         fs::remove_file(p)
     } else {
         Err(io::Error::other("not empty any more"))
     }
+}
+
+/// Remove a tree of directories bottom up, each with `remove_dir`, which refuses one
+/// that is not empty: a file that appears between the check and the removal stops it,
+/// rather than going with the rest.
+fn remove_empty_tree(dir: &Path) -> io::Result<()> {
+    for e in fs::read_dir(dir)? {
+        let e = e?;
+        if e.file_type()?.is_dir() {
+            remove_empty_tree(&e.path())?;
+        }
+    }
+    fs::remove_dir(dir)
 }
 
 /// The first directory of `target` that does not exist yet: what F7 is about to make,

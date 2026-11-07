@@ -22,7 +22,7 @@ that heading and starts a new, empty one here. -->
 - `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
   window or a terminal tab, for some systems only, or only where there is a screen.
 - **File → Settings…**: tabs for General, Files, Theme and Terminal; ←/→ to change,
-  Enter to save. Only the changed lines of `config.toml` are rewritten, comments kept;
+  Enter to save, or the mouse: click a tab, a check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are rewritten, comments kept;
   the result is read back before it is written. Rows say which apply at the next start.
   Not in read-only or restricted mode.
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with

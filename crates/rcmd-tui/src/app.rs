@@ -2306,6 +2306,30 @@ impl App {
         };
     }
 
+    /// What Settings' answer to a key or a click means here: a theme to preview, the
+    /// theme put back on cancel, or the settings to save.
+    fn settings_outcome(&self, o: settings_dialog::Outcome) -> ModalAct {
+        let (spec, depth) = (&self.settings.config.theme, self.settings.depth);
+        let show = |name: &str| {
+            if let Ok(t) = crate::config::theme_for(name, spec, depth) {
+                theme::set(t);
+            }
+        };
+        match o {
+            settings_dialog::Outcome::Stay => ModalAct::None,
+            settings_dialog::Outcome::Preview(name) => {
+                show(&name);
+                ModalAct::None
+            }
+            settings_dialog::Outcome::Cancel => {
+                // Put back the theme the preview replaced.
+                show(&self.theme_name);
+                ModalAct::Close
+            }
+            settings_dialog::Outcome::Save => ModalAct::SaveSettings,
+        }
+    }
+
     fn on_modal_mouse(&mut self, m: MouseEvent) {
         let p = Position::new(m.column, m.row);
         let left = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
@@ -2413,6 +2437,10 @@ impl App {
                 if matches!(h.on_mouse(m), viewer::Action::Close) {
                     act = ModalAct::Close;
                 }
+            }
+            Some(Modal::Settings(d)) => {
+                let o = d.on_mouse(m);
+                act = self.settings_outcome(o);
             }
             _ => {}
         }
@@ -3066,25 +3094,10 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
-            Some(Modal::Settings(d)) => match d.on_key(k) {
-                settings_dialog::Outcome::Stay => {}
-                settings_dialog::Outcome::Preview(name) => {
-                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
-                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
-                        theme::set(t);
-                    }
-                }
-                settings_dialog::Outcome::Cancel => {
-                    // Put back the theme the preview replaced.
-                    let name = self.theme_name.clone();
-                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
-                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
-                        theme::set(t);
-                    }
-                    act = ModalAct::Close;
-                }
-                settings_dialog::Outcome::Save => act = ModalAct::SaveSettings,
-            },
+            Some(Modal::Settings(d)) => {
+                let o = d.on_key(k);
+                act = self.settings_outcome(o);
+            }
             Some(Modal::Rename(d)) => match d.on_key(k) {
                 rename_dialog::Outcome::Stay => {}
                 rename_dialog::Outcome::Close => act = ModalAct::Close,

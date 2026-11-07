@@ -2148,6 +2148,71 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
 }
 
 #[test]
+fn settings_works_with_the_mouse() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings-mouse");
+    fs::create_dir_all(&dir).unwrap();
+    let original = "[general]\nmenu_bar = true\n";
+    let cfg = write_config(&dir, original);
+    let open = "F9,Up,Up,Enter";
+    let s = shot_with(&cfg, open, &a, &b);
+    let click = |(x, y): (usize, usize)| format!("click:{x}:{y}");
+    // A check box: the click toggles it, and the row is marked as changed.
+    let (_, row) = locate(&s, "F8 moves to the trash");
+    let (bx, _) = locate(&s, "[x]");
+    let toggled = format!("{open},{}", click((bx + 1, row)));
+    let s = shot_with(&cfg, &toggled, &a, &b);
+    let line = s.lines().nth(row).unwrap();
+    assert!(
+        line.contains("\u{2022} F8 moves to the trash") && line.contains("[ ]"),
+        "{s}"
+    );
+    assert!(
+        s.contains("Shift+F8 always deletes for good"),
+        "the row is selected\n{s}"
+    );
+    // Cancel leaves the file alone; Save writes the change.
+    let cancel = format!("{toggled},{}", click(locate(&s, "[Esc] cancel")));
+    shot_with(&cfg, &cancel, &a, &b);
+    assert_eq!(fs::read_to_string(&cfg).unwrap(), original);
+    let save = format!("{toggled},{}", click(locate(&s, "[Enter] save")));
+    let saved = shot_with(&cfg, &save, &a, &b);
+    assert!(saved.contains("settings saved"), "{saved}");
+    assert!(
+        fs::read_to_string(&cfg)
+            .unwrap()
+            .contains("delete_to_trash = false"),
+        "{saved}"
+    );
+    write_config(&dir, original);
+    // A tab, then a value's arrows: › forward, ‹ back.
+    let s0 = shot_with(&cfg, open, &a, &b);
+    let theme = format!("{open},{}", click(locate(&s0, "Theme ")));
+    let s = shot_with(&cfg, &theme, &a, &b);
+    let (vx, vy) = locate(&s, "\u{2039} dark \u{203a}");
+    let more = format!(
+        "{theme},{}",
+        click((vx + "\u{2039} dark ".chars().count(), vy))
+    );
+    let s = shot_with(&cfg, &more, &a, &b);
+    assert!(
+        s.contains("\u{2039} light \u{203a}"),
+        "\u{203a} steps forward\n{s}"
+    );
+    let back = format!("{more},{}", click((vx, vy)));
+    let s = shot_with(&cfg, &back, &a, &b);
+    assert!(
+        s.contains("\u{2039} dark \u{203a}"),
+        "\u{2039} steps back\n{s}"
+    );
+    // The wheel moves the selected row: the help line follows it.
+    let (dx, dy) = locate(&s0, "Ask before copy and move");
+    let s = shot_with(&cfg, &format!("{open},wheel:{dx}:{dy}:1"), &a, &b);
+    assert!(s.contains("Shift+F8 always deletes for good"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn settings_in_read_only_mode_shows_but_never_saves() {
     let (a, b) = fixture();
     let dir = a.parent().unwrap().join("settings-ro");
@@ -2164,8 +2229,29 @@ fn settings_in_read_only_mode_shows_but_never_saves() {
         .arg(&b)
         .output()
         .unwrap();
-    let s = String::from_utf8_lossy(&out.stdout);
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(s.contains("rcmd writes nothing"), "{s}");
+    assert_eq!(
+        fs::read_to_string(&cfg).unwrap(),
+        "[general]\nmenu_bar = true\n"
+    );
+    // The mouse too: a click changes what is shown, and the one button only closes.
+    let (bx, by) = locate(&s, "[x]");
+    let (cx, cy) = locate(&s, "[Esc] close");
+    let out = isolated()
+        .args(["--read-only", "--config"])
+        .arg(&cfg)
+        .arg("--screenshot=110x24")
+        .arg(format!(
+            "--keys=F9,Up,Up,Enter,click:{}:{by},click:{cx}:{cy}",
+            bx + 1
+        ))
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(!s.contains("rcmd writes nothing"), "closed\n{s}");
     assert_eq!(
         fs::read_to_string(&cfg).unwrap(),
         "[general]\nmenu_bar = true\n"

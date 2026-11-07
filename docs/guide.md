@@ -143,7 +143,8 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
 
 - **F9** opens the menu bar: File, View, Help. You can click it too.
 - **File → Settings…** changes the common settings: ←/→ or Space to change one, Tab
-  for the next tab, Enter to save. Only the lines that changed are written to
+  for the next tab, Enter to save. With the mouse, click a tab, a check box, a value's
+  ‹ or › (or the value itself, for the next one), or Save; the wheel moves between rows. Only the lines that changed are written to
   `config.toml`; your comments stay. Rows marked *next start* apply after a restart.
 - **View → Theme…** tries a theme at once.
 - **F1** lists every key and setting.

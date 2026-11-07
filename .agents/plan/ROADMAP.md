@@ -77,7 +77,16 @@ những việc kế tiếp"), in this order:
    - **Ctrl+G also goes to a path** (item 5c, S): Ctrl+L stays (the address bar key in
      browsers, Explorer and GNOME Files); Ctrl+G is added beside it (Go to folder in
      macOS Finder, and the habit of others). Checked free in the default keys.
-2. **Packages** (item 8, S each), so nobody has to build from source:
+2. **Sharp image previews** (item 20, M), the round after 0.2.1 (owner, 2026-11-08:
+   "Yes, next round"): quick view and About draw real pixels where the terminal can,
+   through `ratatui-image` (MIT), which detects Kitty graphics (kitty, Ghostty), iTerm2
+   images (iTerm2, WezTerm, VS Code) and sixel (Windows Terminal, foot, xterm), and
+   keeps today's half blocks everywhere else. macOS Terminal.app supports none of them
+   and keeps the half blocks. To settle in the round: the picture redrawn only when it
+   changes (these protocols do not fit ratatui's cell diffing), nothing drawn under an
+   open dialog or over the terminal panel, resizing, detection over SSH and inside tmux,
+   and a setting to turn it off. Starts when Round 013 is Complete.
+3. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
    - ~~Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds~~: done
      early, in 0.2.1 ([Round 013](cycles/Round_013.md)). Windows ARM only if someone
@@ -87,22 +96,22 @@ những việc kế tiếp"), in this order:
    - The README's install section rewritten around them.
    Needs the owner first (see below): crates.io, the tap and bucket repositories, an
    AUR account.
-3. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
-   after 2, so a reader can install with one command.
+4. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
+   after 3, so a reader can install with one command.
    **Also in 0.2.1, from the algorithm review** (owner, 2026-11-08; details in
    `.agents/memory/2026-11-08-algorithm-review.md`): the cross-device move data-loss fix,
    Shift+F8 on Y only, whole-file replacement, per-question "all", safe unpacking, the
    Linux trash by the spec, undo of a delete to the trash (item 16), background compare
    and decoding, bounded directory sizes, `notify` watching (item 17), robocopy-style
    "replace only if older" (item 18) and a fuzzy filter (item 19).
-4. **Settings shows built-in and your own, for themes and keys** (items 4c and 5b):
+5. **Settings shows built-in and your own, for themes and keys** (items 4c and 5b):
    - Theme tab: the list in two parts, built in and yours (with the folder each file
      came from), and a "Make my copy" button that writes the chosen theme into
      `themes/` (what `--print-theme` does) for editing. S.
    - Keys: the keymap presets deferred in Round 004 (`windows`, `macos`, `linux`,
      `classic`, perhaps `mc`), then the Keys tab as two columns, the preset's key and
      yours, with what you changed marked. M.
-5. **An app to click, on Windows and macOS** (item 14): **deferred, only when there is
+6. **An app to click, on Windows and macOS** (item 14): **deferred, only when there is
    a real need** (owner, 2026-11-07: "defered app cho windows và macOS, chỉ khi thực sự
    có nhu cầu"). If it comes, in two steps:
    - 14a, with the packages (S): Windows already runs `xdevcmd.exe` in a console
@@ -122,7 +131,7 @@ những việc kế tiếp"), in this order:
    plugin programs only for a need the menu cannot meet. No Lua, no Total Commander
    DLLs, nothing fetched (see Not planned).
 
-**Waiting on the owner** before step 2:
+**Waiting on the owner** before step 3:
 
 | Question | Why it matters | Suggested |
 |---|---|---|
@@ -173,7 +182,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 17 | Directory watching with the system's events, polling as fallback | M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 18 | Copy/move "replace only if older" (robocopy) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 19 | Fuzzy Ctrl+F filter, best first | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
-| 20 | Sharp image previews: Kitty, iTerm2, sixel via `ratatui-image`, half blocks as fallback | M | — | proposed; Terminal.app has none |
+| 20 | Sharp image previews: Kitty, iTerm2, sixel via `ratatui-image`, half blocks as fallback | M | — | next round, after 013 (owner, 2026-11-08); Terminal.app has none |
 | 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
 | 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |

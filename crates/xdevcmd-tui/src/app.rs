@@ -224,17 +224,13 @@ pub struct App {
     last_autosave: Instant,
 }
 
-/// xdevcmd's icon for About, largest first: drawn in half blocks, so `n` pixels square is
-/// `n` columns by `n / 2` rows, and About shows the largest the window has room for.
-/// Each is pixel art drawn for its size by `scripts/logo_pixels.py`, from the shapes of
-/// `assets/icon.svg`: every pixel one of the logo's colours, none blended, because at
-/// two pixels a cell a smoothed edge reads as blur.
-const LOGOS: [&[u8]; 4] = [
-    include_bytes!("../../../assets/icon-64.png"),
-    include_bytes!("../../../assets/icon-48.png"),
-    include_bytes!("../../../assets/icon-32.png"),
-    include_bytes!("../../../assets/icon-24.png"),
-];
+/// xdevcmd's icon for About, 14 pixels square: drawn in half blocks, 14 columns by 7
+/// rows, about as tall as About's text, so the picture sits beside it rather than
+/// taking the dialog over (the owner's call, 2026-11-07). Pixel art drawn for this size
+/// by `scripts/logo_pixels.py` from the shapes of `assets/icon.svg`: every pixel one of
+/// the logo's colours, none blended, because at two pixels a cell a smoothed edge reads
+/// as blur.
+const LOGO: &[u8] = include_bytes!("../../../assets/icon-14.png");
 
 /// What xdevcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
@@ -2186,9 +2182,8 @@ impl App {
                             ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
                             _ => [0, 0, 0],
                         };
-                        LOGOS
-                            .iter()
-                            .filter_map(|l| xdevcmd_core::image::png_bytes(l, 64, 64, bg).ok())
+                        xdevcmd_core::image::png_bytes(LOGO, 14, 14, bg)
+                            .into_iter()
                             .collect()
                     },
                 }));
@@ -5362,7 +5357,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_logos_are_sharp_pixel_art_in_the_sizes_about_expects() {
+    fn the_logo_is_sharp_pixel_art_of_the_size_about_expects() {
         // Laid over a colour that is none of the logo's, every pixel is either that
         // colour or one of the logo's five: a smoothed edge would blend the two.
         let bg = [255, 0, 255];
@@ -5373,12 +5368,10 @@ mod tests {
             [0xE6, 0xED, 0xF3],
             [0x2D, 0xB5, 0xA3],
         ];
-        for (logo, size) in LOGOS.iter().zip([64, 48, 32, 24]) {
-            let p = logo_picture(logo, bg);
-            assert_eq!((p.width, p.height), (size, size));
-            let odd = p.rgb.iter().find(|c| !colours.contains(c));
-            assert_eq!(odd, None, "the {size} px logo has a blended pixel");
-        }
+        let p = logo_picture(LOGO, bg);
+        assert_eq!((p.width, p.height), (14, 14));
+        let odd = p.rgb.iter().find(|c| !colours.contains(c));
+        assert_eq!(odd, None, "the logo has a blended pixel");
     }
 
     fn logo_picture(bytes: &[u8], bg: [u8; 3]) -> xdevcmd_core::image::Picture {

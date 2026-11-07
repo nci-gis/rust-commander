@@ -54,7 +54,7 @@ that heading and starts a new, empty one here. -->
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
 ### Changed
-- About shows xdevcmd's logo, drawn in the terminal as sharp pixel art, at the largest size the window has room for (24 to 64 pixels square).
+- About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
   extension, else the system's program; programs still ask "Run it?" first. Over SSH,
   without a desktop or in read-only mode it views the file and says why.

@@ -1,9 +1,9 @@
 # Round 004: Key sequences, and built-in keymaps for each system
 
-**Status**: In Progress
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 5
 **Date started**: 2026-11-07
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
 
 ## Goal
 
@@ -205,23 +205,43 @@ then; §1 and §3 are built:
       Done: parsing, the default table has no clash and no key that both runs and
       starts a group, every conflict case, repeat (three Lefts equal three
       Alt+Shift+Left), Enter closes, the hint, Alt+digit, Alt+J, Esc no longer a
-      prefix. **Not tested:** the two-second timeout (needs a clock), Esc closing a
-      group (same path as Enter, untested by itself). Sets, user files and `auto` are
-      deferred with the presets.
+      prefix. The timeout was dropped (owner, 2026-11-07): a group stays open until
+      Enter, Esc, another key or the mouse, and tests cover each — Esc closing a group
+      has its own render test since `feat/v0.2.0`. Since `feat/polish`: only resize
+      actions repeat, any other two-key binding runs once and closes (a render test),
+      and a badge on the status line shows a waiting group (`RESIZE`, `ALT+G …`).
+      Sets, user files and `auto` are deferred with the presets.
 - [ ] Render tests: F1 and the key bar under each set; a sequence on the status line.
+      Done for the one set there is: the hint and the badge on the status line.
 - [ ] Esc as Meta is gone: Esc then 7 in a file pane does not open MkDir, and Esc there
       does what it did before Round 003 (stop, take the filter off, or nothing).
 - [ ] The owner, on each system, in its default terminal: every key on F1 works.
+      **macOS: confirmed by the owner on 2026-11-07** ("R004 luôn nhé", after the
+      Option+R then arrows, Option+J and Option+1…9 check was asked for). Linux and
+      Windows: measured key by key earlier in this round (tables above); no separate
+      by-hand run of the built keys reported.
 
 Record what you could **not** verify as explicitly as what you could.
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** the measurement tables cover
+macOS, Linux and Windows key by key, but F11 and the keys each desktop keeps were not
+itemised everywhere; render tests for F1 and the key bar exist for the one set there
+is, since the built-in sets were deferred with the presets; Esc as Meta is removed and
+covered by the pty test for Esc, not by an Esc-then-7 test of its own. The owner
+confirmed the keys on the Mac, where they had not worked.
+
 **Learnings**:
 
--
+- **Measure every system before designing.** The plan was one keymap per system; the
+  measurements showed one set works on all three once two-key bindings exist, and the
+  belief that Windows Terminal keeps Alt+arrows was wrong.
+- **A key waiting for its second needs no timeout, but must be visible**: a badge on the
+  status line, and only actions done in many small steps (resizing) repeat; the rest
+  run once and close (`feat/polish`).
 
-**Promotions**:
+**Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/ui.md`: keymaps, sequences, the conflict rules
-- [ ] → `reference/platforms.md`: the keys each default terminal keeps
+- [x] → `reference/ui.md`: keymaps, sequences, the conflict rules
+- [x] → `reference/platforms.md`: the keys each default terminal keeps

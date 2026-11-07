@@ -784,6 +784,18 @@ impl Action {
     }
 }
 
+impl Action {
+    /// Actions made to be pressed several times in a row, as tmux's `bind -r` keys are.
+    /// In a two-key group, one of these keeps the group open for another press, until
+    /// Enter or Esc; any other action runs once and closes it.
+    pub fn repeats(self) -> bool {
+        matches!(
+            self,
+            Action::ResizeLeft | Action::ResizeRight | Action::ResizeUp | Action::ResizeDown
+        )
+    }
+}
+
 pub type Chord = (KeyCode, KeyModifiers);
 
 /// A binding: one key, or two in a row — `"Alt+r Left"`, Alt+R and then Left.
@@ -866,6 +878,20 @@ impl Keymap {
     /// What `k` does in the group that `first` opened.
     pub fn in_group(&self, first: Chord, k: KeyEvent) -> Option<Action> {
         self.seqs.get(&(first, normalise(k))).copied()
+    }
+
+    /// A name for the group `first` opens, for the status line: what its actions' names
+    /// start with — `resize` for `resize_left` … `resize_down` — or `None` when they
+    /// have nothing in common.
+    pub fn group_name(&self, first: Chord) -> Option<&'static str> {
+        let names: Vec<&'static str> = self
+            .group(first)
+            .iter()
+            .map(|(_, a)| action_name(*a))
+            .collect();
+        let head = |n: &'static str| n.split('_').next().unwrap_or(n);
+        let h = head(names.first()?);
+        (names.len() > 1 && names.iter().all(|n| head(n) == h)).then_some(h)
     }
 
     /// The group `first` opens, as (second key, action), in a stable order.

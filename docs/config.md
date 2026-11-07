@@ -143,9 +143,17 @@ Naming an action replaces all of its default keys. The names are in
 `rcmd --print-config` and on the F1 screen.
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
-Left. Bindings that start with the same key form a group: after its first key, the
-second keys can be pressed again and again, until Enter, Esc, another key or a click.
-The status line shows the group while it is open. That is how **Alt+R, then arrows** resizes.
+Left. Bindings that start with the same key form a group, and there is no time limit
+on the second key: a badge at the left of the status line shows the group is waiting,
+and the hint beside it lists its keys.
+
+- **A group of resize actions is a mode**: the second keys can be pressed again and
+  again, until Enter, Esc, another key or a click. That is how **Alt+R, then arrows**
+  resizes, under a `RESIZE` badge.
+- **Any other action runs once**: after its second key the group closes, and the badge,
+  `ALT+G …` for a group opened by Alt+G, goes. Esc cancels it.
+
+Only resizing repeats; it is the one thing done in many small steps.
 
 ```toml
 [keys]
@@ -203,14 +211,14 @@ See [security.md](security.md).
 
 ## Files rcmd keeps
 
-rcmd reads `config.toml` and never writes it. What it does write, and nothing else:
+rcmd writes `config.toml` only when you save in **File → Settings…**, and then only the
+lines you changed. What else it writes, and nothing more:
 
 | File | Where | What |
 |---|---|---|
 | `session.toml` | `~/.local/state/rcmd/` (Linux, macOS); `%LOCALAPPDATA%\rcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside rcmd (Ctrl+D). Bookmarks in this config are not copied there. |
-| `rcmd-view-…/` | the system's temporary directory | A file from inside an archive, extracted for F3. Removed when the viewer closes, or when rcmd ends. |
-| `rcmd-rename-….txt` | the system's temporary directory | The list of names when renaming many files in your editor. Removed when the editor closes. |
+| `rcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when rcmd ends; one left by a crash is removed at the next start, an hour on. |
 
 No logs, no cache, nothing sent anywhere. F8 moves files to your system's own trash.
 

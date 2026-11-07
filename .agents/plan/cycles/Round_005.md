@@ -1,11 +1,11 @@
 # Round 005: Enter opens files the Total Commander way
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 3
 **Replaces**: [Round 002](Round_002.md), the same plan, renumbered so rounds run in
 number order (owner, 2026-11-07)
 **Date started**: 2026-11-07 (owner: "1->5 làm nhé", target v0.2.0)
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
 
 ## Goal
 
@@ -158,16 +158,25 @@ owner's go-ahead to work through the roadmap toward v0.2.0.
       on every system (an environment variable, so CI covers all three).
 - [ ] By hand on each system (CI cannot open windows): a PDF opens; Enter over SSH on
       Linux views; a `.cmd` rule with a hostile name is refused, not run.
+      **macOS: confirmed by the owner on 2026-11-07** ("R2 confirmed trên macOS"; which
+      cases were tried was not said). Linux and Windows by hand: not yet reported.
 
 Record what you could **not** verify as explicitly as what you could.
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** no unit test feeds a hostile
+file name through a rule's argv (the path is pushed as one argument, never joined into
+a command line, but nothing proves it); by hand, only macOS was reported (the owner,
+2026-11-07). Both are noted for a later round, not a reason to hold this one.
+
 **Learnings**:
 
--
+- **One "can anything be opened here?" check** (`opener::no_screen`) replaced guesses
+  in several places, and found a bug in `o`: over SSH into a Mac or Windows machine it
+  opened the file on that machine's screen.
 
-**Promotions**:
+**Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/features.md`: Enter, `[[open]]` rules, Open with
-- [ ] → `reference/security.md`: running programs in a tab; the batch-file case
+- [x] → `reference/features.md`: Enter, `[[open]]` rules, Open with
+- [x] → `reference/security.md`: running programs in a tab; the batch-file case

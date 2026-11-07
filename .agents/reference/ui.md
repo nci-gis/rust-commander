@@ -1,6 +1,6 @@
 # The interface: keys, terminals, tabs, panes, mouse, menu bar
 
-> **Read this when**: changing keys or bindings, the terminal panel, tabs or sessions, pane layout and zoom, mouse handling, the menu bar, or the usage view.
+> **Read this when**: changing keys, bindings or two-key groups, the terminal panel, tabs or sessions, pane layout and zoom, mouse handling, the menu bar, or the usage view.
 
 ---
 
@@ -15,6 +15,51 @@ To see the live set, press **F1** or run `rcmd --print-config`.
 from the keymap because a user who sets `copy = ["F2"]` and still sees `5 Copy` has been
 lied to. Hardcoded strings like that existed until the config landed; a test now checks
 the bar follows a rebind.
+
+**One key set for every system.** Measured in each system's default terminal
+(`platforms.md`), the keys arrive on Windows and Linux, and on macOS Terminal.app only
+history and resize could not be typed. So those actions got second keys that arrive
+everywhere — `Alt+J` history, `Alt+R` then arrows resize, `Alt+1`…`Alt+9` tab N
+(`go_tab`, global, so it works from the shell too), `Alt+B` / `Alt+F` parent / enter
+(what Terminal.app sends for ⌥← / ⌥→) — instead of a keymap per system. Named presets
+(`[keys] preset`, `keymaps/*.toml`, `RCMD_KEYS`) are deferred until a second set is
+really wanted; Round 004's design §2 is the plan for then.
+
+### Two-key bindings and groups
+
+A binding is one key, or two separated by a space: `"Alt+r Left"` (`Keys::{One, Two}`,
+`parse_binding`; three is an error). Two-key bindings that share a first key form a group
+(`Keymap::seqs`, `starts_group`, `in_group`). In `App::on_key`:
+
+- The first key opens the group and runs nothing. With a shell focused it opens only if
+  every action in the group is global (resize is); otherwise the key is the shell's.
+- **No timeout.** The group waits until Enter or Esc (closes, nothing else happens),
+  another key (closes, then that key does its own job), or any mouse event (arrows typed
+  after a click are arrows). A two-second timeout was built first and dropped: a key
+  waiting for its second needs no timer, but must be visible.
+- Only actions where `Action::repeats()` is true — the four resizes — keep the group open,
+  so ← ← ← resizes three steps. Any other two-key binding runs once and closes.
+- **A badge on the status line** shows a waiting group: `RESIZE` when all its actions
+  repeat and share a name prefix (`group_name`), otherwise the opening key, `ALT+G …`.
+  The hint beside it lists the second keys.
+
+F1 shows two-key bindings as written (`Alt+r Left`) and more than three keys as
+`first … last`; its "rebound" mark had to learn two-key bindings (it marked every resize
+row until fixed).
+
+### Clashes
+
+Checked in `Keymap::apply` when the config loads:
+
+- An action named under `[keys]` loses all its default keys, single and two-key.
+- One key, or one two-key binding, that the user gives two actions: an error naming both.
+  It used to be silent — the later action took the key.
+- A user key that a default also uses: the user's wins, and the default loses it.
+- A key that runs an action and also starts a group: both the user's is an error; the
+  user's key beats a default group starting with it (the group is dropped); the user's
+  group beats a default key (the key is dropped).
+- Two defaults clashing is a bug in `BINDINGS`, and a test says so: no key runs two
+  actions, none both runs one and starts a group.
 
 ## Terminals
 
@@ -76,8 +121,8 @@ elsewhere they open in the focused pane's directory).
 
 ## Pane size and zoom
 
-**Alt+Shift+arrows move the nearest border in the arrow's direction**, the way dragging
-it would: Left/Right the nearest vertical border, Up/Down the nearest horizontal one.
+**Alt+Shift+arrows (or Alt+R, then arrows) move the nearest border in the arrow's
+direction**, the way dragging it would: Left/Right the nearest vertical border, Up/Down the nearest horizontal one.
 So Alt+Shift+Up on the terminal raises its top edge and it grows; on a file pane at the
 top it raises that pane's bottom edge and it shrinks. Inside a terminal tab with
 splits, the border between shells moves first. "Nearest" is the deepest split of that
@@ -99,9 +144,10 @@ otherwise only a border colour, and that is not something a test — or a person
 ## Navigating
 
 `Alt+←` goes up one level and `Alt+→` goes into the directory under the cursor, as in a
-browser or Explorer; `Backspace` and `Enter` still work. `Alt+→` only ever enters a
-directory — on a file it says so — because `Enter` already views files, and a key that
-sometimes navigates and sometimes opens a viewer is one you stop trusting.
+browser or Explorer; `Backspace` and `Enter` still work, and so do `Alt+B` / `Alt+F`,
+which is what Terminal.app sends for ⌥← / ⌥→. `Alt+→` only ever enters a directory — on
+a file it says so — because `Enter` already opens files, and a key that sometimes
+navigates and sometimes opens a file is one you stop trusting.
 
 Pane resizing moved from `Alt+←/→` to `Alt+Shift+arrows` to make room. Neither navigation
 key is global, so with a shell focused, `Alt+←/→` still reach the shell for word motion.

@@ -1,9 +1,9 @@
 # Round 007: Settings
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 6
 **Date started**: 2026-11-07
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
 
 ## Goal
 
@@ -56,10 +56,17 @@ without losing anything they wrote there.
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** Settings takes no mouse input
+(keys only); a config file in an unusual TOML style is refused by the read-back check
+rather than tested. Both fail safe: nothing is written that does not read back as meant.
+
 **Learnings**:
 
--
+- **Edit the user's file line by line, then parse it back** and refuse if it does not
+  say what was meant: comments and order survive without a TOML-editing dependency.
+- **Every pick's default must be among its choices**: "Shells at most" could not be set
+  back to its default, 3, until a test checked all of them (`feat/polish`).
 
-**Promotions**:
+**Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/config.md`: how Settings writes the file, and the read-back rule
+- [x] → `reference/config.md`: how Settings writes the file, and the read-back rule

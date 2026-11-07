@@ -41,19 +41,24 @@ were done first:
 
 ## Next, in this order
 
-1. **Close Round 004.** The review fixes are merged (PR #4); the owner tries Option+R
-   and arrows, Option+J and Option+1…9 on the Mac; then Complete.
-2. **Round 005**: Enter opens files the Total Commander way (item 3; was Round 002).
-   Reviewed on 2026-11-07: Enter defaults to `open`, as decided; one "can anything be
-   opened here?" check that also covers SSH on macOS and Windows (step 0, a bug in `o`
-   today); a terminal tab that runs a program by argv and stays after it ends.
-3. **Round 006**: themes as files (item 4).
-4. **Round 007**: Settings (item 6), which needs 4; keymap sets join it only if a second
-   set is wanted by then.
-5. Then items 7–10 in table order, each numbered when started.
+Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-07).
+[Round 010](cycles/Round_010.md), the mouse in Settings, is open and targets 0.2.0
+(owner, 2026-11-07). What is left, in order:
+
+1. **Land `feat/settings-mouse`** in `dev` by one pull request: Round 010 and, beneath
+   it, `feat/polish` (the About logo sized to the window, Settings offering 3 shells and
+   keeping hand-written values, the two-key group badge with only resizing repeating).
+2. **Release 0.2.0** when the owner says so (below).
+3. **Item 8, one name**, then the packages; then **item 10**, the launch.
+4. Then items 11–13, each numbered when started.
+
+Carried from closed rounds, small enough for any later round: a unit test feeding a
+hostile file name through an `[[open]]` rule (005); undo of a
+move that meets an overwrite question (009); Enter-opens-files tried by hand on Linux
+and Windows (005).
 
 **Releasing is the owner's call** ("chưa release", 2026-11-07). `dev` already holds
-enough for 0.2.0 — Round 001's colours above all, since 0.1.0 is hard to read on a Mac in
+enough for 0.2.0 — Rounds 001 and 003–009, Round 001's colours above all, since 0.1.0 is hard to read on a Mac in
 Terminal.app — and the flow in `docs/development.md` is ready when asked.
 
 **Small fixes, no round of their own** — all done on `feat/v0.2.0` (2026-11-07):
@@ -66,8 +71,8 @@ Terminal.app — and the flow in `docs/development.md` is ready when asked.
   directory per run, user-only; a marker refreshed while running; removed on exit; at
   start, runs whose marker is over an hour old are removed (only marked directories).
 
-Waiting on a person, at any point: the one name (item 8); the four promotions proposed
-in Rounds 001 and 003; the read-only finding in
+Waiting on a person, at any point: the one name (item 8); the promotions proposed in
+Rounds 001 and 003–009; the read-only finding in
 `.agents/memory/2026-11-07-read-only-writes-a-temp-copy.md`.
 
 ## Order
@@ -78,13 +83,14 @@ in Rounds 001 and 003; the read-only finding in
 | 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
 | 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
 | **Next: Total Commander feel** | | | | |
-| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Review: merged (PR #5) |
-| 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | [006](cycles/Round_006.md) | Review |
-| 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | In Progress: built, in review |
-| 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Review |
-| 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Review (About only) |
+| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Complete (2026-11-07) |
+| 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | [006](cycles/Round_006.md) | Complete (2026-11-07) |
+| 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | Complete (2026-11-07) |
+| 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
+| 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
-| 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Review |
+| 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
+| 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Review |
 | 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
 | **Later: optional extras** | | | | |
 | 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |

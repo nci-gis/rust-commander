@@ -158,6 +158,6 @@ Record what you could **not** verify as explicitly as what you could.
 
 **Promotions** (proposed; `reference/` is a person's to change):
 
-- [ ] → `reference/platforms.md`: Terminal.app and 24-bit colour, and how `auto` decides
-- [ ] → `reference/gotchas.md`: crossterm writes named colours as `38;5;N`; `COLORTERM`
+- [x] → `reference/platforms.md`: Terminal.app and 24-bit colour, and how `auto` decides
+- [x] → `reference/gotchas.md`: crossterm writes named colours as `38;5;N`; `COLORTERM`
       does not survive SSH

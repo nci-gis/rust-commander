@@ -291,7 +291,11 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 ),
                 (
                     "Enter \u{b7} Esc",
-                    "Done with them; so is any other key, or the mouse",
+                    "Done resizing; so is any other key, or the mouse",
+                ),
+                (
+                    "Other two-key bindings",
+                    "Run once, then close; a badge on the status line shows one waiting",
                 ),
                 ("rcmd --show-keys", "What each key really sends"),
                 ("More", TROUBLESHOOTING),

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild assets/rcmd.ico and assets/icon-24.png from the SVGs. Needs `resvg` (cargo install --locked resvg).
+# Rebuild assets/rcmd.ico and assets/icon-{24,32,48,64}.png from the SVGs. Needs `resvg` (cargo install --locked resvg).
 # The .ico is committed, so nobody needs this to build rcmd; run it after changing an SVG.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,6 +27,9 @@ for z, png in zip(sizes, pngs):
 open(out, "wb").write(head + entries + data)
 PY
 echo "assets/rcmd.ico: $(wc -c < assets/rcmd.ico) bytes"
-# The logo About draws in half blocks, built into the binary.
-resvg -w 24 -h 24 assets/icon.svg assets/icon-24.png
-echo "assets/icon-24.png: $(wc -c < assets/icon-24.png) bytes"
+# The logos About draws in half blocks, built into the binary: it shows the largest one
+# the window has room for. Each is rendered at its own size, not shrunk from another.
+for z in 24 32 48 64; do
+  resvg -w "$z" -h "$z" assets/icon.svg "assets/icon-$z.png"
+  echo "assets/icon-$z.png: $(wc -c < "assets/icon-$z.png") bytes"
+done

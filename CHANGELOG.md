@@ -12,16 +12,17 @@ that heading and starts a new, empty one here. -->
 
 ### Added
 - Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
-  start with the same key form a group, and its second keys can be pressed again and
-  again until Enter, Esc or another key: **Alt+R, then arrows** resizes panes, on every system (macOS Terminal.app
-  drops the modifiers from Alt+Shift+arrows).
+  start with the same key form a group. Resizing repeats: **Alt+R, then arrows** resizes
+  panes until Enter, Esc or another key, on every system (macOS Terminal.app drops the
+  modifiers from Alt+Shift+arrows). Any other action runs once and the group closes.
+  While a group is open, a badge at the left of the status line says so (`RESIZE`).
 - **Alt+1**…**Alt+9** go to tab N. Ctrl+PageUp / PageDown cannot be typed on a laptop
   (Ctrl+Fn+↑ loses Ctrl), and the terminal or desktop takes Ctrl+Tab.
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
 - `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
   window or a terminal tab, for some systems only, or only where there is a screen.
 - **File → Settings…**: tabs for General, Files, Theme and Terminal; ←/→ to change,
-  Enter to save. Only the changed lines of `config.toml` are rewritten, comments kept;
+  Enter to save, or the mouse: click a tab, a check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are rewritten, comments kept;
   the result is read back before it is written. Rows say which apply at the next start.
   Not in read-only or restricted mode.
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
@@ -32,6 +33,9 @@ that heading and starts a new, empty one here. -->
   After a copy or a delete it says those cannot be undone.
 - **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
 - "Run it?" can run a program in a terminal tab, where its output stays after it ends.
+  On Windows, a batch file is refused there when a file name holds a character
+  `cmd.exe` would act on (`&`, `%`, `^`…), so a name like `a&calc.txt` cannot start a
+  second command.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
   to do; F1 links to it.
 - Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends
@@ -41,7 +45,7 @@ that heading and starts a new, empty one here. -->
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
 ### Changed
-- About shows rcmd's logo, drawn in the terminal.
+- About shows rcmd's logo, drawn in the terminal, at the largest size the window has room for (24 to 64 pixels square).
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
   extension, else the system's program; programs still ask "Run it?" first. Over SSH,
   without a desktop or in read-only mode it views the file and says why.

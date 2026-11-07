@@ -1,9 +1,9 @@
 # Round 009: Undo the last operation
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 9
 **Date started**: 2026-11-07
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
 
 ## Goal
 
@@ -52,10 +52,15 @@ cannot, and never undoes something older behind the user's back.
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** undoing a move whose way back
+meets an overwrite question is not tested by itself; it is the same job as F6, which
+asks the same question.
+
 **Learnings**:
 
--
+- **Plan undo against the disk as it is now**, not against what was recorded: every
+  undo checks that things are still where the operation left them, and says why not.
 
-**Promotions**:
+**Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/features.md`: undo, what it covers and why not copies or deletes
+- [x] → `reference/features.md`: undo, what it covers and why not copies or deletes

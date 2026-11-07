@@ -224,9 +224,15 @@ pub struct App {
     last_autosave: Instant,
 }
 
-/// rcmd's icon, 24 pixels square, for About: drawn in half blocks, 24 × 12 cells.
-/// Rendered from `assets/icon.svg` (`resvg -w 24 -h 24`).
-const LOGO: &[u8] = include_bytes!("../../../assets/icon-24.png");
+/// rcmd's icon for About, largest first: drawn in half blocks, so `n` pixels square is
+/// `n` columns by `n / 2` rows, and About shows the largest the window has room for.
+/// Each is rendered from `assets/icon.svg` at its own size by `scripts/icons.sh`.
+const LOGOS: [&[u8]; 4] = [
+    include_bytes!("../../../assets/icon-64.png"),
+    include_bytes!("../../../assets/icon-48.png"),
+    include_bytes!("../../../assets/icon-32.png"),
+    include_bytes!("../../../assets/icon-24.png"),
+];
 
 /// What rcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
@@ -1026,11 +1032,33 @@ impl App {
             .iter()
             .map(|((c, m), _)| crate::keys::key_name(*c, *m))
             .collect();
-        format!(
-            "{}, then: {} \u{b7} Enter or Esc: done",
-            crate::keys::key_name(first.0, first.1),
-            keys.join(" ")
-        )
+        // A group whose keys all repeat is a mode, left with Enter or Esc; any other
+        // is a key to pick, after which it closes by itself.
+        if self.group_repeats(first) {
+            format!("{} \u{b7} Enter or Esc: done", keys.join(" "))
+        } else {
+            format!("then: {} \u{b7} Esc: cancel", keys.join(" "))
+        }
+    }
+
+    /// Whether every key in the group `first` opens repeats.
+    fn group_repeats(&self, first: crate::keys::Chord) -> bool {
+        let g = self.settings.keymap.group(first);
+        !g.is_empty() && g.iter().all(|(_, a)| a.repeats())
+    }
+
+    /// The badge at the left of the status line while a group is open: `RESIZE` for a
+    /// mode with a name, else the key that opened it, `ALT+R …`.
+    fn group_badge(&self) -> Option<String> {
+        let first = self.group?;
+        let label = match self.settings.keymap.group_name(first) {
+            Some(n) if self.group_repeats(first) => n.to_uppercase(),
+            _ => format!(
+                "{} \u{2026}",
+                crate::keys::key_name(first.0, first.1).to_uppercase()
+            ),
+        };
+        Some(format!(" {label} "))
     }
 
     /// A key of the open group: run it and keep the group open. `false` when the key is
@@ -1047,8 +1075,12 @@ impl App {
             self.status.clear();
             return false;
         };
-        self.group = Some(first);
-        self.status = self.group_hint(first);
+        if a.repeats() {
+            self.group = Some(first);
+            self.status = self.group_hint(first);
+        } else {
+            self.status.clear();
+        }
         self.run_bound(a, k);
         // An action may have put up its own message; the group's comes back next key.
         true
@@ -2147,12 +2179,15 @@ impl App {
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
                     )),
-                    picture: {
+                    pictures: {
                         let bg = match theme::t().bg_panel {
                             ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
                             _ => [0, 0, 0],
                         };
-                        rcmd_core::image::png_bytes(LOGO, 24, 24, bg).ok()
+                        LOGOS
+                            .iter()
+                            .filter_map(|l| rcmd_core::image::png_bytes(l, 64, 64, bg).ok())
+                            .collect()
                     },
                 }));
             }
@@ -2271,6 +2306,30 @@ impl App {
         };
     }
 
+    /// What Settings' answer to a key or a click means here: a theme to preview, the
+    /// theme put back on cancel, or the settings to save.
+    fn settings_outcome(&self, o: settings_dialog::Outcome) -> ModalAct {
+        let (spec, depth) = (&self.settings.config.theme, self.settings.depth);
+        let show = |name: &str| {
+            if let Ok(t) = crate::config::theme_for(name, spec, depth) {
+                theme::set(t);
+            }
+        };
+        match o {
+            settings_dialog::Outcome::Stay => ModalAct::None,
+            settings_dialog::Outcome::Preview(name) => {
+                show(&name);
+                ModalAct::None
+            }
+            settings_dialog::Outcome::Cancel => {
+                // Put back the theme the preview replaced.
+                show(&self.theme_name);
+                ModalAct::Close
+            }
+            settings_dialog::Outcome::Save => ModalAct::SaveSettings,
+        }
+    }
+
     fn on_modal_mouse(&mut self, m: MouseEvent) {
         let p = Position::new(m.column, m.row);
         let left = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
@@ -2378,6 +2437,10 @@ impl App {
                 if matches!(h.on_mouse(m), viewer::Action::Close) {
                     act = ModalAct::Close;
                 }
+            }
+            Some(Modal::Settings(d)) => {
+                let o = d.on_mouse(m);
+                act = self.settings_outcome(o);
             }
             _ => {}
         }
@@ -3031,25 +3094,10 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
-            Some(Modal::Settings(d)) => match d.on_key(k) {
-                settings_dialog::Outcome::Stay => {}
-                settings_dialog::Outcome::Preview(name) => {
-                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
-                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
-                        theme::set(t);
-                    }
-                }
-                settings_dialog::Outcome::Cancel => {
-                    // Put back the theme the preview replaced.
-                    let name = self.theme_name.clone();
-                    let (spec, depth) = (self.settings.config.theme.clone(), self.settings.depth);
-                    if let Ok(t) = crate::config::theme_for(&name, &spec, depth) {
-                        theme::set(t);
-                    }
-                    act = ModalAct::Close;
-                }
-                settings_dialog::Outcome::Save => act = ModalAct::SaveSettings,
-            },
+            Some(Modal::Settings(d)) => {
+                let o = d.on_key(k);
+                act = self.settings_outcome(o);
+            }
             Some(Modal::Rename(d)) => match d.on_key(k) {
                 rename_dialog::Outcome::Stay => {}
                 rename_dialog::Outcome::Close => act = ModalAct::Close,
@@ -3728,7 +3776,7 @@ impl App {
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -3970,7 +4018,7 @@ impl App {
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -4094,7 +4142,7 @@ impl App {
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
         true
     }
@@ -4229,7 +4277,7 @@ impl App {
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -4675,7 +4723,7 @@ impl App {
             yes: Some(("undo".into(), Cmd::Undo)),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -5074,7 +5122,11 @@ impl App {
             Mode::ReadOnly => " READ-ONLY ",
             Mode::Restricted => " RESTRICTED ",
         };
-        let left = format!("{}{left}", " ".repeat(badge.chars().count()));
+        // An open two-key group is shown the same way, in the accent colour, so a key
+        // waiting for its second is never a surprise.
+        let group = self.group_badge();
+        let badges = badge.chars().count() + group.as_ref().map_or(0, |g| g.chars().count() + 1);
+        let left = format!("{}{left}", " ".repeat(badges));
         let right = format!("{} ", self.status);
 
         let buf = frame.buffer_mut();
@@ -5115,6 +5167,22 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 )),
                 area.width,
+            );
+        }
+        if let Some(g) = group {
+            let th = theme::t();
+            let x = area.x + badge.chars().count() as u16;
+            frame.buffer_mut().set_line(
+                x,
+                area.y,
+                &Line::from(Span::styled(
+                    g,
+                    Style::new()
+                        .fg(th.bg)
+                        .bg(th.accent)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                area.width.saturating_sub(x - area.x),
             );
         }
     }

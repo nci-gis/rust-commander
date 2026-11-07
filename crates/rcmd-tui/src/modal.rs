@@ -55,8 +55,9 @@ pub struct Ask {
     pub buttons: Vec<Rect>,
     /// A quiet line at the bottom right, on the buttons' row: a credit, not content.
     pub footnote: Option<String>,
-    /// A picture to the left of the text: rcmd's logo, in About.
-    pub picture: Option<rcmd_core::image::Picture>,
+    /// A picture to the left of the text — rcmd's logo, in About — in sizes, largest
+    /// first: the largest the window has room for is drawn.
+    pub pictures: Vec<rcmd_core::image::Picture>,
 }
 
 pub struct Confirm {
@@ -418,23 +419,29 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     let th = theme::t();
     let accent = if a.danger { th.err } else { th.accent };
     let shown = a.body.len().min(area.height.saturating_sub(6) as usize);
-    // Room for a picture on the left, with two columns before the text.
-    let (pic_w, pic_h) = a.picture.as_ref().map_or((0, 0), |p| {
-        (p.width as u16 + 2, p.height.div_ceil(2) as u16)
-    });
-    let w = a
+    let text_w = a
         .body
         .iter()
         .map(|l| l.chars().count())
         .max()
         .unwrap_or(0)
         .clamp(40, 100) as u16
-        + 4
-        + pic_w;
+        + 4;
+    // Room for a picture on the left, with two columns before the text.
+    let size = |p: &rcmd_core::image::Picture| (p.width as u16 + 2, p.height.div_ceil(2) as u16);
+    let fits = |p: &&rcmd_core::image::Picture| {
+        let (pw, ph) = size(p);
+        // With two cells to spare all round: a dialog, not the whole screen.
+        text_w + pw + 4 <= area.width && (shown as u16).max(ph) + 8 <= area.height
+    };
+    // The largest that fits; in a window too small for any, the smallest.
+    let picture = a.pictures.iter().find(fits).or(a.pictures.last());
+    let (pic_w, pic_h) = picture.map_or((0, 0), size);
+    let w = text_w + pic_w;
     let h = (shown as u16).max(pic_h) + 4;
     let r = centered(area, w, h);
     let full = frame_box(frame, r, &a.title, accent);
-    if let Some(p) = &a.picture {
+    if let Some(p) = picture {
         let bg = match th.bg_panel {
             ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
             _ => [0, 0, 0],

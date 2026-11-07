@@ -7,8 +7,8 @@
 //! or at the next start. Keys are rebound in the file, under `[keys]`; this screen
 //! says so rather than offering a second way to do it.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::Rect;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
@@ -246,7 +246,7 @@ const FIELDS: &[Field] = &[
         "max_terminals",
         "Shells at most",
         "Across every terminal tab and split",
-        Kind::Pick(&["2", "4", "8", "16"]),
+        Kind::Pick(&["1", "2", "3", "4", "6", "8", "12", "16"]),
         true,
     ),
 ];
@@ -330,6 +330,27 @@ pub fn value(f: &Field, v: &str) -> Value {
     }
 }
 
+/// A pick's choices, with the value the file has among them even when it is not one
+/// of the usual ones — `max_panes = 5` written by hand — in its place by size, so
+/// stepping through the choices can come back to it rather than losing it.
+fn with_own(choices: &[&str], own: &str) -> Vec<String> {
+    let mut out: Vec<String> = choices.iter().map(|s| s.to_string()).collect();
+    if out.iter().any(|c| c == own) {
+        return out;
+    }
+    match own.parse::<i64>() {
+        Ok(n) if choices.iter().all(|c| c.parse::<i64>().is_ok()) => {
+            let at = choices
+                .iter()
+                .position(|c| c.parse::<i64>().is_ok_and(|c| c > n))
+                .unwrap_or(out.len());
+            out.insert(at, own.to_string());
+        }
+        _ => out.push(own.to_string()),
+    }
+    out
+}
+
 pub struct SettingsDialog {
     pub tab: usize,
     row: usize,
@@ -340,6 +361,18 @@ pub struct SettingsDialog {
     /// Why saving is not possible here (read-only modes), if it is not.
     pub cannot_save: Option<String>,
     pub buttons: Vec<Rect>,
+    /// Where each tab, and each row with its value, was drawn: a click hits exactly
+    /// what is on screen.
+    tab_hits: Vec<Rect>,
+    row_hits: Vec<RowHit>,
+}
+
+/// One row as drawn: the whole line, and its `‹` and `›` (for a check box, both are
+/// the box).
+struct RowHit {
+    line: Rect,
+    back: Rect,
+    value: Rect,
 }
 
 pub enum Outcome {
@@ -362,6 +395,8 @@ impl SettingsDialog {
             themes,
             cannot_save,
             buttons: Vec::new(),
+            tab_hits: Vec::new(),
+            row_hits: Vec::new(),
         }
     }
 
@@ -395,7 +430,7 @@ impl SettingsDialog {
         let cur = get(&self.now, f);
         let choices: Vec<String> = match f.kind {
             Kind::Bool => vec!["false".into(), "true".into()],
-            Kind::Pick(c) => c.iter().map(|s| s.to_string()).collect(),
+            Kind::Pick(c) => with_own(c, &get(&self.before, f)),
             Kind::Themes => self.themes.clone(),
         };
         if choices.is_empty() {
@@ -410,6 +445,50 @@ impl SettingsDialog {
         set(&mut self.now, f, &choices[next]);
         if matches!(f.kind, Kind::Themes) {
             return Outcome::Preview(choices[next].clone());
+        }
+        Outcome::Stay
+    }
+
+    /// A click picks a tab or a row, or changes a value: `‹` steps it back, the value
+    /// or `›` forward, a check box toggles. The wheel moves between rows. The buttons
+    /// are Save and Cancel, or only Close where nothing can be saved.
+    pub fn on_mouse(&mut self, m: MouseEvent) -> Outcome {
+        let p = Position::new(m.column, m.row);
+        match m.kind {
+            MouseEventKind::ScrollUp => self.row = self.row.saturating_sub(1),
+            MouseEventKind::ScrollDown => {
+                let rows = self.rows().len();
+                if rows > 0 {
+                    self.row = (self.row + 1).min(rows - 1);
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let hit = |r: &Rect| r.contains(p);
+                if let Some(i) = self.buttons.iter().position(hit) {
+                    return match (i, self.cannot_save.is_some()) {
+                        (0, false) => Outcome::Save,
+                        _ => Outcome::Cancel,
+                    };
+                }
+                if let Some(t) = self.tab_hits.iter().position(hit) {
+                    if t != self.tab {
+                        self.tab = t;
+                        self.row = 0;
+                    }
+                    return Outcome::Stay;
+                }
+                if let Some(i) = self.row_hits.iter().position(|r| hit(&r.line)) {
+                    self.row = i;
+                    let r = &self.row_hits[i];
+                    if hit(&r.back) {
+                        return self.step(-1);
+                    }
+                    if hit(&r.value) {
+                        return self.step(1);
+                    }
+                }
+            }
+            _ => {}
         }
         Outcome::Stay
     }
@@ -443,7 +522,14 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
     let inner = frame_box(frame, r, "Settings", th.accent);
     // The tabs.
     let mut spans = Vec::new();
+    d.tab_hits.clear();
+    d.row_hits.clear();
+    let mut x = inner.x;
     for (i, t) in TABS.iter().enumerate() {
+        let w = t.chars().count() as u16 + 2;
+        d.tab_hits
+            .push(Rect::new(x, inner.y, w, 1).intersection(inner));
+        x += w + 1;
         let style = if i == d.tab {
             Style::new()
                 .fg(th.bg)
@@ -500,11 +586,24 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             } else {
                 Style::new().fg(th.fg)
             };
-            frame.buffer_mut().set_style(
-                Rect::new(inner.x, inner.y + y, inner.width, 1),
-                if i == d.row { style } else { Style::new() },
-            );
+            let row = Rect::new(inner.x, inner.y + y, inner.width, 1);
+            frame
+                .buffer_mut()
+                .set_style(row, if i == d.row { style } else { Style::new() });
             put(frame, inner, y, &line, style);
+            // The value starts after the mark (2) and the label and its space.
+            let vx = inner.x + 2 + label_w as u16 + 1;
+            let vw = shown.chars().count() as u16;
+            let value = Rect::new(vx, row.y, vw, 1).intersection(row);
+            let back = match f.kind {
+                Kind::Bool => Rect::default(),
+                _ => Rect::new(vx, row.y, 1, 1).intersection(row),
+            };
+            d.row_hits.push(RowHit {
+                line: row,
+                back,
+                value,
+            });
         }
         if let Some(f) = rows.get(d.row) {
             put(
@@ -554,6 +653,31 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_default_is_one_of_its_choices() {
+        let base = Config::default();
+        for f in FIELDS {
+            if let Kind::Pick(c) = f.kind {
+                let v = get(&base, f);
+                assert!(
+                    c.contains(&v.as_str()),
+                    "{}.{}: the default {v} is not among {c:?}",
+                    f.section,
+                    f.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_value_written_by_hand_stays_among_the_choices() {
+        let c = &["2", "3", "4", "6"];
+        assert_eq!(with_own(c, "4"), ["2", "3", "4", "6"]);
+        assert_eq!(with_own(c, "5"), ["2", "3", "4", "5", "6"]);
+        assert_eq!(with_own(c, "9"), ["2", "3", "4", "6", "9"]);
+        assert_eq!(with_own(&["open", "view"], "odd"), ["open", "view", "odd"]);
+    }
 
     #[test]
     fn every_field_reads_and_writes_its_own_setting() {

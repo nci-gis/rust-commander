@@ -364,13 +364,43 @@ fn a_reader_that_stops_early_ends_rcmd_quietly() {
 fn a_group_says_what_it_takes_and_enter_closes_it() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Alt+r", &a, &b);
-    assert!(s.contains("Alt+r, then: Down Left Right Up"), "{s}");
-    assert!(s.contains("Enter or Esc: done"), "{s}");
+    // A mode: its keys repeat, so it is named on a badge and left with Enter or Esc.
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(status.starts_with(" RESIZE "), "the badge\n{s}");
+    assert!(
+        status.contains("Down Left Right Up \u{b7} Enter or Esc: done"),
+        "{s}"
+    );
+    // Still a mode after a step.
+    let s = shot_keys("110x24", "Alt+r,Left,Left", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(status.starts_with(" RESIZE "), "still open\n{s}");
     // After Enter, Left is a plain key again: it does not resize.
     let closed = shot_keys("110x24", "Alt+r,Enter,Left", &a, &b);
     let plain = shot_keys("110x24", "Left", &a, &b);
     let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
     assert_eq!(border(&closed), border(&plain), "{closed}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_group_of_keys_that_do_not_repeat_closes_after_one() {
+    // Hidden files are toggled once, not again and again: Alt+G waits for its second
+    // key, says so, and is gone after it.
+    let (a, b) = fixture();
+    fs::write(a.join(".secret"), "x").unwrap();
+    let cfg = "[keys]\ntoggle_hidden = [\"Ctrl+h\", \"Alt+g h\"]\nhelp = [\"F1\", \"Alt+g k\"]\n";
+    let s = shot_cfg_env(cfg, &[], "Alt+g", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(status.starts_with(" ALT+G \u{2026} "), "waiting\n{s}");
+    assert!(status.contains("then: h k \u{b7} Esc: cancel"), "{s}");
+    let s = shot_cfg_env(cfg, &[], "Alt+g,h", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(s.contains(".secret"), "hidden files shown\n{s}");
+    assert!(!status.contains("ALT+G"), "closed after one\n{s}");
+    // A second h is a plain h now: hidden files stay shown.
+    let s = shot_cfg_env(cfg, &[], "Alt+g,h,h", &a, &b);
+    assert!(s.contains(".secret"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -2118,6 +2148,71 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
 }
 
 #[test]
+fn settings_works_with_the_mouse() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings-mouse");
+    fs::create_dir_all(&dir).unwrap();
+    let original = "[general]\nmenu_bar = true\n";
+    let cfg = write_config(&dir, original);
+    let open = "F9,Up,Up,Enter";
+    let s = shot_with(&cfg, open, &a, &b);
+    let click = |(x, y): (usize, usize)| format!("click:{x}:{y}");
+    // A check box: the click toggles it, and the row is marked as changed.
+    let (_, row) = locate(&s, "F8 moves to the trash");
+    let (bx, _) = locate(&s, "[x]");
+    let toggled = format!("{open},{}", click((bx + 1, row)));
+    let s = shot_with(&cfg, &toggled, &a, &b);
+    let line = s.lines().nth(row).unwrap();
+    assert!(
+        line.contains("\u{2022} F8 moves to the trash") && line.contains("[ ]"),
+        "{s}"
+    );
+    assert!(
+        s.contains("Shift+F8 always deletes for good"),
+        "the row is selected\n{s}"
+    );
+    // Cancel leaves the file alone; Save writes the change.
+    let cancel = format!("{toggled},{}", click(locate(&s, "[Esc] cancel")));
+    shot_with(&cfg, &cancel, &a, &b);
+    assert_eq!(fs::read_to_string(&cfg).unwrap(), original);
+    let save = format!("{toggled},{}", click(locate(&s, "[Enter] save")));
+    let saved = shot_with(&cfg, &save, &a, &b);
+    assert!(saved.contains("settings saved"), "{saved}");
+    assert!(
+        fs::read_to_string(&cfg)
+            .unwrap()
+            .contains("delete_to_trash = false"),
+        "{saved}"
+    );
+    write_config(&dir, original);
+    // A tab, then a value's arrows: › forward, ‹ back.
+    let s0 = shot_with(&cfg, open, &a, &b);
+    let theme = format!("{open},{}", click(locate(&s0, "Theme ")));
+    let s = shot_with(&cfg, &theme, &a, &b);
+    let (vx, vy) = locate(&s, "\u{2039} dark \u{203a}");
+    let more = format!(
+        "{theme},{}",
+        click((vx + "\u{2039} dark ".chars().count(), vy))
+    );
+    let s = shot_with(&cfg, &more, &a, &b);
+    assert!(
+        s.contains("\u{2039} light \u{203a}"),
+        "\u{203a} steps forward\n{s}"
+    );
+    let back = format!("{more},{}", click((vx, vy)));
+    let s = shot_with(&cfg, &back, &a, &b);
+    assert!(
+        s.contains("\u{2039} dark \u{203a}"),
+        "\u{2039} steps back\n{s}"
+    );
+    // The wheel moves the selected row: the help line follows it.
+    let (dx, dy) = locate(&s0, "Ask before copy and move");
+    let s = shot_with(&cfg, &format!("{open},wheel:{dx}:{dy}:1"), &a, &b);
+    assert!(s.contains("Shift+F8 always deletes for good"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn settings_in_read_only_mode_shows_but_never_saves() {
     let (a, b) = fixture();
     let dir = a.parent().unwrap().join("settings-ro");
@@ -2134,8 +2229,29 @@ fn settings_in_read_only_mode_shows_but_never_saves() {
         .arg(&b)
         .output()
         .unwrap();
-    let s = String::from_utf8_lossy(&out.stdout);
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(s.contains("rcmd writes nothing"), "{s}");
+    assert_eq!(
+        fs::read_to_string(&cfg).unwrap(),
+        "[general]\nmenu_bar = true\n"
+    );
+    // The mouse too: a click changes what is shown, and the one button only closes.
+    let (bx, by) = locate(&s, "[x]");
+    let (cx, cy) = locate(&s, "[Esc] close");
+    let out = isolated()
+        .args(["--read-only", "--config"])
+        .arg(&cfg)
+        .arg("--screenshot=110x24")
+        .arg(format!(
+            "--keys=F9,Up,Up,Enter,click:{}:{by},click:{cx}:{cy}",
+            bx + 1
+        ))
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(!s.contains("rcmd writes nothing"), "closed\n{s}");
     assert_eq!(
         fs::read_to_string(&cfg).unwrap(),
         "[general]\nmenu_bar = true\n"
@@ -2971,16 +3087,44 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
         .find(|l| l.contains("Developed by"))
         .unwrap_or_else(|| panic!("no credit\n{s}"));
     assert!(row.contains("close"), "credit not on the button row\n{s}");
-    // The logo, 24 pixels square in half blocks: 12 rows of 24 cells, beside the text.
-    let logo_rows = s
-        .lines()
-        .filter(|l| l.contains(&"\u{2580}".repeat(24)))
-        .count();
-    assert_eq!(logo_rows, 12, "the logo\n{s}");
     assert!(
         row.find("close") < row.find("Developed by"),
         "credit not right of the button\n{s}"
     );
+}
+
+/// The logo in About, as (columns, rows) of half blocks: `n` pixels square is `n`
+/// columns by `n / 2` rows.
+fn logo_size(s: &str) -> (usize, usize) {
+    let runs: Vec<usize> = s
+        .lines()
+        .map(|l| {
+            l.split(|c| c != '\u{2580}')
+                .map(|r| r.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .filter(|&n| n > 0)
+        .collect();
+    (runs.iter().copied().max().unwrap_or(0), runs.len())
+}
+
+#[test]
+fn about_draws_the_largest_logo_the_window_has_room_for() {
+    let (a, b) = fixture();
+    for (size, logo) in [
+        ("80x24", (24, 12)),
+        ("100x34", (32, 16)),
+        ("120x40", (48, 24)),
+        ("160x50", (64, 32)),
+    ] {
+        let s = shot_keys(size, "F9,Left,Up,Enter", &a, &b);
+        assert!(
+            s.contains("No network, no telemetry"),
+            "About at {size}\n{s}"
+        );
+        assert_eq!(logo_size(&s), logo, "the logo at {size}\n{s}");
+    }
 }
 
 #[test]

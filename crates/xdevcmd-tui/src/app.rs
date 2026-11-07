@@ -90,6 +90,10 @@ enum ModalAct {
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const TICK: Duration = Duration::from_millis(40);
+/// With nothing known to have changed, the screen is still drawn this often, for what
+/// changes without telling (the usage view's clock, a listing's age). Drawing every
+/// tick cost about 5 % of a core while idle (2026-11-07); a frame is about 2 ms.
+const HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// A picture quick view has decoded: the file, the cell size it was shrunk for, and
 /// the picture or why there is none.
@@ -548,14 +552,27 @@ impl App {
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
+        // Drawn only when something changed: input, a shell's output, background work
+        // reporting in, a job's progress; or after HEARTBEAT, whatever happened.
+        let mut dirty = true;
+        let mut drawn = Instant::now();
         while !self.quit {
             self.pump_job();
-            self.reap_terminals();
-            self.background();
-            let t0 = Instant::now();
-            terminal.draw(|f| self.draw(f))?;
-            self.usage.frame(t0.elapsed());
+            dirty |= self.reap_terminals();
+            dirty |= self.background();
+            dirty |= crate::pane::term::take_output();
+            // A job's progress moves on its own, with no message to say so.
+            dirty |= matches!(self.modal, Some(Modal::Job(_))) || !self.jobs.is_empty();
+            if dirty || drawn.elapsed() >= HEARTBEAT {
+                let t0 = Instant::now();
+                terminal.draw(|f| self.draw(f))?;
+                self.usage.frame(t0.elapsed());
+                drawn = Instant::now();
+                dirty = false;
+            }
             if event::poll(TICK)? {
+                // Any event, a resize or a focus change included, may change the screen.
+                dirty = true;
                 match event::read()? {
                     Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
                     Event::Mouse(m) => self.on_mouse(m),
@@ -615,8 +632,10 @@ impl App {
     }
 
     /// Work that happens between keys: directory sizes arriving, directories that
-    /// changed on disk, and messages from programs started in the background.
-    fn background(&mut self) {
+    /// changed on disk, and messages from programs started in the background. True when
+    /// any of it changed what is on screen.
+    fn background(&mut self) -> bool {
+        let mut changed = false;
         // Not under an open dialog or a drag: a listing that shifted while you were
         // answering "delete these?" or dragging a row is the wrong moment to move it.
         let quiet = self.modal.is_none() && self.drag.is_none();
@@ -625,11 +644,11 @@ impl App {
         for (id, p) in self.panes.iter_mut() {
             if let Some(t) = p.as_tabs_mut() {
                 for f in t.tabs_mut() {
-                    f.poll_sizes();
-                    f.poll_git();
-                    f.poll_opening();
+                    changed |= f.poll_sizes();
+                    changed |= f.poll_git();
+                    changed |= f.poll_opening();
                     let was = f.results.as_ref().is_some_and(|r| r.running());
-                    f.poll_results();
+                    changed |= f.poll_results();
                     if let Some(r) = f.results.as_ref().filter(|r| was && !r.running()) {
                         let n = f.entries.iter().filter(|e| !e.is_parent()).count();
                         let skipped = match r.unreadable {
@@ -643,14 +662,17 @@ impl App {
                     }
                 }
                 if quiet && shown.contains(id) {
-                    t.active_mut().poll_changes(every);
+                    changed |= t.active_mut().poll_changes(every);
                 }
             }
         }
         while let Ok(n) = self.notes.1.try_recv() {
             self.status = n;
+            changed = true;
         }
+        let modal_before = self.modal.is_some();
         self.pump_background_jobs();
+        changed |= modal_before != self.modal.is_some();
         self.autosave();
         let viewed = self
             .pending_view
@@ -658,6 +680,7 @@ impl App {
             .and_then(|(rx, ..)| rx.try_recv().ok());
         if let (Some(out), Some((_, tmp, name, _))) = (viewed, self.pending_view.take()) {
             self.show_extracted(out, tmp, name);
+            changed = true;
         }
         // A count for the open confirmation, if it has come in.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
@@ -666,6 +689,7 @@ impl App {
                 if let Some(l) = c.body.get_mut(line) {
                     *l = Self::count_label(files, bytes);
                 }
+                changed = true;
             }
         }
         let viewing = matches!(self.modal, Some(Modal::Usage));
@@ -677,7 +701,9 @@ impl App {
         if let Some((path, result)) = hashed {
             self.hashing = None;
             self.show_checksum(&path, result);
+            changed = true;
         }
+        changed
     }
 
     // ── identity helpers ───────────────────────────────────────────────────────────
@@ -931,8 +957,9 @@ impl App {
     }
 
     /// Shells that have exited close themselves, as `exit` does in an editor.
-    fn reap_terminals(&mut self) {
-        let Some(p) = self.panel() else { return };
+    /// True when a shell went, so the screen changed.
+    fn reap_terminals(&mut self) -> bool {
+        let Some(p) = self.panel() else { return false };
         let (gone, empty) = p.reap();
         if gone > 0 {
             self.status = if gone == 1 {
@@ -944,6 +971,7 @@ impl App {
         if empty {
             self.remove_terminal_panel();
         }
+        gone > 0 || empty
     }
 
     /// Jump between the file panes and the shell, the way Ctrl+` works in an editor.
@@ -3637,8 +3665,7 @@ impl App {
             let why = format!("{} mode", self.settings.mode.label());
             return self.view_instead(&why);
         }
-        let mut argv: Vec<std::ffi::OsString> = rule.command.iter().map(Into::into).collect();
-        argv.push(path.clone().into_os_string());
+        let argv = rule.argv(&path);
         if rule.terminal {
             let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
             return self.run_in_terminal(argv, cwd);

@@ -15,6 +15,22 @@ that heading and starts a new, empty one here. -->
   Solarized light. Kept beside `xdevcmd`, they appear in View → Theme… as they are.
 - **`xdevcmd --print-theme NAME`** writes a built-in theme out as a file with every
   colour listed, to start your own from.
+- **Ctrl+G** also goes to a path you type, beside Ctrl+L.
+
+### Changed
+- **Idle, xdevcmd now uses almost no CPU**: about 0.3 % of a core instead of 5 %. The
+  screen is drawn when something changed (a key, a click, a shell's output, a job's
+  progress, background work reporting in) and once a second otherwise, not 25 times a
+  second.
+
+### Security
+- **Renaming never replaces a file that appears meanwhile.** F2, renaming many and
+  moving into the Linux trash ask the system to refuse a name that is taken, in the
+  same step as the rename; before, a file created between xdevcmd's check and the
+  rename was overwritten.
+- **A program is never found in the directory you browse.** On Linux and macOS a
+  program run in a terminal tab by its bare name is looked up only in `PATH`'s absolute
+  directories; a `.` or empty entry used to make it look in the browsed directory.
 
 ### Fixed
 - **The logo in About looked striped and stepped on macOS** in Terminal.app. It is now

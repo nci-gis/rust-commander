@@ -910,16 +910,21 @@ fn trash_into(base: &Path, path: &Path) -> io::Result<()> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "unnamed".to_string());
 
+    // The first free name, taken in the same step as the move: a file put in the trash
+    // by another program at the same moment is never overwritten.
     let mut name = stem.clone();
     let mut n = 1;
-    while files.join(&name).symlink_metadata().is_ok()
-        || info.join(format!("{name}.trashinfo")).exists()
-    {
+    loop {
+        if !info.join(format!("{name}.trashinfo")).exists() {
+            match crate::noreplace::rename_noreplace(path, &files.join(&name)) {
+                Ok(()) => break,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
+        }
         name = format!("{stem}.{n}");
         n += 1;
     }
-
-    fs::rename(path, files.join(&name))?;
 
     let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
     let body = format!(

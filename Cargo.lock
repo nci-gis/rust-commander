@@ -2249,6 +2249,7 @@ dependencies = [
  "flate2",
  "libc",
  "png",
+ "rustix",
  "tar",
  "trash",
  "zip",

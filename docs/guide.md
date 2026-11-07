@@ -32,7 +32,7 @@ xdevcmd for yours, or see [keys.md](keys.md).
   **Backspace** or **Alt+←** goes up.
 - **~** goes to your home directory. **Ctrl+\\** goes to the root of the drive.
 - **/** jumps to a name as you type. **↑ ↓** go to the next match.
-- **Ctrl+L** goes to a path you type. **Tab** completes it.
+- **Ctrl+L** or **Ctrl+G** goes to a path you type. **Tab** completes it.
 - **Alt+,** and **Alt+.** go back and forward. **Alt+↓** (or **Alt+J**) lists where you have been.
 - **Ctrl+D** is the hotlist: your bookmarks. You can add the current directory there.
 - Panes refresh by themselves when files change on disk.

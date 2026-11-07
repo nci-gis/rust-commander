@@ -69,7 +69,7 @@ những việc kế tiếp"), in this order:
      Source: `.agents/memory/2026-11-07-security-review-before-0.2.0.md`.
    Done before the packages, so the first packaged version carries them. Work is in
    [Round 013](cycles/Round_013.md) on `feat/v0.2.1`.
-   **Proposed for 0.2.1, owner to decide** (from the owner's questions, 2026-11-07):
+   **Added to 0.2.1 by the owner** ("Yes, add both", 2026-11-07):
    - **Idle CPU** (item 15, S–M): measured at about 5 % of a core with nothing
      happening, because the screen is redrawn every 40 ms. Redraw only when something
      changed (a key, a resize, a job, the terminal tab's output, a listing refresh);
@@ -95,7 +95,9 @@ những việc kế tiếp"), in this order:
    - Keys: the keymap presets deferred in Round 004 (`windows`, `macos`, `linux`,
      `classic`, perhaps `mc`), then the Keys tab as two columns, the preset's key and
      yours, with what you changed marked. M.
-5. **An app to click, on Windows and macOS** (item 14), in two steps:
+5. **An app to click, on Windows and macOS** (item 14): **deferred, only when there is
+   a real need** (owner, 2026-11-07: "defered app cho windows và macOS, chỉ khi thực sự
+   có nhu cầu"). If it comes, in two steps:
    - 14a, with the packages (S): Windows already runs `xdevcmd.exe` in a console
      window when it is double-clicked, with its icon; add a Start-menu shortcut
      through scoop and winget. macOS: an `xdevcmd.app` that opens the user's terminal
@@ -152,14 +154,14 @@ Rounds 001 and 003–009; the read-only finding in
 | 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011, released as 0.2.0; packages after 8b |
-| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | [013](cycles/Round_013.md) | in progress |
+| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`; Windows by hand still open |
 | 7b | The About logo on macOS (and checked by hand on Windows) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test |
 | 4b | Example theme files in the release archives; `--print-theme` | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test |
 | 4c | Settings → Theme: built-in and your own apart; "Make my copy" | S | — | after the packages |
 | 5b | Keymap presets (deferred in 004); Keys tab shows the preset's key and yours | M | — | after the packages |
-| 5c | Ctrl+G beside Ctrl+L to go to a path | S | — | proposed for 0.2.1 |
-| 14 | An app to click: launchers on Windows and macOS (14a); later perhaps its own window (14b) | S / L–XL | — | 14a with the packages; 14b after the launch |
-| 15 | Idle CPU near zero: redraw only on change (measured about 5 % of a core) | S–M | — | proposed for 0.2.1 |
+| 5c | Ctrl+G beside Ctrl+L to go to a path | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test |
+| 14 | An app to click: launchers on Windows and macOS (14a); perhaps its own window (14b) | S / L–XL | — | deferred until there is a real need (owner) |
+| 15 | Idle CPU near zero: redraw only on change (measured about 5 % of a core) | S–M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` (0.2–0.5 %), owner to test |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

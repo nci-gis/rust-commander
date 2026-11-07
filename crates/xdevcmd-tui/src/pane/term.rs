@@ -32,6 +32,15 @@ use crate::theme;
 const MIN_ROWS: u16 = 2;
 const MIN_COLS: u16 = 2;
 
+/// Set by any shell's output thread when the screen it feeds has changed; the main loop
+/// redraws only when something changed, so this is how a shell's output gets drawn.
+static OUTPUT: AtomicBool = AtomicBool::new(false);
+
+/// Whether any shell printed something since the last call.
+pub fn take_output() -> bool {
+    OUTPUT.swap(false, Ordering::Relaxed)
+}
+
 pub struct TermPane {
     parser: Arc<RwLock<vt100::Parser>>,
     tx: Sender<Vec<u8>>,
@@ -123,7 +132,27 @@ impl TermPane {
         ) {
             anyhow::bail!(why);
         }
-        let mut cmd = CommandBuilder::new(program);
+        // A bare name is looked up here, in PATH's absolute directories only: the pty
+        // library resolves a relative entry (`.`, or an empty one) against the tab's
+        // directory, the one being browsed, which could run a program of that name
+        // found there.
+        #[cfg(unix)]
+        let resolved = if Path::new(program).components().count() == 1 {
+            Some(
+                on_path(program, std::env::var_os("PATH").as_deref()).ok_or_else(|| {
+                    anyhow::anyhow!("{}: not found in PATH", program.to_string_lossy())
+                })?,
+            )
+        } else {
+            None
+        };
+        #[cfg(not(unix))]
+        let resolved: Option<std::path::PathBuf> = None;
+        let mut cmd = CommandBuilder::new(
+            resolved
+                .as_deref()
+                .map_or(program.as_os_str(), Path::as_os_str),
+        );
         cmd.args(args);
         let label = Path::new(program).file_name().map_or_else(
             || "program".to_string(),
@@ -198,11 +227,15 @@ impl TermPane {
                 let mut tail = Vec::new();
                 loop {
                     match reader.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) | Err(_) => {
+                            OUTPUT.store(true, Ordering::Relaxed);
+                            break;
+                        }
                         Ok(n) => {
                             let asked = cursor_queries(&mut tail, &buf[..n]);
                             if let Ok(mut p) = parser.write() {
                                 p.process(&buf[..n]);
+                                OUTPUT.store(true, Ordering::Relaxed);
                                 // A terminal answers "where is the cursor?". ConPTY asks
                                 // it once at start-up (PSEUDOCONSOLE_INHERIT_CURSOR) and
                                 // waits for the answer before the shell runs at all: on
@@ -623,6 +656,24 @@ fn is_batch(p: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"))
 }
 
+/// The first executable file named `program` in an absolute directory of `path`.
+/// Empty and relative entries are skipped: they mean the current directory, which in
+/// a terminal tab is the directory being browsed.
+#[cfg(unix)]
+fn on_path(
+    program: &std::ffi::OsStr,
+    path: Option<&std::ffi::OsStr>,
+) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    path.into_iter()
+        .flat_map(std::env::split_paths)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(program))
+        .find(|c| {
+            std::fs::metadata(c).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
 /// The batch file `program` will start, if it is one, found in the order portable-pty
 /// finds it on Windows: in each `PATH` directory, the name as given and then with each
 /// `PATHEXT` extension in its place; the name itself only when no directory has it. So
@@ -700,6 +751,37 @@ pub fn batch_refusal(
 
 #[cfg(test)]
 mod batch_tests {
+    #[cfg(unix)]
+    #[test]
+    fn a_program_is_never_found_through_a_relative_path_entry() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("xdevcmd-onpath-{}", std::process::id()));
+        let (here, bin) = (root.join("browsed"), root.join("bin"));
+        for d in [&here, &bin] {
+            std::fs::create_dir_all(d).unwrap();
+            let p = d.join("tool");
+            std::fs::write(&p, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let name = std::ffi::OsStr::new("tool");
+        // `.`, an empty entry and a relative one come first; only bin/ counts.
+        let path = std::env::join_paths([
+            std::path::PathBuf::from("."),
+            std::path::PathBuf::new(),
+            std::path::PathBuf::from("browsed"),
+            bin.clone(),
+        ])
+        .unwrap();
+        assert_eq!(on_path(name, Some(&path)), Some(bin.join("tool")));
+        // With only relative entries there is nothing to run.
+        let rel = std::env::join_paths([".", "browsed"]).unwrap();
+        assert_eq!(on_path(name, Some(&rel)), None);
+        // A file that cannot be run is passed over.
+        std::fs::set_permissions(bin.join("tool"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(on_path(name, Some(&path)), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     use super::*;
     use std::ffi::OsString;
 

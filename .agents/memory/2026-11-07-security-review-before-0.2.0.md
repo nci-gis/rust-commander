@@ -48,6 +48,11 @@ swapped in between the check and the open; batch files found on PATH by a bare
 
 ## Open (not fixed in 0.2.0)
 
+Update, 2026-11-07, Round 013 (`feat/v0.2.1`): the first two items below are fixed
+(`noreplace.rs`; `on_path` in `pane/term.rs`), with tests. Still open: the Windows
+run, active content, and F6's move keeping a race between its overwrite answer and the
+rename.
+
 - `batch_rename::apply` checks the target is free, then `rename`s, which overwrites a
   file that appears in between. A no-replace rename (`renameat2(RENAME_NOREPLACE)` on
   Linux, `renamex_np(RENAME_EXCL)` on macOS, `MoveFileExW` without

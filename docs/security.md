@@ -26,6 +26,13 @@ your permissions. It was tested against attacks on all three before release.
   acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when there is a space anywhere in the
   batch file's path (as in `C:\Program Files\nodejs\npm.cmd`), which `cmd.exe` can
   misread.
+- **A program of the same name in the directory you browse.** On Linux and macOS, a
+  program named without a path (in an `[[open]]` rule, or run in a terminal tab) is
+  looked up only in the absolute directories of `PATH`: a `.` or an empty entry, which
+  would mean the directory being browsed, is skipped.
+- **A file that appears while xdevcmd renames.** Renaming (F2, renaming many, and
+  moving into the Linux trash) is refused by the system itself if the new name is
+  taken, even by a file created a moment earlier: it never replaces it.
 - **Typing into the wrong program.** Alt+C and the user menu type a line into the
   terminal only when a shell is at its prompt there, never into a program that owns
   it — an editor, a password prompt, a program run in a terminal tab.

@@ -68,6 +68,14 @@ pub struct OpenRule {
 }
 
 impl OpenRule {
+    /// The program and arguments for `path`: the command as written, then the path as
+    /// one more argument, whatever characters its name holds. No shell reads it.
+    pub fn argv(&self, path: &Path) -> Vec<std::ffi::OsString> {
+        let mut argv: Vec<std::ffi::OsString> = self.command.iter().map(Into::into).collect();
+        argv.push(path.as_os_str().to_owned());
+        argv
+    }
+
     /// Whether this rule is for `ext` (lower case, without the dot) on system `os`.
     pub fn matches(&self, ext: &str, os: &str) -> bool {
         (self.os.is_empty() || self.os.iter().any(|o| o == os))
@@ -1110,6 +1118,47 @@ mod tests {
     fn a_misspelt_key_is_an_error_not_silence() {
         let e = parse("[general]\nconfirm_tranfser = false\n").unwrap_err();
         assert!(e.contains("confirm_tranfser"), "{e}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_file_name_reaches_an_open_rule_as_one_argument() {
+        // Spaces, quotes, a ; and a $( ) that a shell would run: the program sees the
+        // name exactly, as one argument, and nothing else runs.
+        let d = std::env::temp_dir().join(format!("xdevcmd-openrule-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let name = "a b; touch pwned $(touch pwned2) `touch pwned3` 'q\" && echo x.txt";
+        let file = d.join(name);
+        std::fs::write(&file, "").unwrap();
+        let out = d.join("seen");
+        let rule = OpenRule {
+            ext: vec!["txt".into()],
+            action: String::new(),
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!("printf '%s|%s' \"$#\" \"$1\" > '{}'", out.display()),
+                "sh".into(),
+            ],
+            terminal: false,
+            needs_display: false,
+            os: Vec::new(),
+        };
+        let argv = rule.argv(&file);
+        assert_eq!(argv.last().unwrap(), file.as_os_str());
+        let status = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .current_dir(&d)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let seen = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(seen, format!("1|{}", file.display()));
+        for p in ["pwned", "pwned2", "pwned3"] {
+            assert!(!d.join(p).exists(), "{p} was created: the name was run");
+        }
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

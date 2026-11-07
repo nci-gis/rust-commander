@@ -261,6 +261,49 @@ mod tests {
     }
 
     #[test]
+    fn undoing_a_move_asks_before_overwriting_what_appeared_meanwhile() {
+        use crate::ops::{start, Answer, Event, Request};
+        // Moving back runs the F6 job: a file that took the old name after the plan was
+        // made gets the same overwrite question, and Skip keeps it.
+        let run = |back: Vec<PathBuf>, into: PathBuf, answer: Answer| -> u32 {
+            let h = start(Request::mv(back, into));
+            let mut asked = 0;
+            loop {
+                match h.events.recv_timeout(std::time::Duration::from_secs(20)) {
+                    Ok(Event::Ask(_)) => {
+                        asked += 1;
+                        h.answer(answer);
+                    }
+                    Ok(Event::Done(_)) => return asked,
+                    Ok(_) => {}
+                    Err(e) => panic!("the job never finished: {e}"),
+                }
+            }
+        };
+        let d = dir("move-asks");
+        let (src, dst) = (d.join("src"), d.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(dst.join("x"), "moved").unwrap();
+        let u = Undo::Move {
+            sources: vec![src.join("x")],
+            dest: dst.clone(),
+            rename_to: None,
+        };
+        let Ok(Plan::Move { back, into }) = u.plan() else {
+            panic!("a plan to move x back");
+        };
+        fs::write(src.join("x"), "theirs").unwrap();
+        assert_eq!(run(back.clone(), into.clone(), Answer::Skip), 1, "it asked");
+        assert_eq!(fs::read_to_string(src.join("x")).unwrap(), "theirs");
+        assert_eq!(fs::read_to_string(dst.join("x")).unwrap(), "moved");
+        assert_eq!(run(back, into, Answer::Yes), 1);
+        assert_eq!(fs::read_to_string(src.join("x")).unwrap(), "moved");
+        assert!(!dst.join("x").exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn a_new_directory_goes_only_while_it_holds_nothing_but_directories() {
         let d = dir("mkdir");
         let made = d.join("a");

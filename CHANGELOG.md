@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.2.1] - 2026-11-07
+
 ### Added
 - **Example themes in the release files**: `themes/` holds Nord, Gruvbox dark and
   Solarized light. Kept beside `xdevcmd`, they appear in View → Theme… as they are.

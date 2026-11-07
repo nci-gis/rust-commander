@@ -43,6 +43,21 @@ impl Kind {
     }
 }
 
+/// What a copy or move does with a file already at the destination.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Existing {
+    /// Ask about each one (the default).
+    #[default]
+    Ask,
+    /// Replace it only when the source is newer; skip it when the two are the same or
+    /// the destination is newer. robocopy's and rsync's `--update`.
+    Update,
+    /// Leave every existing file as it is.
+    Skip,
+    /// Replace every existing file.
+    Replace,
+}
+
 #[derive(Debug, Clone)]
 pub struct Request {
     pub kind: Kind,
@@ -67,6 +82,8 @@ pub struct Request {
     /// Overwrites were listed in a plan the user confirmed, so they are not asked
     /// about one by one. Only a plan that names every overwrite may set this.
     pub overwrite_confirmed: bool,
+    /// Copy and move: what to do with files already at the destination.
+    pub existing: Existing,
 }
 
 impl Request {
@@ -113,6 +130,7 @@ impl Request {
             base: String::new(),
             pairs: Vec::new(),
             overwrite_confirmed: false,
+            existing: Existing::Ask,
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -128,6 +146,7 @@ impl Request {
             base: String::new(),
             pairs: Vec::new(),
             overwrite_confirmed: false,
+            existing: Existing::Ask,
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -143,6 +162,7 @@ impl Request {
             base: String::new(),
             pairs: Vec::new(),
             overwrite_confirmed: false,
+            existing: Existing::Ask,
         }
     }
 }
@@ -172,6 +192,8 @@ pub enum Answer {
     YesToAll,
     Skip,
     SkipAll,
+    /// From here on: replace a destination only when the source is newer, skip the rest.
+    Update,
     Retry,
     Abort,
 }
@@ -262,6 +284,7 @@ pub fn start(req: Request) -> Handle {
             cancel: worker_cancel,
             overwrite_all: false,
             skip_all: false,
+            update: false,
             cross_all: false,
             trash_all: false,
             planned: None,
@@ -290,6 +313,8 @@ struct Worker {
     /// to copy-then-delete across devices, or to delete permanently.
     overwrite_all: bool,
     skip_all: bool,
+    /// Replace only what is older than its source; skip what is the same or newer.
+    update: bool,
     cross_all: bool,
     trash_all: bool,
     /// Synchronising: the destinations the confirmed plan overwrites. Only these are
@@ -322,6 +347,12 @@ impl Worker {
             self.sum.bytes = self.bytes_done;
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
+        }
+        match req.existing {
+            Existing::Ask => {}
+            Existing::Update => self.update = true,
+            Existing::Skip => self.skip_all = true,
+            Existing::Replace => self.overwrite_all = true,
         }
         if req.overwrite_confirmed {
             self.planned = Some(
@@ -414,7 +445,7 @@ impl Worker {
                 let (files, bytes) = scan(&req.sources);
                 let _ = self.tx.send(Event::Scanned { files, bytes });
                 // The archive is one new file: an existing one is asked about first.
-                match self.resolve_conflict(&dest, bytes) {
+                match self.resolve_conflict(None, &dest, bytes) {
                     Some(true) => crate::archive::pack(&req.sources, &dest, self),
                     _ => Ok(()),
                 }
@@ -453,8 +484,9 @@ impl Worker {
         }
     }
 
-    /// Decide what to do about an existing destination. `Ok(true)` means go ahead.
-    fn resolve_conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
+    /// Decide what to do about an existing destination. `Some(true)` means go ahead.
+    /// `src`: the file that would replace it, for the update rule; none for an archive.
+    fn resolve_conflict(&mut self, src: Option<&Path>, dst: &Path, incoming: u64) -> Option<bool> {
         if dst.symlink_metadata().is_err() {
             return Some(true);
         }
@@ -467,6 +499,9 @@ impl Worker {
         }
         if self.skip_all {
             return Some(false);
+        }
+        if self.update {
+            return Some(self.is_older(src, dst));
         }
         let existing = fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
         match self.ask(Question::Conflict {
@@ -484,11 +519,30 @@ impl Worker {
                 self.skip_all = true;
                 Some(false)
             }
+            Answer::Update => {
+                self.update = true;
+                Some(self.is_older(src, dst))
+            }
             _ => {
                 self.abort = true;
                 None
             }
         }
+    }
+
+    /// The update rule: `dst` is replaced only when `src` is newer (beyond a FAT drive's
+    /// two seconds). Two directories merge. Without a source (an archive) it is kept.
+    fn is_older(&self, src: Option<&Path>, dst: &Path) -> bool {
+        let (Some(s), Ok(d)) = (
+            src.and_then(|s| fs::symlink_metadata(s).ok()),
+            fs::symlink_metadata(dst),
+        ) else {
+            return false;
+        };
+        if s.is_dir() && d.is_dir() {
+            return true;
+        }
+        crate::compare::newer_than(&s, &d) == std::cmp::Ordering::Greater
     }
 
     // ── copy ───────────────────────────────────────────────────────────────────────
@@ -580,7 +634,7 @@ impl Worker {
     fn copy_symlink(&mut self, src: &Path, dst: &Path) {
         match fs::read_link(src) {
             Ok(target) => {
-                if matches!(self.resolve_conflict(dst, 0), Some(false) | None) {
+                if matches!(self.resolve_conflict(Some(src), dst, 0), Some(false) | None) {
                     if !self.abort {
                         self.sum.skipped += 1;
                     }
@@ -610,7 +664,7 @@ impl Worker {
             // Free now: written only if it is still free when opened, so a file that
             // appears meanwhile is asked about, not overwritten.
             let free = dst.symlink_metadata().is_err();
-            match self.resolve_conflict(dst, size) {
+            match self.resolve_conflict(Some(src), dst, size) {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
@@ -731,7 +785,7 @@ impl Worker {
         let size = fs::symlink_metadata(src).map(|m| m.len()).unwrap_or(0);
         let moved = loop {
             let free = dst.symlink_metadata().is_err();
-            match self.resolve_conflict(&dst, size) {
+            match self.resolve_conflict(Some(src), &dst, size) {
                 Some(true) if !free => self.approved = Some(dst.clone()),
                 Some(true) => {}
                 Some(false) => {
@@ -854,7 +908,7 @@ impl crate::archive::Hooks for Worker {
         });
     }
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
-        self.resolve_conflict(dst, incoming)
+        self.resolve_conflict(None, dst, incoming)
     }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
@@ -1574,6 +1628,76 @@ mod tests {
         );
         assert_eq!(fs::read(dst.join("a")).unwrap(), b"new a");
         assert_eq!(fs::read(dst.join("b")).unwrap(), b"theirs");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Set `p`'s modification time to `secs` after the epoch.
+    fn age(p: &Path, secs: u64) {
+        let t = std::time::UNIX_EPOCH + Duration::from_secs(secs);
+        File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(t))
+            .unwrap();
+    }
+
+    #[test]
+    fn update_replaces_only_what_is_older_and_skips_the_same_and_newer() {
+        let root = tmp("update");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        // older: the copy there is older; same: equal times (within 2 s); newer: the
+        // copy there is newer; fresh: not there at all.
+        for (name, ours, theirs) in [
+            ("older", 2_000_000, 1_000_000),
+            ("same", 1_000_000, 1_000_001),
+            ("newer", 1_000_000, 2_000_000),
+        ] {
+            fs::write(root.join(name), b"ours").unwrap();
+            age(&root.join(name), ours);
+            fs::write(dst.join(name), b"theirs").unwrap();
+            age(&dst.join(name), theirs);
+        }
+        fs::write(root.join("fresh"), b"ours").unwrap();
+        let names = ["older", "same", "newer", "fresh"];
+        let mut req = Request::copy(names.iter().map(|n| root.join(n)).collect(), dst.clone());
+        req.existing = Existing::Update;
+        let (s, asked) = run_with(req, Answer::Abort);
+        assert_eq!(asked, 0, "update never asks");
+        assert_eq!((s.done, s.skipped), (2, 2));
+        assert_eq!(fs::read(dst.join("older")).unwrap(), b"ours");
+        assert_eq!(fs::read(dst.join("same")).unwrap(), b"theirs");
+        assert_eq!(fs::read(dst.join("newer")).unwrap(), b"theirs");
+        assert_eq!(fs::read(dst.join("fresh")).unwrap(), b"ours");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn answering_update_at_a_question_applies_it_to_the_rest() {
+        let root = tmp("update-answer");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        for (name, ours, theirs) in [("a", 1_000_000, 2_000_000), ("b", 2_000_000, 1_000_000)] {
+            fs::write(root.join(name), b"ours").unwrap();
+            age(&root.join(name), ours);
+            fs::write(dst.join(name), b"theirs").unwrap();
+            age(&dst.join(name), theirs);
+        }
+        let req = Request::copy(vec![root.join("a"), root.join("b")], dst.clone());
+        let (s, asked) = run_with(req, Answer::Update);
+        assert_eq!(asked, 1, "asked once, then the rule decides");
+        assert_eq!(
+            fs::read(dst.join("a")).unwrap(),
+            b"theirs",
+            "newer there: kept"
+        );
+        assert_eq!(
+            fs::read(dst.join("b")).unwrap(),
+            b"ours",
+            "older there: replaced"
+        );
+        assert_eq!((s.done, s.skipped), (1, 1));
         fs::remove_dir_all(&root).unwrap();
     }
 

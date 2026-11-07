@@ -270,6 +270,28 @@ fn ctrl_z_puts_back_what_went_to_the_trash() {
 }
 
 #[test]
+fn f5_can_replace_only_older_files() {
+    let (a, b) = fixture();
+    // The copy on the other side is newer: "only if older" leaves it, without asking.
+    fs::write(b.join("victim.txt"), b"newer there").unwrap();
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+    fs::File::options()
+        .write(true)
+        .open(b.join("victim.txt"))
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(later))
+        .unwrap();
+    let s = shot_keys("110x24", "Down,Insert,F5", &a, &b);
+    assert!(s.contains("if a file is there: ask"), "{s}");
+    let s = shot_keys("110x24", "Down,Insert,F5,u", &a, &b);
+    assert!(s.contains("replace it only if older"), "{s}");
+    let s = shot_keys("110x24", "Down,Insert,F5,u,Enter", &a, &b);
+    assert!(!s.contains("Already exists"), "no question\n{s}");
+    assert_eq!(fs::read(b.join("victim.txt")).unwrap(), b"newer there");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_never_confirms_a_permanent_delete() {
     let (a, b) = fixture();
     // Enter, out of habit: nothing goes, and the dialog says what does.

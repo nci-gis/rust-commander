@@ -2769,6 +2769,8 @@ impl App {
             source_dir: Some(self.focused_cwd()),
             counting: Some((ops::count(sources), 3)),
             permanent: false,
+            // set_destination writes the line, after the destination's own lines.
+            existing_line: Some(0),
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -2818,6 +2820,7 @@ impl App {
             source_dir: None,
             counting,
             permanent,
+            existing_line: None,
         }));
     }
 
@@ -3259,6 +3262,7 @@ impl App {
                 KeyCode::Enter if c.permanent => {
                     self.status = "press Y to delete permanently, Esc to cancel".into();
                 }
+                KeyCode::Char('u' | 'U') if c.existing_line.is_some() => c.next_existing(),
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => act = ModalAct::Start,
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => act = ModalAct::Close,
                 _ => {}
@@ -4656,6 +4660,7 @@ impl App {
             source_dir: None,
             counting,
             permanent: false,
+            existing_line: None,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);

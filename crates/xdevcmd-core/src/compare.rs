@@ -32,6 +32,12 @@ pub struct Diff {
 
 const SLACK_SECS: u64 = 2;
 
+/// Whether `a` was modified later than `b`, beyond the two seconds a FAT drive can
+/// round a time by: `Greater` when `a` is newer, `Equal` when they count as the same.
+pub(crate) fn newer_than(a: &fs::Metadata, b: &fs::Metadata) -> std::cmp::Ordering {
+    newer(stamp(a), stamp(b))
+}
+
 fn stamp(m: &fs::Metadata) -> Option<SystemTime> {
     m.modified().ok()
 }

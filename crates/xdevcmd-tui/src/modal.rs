@@ -79,9 +79,39 @@ pub struct Confirm {
     /// What cannot be undone (a permanent delete): Enter does not confirm it, only Y
     /// or a click on the button, and the button says what it does.
     pub permanent: bool,
+    /// Copy and move: the body line that says what happens to files already there, which
+    /// U changes.
+    pub existing_line: Option<usize>,
+}
+
+/// What the confirmation says for each choice of what to do with existing files.
+pub fn existing_label(e: ops::Existing) -> &'static str {
+    match e {
+        ops::Existing::Ask => "if a file is there: ask  (U changes)",
+        ops::Existing::Update => "if a file is there: replace it only if older; skip the same  (U)",
+        ops::Existing::Skip => "if a file is there: leave it  (U)",
+        ops::Existing::Replace => "if a file is there: replace it  (U)",
+    }
 }
 
 impl Confirm {
+    /// U: the next choice of what to do with files already at the destination.
+    pub fn next_existing(&mut self) {
+        let Some(line) = self.existing_line else {
+            return;
+        };
+        use ops::Existing::*;
+        self.request.existing = match self.request.existing {
+            Ask => Update,
+            Update => Skip,
+            Skip => Replace,
+            Replace => Ask,
+        };
+        if let Some(l) = self.body.get_mut(line) {
+            *l = existing_label(self.request.existing).to_string();
+        }
+    }
+
     /// The line that names the destination, and a warning when it is the source's own
     /// directory — said before Enter, not discovered afterwards as "1 skipped".
     pub fn set_destination(&mut self, i: usize) {
@@ -98,6 +128,12 @@ impl Confirm {
             self.body.push(String::new());
             self.body
                 .push("Same directory as the source \u{2014} nothing would change.".into());
+        }
+        if self.existing_line.is_some() {
+            self.body.push(String::new());
+            self.body
+                .push(existing_label(self.request.existing).to_string());
+            self.existing_line = Some(self.body.len() - 1);
         }
     }
 
@@ -219,6 +255,7 @@ pub fn options(q: &Question) -> Vec<(&'static str, &'static str, Answer)> {
             ("A", "overwrite all", Answer::YesToAll),
             ("S", "skip", Answer::Skip),
             ("L", "skip all", Answer::SkipAll),
+            ("U", "update all", Answer::Update),
             ("Esc", "abort", Answer::Abort),
         ],
         Question::CrossDevice { .. } => vec![

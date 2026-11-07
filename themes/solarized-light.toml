@@ -1,0 +1,22 @@
+# Solarized light (https://ethanschoonover.com/solarized, MIT) for xdevcmd: an
+# example theme file, for a light terminal. Copy it into themes/ beside your
+# config.toml, or keep it in themes/ beside the xdevcmd binary, then pick
+# "solarized-light" in View > Theme... or with [theme] name = "solarized-light".
+# Start your own with: xdevcmd --print-theme light
+base = "light"
+background = "#fdf6e3"
+panel = "#fdf6e3"
+bar = "#eee8d5"
+border = "#93a1a1"
+border_active = "#2aa198"
+accent = "#268bd2"
+text = "#586e75"
+text_dim = "#93a1a1"
+directory = "#268bd2"
+executable = "#859900"
+symlink = "#6c71c4"
+archive = "#cb4b16"
+error = "#dc322f"
+marked = "#b58900"
+cursor = "#eee8d5"
+cursor_active = "#c9e4e0"

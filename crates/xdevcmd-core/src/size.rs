@@ -22,8 +22,20 @@ pub struct Total {
 /// Walk `dir` without following symlinks — a link to `/` inside it must not make it
 /// "the size of the disk" — and count every regular file's length. `None` if `stop`
 /// was set before it finished.
+///
+/// On Unix a file with several hard links counts once, as `du` does, and the walk stays
+/// on `dir`'s own file system (`du -x`): a mount point inside — a network share, `/proc`
+/// under `/` — is not walked into, where it could hang or count what is not there.
 pub fn dir_size(dir: &Path, stop: &AtomicBool) -> Option<Total> {
     let mut t = Total::default();
+    #[cfg(unix)]
+    let (root_dev, mut linked) = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            fs::symlink_metadata(dir).map(|m| m.dev()).ok(),
+            std::collections::HashSet::<(u64, u64)>::new(),
+        )
+    };
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         if stop.load(Ordering::Relaxed) {
@@ -36,22 +48,41 @@ pub fn dir_size(dir: &Path, stop: &AtomicBool) -> Option<Total> {
         for e in it.flatten() {
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    let here = e.metadata().map(|m| m.dev()).ok();
+                    if root_dev.is_some() && here != root_dev {
+                        continue;
+                    }
+                }
                 stack.push(e.path());
             } else if ft.is_file() {
+                let Ok(m) = e.metadata() else { continue };
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if m.nlink() > 1 && !linked.insert((m.dev(), m.ino())) {
+                        continue;
+                    }
+                }
                 t.files += 1;
-                t.bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+                t.bytes += m.len();
             }
         }
     }
     Some(t)
 }
 
-/// Sizes being worked out in the background, one thread per request, all cancelled
-/// together when dropped.
+/// Sizes being worked out in the background by a few threads (as many as the machine
+/// has cores, at most four) taking requests in turn: Ctrl+Space on a directory of
+/// thousands of folders queues thousands of walks, not thousands of threads. All are
+/// cancelled together when dropped.
 pub struct Sizer {
     stop: Arc<AtomicBool>,
     rx: Receiver<(PathBuf, Total)>,
     tx: mpsc::Sender<(PathBuf, Total)>,
+    jobs: Option<mpsc::Sender<PathBuf>>,
     pending: usize,
 }
 
@@ -62,6 +93,7 @@ impl Default for Sizer {
             stop: Arc::new(AtomicBool::new(false)),
             rx,
             tx,
+            jobs: None,
             pending: 0,
         }
     }
@@ -69,13 +101,31 @@ impl Default for Sizer {
 
 impl Sizer {
     pub fn request(&mut self, dir: PathBuf) {
-        let (stop, tx) = (self.stop.clone(), self.tx.clone());
-        self.pending += 1;
-        thread::spawn(move || {
-            if let Some(t) = dir_size(&dir, &stop) {
-                let _ = tx.send((dir, t));
+        let jobs = self.jobs.get_or_insert_with(|| {
+            let (jobs, queue) = mpsc::channel::<PathBuf>();
+            let queue = Arc::new(std::sync::Mutex::new(queue));
+            let n = thread::available_parallelism()
+                .map_or(2, |n| n.get())
+                .clamp(1, 4);
+            for _ in 0..n {
+                let (queue, stop, tx) = (queue.clone(), self.stop.clone(), self.tx.clone());
+                thread::spawn(move || loop {
+                    // The lock is held only to take the next request.
+                    let next = queue.lock().map(|q| q.recv());
+                    let Ok(Ok(dir)) = next else { return };
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if let Some(t) = dir_size(&dir, &stop) {
+                        let _ = tx.send((dir, t));
+                    }
+                });
             }
+            jobs
         });
+        if jobs.send(dir).is_ok() {
+            self.pending += 1;
+        }
     }
 
     /// Results that have arrived since the last call.
@@ -170,6 +220,41 @@ mod tests {
             )]
         );
         assert!(!s.busy());
+        let _ = fs::remove_dir_all(&d);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_file_with_several_hard_links_counts_once() {
+        let d = scratch("hardlinks");
+        fs::write(d.join("f"), vec![0u8; 1000]).unwrap();
+        fs::hard_link(d.join("f"), d.join("g")).unwrap();
+        fs::create_dir_all(d.join("sub")).unwrap();
+        fs::hard_link(d.join("f"), d.join("sub/h")).unwrap();
+        let t = dir_size(&d, &AtomicBool::new(false)).unwrap();
+        assert_eq!((t.files, t.bytes), (1, 1000));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn many_requests_are_all_answered_by_a_few_threads() {
+        let d = scratch("pool");
+        let mut s = Sizer::default();
+        for i in 0..40 {
+            let sub = d.join(format!("d{i}"));
+            fs::create_dir_all(&sub).unwrap();
+            fs::write(sub.join("f"), vec![0u8; i]).unwrap();
+            s.request(sub);
+        }
+        let mut got = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while got.len() < 40 && std::time::Instant::now() < deadline {
+            got.extend(s.poll());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(got.len(), 40);
+        assert!(!s.busy());
+        let total: u64 = got.iter().map(|(_, t)| t.bytes).sum();
+        assert_eq!(total, (0..40).sum::<u64>());
         let _ = fs::remove_dir_all(&d);
     }
 }

@@ -104,7 +104,7 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
     for (i, (from, to)) in moves.iter().enumerate() {
         let dir = from.parent().unwrap_or(Path::new("."));
         let tmp = dir.join(format!(".xdevcmd-rename-{tag}-{i}"));
-        if let Err(e) = fs::rename(from, &tmp) {
+        if let Err(e) = crate::noreplace::rename_noreplace(from, &tmp) {
             out.errors.push(format!("{}: {e}", show(from)));
             // Put back what had already moved: half a batch is worse than none.
             for (t, f, _) in parked.iter().rev() {
@@ -115,25 +115,25 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
         parked.push((tmp, from, to));
     }
     for (tmp, from, to) in parked {
-        // Checked again now, in case something appeared since the plan was made.
-        if fs::symlink_metadata(to).is_ok() {
-            let back = fs::rename(&tmp, from);
-            out.errors.push(match back {
-                Ok(()) => format!(
-                    "{} appeared meanwhile \u{2014} {} left as it was",
-                    show(to),
-                    show(from)
-                ),
-                Err(_) => format!(
-                    "{} appeared meanwhile \u{2014} the file is now {}",
-                    show(to),
-                    tmp.display()
-                ),
-            });
-            continue;
-        }
-        match fs::rename(&tmp, to) {
+        // The system refuses a name that is taken in the same step as the rename, so a
+        // file that appeared since the plan was made is never overwritten.
+        match crate::noreplace::rename_noreplace(&tmp, to) {
             Ok(()) => out.renamed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let back = crate::noreplace::rename_noreplace(&tmp, from);
+                out.errors.push(match back {
+                    Ok(()) => format!(
+                        "{} appeared meanwhile \u{2014} {} left as it was",
+                        show(to),
+                        show(from)
+                    ),
+                    Err(_) => format!(
+                        "{} appeared meanwhile \u{2014} the file is now {}",
+                        show(to),
+                        tmp.display()
+                    ),
+                });
+            }
             Err(e) => out.errors.push(format!(
                 "{}: {e} \u{2014} the file is now {}",
                 show(to),
@@ -221,6 +221,25 @@ mod tests {
         assert!(e.contains("keep already exists"), "{e}");
         assert_eq!(body(&d.join("keep")), "keep", "untouched");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_file_that_appears_after_the_plan_is_never_overwritten() {
+        let (d, p) = dir("appears", &["a", "b"]);
+        let moves = vec![(p[0].clone(), d.join("x")), (p[1].clone(), d.join("y"))];
+        // Another program creates x between the plan and the renaming.
+        fs::write(d.join("x"), "theirs").unwrap();
+        let out = apply(&moves);
+        assert_eq!(out.renamed, 1, "{:?}", out.errors);
+        assert!(
+            out.errors[0].contains("appeared meanwhile"),
+            "{:?}",
+            out.errors
+        );
+        assert_eq!(body(&d.join("x")), "theirs");
+        assert_eq!(body(&p[0]), "a", "a is back under its own name");
+        assert_eq!(body(&d.join("y")), "b");
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

@@ -12,6 +12,8 @@ accepted = [
     "Unlicense",
     "BSL-1.0",
     "Unicode-3.0",
+    # notify (directory watching), 2026-11-08: a public-domain dedication.
+    "CC0-1.0",
 ]
 # Every platform a release is built for, so a Windows-only or macOS-only crate is
 # listed too.

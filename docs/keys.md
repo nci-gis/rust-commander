@@ -33,7 +33,7 @@ These are the defaults. Press **F1** in xdevcmd to see your own, after any chang
 | `Ctrl+\` | Go to the root of this drive or filesystem |
 | `/` `Ctrl+s` | Jump to a name as you type it; Up/Down for the next match |
 | `Ctrl+f` | Show only names matching what you type (*.rs works too) |
-| `Ctrl+l` | Type a path to go to |
+| `Ctrl+g` `Ctrl+l` | Type a path to go to |
 | `Alt+,` | Back to the previous directory |
 | `Alt+.` | Forward again |
 | `Alt+Down` `Alt+j` | Directories visited in this tab |

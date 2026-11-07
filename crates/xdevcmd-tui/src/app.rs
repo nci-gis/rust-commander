@@ -89,6 +89,17 @@ enum ModalAct {
 }
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// A deep compare running for Alt+Y: the two roots, how far it has got, and the
+/// diffs when they come.
+struct Comparing {
+    left: PathBuf,
+    right: PathBuf,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seen: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    shown: u64,
+    rx: Receiver<Option<Vec<xdevcmd_core::compare::Diff>>>,
+}
+
 /// What undo says while a delete to the trash is still running.
 const TRASH_RUNNING: &str = "a delete to the trash that is still running";
 const TICK: Duration = Duration::from_millis(40);
@@ -97,12 +108,22 @@ const TICK: Duration = Duration::from_millis(40);
 /// tick cost about 5 % of a core while idle (2026-11-07); a frame is about 2 ms.
 const HEARTBEAT: Duration = Duration::from_secs(1);
 
-/// A picture quick view has decoded: the file, the cell size it was shrunk for, and
-/// the picture or why there is none.
+/// A picture quick view has decoded: the file, the cell size it was shrunk for, the
+/// file's modification time then (a changed file is decoded again), and the picture or
+/// why there is none.
 type Shrunk = (
     PathBuf,
     (u16, u16),
+    Option<std::time::SystemTime>,
     Result<xdevcmd_core::image::Picture, String>,
+);
+
+/// A picture being decoded on a thread: what it is for, and where the result comes.
+type Decoding = (
+    PathBuf,
+    (u16, u16),
+    Option<std::time::SystemTime>,
+    Receiver<Result<xdevcmd_core::image::Picture, String>>,
 );
 
 /// Where a confirmation's count goes until the count has been made.
@@ -215,6 +236,8 @@ pub struct App {
     quick_view: Option<(PaneId, Option<Preview>)>,
     /// Alt+H: a checksum being worked out on its own thread.
     hashing: Option<(PathBuf, Receiver<std::io::Result<Option<String>>>)>,
+    /// Alt+Y's deep compare, on a thread of its own: Esc stops it.
+    comparing: Option<Comparing>,
     /// A file extracted from an archive so F3 can show it; removed when the viewer
     /// closes.
     view_temp: Option<PathBuf>,
@@ -223,6 +246,8 @@ pub struct App {
     jobs: Vec<Job>,
     /// Quick view's last picture: the file, the size it was shrunk for, the result.
     quick_image: Option<Shrunk>,
+    /// A big photo takes a moment to decode: never on the drawing thread.
+    decoding: Option<Decoding>,
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
@@ -320,9 +345,11 @@ impl App {
             pending_batch: None,
             quick_view: None,
             hashing: None,
+            comparing: None,
             view_temp: None,
             jobs: Vec::new(),
             quick_image: None,
+            decoding: None,
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
             pending_view: None,
@@ -695,6 +722,14 @@ impl App {
                 if let Some(l) = c.body.get_mut(line) {
                     *l = Self::count_label(files, bytes);
                 }
+                changed = true;
+            }
+        }
+        changed |= self.poll_comparing();
+        if let Some((p, sz, m, rx)) = &self.decoding {
+            if let Ok(pic) = rx.try_recv() {
+                self.quick_image = Some((p.clone(), *sz, *m, pic));
+                self.decoding = None;
                 changed = true;
             }
         }
@@ -1177,6 +1212,13 @@ impl App {
     fn on_key(&mut self, k: KeyEvent) {
         if self.modal.is_some() {
             return self.on_modal_key(k);
+        }
+        if k.code == KeyCode::Esc {
+            if let Some(c) = self.comparing.take() {
+                c.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.status = "comparison stopped".into();
+                return;
+            }
         }
         if self.search.is_some() && self.on_search_key(k) {
             return;
@@ -4394,21 +4436,84 @@ impl App {
         );
     }
 
-    /// Alt+Y: both trees, compared all the way down, and a plan to make them agree.
+    /// Alt+Y: both trees, compared all the way down on a thread (a big tree or a network
+    /// drive can take a while, and Esc stops it), then a plan to make them agree.
     fn begin_sync(&mut self) {
-        use xdevcmd_core::compare::{compare, plan, State};
+        use std::sync::atomic::{AtomicBool, AtomicU64};
+        use std::sync::Arc;
         let Some((_, left, _, right, hidden)) = self.compare_pair() else {
             return;
         };
-        let diffs = compare(&left, &right, true, hidden);
-        let pairs = plan(&left, &right, &diffs);
+        if let Some(old) = self.comparing.take() {
+            old.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        // A screenshot (the tests) has no later frame to bring the result to: compare
+        // there and then.
+        if !self.interactive {
+            let diffs = xdevcmd_core::compare::compare(&left, &right, true, hidden);
+            return self.show_sync_plan(&left, &right, &diffs);
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(AtomicU64::new(0));
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let (l, r, stop, seen) = (left.clone(), right.clone(), stop.clone(), seen.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(xdevcmd_core::compare::compare_until(
+                    &l, &r, true, hidden, &stop, &seen,
+                ));
+            });
+        }
+        self.status = "comparing the two trees\u{2026} Esc stops".into();
+        self.comparing = Some(Comparing {
+            left,
+            right,
+            stop,
+            seen,
+            shown: 0,
+            rx,
+        });
+    }
+
+    /// Alt+Y's compare has come in, or moved on: show its plan, or how far it is.
+    fn poll_comparing(&mut self) -> bool {
+        let Some(c) = self.comparing.as_mut() else {
+            return false;
+        };
+        match c.rx.try_recv() {
+            Ok(Some(diffs)) => {
+                let (left, right) = (c.left.clone(), c.right.clone());
+                self.comparing = None;
+                self.show_sync_plan(&left, &right, &diffs);
+                true
+            }
+            Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.comparing = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                let n = c.seen.load(std::sync::atomic::Ordering::Relaxed);
+                if n != c.shown {
+                    c.shown = n;
+                    self.status =
+                        format!("comparing the two trees\u{2026} {n} looked at \u{b7} Esc stops");
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
+    fn show_sync_plan(&mut self, left: &Path, right: &Path, diffs: &[xdevcmd_core::compare::Diff]) {
+        use xdevcmd_core::compare::{plan, State};
+        let pairs = plan(left, right, diffs);
         let mut body = vec![
-            format!("\u{2192} this pane  {}", tidy(&left)),
-            format!("\u{2190} the other  {}", tidy(&right)),
+            format!("\u{2192} this pane  {}", tidy(left)),
+            format!("\u{2190} the other  {}", tidy(right)),
             String::new(),
         ];
         let mut overwrites = 0;
-        for d in &diffs {
+        for d in diffs {
             let slash = if d.is_dir { "/" } else { "" };
             let line = match d.state {
                 State::LeftOnly => format!("\u{2192} {}{slash}", d.rel),
@@ -4705,21 +4810,48 @@ impl App {
             _ => [0, 0, 0],
         };
         let size = (inner.width, inner.height);
+        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let fresh = |p: &Path, s: (u16, u16), m: Option<std::time::SystemTime>| {
+            p == path && s == size && m == mtime
+        };
         let stale = self
             .quick_image
             .as_ref()
-            .is_none_or(|(p, s, _)| p != path || *s != size);
+            .is_none_or(|(p, s, m, _)| !fresh(p, *s, *m));
         if stale {
-            let pic = xdevcmd_core::image::load(
-                path,
-                inner.width as usize,
-                inner.height as usize * 2,
-                bg,
-            )
-            .map_err(|e| e.to_string());
-            self.quick_image = Some((path.to_path_buf(), size, pic));
+            let (w, h) = (inner.width as usize, inner.height as usize * 2);
+            if !self.interactive {
+                // A screenshot has no later frame for the picture to arrive in.
+                let pic = xdevcmd_core::image::load(path, w, h, bg).map_err(|e| e.to_string());
+                self.quick_image = Some((path.to_path_buf(), size, mtime, pic));
+            } else if !self
+                .decoding
+                .as_ref()
+                .is_some_and(|(p, s, m, _)| fresh(p, *s, *m))
+            {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let file = path.to_path_buf();
+                std::thread::spawn(move || {
+                    let _ = tx.send(
+                        xdevcmd_core::image::load(&file, w, h, bg).map_err(|e| e.to_string()),
+                    );
+                });
+                self.decoding = Some((path.to_path_buf(), size, mtime, rx));
+            }
         }
-        let Some((_, _, pic)) = &self.quick_image else {
+        let current = self
+            .quick_image
+            .as_ref()
+            .filter(|(p, s, m, _)| fresh(p, *s, *m));
+        let Some((_, _, _, pic)) = current else {
+            let inner = modal::frame_box(frame, area, "image", th.accent);
+            modal::put(
+                frame,
+                inner,
+                0,
+                "decoding\u{2026}",
+                Style::new().fg(th.fg_dim),
+            );
             return;
         };
         let title = match pic {

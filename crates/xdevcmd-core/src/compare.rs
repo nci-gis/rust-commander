@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,81 +76,124 @@ fn entries(dir: &Path, hidden: bool) -> Vec<(String, fs::Metadata)> {
 /// Compare `left` and `right`. With `deep`, directories present on both sides are
 /// compared inside too; a directory on one side only is one entry, not its contents.
 pub fn compare(left: &Path, right: &Path, deep: bool, hidden: bool) -> Vec<Diff> {
+    let w = Walk {
+        deep,
+        hidden,
+        stop: &AtomicBool::new(false),
+        seen: &AtomicU64::new(0),
+    };
     let mut out = Vec::new();
-    walk(left, right, "", deep, hidden, &mut out);
+    w.walk(left, right, "", &mut out);
     out
 }
 
-fn walk(l: &Path, r: &Path, prefix: &str, deep: bool, hidden: bool, out: &mut Vec<Diff>) {
-    let le = entries(l, hidden);
-    let re = entries(r, hidden);
-    let rel = |n: &str| {
-        if prefix.is_empty() {
-            n.to_string()
-        } else {
-            format!("{prefix}/{n}")
-        }
+/// [`compare`] that can be stopped, counting the entries looked at into `seen` as it
+/// goes: for a deep compare on a thread of its own, which a big tree or a network
+/// drive can keep busy for a long time. `None` when stopped.
+pub fn compare_until(
+    left: &Path,
+    right: &Path,
+    deep: bool,
+    hidden: bool,
+    stop: &AtomicBool,
+    seen: &AtomicU64,
+) -> Option<Vec<Diff>> {
+    let w = Walk {
+        deep,
+        hidden,
+        stop,
+        seen,
     };
-    let (mut i, mut j) = (0, 0);
-    while i < le.len() || j < re.len() {
-        let order = match (le.get(i), re.get(j)) {
-            (Some(a), Some(b)) => a.0.cmp(&b.0),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            _ => std::cmp::Ordering::Greater,
+    let mut out = Vec::new();
+    w.walk(left, right, "", &mut out);
+    (!stop.load(Ordering::Relaxed)).then_some(out)
+}
+
+struct Walk<'a> {
+    deep: bool,
+    hidden: bool,
+    stop: &'a AtomicBool,
+    seen: &'a AtomicU64,
+}
+
+impl Walk<'_> {
+    fn walk(&self, l: &Path, r: &Path, prefix: &str, out: &mut Vec<Diff>) {
+        if self.stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let (deep, hidden) = (self.deep, self.hidden);
+        let le = entries(l, hidden);
+        let re = entries(r, hidden);
+        self.seen
+            .fetch_add((le.len() + re.len()) as u64, Ordering::Relaxed);
+        let rel = |n: &str| {
+            if prefix.is_empty() {
+                n.to_string()
+            } else {
+                format!("{prefix}/{n}")
+            }
         };
-        match order {
-            std::cmp::Ordering::Less => {
-                let (n, m) = &le[i];
-                out.push(Diff {
-                    rel: rel(n),
-                    is_dir: m.is_dir(),
-                    state: State::LeftOnly,
-                });
-                i += 1;
-            }
-            std::cmp::Ordering::Greater => {
-                let (n, m) = &re[j];
-                out.push(Diff {
-                    rel: rel(n),
-                    is_dir: m.is_dir(),
-                    state: State::RightOnly,
-                });
-                j += 1;
-            }
-            std::cmp::Ordering::Equal => {
-                let (n, a) = &le[i];
-                let b = &re[j].1;
-                if a.is_dir() && b.is_dir() {
-                    if deep {
-                        walk(&l.join(n), &r.join(n), &rel(n), deep, hidden, out);
-                    } else {
+        let (mut i, mut j) = (0, 0);
+        while i < le.len() || j < re.len() {
+            let order = match (le.get(i), re.get(j)) {
+                (Some(a), Some(b)) => a.0.cmp(&b.0),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                _ => std::cmp::Ordering::Greater,
+            };
+            match order {
+                std::cmp::Ordering::Less => {
+                    let (n, m) = &le[i];
+                    out.push(Diff {
+                        rel: rel(n),
+                        is_dir: m.is_dir(),
+                        state: State::LeftOnly,
+                    });
+                    i += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    let (n, m) = &re[j];
+                    out.push(Diff {
+                        rel: rel(n),
+                        is_dir: m.is_dir(),
+                        state: State::RightOnly,
+                    });
+                    j += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    let (n, a) = &le[i];
+                    let b = &re[j].1;
+                    if a.is_dir() && b.is_dir() {
+                        if deep {
+                            self.walk(&l.join(n), &r.join(n), &rel(n), out);
+                        } else {
+                            out.push(Diff {
+                                rel: rel(n),
+                                is_dir: true,
+                                state: State::Same,
+                            });
+                        }
+                    } else if a.is_dir() != b.is_dir() {
                         out.push(Diff {
                             rel: rel(n),
-                            is_dir: true,
-                            state: State::Same,
+                            is_dir: false,
+                            state: State::Conflict,
+                        });
+                    } else {
+                        let state = match newer(stamp(a), stamp(b)) {
+                            std::cmp::Ordering::Greater => State::LeftNewer,
+                            std::cmp::Ordering::Less => State::RightNewer,
+                            std::cmp::Ordering::Equal if a.len() != b.len() => State::Conflict,
+                            std::cmp::Ordering::Equal => State::Same,
+                        };
+                        out.push(Diff {
+                            rel: rel(n),
+                            is_dir: false,
+                            state,
                         });
                     }
-                } else if a.is_dir() != b.is_dir() {
-                    out.push(Diff {
-                        rel: rel(n),
-                        is_dir: false,
-                        state: State::Conflict,
-                    });
-                } else {
-                    let state = match newer(stamp(a), stamp(b)) {
-                        std::cmp::Ordering::Greater => State::LeftNewer,
-                        std::cmp::Ordering::Less => State::RightNewer,
-                        std::cmp::Ordering::Equal if a.len() != b.len() => State::Conflict,
-                        std::cmp::Ordering::Equal => State::Same,
-                    };
-                    out.push(Diff {
-                        rel: rel(n),
-                        is_dir: false,
-                        state,
-                    });
+                    i += 1;
+                    j += 1;
                 }
-                i += 1;
-                j += 1;
             }
         }
     }
@@ -236,6 +280,40 @@ mod tests {
             !p.iter().any(|(s, _)| s.ends_with("clash")),
             "a conflict is never copied"
         );
+        let _ = fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn a_deep_compare_can_be_stopped_and_counts_as_it_goes() {
+        use std::sync::atomic::{AtomicBool, AtomicU64};
+        let d = std::env::temp_dir().join(format!("xdevcmd-cmp-stop-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        for side in ["l", "r"] {
+            fs::create_dir_all(d.join(side).join("sub")).unwrap();
+            fs::write(d.join(side).join("sub/f"), side).unwrap();
+        }
+        let seen = AtomicU64::new(0);
+        let out = compare_until(
+            &d.join("l"),
+            &d.join("r"),
+            true,
+            false,
+            &AtomicBool::new(false),
+            &seen,
+        );
+        assert!(out.is_some());
+        assert!(
+            seen.load(Ordering::Relaxed) >= 4,
+            "both levels of both sides counted"
+        );
+        let stopped = compare_until(
+            &d.join("l"),
+            &d.join("r"),
+            true,
+            false,
+            &AtomicBool::new(true),
+            &seen,
+        );
+        assert_eq!(stopped, None);
         let _ = fs::remove_dir_all(&d);
     }
 }

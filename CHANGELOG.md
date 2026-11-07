@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.2.0] - 2026-11-07
+
 ### Changed
 - **rcmd is now xdevcmd**, everywhere: the command, the release files, the config and
   state directories (`~/.config/xdevcmd/`, `~/.local/state/xdevcmd/`;

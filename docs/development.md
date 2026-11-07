@@ -52,7 +52,7 @@ The SVGs in `assets/` are the source: `icon.svg`, `icon-16.svg` (the same pictur
 redrawn on whole pixels, because a scaled-down one blurs at 16 px), and the README's
 `logo-light.svg` / `logo-dark.svg`, whose wordmark is drawn as strokes so it looks the
 same without any font. After changing an icon SVG, rebuild `assets/rcmd.ico` and
-`assets/icon-24.png` (the logo About draws, built into the binary):
+`assets/icon-24.png` … `icon-64.png` (the logos About draws, built into the binary):
 
 ```bash
 cargo install --locked resvg   # once

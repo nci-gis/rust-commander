@@ -224,9 +224,15 @@ pub struct App {
     last_autosave: Instant,
 }
 
-/// rcmd's icon, 24 pixels square, for About: drawn in half blocks, 24 × 12 cells.
-/// Rendered from `assets/icon.svg` (`resvg -w 24 -h 24`).
-const LOGO: &[u8] = include_bytes!("../../../assets/icon-24.png");
+/// rcmd's icon for About, largest first: drawn in half blocks, so `n` pixels square is
+/// `n` columns by `n / 2` rows, and About shows the largest the window has room for.
+/// Each is rendered from `assets/icon.svg` at its own size by `scripts/icons.sh`.
+const LOGOS: [&[u8]; 4] = [
+    include_bytes!("../../../assets/icon-64.png"),
+    include_bytes!("../../../assets/icon-48.png"),
+    include_bytes!("../../../assets/icon-32.png"),
+    include_bytes!("../../../assets/icon-24.png"),
+];
 
 /// What rcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
@@ -2147,12 +2153,15 @@ impl App {
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
                     )),
-                    picture: {
+                    pictures: {
                         let bg = match theme::t().bg_panel {
                             ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
                             _ => [0, 0, 0],
                         };
-                        rcmd_core::image::png_bytes(LOGO, 24, 24, bg).ok()
+                        LOGOS
+                            .iter()
+                            .filter_map(|l| rcmd_core::image::png_bytes(l, 64, 64, bg).ok())
+                            .collect()
                     },
                 }));
             }
@@ -3728,7 +3737,7 @@ impl App {
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -3970,7 +3979,7 @@ impl App {
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -4094,7 +4103,7 @@ impl App {
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
         true
     }
@@ -4229,7 +4238,7 @@ impl App {
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 
@@ -4675,7 +4684,7 @@ impl App {
             yes: Some(("undo".into(), Cmd::Undo)),
             buttons: Vec::new(),
             footnote: None,
-            picture: None,
+            pictures: Vec::new(),
         }));
     }
 

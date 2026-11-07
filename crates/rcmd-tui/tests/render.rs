@@ -2971,16 +2971,44 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
         .find(|l| l.contains("Developed by"))
         .unwrap_or_else(|| panic!("no credit\n{s}"));
     assert!(row.contains("close"), "credit not on the button row\n{s}");
-    // The logo, 24 pixels square in half blocks: 12 rows of 24 cells, beside the text.
-    let logo_rows = s
-        .lines()
-        .filter(|l| l.contains(&"\u{2580}".repeat(24)))
-        .count();
-    assert_eq!(logo_rows, 12, "the logo\n{s}");
     assert!(
         row.find("close") < row.find("Developed by"),
         "credit not right of the button\n{s}"
     );
+}
+
+/// The logo in About, as (columns, rows) of half blocks: `n` pixels square is `n`
+/// columns by `n / 2` rows.
+fn logo_size(s: &str) -> (usize, usize) {
+    let runs: Vec<usize> = s
+        .lines()
+        .map(|l| {
+            l.split(|c| c != '\u{2580}')
+                .map(|r| r.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .filter(|&n| n > 0)
+        .collect();
+    (runs.iter().copied().max().unwrap_or(0), runs.len())
+}
+
+#[test]
+fn about_draws_the_largest_logo_the_window_has_room_for() {
+    let (a, b) = fixture();
+    for (size, logo) in [
+        ("80x24", (24, 12)),
+        ("100x34", (32, 16)),
+        ("120x40", (48, 24)),
+        ("160x50", (64, 32)),
+    ] {
+        let s = shot_keys(size, "F9,Left,Up,Enter", &a, &b);
+        assert!(
+            s.contains("No network, no telemetry"),
+            "About at {size}\n{s}"
+        );
+        assert_eq!(logo_size(&s), logo, "the logo at {size}\n{s}");
+    }
 }
 
 #[test]

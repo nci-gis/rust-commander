@@ -54,6 +54,7 @@ max_terminals = 3         # shells across all tabs and splits (1-16)
 [viewer]
 wrap = true
 tab_width = 4             # 1-16
+images = "auto"           # quick view's pictures: auto, kitty, iterm2, sixel or blocks
 
 [commands]
 editor = ""               # empty: $VISUAL, then $EDITOR, then vi (notepad on Windows)

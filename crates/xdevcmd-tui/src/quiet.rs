@@ -41,6 +41,16 @@ impl<B> Quiet<B> {
         self
     }
 
+    /// Bytes for the terminal that are not cells: a picture in its own protocol.
+    pub fn raw(&mut self, bytes: &[u8]) -> std::io::Result<()>
+    where
+        B: std::io::Write,
+    {
+        self.at = None;
+        self.inner.write_all(bytes)?;
+        self.inner.flush()
+    }
+
     /// The terminal was used behind our back (an editor ran): assume nothing about it.
     pub fn forget(&mut self) {
         self.shown = None;

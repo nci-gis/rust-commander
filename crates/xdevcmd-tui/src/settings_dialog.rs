@@ -214,6 +214,15 @@ const FIELDS: &[Field] = &[
         true,
     ),
     f(
+        1,
+        "viewer",
+        "images",
+        "Pictures in quick view",
+        "auto: the terminal's own pictures where it can; blocks: half blocks always",
+        Kind::Pick(&["auto", "kitty", "iterm2", "sixel", "blocks"]),
+        true,
+    ),
+    f(
         2,
         "theme",
         "name",
@@ -280,6 +289,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("files", "git_status") => c.files.git_status.to_string(),
         ("viewer", "wrap") => c.viewer.wrap.to_string(),
         ("viewer", "tab_width") => c.viewer.tab_width.to_string(),
+        ("viewer", "images") => c.viewer.images.clone(),
         ("theme", "name") => c.theme.name.clone(),
         ("theme", "colors") => c.theme.colors.clone(),
         ("terminal", "show") => c.terminal.show.to_string(),
@@ -317,6 +327,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         ("viewer", "tab_width") => {
             c.viewer.tab_width = n().map_or(c.viewer.tab_width, |x| x as usize)
         }
+        ("viewer", "images") => c.viewer.images = v.to_string(),
         ("theme", "name") => c.theme.name = v.to_string(),
         ("theme", "colors") => c.theme.colors = v.to_string(),
         ("terminal", "show") => c.terminal.show = b,

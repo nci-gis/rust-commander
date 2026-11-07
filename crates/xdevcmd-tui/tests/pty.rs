@@ -384,6 +384,105 @@ fn a_file_made_by_another_program_shows_up_at_once() {
     xdevcmd.quit();
 }
 
+/// Wait until xdevcmd has written `n` copies of `needle` in all, or fail.
+fn wait_bytes(session: &Session, needle: &str, n: usize) {
+    let start = Instant::now();
+    loop {
+        let got = String::from_utf8_lossy(&session.raw.lock().unwrap())
+            .matches(needle)
+            .count();
+        if got >= n {
+            return;
+        }
+        if start.elapsed() > PATIENCE {
+            panic!(
+                "{needle:?} written {got} times, not {n}. Screen:\n{}",
+                session.screen()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn quick_view_draws_a_kitty_picture_once_and_removes_it_under_a_dialog() {
+    let s = Scratch::new("kitty");
+    let pic = xdevcmd_core::image::Picture {
+        width: 8,
+        height: 8,
+        source: (8, 8),
+        rgb: vec![[200, 30, 30]; 64],
+    };
+    std::fs::write(
+        s.left().join("a.png"),
+        xdevcmd_core::image::to_png(&pic).unwrap(),
+    )
+    .unwrap();
+    let cfg = s.file("kitty.toml", "[viewer]\nimages = \"kitty\"\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("a ");
+    x.send(DOWN);
+    x.send(b"\x1bq"); // Alt+Q: quick view in the other pane
+    wait_bytes(&x, "\x1b_Ga=T,f=24,", 1);
+    // Drawn once: frames that change nothing do not send it again.
+    std::thread::sleep(Duration::from_millis(1500));
+    wait_bytes(&x, "\x1b_Ga=T,f=24,", 1);
+    let sent = String::from_utf8_lossy(&x.raw.lock().unwrap())
+        .matches("\x1b_Ga=T,")
+        .count();
+    assert_eq!(sent, 1, "sent again with nothing changed");
+    // A dialog over it: the picture goes (it would be drawn over the dialog)...
+    x.send(b"\x1bOP"); // F1, help
+    wait_bytes(&x, "\x1b_Ga=d,d=I,", 1);
+    // ...and comes back when the dialog closes.
+    x.send(b"\x1b");
+    wait_bytes(&x, "\x1b_Ga=T,f=24,", 2);
+    x.quit();
+}
+
+#[test]
+fn quick_view_draws_iterm2_and_sixel_pictures_and_repaints_them_away() {
+    for (name, start) in [("iterm2", "\x1b]1337;File=inline=1;"), ("sixel", "\x1bP")] {
+        let s = Scratch::new(name);
+        let pic = xdevcmd_core::image::Picture {
+            width: 8,
+            height: 8,
+            source: (8, 8),
+            rgb: vec![[30, 200, 30]; 64],
+        };
+        std::fs::write(
+            s.left().join("a.png"),
+            xdevcmd_core::image::to_png(&pic).unwrap(),
+        )
+        .unwrap();
+        let cfg = s.file("p.toml", &format!("[viewer]\nimages = \"{name}\"\n"));
+        let cfg = cfg.to_string_lossy().into_owned();
+        let mut x = Session::start_env(
+            &s,
+            None,
+            &[s.left(), s.right()],
+            &[("XDEVCMD_CONFIG", &cfg)],
+        );
+        x.wait_for("a ");
+        x.send(DOWN);
+        x.send(b"\x1bq");
+        wait_bytes(&x, start, 1);
+        // Under a dialog these pictures are cells: the screen is repainted over them, and
+        // they are drawn again once it closes.
+        x.send(b"\x1bOP");
+        x.wait_for("Keys");
+        x.send(b"\x1b");
+        wait_bytes(&x, start, 2);
+        x.quit();
+    }
+}
+
 #[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");

@@ -87,6 +87,10 @@ xdevcmd for yours, or see [keys.md](keys.md).
   part-way leaves the old one.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
+  Pictures are sharp where the terminal can draw them itself (kitty, Ghostty, iTerm2,
+  WezTerm, Windows Terminal, foot), and drawn in half blocks elsewhere (macOS
+  Terminal.app, VS Code, inside tmux). `images` under `[viewer]` chooses or turns it
+  off.
 
 ### Renaming many files
 

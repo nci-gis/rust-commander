@@ -10,6 +10,7 @@ mod config;
 mod config_edit;
 mod find_dialog;
 mod git;
+mod graphics;
 mod help;
 mod keyfix;
 mod keys;

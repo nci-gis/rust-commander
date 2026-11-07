@@ -41,6 +41,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 # Directory changes from the system (inotify, FSEvents, ReadDirectoryChangesW) instead of
 # polling every second; polling stays as the fallback for network drives. CC0-1.0.
 notify = "8"
+# Sixel for quick view's pictures (Windows Terminal, foot, xterm). The Kitty and iTerm2
+# protocols are a few escape sequences of our own (graphics.rs); this is the one part
+# worth a crate: quantising a picture to a palette. MIT OR Apache-2.0.
+icy_sixel = "0.7"
 
 [dev-dependencies]
 tar = { version = "0.4.46", default-features = false }

@@ -41,7 +41,9 @@ were done first:
 
 ## Next, in this order
 
-**0.2.0 is out** (published by the owner on 2026-11-07), **and 0.2.1** (2026-11-08). Rounds 001 and 003–013 are
+**0.2.0 is out** (published by the owner on 2026-11-07), **and 0.2.1** (2026-11-08). The
+owner uses 0.2.1 for a week or two before any next release is planned ("dùng 1-2 weeks
+đã"). Rounds 001 and 003–013 are
 Complete (013 closed by the owner on 2026-11-08); 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
 những việc kế tiếp"), in this order:
 
@@ -183,7 +185,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 17 | Directory watching with the system's events, polling as fallback | M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 18 | Copy/move "replace only if older" (robocopy) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 19 | Fuzzy Ctrl+F filter, best first | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
-| 20 | Sharp image previews: Kitty, iTerm2, sixel, half blocks as fallback | M | [014](cycles/Round_014.md) | Planning: the owner picks how (a crate or our own) |
+| 20 | Sharp image previews: Kitty, iTerm2, sixel, half blocks as fallback | M | [014](cycles/Round_014.md) | In progress, our own code (owner's choice); local only, no release planned yet |
 | 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
 | 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |

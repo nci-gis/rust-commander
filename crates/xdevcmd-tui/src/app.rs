@@ -89,6 +89,18 @@ enum ModalAct {
 }
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// A picture for the terminal to draw itself: where, and which decode it is.
+#[derive(Debug, Clone, PartialEq)]
+struct Graphic {
+    rect: Rect,
+    path: PathBuf,
+    px: (u16, u16),
+    mtime: Option<std::time::SystemTime>,
+}
+
+/// The id of quick view's picture in the Kitty protocol, so it can be removed.
+const KITTY_ID: u32 = 0x7864;
+
 /// A deep compare running for Alt+Y: the two roots, how far it has got, and the
 /// diffs when they come.
 struct Comparing {
@@ -256,6 +268,13 @@ pub struct App {
     quick_image: Option<Shrunk>,
     /// A big photo takes a moment to decode: never on the drawing thread.
     decoding: Option<Decoding>,
+    /// How quick view draws pictures: the terminal's own protocol, or half blocks.
+    graphics: crate::graphics::Protocol,
+    /// A terminal cell in pixels, for decoding pictures at the terminal's resolution.
+    cell_px: (u16, u16),
+    /// The picture this frame wants drawn by the terminal, and the one it shows now.
+    graphic_want: Option<Graphic>,
+    graphic_shown: Option<Graphic>,
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
@@ -362,6 +381,10 @@ impl App {
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
+            graphics: crate::graphics::Protocol::Blocks,
+            cell_px: (8, 16),
+            graphic_want: None,
+            graphic_shown: None,
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
             pending_view: None,
@@ -595,6 +618,10 @@ impl App {
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
         self.watcher = crate::watch::Watcher::new();
+        self.graphics = crate::graphics::detect(&self.settings.config.viewer.images, |k| {
+            std::env::var(k).ok()
+        });
+        self.measure_cells(terminal);
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
@@ -612,6 +639,7 @@ impl App {
             if dirty || drawn.elapsed() >= HEARTBEAT {
                 let t0 = Instant::now();
                 terminal.draw(|f| self.draw(f))?;
+                self.sync_graphics(terminal)?;
                 self.usage.frame(t0.elapsed());
                 drawn = Instant::now();
                 dirty = false;
@@ -622,6 +650,12 @@ impl App {
                 match event::read()? {
                     Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
                     Event::Mouse(m) => self.on_mouse(m),
+                    // A resize clears the screen: whatever picture was there is gone, and
+                    // the cells may be a different size now.
+                    Event::Resize(..) => {
+                        self.graphic_shown = None;
+                        self.measure_cells(terminal);
+                    }
                     _ => {}
                 }
             }
@@ -640,6 +674,12 @@ impl App {
                     self.finish_batch(files, &list);
                 }
             }
+        }
+        if self.graphic_shown.take().is_some() && self.graphics == crate::graphics::Protocol::Kitty
+        {
+            let _ = terminal
+                .backend_mut()
+                .raw(&crate::graphics::kitty_delete(KITTY_ID));
         }
         self.save_session();
         if self.quit_cd {
@@ -3195,6 +3235,8 @@ impl App {
         terminal.backend_mut().forget();
         terminal.swap_buffers();
         terminal.swap_buffers();
+        // And with it any picture the terminal drew.
+        self.graphic_shown = None;
 
         self.status = match outcome {
             Ok(s) if s.success() => format!("{program} closed"),
@@ -4851,7 +4893,18 @@ impl App {
             ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
             _ => [0, 0, 0],
         };
-        let size = (inner.width, inner.height);
+        // The terminal's own pictures are decoded at its resolution, a cell's pixels each;
+        // half blocks at two pixels a cell.
+        let own = self.graphics != crate::graphics::Protocol::Blocks && self.interactive;
+        let (cw, ch) = self.cell_px;
+        let size = if own {
+            (
+                inner.width.saturating_mul(cw),
+                inner.height.saturating_mul(ch),
+            )
+        } else {
+            (inner.width, inner.height)
+        };
         let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
         let fresh = |p: &Path, s: (u16, u16), m: Option<std::time::SystemTime>| {
             p == path && s == size && m == mtime
@@ -4861,7 +4914,11 @@ impl App {
             .as_ref()
             .is_none_or(|(p, s, m, _)| !fresh(p, *s, *m));
         if stale {
-            let (w, h) = (inner.width as usize, inner.height as usize * 2);
+            let (w, h) = if own {
+                (size.0 as usize, size.1 as usize)
+            } else {
+                (inner.width as usize, inner.height as usize * 2)
+            };
             if !self.interactive {
                 // A screenshot has no later frame for the picture to arrive in.
                 let pic = xdevcmd_core::image::load(path, w, h, bg).map_err(|e| e.to_string());
@@ -4908,6 +4965,28 @@ impl App {
                 return;
             }
         };
+        if own {
+            // The terminal draws it, after this frame (sync_graphics); not under a dialog,
+            // where it would be drawn over the dialog.
+            if self.modal.is_none() {
+                let cols = (pic.width as u16).div_ceil(cw.max(1)).clamp(1, inner.width);
+                let rows = (pic.height as u16)
+                    .div_ceil(ch.max(1))
+                    .clamp(1, inner.height);
+                self.graphic_want = Some(Graphic {
+                    rect: Rect::new(
+                        inner.x + (inner.width - cols) / 2,
+                        inner.y + (inner.height - rows) / 2,
+                        cols,
+                        rows,
+                    ),
+                    path: path.to_path_buf(),
+                    px: size,
+                    mtime,
+                });
+            }
+            return;
+        }
         let rows = pic.height.div_ceil(2);
         let x0 = inner.x + (inner.width.saturating_sub(pic.width as u16)) / 2;
         let y0 = inner.y + (inner.height.saturating_sub(rows as u16)) / 2;
@@ -5037,6 +5116,56 @@ impl App {
             ops::Kind::Extract => Undo::Cannot("an extraction".into()),
             ops::Kind::Pack => Undo::Cannot("packing".into()),
         });
+    }
+
+    /// A cell's size in pixels, from the terminal, for decoding pictures at its own
+    /// resolution. Terminals that do not say (Windows) keep the last guess.
+    fn measure_cells(&mut self, terminal: &mut Term) {
+        use ratatui::backend::Backend;
+        if let Ok(w) = terminal.backend_mut().window_size() {
+            let (c, p) = (w.columns_rows, w.pixels);
+            if c.width > 0 && c.height > 0 && p.width >= c.width && p.height >= c.height {
+                self.cell_px = (p.width / c.width, p.height / c.height);
+            }
+        }
+    }
+
+    /// After a frame: put the picture it wants on screen in the terminal's own protocol,
+    /// once, and take an old one away. A Kitty picture is removed by its id; an iTerm2
+    /// or sixel picture is cells, so the screen is repainted over it.
+    fn sync_graphics(&mut self, terminal: &mut Term) -> Result<()> {
+        use crate::graphics::{encode, kitty_delete, Protocol};
+        if self.graphic_want == self.graphic_shown {
+            return Ok(());
+        }
+        if self.graphic_shown.take().is_some() {
+            if self.graphics == Protocol::Kitty {
+                terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
+            } else {
+                let _ = terminal.backend_mut().clear_region(ClearType::All);
+                terminal.backend_mut().forget();
+                terminal.swap_buffers();
+                terminal.swap_buffers();
+                terminal.draw(|f| self.draw(f))?;
+            }
+        }
+        let Some(want) = self.graphic_want.clone() else {
+            return Ok(());
+        };
+        let Some((_, _, _, Ok(pic))) = self
+            .quick_image
+            .as_ref()
+            .filter(|(p, s, m, _)| *p == want.path && *s == want.px && *m == want.mtime)
+        else {
+            return Ok(());
+        };
+        let r = want.rect;
+        let mut bytes = format!("\x1b7\x1b[{};{}H", r.y + 1, r.x + 1).into_bytes();
+        bytes.extend(encode(self.graphics, pic, r.width, r.height, KITTY_ID));
+        bytes.extend_from_slice(b"\x1b8");
+        terminal.backend_mut().raw(&bytes)?;
+        self.graphic_shown = Some(want);
+        Ok(())
     }
 
     /// Keep the system watching the directories on screen, and note the panes whose
@@ -5304,6 +5433,10 @@ impl App {
         s.root = self.settings.root.clone();
         s.depth = self.settings.depth;
         crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
+        if self.interactive {
+            self.graphics =
+                crate::graphics::detect(&s.config.viewer.images, |k| std::env::var(k).ok());
+        }
         self.settings = s;
         self.config_outcome = Outcome::Loaded(path.clone());
         let name = self.settings.config.theme.name.clone();
@@ -5418,6 +5551,7 @@ impl App {
     // ── drawing ────────────────────────────────────────────────────────────────────
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        self.graphic_want = None;
         let area = frame.area();
         self.screen = area;
         self.note_focus();

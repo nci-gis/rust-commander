@@ -217,6 +217,10 @@ impl Default for Terminal {
 pub struct Viewer {
     pub wrap: bool,
     pub tab_width: usize,
+    /// How quick view draws pictures: "auto" (the terminal's own pictures where it can
+    /// draw them, kitty, Ghostty, iTerm2, WezTerm, Windows Terminal, foot; half blocks
+    /// elsewhere), "kitty", "iterm2", "sixel", or "blocks" (half blocks always).
+    pub images: String,
 }
 
 impl Default for Viewer {
@@ -224,6 +228,7 @@ impl Default for Viewer {
         Self {
             wrap: true,
             tab_width: 4,
+            images: "auto".into(),
         }
     }
 }
@@ -470,6 +475,15 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         }
     }
 
+    if !matches!(
+        config.viewer.images.as_str(),
+        "auto" | "kitty" | "iterm2" | "sixel" | "blocks"
+    ) {
+        return Err(format!(
+            "[viewer] images = \"{}\": expected auto, kitty, iterm2, sixel or blocks",
+            config.viewer.images
+        ));
+    }
     if !matches!(config.files.filter.as_str(), "fuzzy" | "plain") {
         return Err(format!(
             "[files] filter = \"{}\": expected fuzzy or plain",

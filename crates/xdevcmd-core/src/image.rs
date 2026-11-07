@@ -61,6 +61,23 @@ pub fn load(path: &Path, max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<
     Ok(shrink(w, h, &px, max_w.max(1), max_h.max(1)))
 }
 
+/// `pic` as a PNG file in memory, for terminals that take a picture as a file (iTerm2's
+/// inline images).
+pub fn to_png(pic: &Picture) -> io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    {
+        let mut e = png::Encoder::new(&mut out, pic.width as u32, pic.height as u32);
+        e.set_color(png::ColorType::Rgb);
+        e.set_depth(png::BitDepth::Eight);
+        // Fast: the file goes straight to the terminal and is thrown away.
+        e.set_compression(png::Compression::Fast);
+        let mut w = e.write_header().map_err(io::Error::other)?;
+        let data: Vec<u8> = pic.rgb.iter().flatten().copied().collect();
+        w.write_image_data(&data).map_err(io::Error::other)?;
+    }
+    Ok(out)
+}
+
 /// A PNG already in memory — xdevcmd's own logo, built into the binary — shrunk to fit as
 /// [`load`] does.
 pub fn png_bytes(bytes: &[u8], max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<Picture> {

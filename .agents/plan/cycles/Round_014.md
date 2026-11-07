@@ -1,6 +1,6 @@
 # Round 014: Sharp image previews
 
-**Status**: Planning
+**Status**: In Progress
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 20
 **Date started**: 2026-11-08 (owner: "Yes, next round", after 0.2.1 was published)
 **Date completed**: —
@@ -27,26 +27,49 @@ drawn and removed.
 
 Then, either way:
 
-- [ ] Detect what the terminal speaks; `[view] images = "auto" | "kitty" | "iterm2" |
-      "sixel" | "blocks"` to choose, with "blocks" as today.
-- [ ] Draw the picture once when it changes; remove it when a dialog opens over it, the
+- [x] Detect what the terminal speaks; `[viewer] images = "auto" | "kitty" | "iterm2" |
+      "sixel" | "blocks"` to choose (also in Settings), "blocks" as before.
+- [x] Draw the picture once when it changes; remove it when a dialog opens over it, the
       pane closes, the cursor leaves the file, or the window resizes.
-- [ ] Never inside the terminal panel's area; never in screenshots (the tests).
+- [x] Never inside the terminal panel's area; never in screenshots (the tests).
 - [ ] Over SSH: the local terminal's protocol arrives through SSH, so detection must not
       trust only local environment variables; inside tmux, passthrough or blocks.
-- [ ] Tests: the escape sequences for each protocol (unit), detection from the
-      environment, blocks unchanged where nothing is supported.
+- [x] Tests: the escape sequences for each protocol (unit), detection from the
+      environment, blocks unchanged where nothing is supported; pty tests read the bytes
+      sent: a Kitty picture sent once, deleted under a dialog and sent again after;
+      iTerm2 and sixel drawn, repainted away under a dialog, drawn again.
 - [ ] By hand, by the owner: iTerm2 or Ghostty on macOS, Windows Terminal, and
       Terminal.app (blocks, as now).
 
 ## Do
 
+- 2026-11-08, the owner's terms for this round: "nhánh này chỉ làm test local, ko ci
+  và chưa có plan release next version" and "dùng 1-2 weeks đã" — work and tests stay
+  on this machine, no CI runs, nothing pushed until the owner asks; no next release is
+  planned while 0.2.1 is used for a week or two.
+- 2026-11-08, the owner chose **B** ("để ít phụ thuộc nhiều nhất vào thư viện khi ko
+  cần"): our own Kitty and iTerm2 sequences, `icy_sixel` for sixel only.
+
+- 2026-11-08, built: `graphics.rs` (detection from the environment; Kitty raw RGB in
+  4096-byte base64 chunks with `c`/`r` cells and an id; iTerm2 as an inline PNG made by
+  the core's new `image::to_png`; sixel through `icy_sixel`; a dozen-line base64).
+  Quick view decodes at the cell size the terminal reports (`window_size`; 8×16 where
+  it says nothing, as on Windows) instead of two pixels a cell, leaves its box empty,
+  and the loop sends the picture after the frame (`sync_graphics`) only when it changed:
+  a Kitty picture is removed by id; an iTerm2 or sixel one, being cells, by repainting
+  the screen. Under any dialog nothing is drawn. A resize or an editor's return forgets
+  what was shown. `Quiet::raw` writes the bytes past ratatui's cell diff.
 - 2026-11-08: round opened on `feat/image-preview` from `dev` after 0.2.1. `ratatui-image`
   tried in a scratch build to measure what it brings (table above), then reverted.
 
 ## Check
 
-- [ ] —
+- [x] fmt, clippy (Linux, and the macOS and Windows targets from Linux), `cargo test
+      --workspace`: core 146, tui 136 + 147 render + 35 pty, all pass; `cargo deny` passes
+      with `icy_sixel` (2026-11-08). No CI, as the owner asked.
+- [ ] Not verified: how any picture looks — no terminal here draws them. Over SSH from
+      iTerm2 or Ghostty to this machine, `auto` should find iTerm2 by `LC_TERMINAL` or
+      Ghostty by `TERM`; Windows Terminal's sixel and the 8×16 cell guess there.
 
 ## Act
 

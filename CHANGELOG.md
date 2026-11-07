@@ -10,6 +10,13 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **Sharp pictures in quick view** where the terminal draws them itself: the Kitty
+  graphics protocol (kitty, Ghostty), iTerm2's inline images (iTerm2, WezTerm) and sixel
+  (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and
+  tmux included. `[viewer] images` (also in Settings) chooses: auto, kitty, iterm2,
+  sixel or blocks.
+
 ## [0.2.1] - 2026-11-07
 
 ### Added

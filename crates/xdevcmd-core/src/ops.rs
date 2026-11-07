@@ -258,8 +258,11 @@ pub fn start(req: Request) -> Handle {
             tx: etx,
             answers: arx,
             cancel: worker_cancel,
-            yes_to_all: false,
+            overwrite_all: false,
             skip_all: false,
+            cross_all: false,
+            trash_all: false,
+            planned: None,
             abort: false,
             bytes_done: 0,
             last_report: 0,
@@ -281,8 +284,15 @@ struct Worker {
     tx: Sender<Event>,
     answers: Receiver<Answer>,
     cancel: Arc<AtomicBool>,
-    yes_to_all: bool,
+    /// "All" answers, one per kind of question: overwriting all is not also agreeing
+    /// to copy-then-delete across devices, or to delete permanently.
+    overwrite_all: bool,
     skip_all: bool,
+    cross_all: bool,
+    trash_all: bool,
+    /// Synchronising: the destinations the confirmed plan overwrites. Only these are
+    /// replaced without asking; a file that appears elsewhere is asked about.
+    planned: Option<std::collections::HashSet<PathBuf>>,
     abort: bool,
     bytes_done: u64,
     last_report: u64,
@@ -311,7 +321,15 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
-        self.yes_to_all = req.overwrite_confirmed;
+        if req.overwrite_confirmed {
+            self.planned = Some(
+                req.pairs
+                    .iter()
+                    .filter_map(|(src, into)| Some(into.join(src.file_name()?)))
+                    .filter(|dst| dst.symlink_metadata().is_ok())
+                    .collect(),
+            );
+        }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
@@ -442,7 +460,7 @@ impl Worker {
             self.approved = None;
             return Some(true);
         }
-        if self.yes_to_all {
+        if self.overwrite_all || self.planned.as_ref().is_some_and(|p| p.contains(dst)) {
             return Some(true);
         }
         if self.skip_all {
@@ -456,7 +474,7 @@ impl Worker {
         }) {
             Answer::Yes => Some(true),
             Answer::YesToAll => {
-                self.yes_to_all = true;
+                self.overwrite_all = true;
                 Some(true)
             }
             Answer::Skip => Some(false),
@@ -607,12 +625,9 @@ impl Worker {
                 }
                 // Taken since it was found free: round again, to the question.
                 Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
-                // Cancelled mid-file: the partial destination is removed rather than
-                // left looking like a complete copy.
-                Ok(false) => {
-                    let _ = fs::remove_file(dst);
-                    return;
-                }
+                // Cancelled mid-file: copy_bytes removed what it wrote, and a file
+                // being replaced is still the old one.
+                Ok(false) => return,
                 Err(e) => match self.ask(Question::Failed {
                     path: dst.to_path_buf(),
                     error: e.to_string(),
@@ -635,17 +650,49 @@ impl Worker {
 
     /// Returns Ok(false) when cancelled part-way. `new_only`: fail with `AlreadyExists`
     /// rather than replace a file at `dst`.
+    ///
+    /// Replacing writes beside `dst` under a temporary name and renames it over `dst`
+    /// only once complete: a cancel or an error part-way leaves the old file as it
+    /// was, rather than both old and new gone. Whatever was written and not kept is
+    /// removed here.
     fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
-        let mut w = if new_only {
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(dst)?
+        let target = if new_only {
+            dst.to_path_buf()
         } else {
-            File::create(dst)?
+            part_name(dst)
         };
+        let mut w = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)?;
+        let written = self.write_all_from(&mut r, &mut w);
+        let kept = match written {
+            Ok(true) => {
+                // Permissions and mtime are part of the file as far as a user is
+                // concerned; a copy that loses the executable bit broke something.
+                let _ = fs::set_permissions(&target, meta.permissions());
+                if let Ok(mtime) = meta.modified() {
+                    let _ = w.set_times(FileTimes::new().set_modified(mtime));
+                }
+                drop(w);
+                if new_only {
+                    Ok(true)
+                } else {
+                    fs::rename(&target, dst).map(|()| true)
+                }
+            }
+            other => other,
+        };
+        if !matches!(kept, Ok(true)) {
+            let _ = fs::remove_file(&target);
+        }
+        kept
+    }
+
+    /// Copy `r` into `w`; Ok(false) when cancelled part-way.
+    fn write_all_from(&mut self, r: &mut File, w: &mut File) -> io::Result<bool> {
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -659,12 +706,6 @@ impl Worker {
             self.advance(n as u64);
         }
         w.flush()?;
-        // Permissions and mtime are part of the file as far as a user is concerned; a
-        // copy that loses the executable bit is a copy that broke something.
-        let _ = fs::set_permissions(dst, meta.permissions());
-        if let Ok(mtime) = meta.modified() {
-            let _ = w.set_times(FileTimes::new().set_modified(mtime));
-        }
         Ok(true)
     }
 
@@ -719,7 +760,7 @@ impl Worker {
             Err(e) if is_cross_device(&e) => {
                 // Not a rename at all: a copy followed by a delete, which can half-fail.
                 // The user is told before it starts.
-                let go = if self.yes_to_all {
+                let go = if self.cross_all {
                     true
                 } else {
                     match self.ask(Question::CrossDevice {
@@ -727,7 +768,7 @@ impl Worker {
                     }) {
                         Answer::Yes => true,
                         Answer::YesToAll => {
-                            self.yes_to_all = true;
+                            self.cross_all = true;
                             true
                         }
                         Answer::Skip | Answer::SkipAll => false,
@@ -770,7 +811,7 @@ impl Worker {
                     return;
                 }
                 Err(e) => {
-                    let answer = if self.yes_to_all {
+                    let answer = if self.trash_all {
                         Answer::Yes
                     } else {
                         self.ask(Question::TrashUnavailable {
@@ -780,7 +821,7 @@ impl Worker {
                     };
                     match answer {
                         Answer::Yes => {}
-                        Answer::YesToAll => self.yes_to_all = true,
+                        Answer::YesToAll => self.trash_all = true,
                         Answer::Skip | Answer::SkipAll => {
                             self.sum.skipped += 1;
                             return;
@@ -910,6 +951,19 @@ pub fn remove_tree(p: &Path) -> io::Result<()> {
     } else {
         fs::remove_file(p)
     }
+}
+
+/// A temporary name beside `dst` to write a replacement under: hidden, and unique to
+/// this process and call, so two jobs never share one.
+pub(crate) fn part_name(dst: &Path) -> PathBuf {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let name = dst
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let dir = dst.parent().unwrap_or(Path::new("."));
+    dir.join(format!(".{name}.xdevcmd-part-{}-{n}", std::process::id()))
 }
 
 /// Tests put a path here to have a file appear at it between the check that found the
@@ -1310,6 +1364,99 @@ mod tests {
         assert_eq!(fs::read(root.join("g")).unwrap(), b"ours");
         assert_eq!(fs::read(other.join("g")).unwrap(), b"theirs");
         fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_replacement_cancelled_part_way_keeps_the_old_file() {
+        let root = tmp("replace-cancel");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("f"), vec![7u8; 1 << 20]).unwrap();
+        fs::write(dst.join("f"), b"old").unwrap();
+        let h = start(Request::copy(vec![root.join("f")], dst.clone()));
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                // Agree to overwrite, and cancel at once: the copy stops before it is
+                // complete.
+                Event::Ask(_) => {
+                    h.cancel();
+                    h.answer(Answer::Yes);
+                }
+                Event::Done(_) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            fs::read(dst.join("f")).unwrap(),
+            b"old",
+            "the old file is intact"
+        );
+        let left: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left.len(), 1, "no temporary file left behind: {left:?}");
+        // Not cancelled, the replacement lands whole.
+        let (s, _) = run_with(
+            Request::copy(vec![root.join("f")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read(dst.join("f")).unwrap().len(), 1 << 20);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn overwrite_all_does_not_also_agree_to_copy_then_delete() {
+        let Some(other) = other_device("split") else {
+            return;
+        };
+        let root = tmp("split-all");
+        fs::write(root.join("a"), b"A").unwrap();
+        fs::write(root.join("b"), b"B").unwrap();
+        fs::write(other.join("a"), b"theirs").unwrap();
+        // "Overwrite all" at a's question; b's copy-then-delete is still asked about.
+        let (_, asked) = run_answering(
+            Request::mv(vec![root.join("a"), root.join("b")], other.clone()),
+            |q| match q {
+                Question::Conflict { .. } => Answer::YesToAll,
+                _ => Answer::Yes,
+            },
+        );
+        let cross = asked
+            .iter()
+            .filter(|q| q.starts_with("CrossDevice"))
+            .count();
+        assert_eq!(cross, 2, "{asked:?}");
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_sync_replaces_only_what_its_plan_named() {
+        let root = tmp("sync-planned");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("a"), b"new a").unwrap();
+        fs::write(root.join("b"), b"new b").unwrap();
+        fs::write(dst.join("a"), b"old a").unwrap();
+        // a is a planned overwrite; b was free, and a file takes its name meanwhile.
+        APPEAR.lock().unwrap().push(dst.join("b"));
+        let (_, asked) = run_with(
+            Request::sync(vec![
+                (root.join("a"), dst.clone()),
+                (root.join("b"), dst.clone()),
+            ]),
+            Answer::Skip,
+        );
+        assert_eq!(
+            asked, 1,
+            "only b, which the plan did not name, is asked about"
+        );
+        assert_eq!(fs::read(dst.join("a")).unwrap(), b"new a");
+        assert_eq!(fs::read(dst.join("b")).unwrap(), b"theirs");
         fs::remove_dir_all(&root).unwrap();
     }
 

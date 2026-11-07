@@ -365,9 +365,12 @@ fn shift_f8_warns_then_deletes_for_real() {
     xdevcmd.send(SHIFT_F8);
     // The thing the Python harness could never match: its byte stream had no spaces.
     xdevcmd.wait_for("This cannot be undone.");
-    assert!(victim.exists(), "not before Enter");
-
+    // Enter, out of habit, does not do it: Y does.
     xdevcmd.send(ENTER);
+    xdevcmd.wait_for("press Y to delete permanently");
+    assert!(victim.exists(), "not on Enter");
+
+    xdevcmd.send(b"y");
     wait_file(&victim, "deleted", |c| c.is_none());
     assert!(
         !s.0.join("data/Trash").exists(),

@@ -35,7 +35,8 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - **Ctrl+L** or **Ctrl+G** goes to a path you type. **Tab** completes it.
 - **Alt+,** and **Alt+.** go back and forward. **Alt+↓** (or **Alt+J**) lists where you have been.
 - **Ctrl+D** is the hotlist: your bookmarks. You can add the current directory there.
-- Panes refresh by themselves when files change on disk.
+- Panes refresh by themselves when files change on disk: the system tells xdevcmd, and
+  on network drives it checks now and then.
 
 ## Selecting
 
@@ -71,11 +72,19 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - Where nothing can be opened on a screen — over SSH or without a desktop, unless
   `[commands] opener` is set, and always in read-only mode — Enter views the file
   instead and says why. `enter = "view"` under `[files]` makes Enter always view.
-- **Ctrl+Z** undoes the last rename (one file or many), move, new directory or new
-  file, after showing what it will do. It checks the disk first: a file renamed since,
-  or a new directory with something in it now, is left alone. Copies and deletes are not
-  undone (your system's trash restores what F8 sent there), and Ctrl+Z says so.
-- xdevcmd always asks before it deletes or overwrites anything.
+- **Ctrl+Z** undoes the last rename (one file or many), move, new directory, new file
+  or delete to the trash (F8 puts things back where they were), after showing what it
+  will do. It checks the disk first: a file renamed since, a name taken again, or a
+  new directory with something in it now, is left alone. Copies and Shift+F8 cannot be
+  undone, and Ctrl+Z says so.
+- xdevcmd always asks before it deletes or overwrites anything. **Shift+F8** deletes
+  only on **Y** (or a click on its button), never on Enter.
+- **F5** / **F6** say what happens to a file already at the destination, and **U**
+  changes it: ask about each (the default); replace it only when yours is newer and
+  skip the same ones (like robocopy); leave them all; or replace them all. At an
+  overwrite question, **U** applies the "only if newer" rule to the rest of the job.
+- A file being replaced stays as it was until its new copy is complete: cancelling
+  part-way leaves the old one.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
 
@@ -105,11 +114,15 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 
 - **Alt+F7** finds files by name, and by text inside if you like. Results open in a new
   tab. Enter goes to a file.
-- **Ctrl+F** shows only the names that match. **Esc** shows everything again.
+- **Ctrl+F** shows only the names that match, best matches first. The letters only
+  need to come in order: `cfg` finds `config.toml`. `*.rs` style wildcards work too.
+  **Esc** shows everything again. `filter = "plain"` under `[files]` matches the text
+  as typed instead.
 - **Alt+K** compares the two panes and marks what the other side is missing or has an
   older copy of. Then **F5** copies it.
 - **Alt+Y** makes two folder trees match. It shows the plan first; nothing happens until
-  you say yes.
+  you say yes. A big tree takes a moment to compare: the status line counts, and
+  **Esc** stops it.
 
 ## Archives
 
@@ -117,6 +130,8 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **F3** reads a file inside. **F5** extracts what you marked to the other pane.
 - **Alt+F5** packs the selection. **Alt+F9** unpacks everything.
 - xdevcmd does not change an archive in place.
+- Unpacking refuses an archive that would not fit, or that would grow to far more than
+  its own size (over 1 GB at more than 1000 times), as a "zip bomb" would.
 
 ## The terminal
 

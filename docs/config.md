@@ -38,7 +38,9 @@ sort = "name"             # name | ext | size | modified
 reverse = false           # the other way round
 dirs_first = true         # directories before files
 max_panes = 3             # how many file panes you can split into (2-16)
-auto_refresh_ms = 1000    # how often panes look for changes; 0 = never, or 100-60000
+auto_refresh_ms = 1000    # how often panes look for changes where the system cannot tell
+                          # (network drives; 10 times less often where it can); 0 = never
+filter = "fuzzy"          # Ctrl+F: fuzzy (letters in order, best first) or plain
 ls_colors = false         # use your $LS_COLORS
 icons = false             # file icons; needs a Nerd Font
 git_status = false        # a git letter per file; runs git (see security.md)

@@ -30,6 +30,18 @@ packaged version carries them.
 - [x] Added after a check for what else fits 0.2.1 (owner: "add both, ARM",
       2026-11-08): F5/F6 never overwrite a file that appears meanwhile; libraries at
       their latest patch releases; a 64-bit ARM Linux build, and CI tests on ARM.
+- [x] From the algorithm review (owner: "Yes, fix it. Enter guard. các mục 1,2,3. Riêng
+      mục 4, tính năng copy … giống robocopy? lọc fuzzy", 2026-11-08):
+      - [x] A move across devices no longer deletes what was skipped (data loss).
+      - [x] Shift+F8: Enter never confirms; Y or a click does; first names listed.
+      - [x] Replacing a file through a temporary name (copy and extraction); "all"
+            answers per question; sync replaces only planned files; unpack never through
+            a link, with bomb and free-space limits.
+      - [x] Linux trash by the spec (record first, a link's own path, per volume) and
+            undo of a delete to the trash on Linux, macOS and Windows.
+      - [x] Alt+Y's compare and picture decoding off the drawing thread; bounded,
+            hard-link-aware, one-file-system directory sizes; `notify` watching.
+      - [x] F5/F6 "replace only if older" (robocopy); a fuzzy Ctrl+F filter.
 - [ ] By hand, by the owner: the logo on Terminal.app, iTerm2, Windows Terminal and the
       old console; the batch-file refusal on Windows; Enter opening files on Linux and
       Windows.
@@ -100,6 +112,20 @@ packaged version carries them.
   native, since nothing on Linux compiles C; the CI test matrix gains the same runner,
   its artifact named `…-Linux-ARM64-…` so the two Linux artifacts do not clash.
 
+- 2026-11-08, the algorithm review's fixes (memory:
+  `2026-11-08-algorithm-review.md`). The move bug was reproduced with a throwaway test
+  (home disk → `/dev/shm`: `done=2 skipped=1 failed=0`, the skipped file gone) before
+  fixing; the fix removes each source in `copy_node` once `sum.done` rose for it, and a
+  directory with `remove_dir` once empty. The Enter guard also broke the pty test that
+  deleted with Enter; it now sends Y. macOS's trash undo calls `trashItemAtURL` through
+  `objc2-foundation`, which binds it safely, so the crate keeps `forbid(unsafe_code)`;
+  whether macOS lets a terminal program move an item out of `~/.Trash` without Full
+  Disk Access is not known here, and the message points at Put Back if not. `notify` is
+  CC0-1.0, added to `deny.toml` and `about.toml`. The watcher's first pty test failed:
+  the file was made between the first frame and the watch, so a newly watched directory
+  is now looked at once. The fuzzy score is our own small fzf-like scorer, no
+  dependency.
+
 ## Check
 
 - [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
@@ -126,7 +152,12 @@ packaged version carries them.
       Usage now stays near one a second when idle ("mình confirm đã okay số frame, logo
       on macOS"). Measured here too, with strace: 10 terminal writes in 10 idle seconds
       with Usage open, against 220 in 0.2.0.
-- [ ] Not verified: the logo on a real Mac or Windows screen (only Linux, and the
+- [x] After the review's fixes: fmt, clippy (Linux, and the macOS and Windows targets
+      from Linux), `cargo test --workspace`: core 146, tui 131 + 147 render + 33 pty,
+      all pass. Idle CPU with the watcher: 0.4 %.
+- [ ] Not verified: undo from the macOS Trash and the Windows Recycle Bin on real
+      machines; the watcher on macOS and Windows (CI runs the pty test there); the
+      logo on a real Mac or Windows screen (only Linux, and the
       plain-text screenshot cannot show colours); the archive layout, until a release
       build runs.
 

@@ -89,6 +89,12 @@ những việc kế tiếp"), in this order:
    AUR account.
 3. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
    after 2, so a reader can install with one command.
+   **Also in 0.2.1, from the algorithm review** (owner, 2026-11-08; details in
+   `.agents/memory/2026-11-08-algorithm-review.md`): the cross-device move data-loss fix,
+   Shift+F8 on Y only, whole-file replacement, per-question "all", safe unpacking, the
+   Linux trash by the spec, undo of a delete to the trash (item 16), background compare
+   and decoding, bounded directory sizes, `notify` watching (item 17), robocopy-style
+   "replace only if older" (item 18) and a fuzzy filter (item 19).
 4. **Settings shows built-in and your own, for themes and keys** (items 4c and 5b):
    - Theme tab: the list in two parts, built in and yours (with the folder each file
      came from), and a "Make my copy" button that writes the chosen theme into
@@ -163,6 +169,13 @@ Rounds 001 and 003–009; the read-only finding in
 | 5c | Ctrl+G beside Ctrl+L to go to a path | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test |
 | 14 | An app to click: launchers on Windows and macOS (14a); perhaps its own window (14b) | S / L–XL | — | deferred until there is a real need (owner) |
 | 15 | Idle CPU near zero: redraw only on change (measured about 5 % of a core) | S–M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` (0.2–0.5 %), owner to test |
+| 16 | Undo a delete to the trash (Linux, macOS, Windows); Linux trash by the spec, per volume | M | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test on Mac and Windows |
+| 17 | Directory watching with the system's events, polling as fallback | M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
+| 18 | Copy/move "replace only if older" (robocopy) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
+| 19 | Fuzzy Ctrl+F filter, best first | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
+| 20 | Sharp image previews: Kitty, iTerm2, sixel via `ratatui-image`, half blocks as fallback | M | — | proposed; Terminal.app has none |
+| 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
+| 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

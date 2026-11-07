@@ -431,8 +431,11 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     let size = |p: &xdevcmd_core::image::Picture| (p.width as u16 + 2, p.height.div_ceil(2) as u16);
     let fits = |p: &&xdevcmd_core::image::Picture| {
         let (pw, ph) = size(p);
-        // With two cells to spare all round: a dialog, not the whole screen.
-        text_w + pw + 4 <= area.width && (shown as u16).max(ph) + 8 <= area.height
+        // The dialog takes at most 70% of the window each way: a larger logo only
+        // where the window is large, so the picture never crowds out the window.
+        let (w, h) = (text_w + pw, (shown as u16).max(ph) + 4);
+        u32::from(w) * 10 <= u32::from(area.width) * 7
+            && u32::from(h) * 10 <= u32::from(area.height) * 7
     };
     // The largest that fits; in a window too small for any, the smallest.
     let picture = a.pictures.iter().find(fits).or(a.pictures.last());

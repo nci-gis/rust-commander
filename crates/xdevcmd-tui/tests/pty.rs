@@ -355,6 +355,36 @@ fn copying_over_a_file_asks_first_then_overwrites() {
 }
 
 #[test]
+fn a_file_made_by_another_program_shows_up_at_once() {
+    let s = Scratch::new("watch");
+    s.file("left/first.txt", "x");
+    let xdevcmd = Session::start(&s, None);
+    xdevcmd.wait_for("first ");
+    // Made outside xdevcmd. The system's watcher reports it at once; polling, when
+    // watching works, is ten times slower than the 1 s default, so two seconds tell
+    // the two apart.
+    let t = Instant::now();
+    s.file("left/arrived.txt", "y");
+    xdevcmd.wait_for("arrived ");
+    assert!(
+        t.elapsed() < Duration::from_secs(2),
+        "took {:?}",
+        t.elapsed()
+    );
+    // Well after the watch began, so only the watcher can bring it this fast.
+    std::thread::sleep(Duration::from_millis(500));
+    let t = Instant::now();
+    s.file("left/later.txt", "z");
+    xdevcmd.wait_for("later ");
+    assert!(
+        t.elapsed() < Duration::from_secs(2),
+        "took {:?}",
+        t.elapsed()
+    );
+    xdevcmd.quit();
+}
+
+#[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");
     let victim = s.file("left/victim.txt", "x");

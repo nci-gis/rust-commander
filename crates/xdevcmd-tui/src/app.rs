@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -238,6 +238,14 @@ pub struct App {
     hashing: Option<(PathBuf, Receiver<std::io::Result<Option<String>>>)>,
     /// Alt+Y's deep compare, on a thread of its own: Esc stops it.
     comparing: Option<Comparing>,
+    /// The system's directory watcher (interactive runs only; tests poll).
+    watcher: Option<crate::watch::Watcher>,
+    /// Each shown directory's canonical path, as the watcher reports it.
+    canonical: HashMap<PathBuf, PathBuf>,
+    /// Panes whose directory changed, to re-read when no dialog or drag is up.
+    to_reload: HashSet<PaneId>,
+    /// Panes whose directory has just begun to be watched, to look at once.
+    to_check: HashSet<PaneId>,
     /// A file extracted from an archive so F3 can show it; removed when the viewer
     /// closes.
     view_temp: Option<PathBuf>,
@@ -346,6 +354,10 @@ impl App {
             quick_view: None,
             hashing: None,
             comparing: None,
+            watcher: None,
+            canonical: HashMap::new(),
+            to_reload: HashSet::new(),
+            to_check: HashSet::new(),
             view_temp: None,
             jobs: Vec::new(),
             quick_image: None,
@@ -582,6 +594,7 @@ impl App {
 
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
+        self.watcher = crate::watch::Watcher::new();
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
@@ -674,6 +687,7 @@ impl App {
         let quiet = self.modal.is_none() && self.drag.is_none();
         let every = Duration::from_millis(self.settings.config.files.auto_refresh_ms);
         let shown: Vec<PaneId> = self.rects.iter().map(|(id, _)| *id).collect();
+        self.watch_panes(&shown, every);
         for (id, p) in self.panes.iter_mut() {
             if let Some(t) = p.as_tabs_mut() {
                 for f in t.tabs_mut() {
@@ -695,7 +709,23 @@ impl App {
                     }
                 }
                 if quiet && shown.contains(id) {
-                    changed |= t.active_mut().poll_changes(every);
+                    let f = t.active_mut();
+                    if self.to_reload.remove(id) {
+                        f.reload();
+                        changed = true;
+                    } else if self.to_check.remove(id) {
+                        // Just watched: a change from before the watch began.
+                        changed |= f.check_now();
+                    } else {
+                        // Watched: the system says when it changes, and polling is only
+                        // the safety net for what sends no events (network drives).
+                        let watched = self
+                            .watcher
+                            .as_ref()
+                            .zip(self.canonical.get(&f.cwd))
+                            .is_some_and(|(w, c)| w.watching(c));
+                        changed |= f.poll_changes(if watched { every * 10 } else { every });
+                    }
                 }
             }
         }
@@ -4995,6 +5025,45 @@ impl App {
             ops::Kind::Extract => Undo::Cannot("an extraction".into()),
             ops::Kind::Pack => Undo::Cannot("packing".into()),
         });
+    }
+
+    /// Keep the system watching the directories on screen, and note the panes whose
+    /// directory it says changed; they re-read on the next quiet moment.
+    fn watch_panes(&mut self, shown: &[PaneId], every: Duration) {
+        let Some(w) = self.watcher.as_mut() else {
+            return;
+        };
+        let mut dirs = HashSet::new();
+        let mut owners: Vec<(PaneId, PathBuf)> = Vec::new();
+        if !every.is_zero() {
+            for id in shown {
+                let Some(f) = self.panes.get(id).and_then(Pane::as_files) else {
+                    continue;
+                };
+                if f.archive.is_some() || f.results.is_some() {
+                    continue;
+                }
+                // The system reports canonical paths (macOS's /tmp is /private/tmp).
+                let canon = self
+                    .canonical
+                    .entry(f.cwd.clone())
+                    .or_insert_with(|| f.cwd.canonicalize().unwrap_or_else(|_| f.cwd.clone()))
+                    .clone();
+                dirs.insert(canon.clone());
+                owners.push((*id, canon));
+            }
+        }
+        let new = w.sync(&dirs);
+        let changed = w.changed();
+        for (id, canon) in owners {
+            if changed.contains(&canon) {
+                self.to_reload.insert(id);
+            } else if new.contains(&canon) {
+                self.to_check.insert(id);
+            }
+        }
+        // Forget what is no longer shown, so the map does not grow without end.
+        self.canonical.retain(|_, c| dirs.contains(c));
     }
 
     /// A delete to the trash has finished: if it is still the last operation, undo

@@ -32,6 +32,7 @@ mod theme;
 mod usage;
 mod usermenu;
 mod viewer;
+mod watch;
 
 use std::io::stdout;
 use std::path::PathBuf;

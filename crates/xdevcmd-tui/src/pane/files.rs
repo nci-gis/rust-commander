@@ -486,11 +486,15 @@ impl FilePane {
     /// Re-read the directory if it changed since it was last looked at, at most once
     /// per `every`. Returns whether it did.
     pub fn poll_changes(&mut self, every: Duration) -> bool {
-        if self.results.is_some()
-            || self.archive.is_some()
-            || every.is_zero()
-            || self.checked.0.elapsed() < every
-        {
+        if every.is_zero() || self.checked.0.elapsed() < every {
+            return false;
+        }
+        self.check_now()
+    }
+
+    /// Look now whether the directory changed, and re-read it if so. True when it did.
+    pub fn check_now(&mut self) -> bool {
+        if self.results.is_some() || self.archive.is_some() {
             return false;
         }
         let mtime = dir_mtime(&self.cwd);

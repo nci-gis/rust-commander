@@ -3110,14 +3110,10 @@ fn logo_size(s: &str) -> (usize, usize) {
 }
 
 #[test]
-fn about_draws_the_largest_logo_the_window_has_room_for() {
+fn about_draws_a_small_logo_beside_the_text() {
     let (a, b) = fixture();
-    for (size, logo) in [
-        ("80x24", (24, 12)),
-        ("100x34", (32, 16)),
-        ("120x40", (48, 24)),
-        ("160x50", (64, 32)),
-    ] {
+    // One small logo, about as tall as the text, whatever the window.
+    for (size, logo) in [("80x24", (14, 7)), ("170x52", (14, 7))] {
         let s = shot_keys(size, "F9,Left,Up,Enter", &a, &b);
         assert!(
             s.contains("No network, no telemetry"),

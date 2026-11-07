@@ -18,6 +18,11 @@ tar = { version = "0.4.46", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 zune-jpeg = "0.5.15"
 
+# O_NONBLOCK, to open a picture someone else may swap for a FIFO without hanging
+# (quick view). Already in the tree through ratatui.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Windows' Recycle Bin and macOS' Trash are OS APIs, not a directory you can rename
 # into, so they get a crate. Linux keeps the implementation in ops.rs: it is tested
 # here, it takes an injectable root so tests never touch the real trash, and when it

@@ -41,14 +41,8 @@ fn too_big(w: u64, h: u64) -> io::Result<()> {
 /// Decode `path` and shrink it to fit `max_w` × `max_h` pixels, keeping its shape.
 /// Transparency is laid over `bg`.
 pub fn load(path: &Path, max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<Picture> {
-    // Only a regular file, links followed: a FIFO named x.png would block the read
-    // forever, and /dev/zero behind z.jpg never ends — and both report a size of 0.
-    let meta = fs::metadata(path)?;
-    if !meta.is_file() {
-        return Err(io::Error::other(
-            "not a regular file \u{2014} not previewed",
-        ));
-    }
+    let file = open_regular(path)?;
+    let meta = file.metadata()?;
     if meta.len() > MAX_FILE {
         return Err(io::Error::other(
             "larger than 64 MiB \u{2014} not previewed",
@@ -60,9 +54,9 @@ pub fn load(path: &Path, max_w: usize, max_h: usize, bg: [u8; 3]) -> io::Result<
         .unwrap_or("")
         .to_ascii_lowercase();
     let (w, h, px) = if ext == "png" {
-        png(BufReader::new(fs::File::open(path)?), bg)?
+        png(BufReader::new(file), bg)?
     } else {
-        jpeg(path)?
+        jpeg(file)?
     };
     Ok(shrink(w, h, &px, max_w.max(1), max_h.max(1)))
 }
@@ -125,15 +119,33 @@ fn png<R: io::BufRead + io::Seek>(r: R, bg: [u8; 3]) -> io::Result<(usize, usize
     Ok((w as usize, h as usize, px))
 }
 
-fn jpeg(path: &Path) -> io::Result<(usize, usize, Vec<[u8; 3]>)> {
+/// Open `path` only if it is a regular file, links followed: a FIFO named x.png would
+/// block the read forever, and /dev/zero behind z.jpg never ends — and both report a
+/// size of 0. Checked on the open handle, not by name beforehand, so the file cannot be
+/// swapped in between; opened without blocking, so a FIFO cannot hang the open itself.
+fn open_regular(path: &Path) -> io::Result<fs::File> {
+    let mut o = fs::OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
+    }
+    let f = o.open(path)?;
+    if !f.metadata()?.is_file() {
+        return Err(io::Error::other(
+            "not a regular file \u{2014} not previewed",
+        ));
+    }
+    Ok(f)
+}
+
+fn jpeg(file: fs::File) -> io::Result<(usize, usize, Vec<[u8; 3]>)> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
     // Bounded as it is read, not only by the size reported beforehand.
     let mut data = Vec::new();
-    io::Read::read_to_end(
-        &mut io::Read::take(fs::File::open(path)?, MAX_FILE + 1),
-        &mut data,
-    )?;
+    io::Read::read_to_end(&mut io::Read::take(file, MAX_FILE + 1), &mut data)?;
     if data.len() as u64 > MAX_FILE {
         return Err(io::Error::other(
             "larger than 64 MiB \u{2014} not previewed",
@@ -210,6 +222,15 @@ mod tests {
         // A device behind a picture's name: it would be read until memory ran out.
         std::os::unix::fs::symlink("/dev/zero", d.join("z.jpg")).unwrap();
         let e = load(&d.join("z.jpg"), 10, 10, [0, 0, 0]).unwrap_err();
+        assert!(e.to_string().contains("not a regular file"), "{e}");
+        // A FIFO under a picture's name: opening it to read would wait for a writer
+        // forever. Refused at once instead.
+        let made = std::process::Command::new("mkfifo")
+            .arg(d.join("x.png"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let e = load(&d.join("x.png"), 10, 10, [0, 0, 0]).unwrap_err();
         assert!(e.to_string().contains("not a regular file"), "{e}");
         let _ = fs::remove_dir_all(&d);
     }

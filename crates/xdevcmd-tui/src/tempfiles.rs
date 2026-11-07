@@ -18,22 +18,51 @@ const RUN_PREFIX: &str = "xdevcmd-run-";
 const MARKER: &str = ".xdevcmd-alive";
 /// A run whose marker is older than this has ended.
 const STALE: Duration = Duration::from_secs(60 * 60);
-/// How often a running xdevcmd refreshes its marker: well inside `STALE`.
-const TOUCH_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How often a running xdevcmd refreshes its marker: well inside `STALE`, and often
+/// enough that waking from sleep — when the thread's monotonic clock has stood still
+/// and the marker's wall-clock time is hours old — leaves it stale for seconds only.
+const TOUCH_EVERY: Duration = Duration::from_secs(30);
 
 static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// What the directory was when this run made it (device and inode on Unix), to tell
+/// it from one made later under the same name.
+static IDENTITY: OnceLock<Option<(u64, u64)>> = OnceLock::new();
+
+fn identity(p: &Path) -> Option<(u64, u64)> {
+    let m = std::fs::symlink_metadata(p).ok().filter(|m| m.is_dir())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((m.dev(), m.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        // The temporary directory on Windows is the user's own (under the profile).
+        let _ = m;
+        Some((0, 0))
+    }
+}
+
+/// Whether `d` is still the directory this run made: a real directory, the same one.
+fn ours(d: &Path) -> bool {
+    matches!((IDENTITY.get(), identity(d)), (Some(Some(a)), Some(b)) if *a == b)
+}
 
 /// This run's directory, made on first use, with the thread that keeps its marker
 /// fresh. `None` if it cannot be made.
 pub fn dir() -> Option<PathBuf> {
     DIR.get_or_init(|| {
         let d = make_in(&std::env::temp_dir())?;
-        let marker = d.join(MARKER);
+        let _ = IDENTITY.set(identity(&d));
+        let (dir, marker) = (d.clone(), d.join(MARKER));
         std::thread::spawn(move || loop {
             std::thread::sleep(TOUCH_EVERY);
-            // Rewritten only while it is there: never re-creates a removed directory.
-            if marker.exists() {
-                let _ = std::fs::write(&marker, b"");
+            // Only in the directory this run made, which no one else can write in, and
+            // without creating anything: a removed directory is never made again.
+            if ours(&dir) {
+                if let Ok(f) = std::fs::File::options().write(true).open(&marker) {
+                    let _ = f.set_modified(SystemTime::now());
+                }
             }
         });
         Some(d)
@@ -42,13 +71,11 @@ pub fn dir() -> Option<PathBuf> {
 }
 
 /// A path for `name` in this run's directory — only while that directory is still
-/// the one this run made: a real directory, not a link. If it has gone, nothing is
-/// written in its place, so a directory someone else made under the same name is
-/// never used.
+/// the one this run made (the same directory, not a link, not one made since under
+/// the same name). If it has gone, nothing is written in its place.
 pub fn file(name: &str) -> Option<PathBuf> {
     let d = dir()?;
-    let ok = std::fs::symlink_metadata(&d).is_ok_and(|m| m.is_dir());
-    ok.then(|| d.join(name))
+    ours(&d).then(|| d.join(name))
 }
 
 /// Make a fresh run directory under `base`. `create` fails on anything already there,

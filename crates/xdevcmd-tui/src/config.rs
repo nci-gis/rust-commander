@@ -622,7 +622,15 @@ pub fn named_theme(name: &str) -> Result<Theme, String> {
         return Ok(t);
     }
     // `:` too: on Windows `C:name` would make the join leave the theme directory.
-    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') {
+    // Windows' device names: CON.toml is the console, and reading it waits forever.
+    let device = {
+        let n = name.to_ascii_uppercase();
+        ["CON", "PRN", "AUX", "NUL"].contains(&n.as_str())
+            || ((n.starts_with("COM") || n.starts_with("LPT"))
+                && n.len() == 4
+                && n.as_bytes()[3].is_ascii_digit())
+    };
+    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') || device {
         return Err(format!("[theme] name = \"{name}\": not a theme name"));
     }
     let Some(path) = theme_dirs()

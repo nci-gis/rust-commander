@@ -305,6 +305,53 @@ fn alt_digit_in_the_terminal_picks_the_terminals_tab() {
 }
 
 #[test]
+fn a_click_on_a_directory_in_the_title_goes_there() {
+    let (a, b) = fixture();
+    // The left pane's title is <scratch>/ui-N/a; its parent is named ui-N.
+    let parent = a.parent().unwrap();
+    let name = parent.file_name().unwrap().to_string_lossy().into_owned();
+    let s = shot_keys("110x24", "", &a, &b);
+    let title = s.lines().nth(1).unwrap();
+    let byte = title
+        .find(&format!("{name}{}", std::path::MAIN_SEPARATOR))
+        .unwrap();
+    let x = title[..byte].chars().count() + 1;
+    let s = shot_keys("110x24", &format!("click:{x}:1"), &a, &b);
+    let title = s.lines().nth(1).unwrap();
+    assert!(
+        title.contains(&format!("{name} ")),
+        "the title is the parent now\n{s}"
+    );
+    assert!(s.contains(" a "), "and a is listed in it\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_double_click_on_a_border_shares_it_evenly() {
+    let (a, b) = fixture();
+    let border = |s: &str| {
+        s.lines()
+            .nth(1)
+            .and_then(|l| l.find("\u{2510}\u{250c}"))
+            .map(|byte| s.lines().nth(1).unwrap()[..byte].chars().count())
+            .unwrap()
+    };
+    let even = border(&shot_keys("110x24", "", &a, &b));
+    let moved = shot_keys("110x24", &format!("drag:{even}:5:80:5"), &a, &b);
+    let x = border(&moved);
+    assert!(x > even + 10, "the drag moved it\n{moved}");
+    let back = shot_keys(
+        "110x24",
+        &format!("drag:{even}:5:80:5,click:{x}:5,click:{x}:5"),
+        &a,
+        &b,
+    );
+    assert_eq!(border(&back), even, "evened\n{back}");
+    assert!(back.contains("shared evenly"), "{back}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_group_stays_open_until_a_key_outside_it() {
     // No timeout: while the hint is up, arrows resize; after another key, they do not.
     let (a, b) = fixture();
@@ -1791,6 +1838,35 @@ fn the_root_holds_against_dotdot_backspace_and_symlinks() {
             assert!(!s.contains("Open with"), "{keys}: no menu for it\n{s}");
         }
     }
+    #[cfg(unix)]
+    {
+        // An archive reached through a link out of the root is not opened or unpacked,
+        // and Shift+F4 on a name that is a link out does not edit its target.
+        let outside = a.parent().unwrap().join("outside.zip");
+        fs::copy(a.join("keep.txt"), &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, a.join("inner/out.zip")).unwrap();
+        let s = shot_flags(&flags, "Enter,End,Enter", &a, &b);
+        assert!(s.contains("outside the root"), "entering it\n{s}");
+        let s = shot_flags(&flags, "Enter,End,A-F9", &a, &b);
+        assert!(s.contains("outside the root"), "unpacking it\n{s}");
+        let s = shot_flags(
+            &flags,
+            "Enter,S-F4,BS,BS,BS,BS,BS,BS,BS,BS,l,e,a,k,.,t,x,t,Enter",
+            &a,
+            &b,
+        );
+        assert!(
+            s.contains("outside the root"),
+            "Shift+F4 on a link out\n{s}"
+        );
+    }
+    // Alt+F5 packs only inside the root.
+    let s = shot_flags(&flags, "Down,A-F5,C-u,.,.,/,o,u,t,.,z,i,p,Enter", &a, &b);
+    assert!(s.contains("outside the root"), "packing out\n{s}");
+    assert!(
+        !a.parent().unwrap().join("out.zip").exists(),
+        "packed outside"
+    );
     for name in ["../made-outside", "inner/../../made-outside"] {
         let keys = format!(
             "F7,{},Enter",
@@ -2182,6 +2258,14 @@ fn enter_opens_only_known_documents_without_asking() {
     );
     let s = shot_keys("110x24", "Down,Down,Down,Enter", &a, &b);
     assert!(s.contains("Run it?"), "c.exe runs something\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_configured_opener_still_asks_for_a_type_it_does_not_know() {
+    let (a, b) = files(&["b.zzz"]);
+    let s = shot_cfg_env("[commands]\nopener = \"less\"\n", &[], "Down,Enter", &a, &b);
+    assert!(s.contains("Open it?"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

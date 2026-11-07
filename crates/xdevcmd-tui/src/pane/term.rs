@@ -623,19 +623,16 @@ fn is_batch(p: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"))
 }
 
-/// The batch file `program` will start, if it is one, found as portable-pty finds it
-/// on Windows: the name as given in each `PATH` directory, then with each `PATHEXT`
-/// extension — so a rule's `npm` is `npm.cmd`.
+/// The batch file `program` will start, if it is one, found in the order portable-pty
+/// finds it on Windows: in each `PATH` directory, the name as given and then with each
+/// `PATHEXT` extension in its place; the name itself only when no directory has it. So
+/// a rule's `npm` is `npm.cmd`, and its `npm.cmd` is `C:\Program Files\nodejs\npm.cmd`.
 fn resolves_to_batch(
     program: &std::ffi::OsStr,
     path: Option<&std::ffi::OsStr>,
     pathext: Option<&std::ffi::OsStr>,
 ) -> Option<std::path::PathBuf> {
     let program = Path::new(program);
-    if is_batch(program) {
-        return Some(program.to_path_buf());
-    }
-    let path = path?;
     let exts: Vec<String> = pathext
         .map(|e| {
             std::env::split_paths(e)
@@ -643,19 +640,20 @@ fn resolves_to_batch(
                 .collect()
         })
         .unwrap_or_else(|| vec!["EXE".into()]);
-    for dir in std::env::split_paths(path) {
-        let exact = dir.join(program);
-        if exact.exists() {
-            return is_batch(&exact).then_some(exact);
-        }
-        for ext in &exts {
-            let c = dir.join(program).with_extension(ext);
-            if c.exists() {
-                return is_batch(&c).then_some(c);
+    let found = path
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .find_map(|dir| {
+            let exact = dir.join(program);
+            if exact.exists() {
+                return Some(exact);
             }
-        }
-    }
-    None
+            exts.iter()
+                .map(|ext| dir.join(program).with_extension(ext))
+                .find(|c| c.exists())
+        });
+    let run = found.unwrap_or_else(|| program.to_path_buf());
+    is_batch(&run).then_some(run)
 }
 
 /// Why `argv` may not run in a terminal tab, if it may not. On Windows a batch file is
@@ -747,6 +745,23 @@ mod batch_tests {
         let spaced = argv(&["C:\\Program Files\\x\\npm.cmd", "a.txt"]);
         let why = batch_refusal(&spaced, true, None, None);
         assert!(why.is_some_and(|w| w.contains("space")));
+        // A bare batch name is looked for in PATH first, as the pty library does.
+        let dir = std::env::temp_dir().join(format!("xdevcmd-batch-sp ace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("npm.cmd"), "").unwrap();
+        let path = std::env::join_paths([&dir]).unwrap();
+        let why = batch_refusal(
+            &argv(&["npm.cmd", "a.txt"]),
+            true,
+            Some(path.as_os_str()),
+            None,
+        );
+        assert!(
+            why.is_some_and(|w| w.contains("space")),
+            "found in a folder with a space"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
         // Only Windows runs batch files through cmd.exe.
         assert_eq!(batch_refusal(&run, false, None, None), None);
     }

@@ -200,6 +200,94 @@ impl Node {
         b.dividers_inner(parts[1], out, n);
     }
 
+    /// Share the boundary numbered `id` evenly between the two panes on either side of
+    /// it, leaving every other pane along that line as it was. With three panes side by
+    /// side, a double-click between the first two makes those two the same width and
+    /// does not touch the third. "A pane" here is whatever sits whole against the
+    /// boundary: a stack of panes split the other way counts as one.
+    pub fn even(&mut self, id: usize) -> bool {
+        let mut n = 0;
+        self.even_inner(id, &mut n)
+    }
+
+    fn even_inner(&mut self, id: usize, n: &mut usize) -> bool {
+        let Node::Split { axis, a, b, .. } = self else {
+            return false;
+        };
+        if *n != id {
+            *n += 1;
+            return a.even_inner(id, n) || b.even_inner(id, n);
+        }
+        let axis = *axis;
+        // The pieces along this line, as shares of the split's extent: the same-axis
+        // splits flattened, each piece a pane or a stack.
+        let mut sizes = Vec::new();
+        self.pieces(axis, 1.0, &mut sizes);
+        let Node::Split { a, .. } = &*self else {
+            return false;
+        };
+        let left = a.count_pieces(axis);
+        let (i, j) = (left - 1, left);
+        let mean = (sizes[i] + sizes[j]) / 2.0;
+        sizes[i] = mean;
+        sizes[j] = mean;
+        self.set_pieces(axis, &sizes, &mut 0);
+        true
+    }
+
+    /// The pieces along `axis` under this node, each as its share of `share`.
+    fn pieces(&self, axis: Axis, share: f64, out: &mut Vec<f64>) {
+        match self {
+            Node::Split {
+                axis: ax,
+                pct,
+                a,
+                b,
+                ..
+            } if *ax == axis => {
+                let p = f64::from((*pct).clamp(10, 90)) / 100.0;
+                a.pieces(axis, share * p, out);
+                b.pieces(axis, share * (1.0 - p), out);
+            }
+            _ => out.push(share),
+        }
+    }
+
+    fn count_pieces(&self, axis: Axis) -> usize {
+        match self {
+            Node::Split { axis: ax, a, b, .. } if *ax == axis => {
+                a.count_pieces(axis) + b.count_pieces(axis)
+            }
+            _ => 1,
+        }
+    }
+
+    /// Set the same-axis splits under this node so that its pieces have `sizes`, read
+    /// from `at`; returns the total of the pieces it used.
+    fn set_pieces(&mut self, axis: Axis, sizes: &[f64], at: &mut usize) -> f64 {
+        match self {
+            Node::Split {
+                axis: ax,
+                pct,
+                a,
+                b,
+                ..
+            } if *ax == axis => {
+                let sa = a.set_pieces(axis, sizes, at);
+                let sb = b.set_pieces(axis, sizes, at);
+                if sa + sb > 0.0 {
+                    *pct = ((sa * 100.0 / (sa + sb)).round() as u16).clamp(10, 90);
+                }
+                sa + sb
+            }
+            _ => {
+                let v = sizes[*at];
+                *at += 1;
+                v
+            }
+        }
+    }
+
     /// Set the split numbered `id` (pre-order, as [`Node::dividers`] numbers them).
     pub fn set_pct(&mut self, id: usize, pct: u16) -> bool {
         let mut n = 0;
@@ -247,6 +335,60 @@ impl Divider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn widths(n: &Node, w: u16) -> Vec<u16> {
+        let mut out = Vec::new();
+        n.assign(Rect::new(0, 0, w, 10), &mut out);
+        out.iter().map(|(_, r)| r.width).collect()
+    }
+
+    #[test]
+    fn evening_a_boundary_shares_only_its_two_panes() {
+        // Two panes: 70/30 becomes 50/50.
+        let mut n = Node::split(Axis::Cols, 70, Node::Leaf(1), Node::Leaf(2));
+        assert!(n.even(0));
+        assert_eq!(widths(&n, 100), [50, 50]);
+        // Three side by side, A | (B | C) at 20 | 60 | 20: evening A|B makes A and B
+        // the same and leaves C alone.
+        let mut n = Node::split(
+            Axis::Cols,
+            20,
+            Node::Leaf(1),
+            Node::split(Axis::Cols, 75, Node::Leaf(2), Node::Leaf(3)),
+        );
+        assert_eq!(widths(&n, 100), [20, 60, 20]);
+        assert!(n.even(0));
+        assert_eq!(widths(&n, 100), [40, 40, 20]);
+        // The inner boundary, B|C, leaves A alone.
+        let mut n = Node::split(
+            Axis::Cols,
+            20,
+            Node::Leaf(1),
+            Node::split(Axis::Cols, 75, Node::Leaf(2), Node::Leaf(3)),
+        );
+        assert!(n.even(1));
+        assert_eq!(widths(&n, 100), [20, 40, 40]);
+        // (A | B) | C: the outer boundary is B|C; A keeps its width.
+        let mut n = Node::split(
+            Axis::Cols,
+            80,
+            Node::split(Axis::Cols, 25, Node::Leaf(1), Node::Leaf(2)),
+            Node::Leaf(3),
+        );
+        assert_eq!(widths(&n, 100), [20, 60, 20]);
+        assert!(n.even(0));
+        assert_eq!(widths(&n, 100), [20, 40, 40]);
+        // A stack split the other way counts as one piece.
+        let mut n = Node::split(
+            Axis::Cols,
+            30,
+            Node::Leaf(1),
+            Node::split(Axis::Rows, 50, Node::Leaf(2), Node::Leaf(3)),
+        );
+        assert!(n.even(0));
+        assert_eq!(widths(&n, 100), [50, 50, 50]);
+        assert!(!n.even(5), "no such boundary");
+    }
 
     fn leaves_of(n: &Node) -> Vec<PaneId> {
         let mut v = Vec::new();

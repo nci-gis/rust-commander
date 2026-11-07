@@ -267,9 +267,22 @@ fn main() -> Result<()> {
     });
 
     // A start directory outside the root opens at the root instead.
+    // Directories named relative to where xdevcmd was started are made absolute first:
+    // the title, its clickable path and Backspace all need the whole path.
     let cwd = std::env::current_dir()?;
-    let left = policy::get().clamp(&cli.paths.first().cloned().unwrap_or_else(|| cwd.clone()));
-    let right = policy::get().clamp(&cli.paths.get(1).cloned().unwrap_or(cwd));
+    let absolute = |p: &PathBuf| std::path::absolute(p).unwrap_or_else(|_| cwd.join(p));
+    let left = policy::get().clamp(
+        &cli.paths
+            .first()
+            .map(absolute)
+            .unwrap_or_else(|| cwd.clone()),
+    );
+    let right = policy::get().clamp(
+        &cli.paths
+            .get(1)
+            .map(absolute)
+            .unwrap_or_else(|| cwd.clone()),
+    );
 
     // The last session, unless directories were named or it was declined. Anything
     // wrong with it means a fresh start, never a failure to open.

@@ -40,6 +40,12 @@ Fixed before the tag (each with a test):
   between; now bottom-up `remove_dir`. Settings save checks the mode itself and writes
   through a symlinked config. Theme names refuse `:`.
 
+A second, final review (over the fixes and Round 012) found and this branch fixed:
+Alt+F5 packing outside `--root`; archives reached through a link out of the root;
+Shift+F4 on a link out; a configured opener skipping the "Open it?" question; a FIFO
+swapped in between the check and the open; batch files found on PATH by a bare
+`.cmd` name; the temp directory used by name rather than identity.
+
 ## Open (not fixed in 0.2.0)
 
 - `batch_rename::apply` checks the target is free, then `rename`s, which overwrites a
@@ -49,6 +55,9 @@ Fixed before the tag (each with a test):
 - portable-pty on Unix resolves relative `PATH` entries against the tab's working
   directory (the browsed directory). Only matters with `.` or an empty entry in PATH.
 - The batch-file refusal is unit-tested everywhere but has not been tried on Windows.
+- Active content in documents Enter still opens without asking (PDF, RTF, docx)
+  depends on the viewer's own safety; the allowlist keeps out what runs scripts or
+  macros by design.
 
 ## Evidence
 

@@ -2247,6 +2247,7 @@ version = "0.2.0"
 dependencies = [
  "chrono",
  "flate2",
+ "libc",
  "png",
  "tar",
  "trash",
@@ -2265,6 +2266,7 @@ dependencies = [
  "tar",
  "toml",
  "tui-term",
+ "unicode-width",
  "vt100",
  "winresource",
  "xdevcmd-core",

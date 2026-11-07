@@ -34,6 +34,9 @@ pub struct FilePane {
     /// The scrollbar as last drawn; `None` when everything fits.
     pub bar: Option<crate::scrollbar::Bar>,
     pub header_cells: Vec<(SortKey, Rect)>,
+    /// Each directory named in the title's path, where it was drawn: a click there
+    /// goes to it.
+    pub crumbs: Vec<(Rect, PathBuf)>,
     /// Something the pane refused to do and the user should hear about, collected by
     /// the app into the status line on the next draw.
     pub notice: Option<String>,
@@ -153,6 +156,7 @@ impl FilePane {
             rows_rect: Rect::ZERO,
             bar: None,
             header_cells: Vec::new(),
+            crumbs: Vec::new(),
             notice: None,
             all: Vec::new(),
             filter: None,
@@ -246,6 +250,11 @@ impl FilePane {
     /// Browse `file` as a directory: at once if it is small, else from a thread, with a
     /// notice meanwhile.
     pub fn enter_archive(&mut self, file: &Path) {
+        // A link inside the root to an archive outside it: its contents are outside.
+        if !xdevcmd_core::policy::get().allows(file) {
+            self.notice = Some("that archive is outside the root xdevcmd is confined to".into());
+            return;
+        }
         let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
         if size < LIST_AT_ONCE {
             let listed = archive::list(file);
@@ -639,6 +648,15 @@ impl FilePane {
         }
     }
 
+    /// The directory named in the title under (x, y), if any.
+    pub fn crumb_at(&self, x: u16, y: u16) -> Option<PathBuf> {
+        let p = ratatui::layout::Position::new(x, y);
+        self.crumbs
+            .iter()
+            .find(|(r, _)| r.contains(p))
+            .map(|(_, d)| d.clone())
+    }
+
     pub fn set_cwd(&mut self, path: &Path) {
         self.navigate(path, true);
     }
@@ -946,15 +964,13 @@ impl FilePane {
             .chars()
             .count()
             .min(area.width.saturating_sub(12) as usize / 2);
+        let full = self.cwd.display().to_string();
+        let room = (area.width as usize).saturating_sub(6 + fw);
+        // The title starts one cell in from the corner, after a space.
+        self.crumbs = crumbs(&self.cwd, &full, room, area.x + 2, area.y);
         let mut title = vec![
             Span::styled(" ", border),
-            Span::styled(
-                elide_middle(
-                    &self.cwd.display().to_string(),
-                    (area.width as usize).saturating_sub(6 + fw),
-                ),
-                theme::title_style(active),
-            ),
+            Span::styled(elide_middle(&full, room), theme::title_style(active)),
             Span::styled(" ", border),
         ];
         if fw > 0 {
@@ -1233,9 +1249,104 @@ impl FilePane {
     }
 }
 
+/// Where each directory of `cwd` lands in its title, drawn from `x0` as `full` elided
+/// to `room` characters: one rectangle per name, for the directories above `cwd`. A
+/// name hidden in the elided middle gets none; one cut by it is clickable on what
+/// shows. Measured in cells, as the terminal draws: a CJK character takes two, a
+/// combining accent (as in macOS's decomposed file names) none.
+fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, PathBuf)> {
+    use unicode_width::UnicodeWidthChar;
+    let n = full.chars().count();
+    // Which character of the drawn text character `i` of `full` became, as
+    // elide_middle lays it out.
+    let at = |i: usize| -> Option<usize> {
+        if n <= room {
+            return Some(i);
+        }
+        let keep = room.saturating_sub(1);
+        let head = keep.div_ceil(2);
+        let tail = keep - head;
+        if i < head {
+            Some(i)
+        } else if i >= n - tail {
+            Some(head + 1 + i - (n - tail))
+        } else {
+            None
+        }
+    };
+    // The cell each drawn character starts at, and how wide it is.
+    let mut cells = Vec::new();
+    let mut x = 0usize;
+    for c in elide_middle(full, room).chars() {
+        let w = c.width().unwrap_or(0);
+        cells.push((x, w));
+        x += w;
+    }
+    let cell = |k: usize| cells.get(k).copied();
+    let mut out = Vec::new();
+    let mut prev: Option<usize> = None;
+    let mut dirs: Vec<&Path> = cwd.ancestors().collect();
+    dirs.reverse();
+    for d in dirs {
+        let s = d.display().to_string();
+        if !full.starts_with(&s) {
+            break;
+        }
+        let end = s.chars().count();
+        let start = match prev {
+            None => 0,
+            // After the separator, unless the parent already ends in one ("/", "C:\").
+            Some(p)
+                if full[..]
+                    .chars()
+                    .nth(p.saturating_sub(1))
+                    .is_some_and(std::path::is_separator) =>
+            {
+                p
+            }
+            Some(p) => p + 1,
+        };
+        prev = Some(end);
+        if d == cwd || start >= end {
+            continue;
+        }
+        let shown: Vec<(usize, usize)> = (start..end).filter_map(at).filter_map(cell).collect();
+        if let (Some(a), Some(b)) = (shown.first(), shown.last()) {
+            let w = (b.0 + b.1).saturating_sub(a.0).max(1) as u16;
+            out.push((Rect::new(x0 + a.0 as u16, y, w, 1), d.to_path_buf()));
+        }
+    }
+    out
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn each_directory_in_the_title_is_where_it_was_drawn() {
+        let cwd = Path::new("/home/me/src");
+        let full = "/home/me/src";
+        let c = crumbs(cwd, full, 40, 10, 0);
+        let got: Vec<(u16, u16, &str)> = c
+            .iter()
+            .map(|(r, d)| (r.x, r.width, d.to_str().unwrap()))
+            .collect();
+        // "/" at 10, "home" at 11..15, "me" at 16..18; "src" is where it already is.
+        assert_eq!(got, [(10, 1, "/"), (11, 4, "/home"), (16, 2, "/home/me")]);
+        // Elided to 9 cells, "/hom…/src": "home" is cut but still there, "me" is gone.
+        let c = crumbs(cwd, full, 9, 0, 0);
+        let got: Vec<(u16, u16, &str)> = c
+            .iter()
+            .map(|(r, d)| (r.x, r.width, d.to_str().unwrap()))
+            .collect();
+        assert_eq!(got, [(0, 1, "/"), (1, 3, "/home")]);
+        // Wide characters take two cells each: "日本" is four cells, and "src" after it
+        // starts at cell 6.
+        let c = crumbs(Path::new("/日本/src/x"), "/日本/src/x", 40, 0, 0);
+        let got: Vec<(u16, u16)> = c.iter().map(|(r, _)| (r.x, r.width)).collect();
+        assert_eq!(got, [(0, 1), (1, 4), (6, 3)]);
+    }
     use std::io::Read as _;
 
     fn big_tar(dir: &Path) -> PathBuf {

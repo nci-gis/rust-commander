@@ -29,7 +29,7 @@ file.
 confirm_transfer = true   # ask before copy and move start (delete always asks)
 delete_to_trash = true    # F8 uses the trash; Shift+F8 always deletes for good
 restore_session = true    # reopen last time's panes and tabs
-autosave_secs = 5         # save them this often when they change; 0 = only on quit, or 5-3600
+autosave_secs = 5         # save them this often when they change: 5-3600, or 0 = on quit
 menu_bar = true           # the File | View | Help bar
 
 [files]
@@ -62,11 +62,12 @@ opener = ""               # what o and Enter use; empty: the system's own
 
 Enter on a file opens it as Total Commander does: with the first `[[open]]` rule for its
 extension, else with the system's program (`open`, `explorer.exe`, `xdg-open`, or
-`[commands] opener`). Programs are asked about first.
+`[commands] opener`). Programs, scripts and installers ask "Run it?" first; a type that
+is not a known document asks "Open it?".
 
 ```toml
 [files]
-enter = "open"            # or "view": Enter views files, as in 0.1.0
+enter = "open"            # or "view": Enter views files
 
 [[open]]
 ext = ["txt", "log", "md"]
@@ -118,7 +119,8 @@ Colours set in `[theme]` itself go on top of whichever theme is chosen.
 
 **`colors = "auto"`** sends 24-bit colour only where the terminal is known to take it:
 `COLORTERM=truecolor` (or `24bit`), iTerm2, WezTerm, kitty, Ghostty, Alacritty, VS Code,
-a `TERM` ending in `-direct`, Windows Terminal and the Windows console, and Terminal.app from macOS 26. Everywhere else it uses
+a `TERM` ending in `-direct`, Windows Terminal and the Windows console, and
+Terminal.app from macOS 26. Everywhere else it uses
 the 256-colour palette, which every current terminal shows; the Linux console
 (`TERM=linux`) gets a 16-colour theme drawn in your terminal's own palette. An older
 Terminal.app is never sent 24-bit colour, whatever `COLORTERM` says, because it shows
@@ -140,7 +142,7 @@ config file is shared between several.
 
 ```toml
 [keys]
-copy = ["F5", "Ctrl+c"]   # F5 or Ctrl+C: F5 is listed, as naming an action replaces its keys
+copy = ["F5", "Ctrl+c"]   # F5 or Ctrl+C (naming an action replaces all its keys)
 ```
 
 Naming an action replaces all of its default keys. The names are in
@@ -215,9 +217,9 @@ See [security.md](security.md).
 
 ## Files xdevcmd keeps
 
-xdevcmd writes `config.toml` only when you save in **File → Settings…**, and then only the
-lines you changed, and the file you name with `--cwd-file`, on quit. What else it
-writes, and nothing more:
+Besides `config.toml`, which xdevcmd writes only when you save in **File → Settings…**
+(and then only the lines you changed; a link is written where it points), and the file
+you name with `--cwd-file`, written on quit, it writes these and nothing more:
 
 | File | Where | What |
 |---|---|---|
@@ -230,6 +232,6 @@ No logs, no cache, nothing sent anywhere. F8 moves files to your system's own tr
 - `$XDG_STATE_HOME/xdevcmd/` replaces the state directory, and `XDEVCMD_STATE` names the
   session file itself (bookmarks go beside it).
 - `restore_session = false` stops the session being saved.
-- `--read-only` and `--restricted` save no session and no bookmarks. The one thing
-  they still write is the temporary copy of a file viewed from inside an archive,
-  removed as above.
+- `--read-only` and `--restricted` save no session, no bookmarks and no settings. They
+  still write the file named with `--cwd-file`, and the temporary copy of a file viewed
+  from inside an archive, removed as above.

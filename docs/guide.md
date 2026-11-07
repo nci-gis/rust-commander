@@ -11,8 +11,8 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - [Archives](#archives)
 - [The terminal](#the-terminal)
 - [Mouse](#mouse)
-- [Menus and help](#menus-and-help)
 - [Keys a terminal does not send](#keys-a-terminal-does-not-send)
+- [Menus and help](#menus-and-help)
 
 ## Panes and tabs
 
@@ -68,9 +68,9 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - **Enter on a program or script** asks "Run it?" (Cancel first). **Run in a terminal
   tab** shows its output and keeps it after the program ends; Enter or Esc closes the
   tab.
-- Where nothing can be opened on a screen — over SSH, without a desktop, in read-only
-  mode — Enter views the file instead and says why. `enter = "view"` under `[files]`
-  makes Enter always view, as in 0.1.0.
+- Where nothing can be opened on a screen — over SSH or without a desktop, unless
+  `[commands] opener` is set, and always in read-only mode — Enter views the file
+  instead and says why. `enter = "view"` under `[files]` makes Enter always view.
 - **Ctrl+Z** undoes the last rename (one file or many), move, new directory or new
   file, after showing what it will do. It checks the disk first: a file renamed since,
   or a new directory with something in it now, is left alone. Copies and deletes are not
@@ -131,7 +131,10 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - Click to select; double-click does what Enter does (into a directory, or open the
   file). **Ctrl+click** marks.
 - Drag down a pane to mark a range. Drag files onto the other pane to copy or move.
-- Drag a border to resize. Right-click for a menu. The wheel scrolls.
+- Click a directory's name in a pane's path, at the top, to go there.
+- Drag a border to resize; double-click it to share it evenly between the two panes on
+  either side (any others keep their size): two file panes, the file area and the
+  terminal, or two shells. Right-click for a menu. The wheel scrolls.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).
@@ -149,8 +152,10 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
 - **F9** opens the menu bar: File, View, Help. You can click it too.
 - **File → Settings…** changes the common settings: ←/→ or Space to change one, Tab
   for the next tab, Enter to save. With the mouse, click a tab, a check box, a value's
-  ‹ or › (or the value itself, for the next one), or Save; the wheel moves between rows. Only the lines that changed are written to
-  `config.toml`; your comments stay. Rows marked *next start* apply after a restart.
+  ‹ or › (or the value itself, for the next one), or Save; the wheel moves between
+  rows. Only the lines that changed are written to `config.toml`; your comments stay.
+  Rows marked *next start* apply after a restart. The Keys tab says how to rebind keys.
+  In read-only and restricted mode it shows the settings but saves nothing.
 - **View → Theme…** tries a theme at once.
 - **F1** lists every key and setting.
 - **Shift+F1** shows what xdevcmd is using: memory, CPU, and whether memory keeps growing.

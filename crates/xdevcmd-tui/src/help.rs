@@ -267,11 +267,22 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
             "Mouse",
             &[
                 ("click", "Focus a pane, select a row"),
-                ("double-click", "Enter a directory, view a file"),
+                (
+                    "double-click",
+                    "What Enter does: enter a directory, open a file",
+                ),
                 ("Ctrl+click", "Mark or unmark a row"),
                 ("drag down a pane", "Mark a range of rows"),
                 ("drag to the other pane", "Copy or move there (asks which)"),
                 ("drag a border", "Resize panes and the terminal"),
+                (
+                    "double-click a border",
+                    "Share it evenly between the panes beside it",
+                ),
+                (
+                    "path in a pane's title",
+                    "Click a directory's name to go there",
+                ),
                 ("right-click", "Context menu"),
                 ("header", "Sort by that column; again to reverse"),
                 ("key bar", "Click a key to run it"),

@@ -178,5 +178,5 @@ a command line, but nothing proves it); by hand, only macOS was reported (the ow
 
 **Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/features.md`: Enter, `[[open]]` rules, Open with
-- [ ] → `reference/security.md`: running programs in a tab; the batch-file case
+- [x] → `reference/features.md`: Enter, `[[open]]` rules, Open with
+- [x] → `reference/security.md`: running programs in a tab; the batch-file case

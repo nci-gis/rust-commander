@@ -63,4 +63,4 @@ asks the same question.
 
 **Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/features.md`: undo, what it covers and why not copies or deletes
+- [x] → `reference/features.md`: undo, what it covers and why not copies or deletes

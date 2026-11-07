@@ -243,5 +243,5 @@ confirmed the keys on the Mac, where they had not worked.
 
 **Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/ui.md`: keymaps, sequences, the conflict rules
-- [ ] → `reference/platforms.md`: the keys each default terminal keeps
+- [x] → `reference/ui.md`: keymaps, sequences, the conflict rules
+- [x] → `reference/platforms.md`: the keys each default terminal keeps

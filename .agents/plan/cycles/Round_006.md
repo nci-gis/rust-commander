@@ -65,4 +65,4 @@ used the build and closed the round.
 
 **Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/config.md`: theme files and where they are looked for
+- [x] → `reference/config.md`: theme files and where they are looked for

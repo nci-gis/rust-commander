@@ -219,6 +219,6 @@ the owner's Mac, and the keys that still do not work there are Round 004's.
 
 **Promotions** (proposed; `reference/` is a person's to change):
 
-- [ ] → `reference/platforms.md`: the macOS Terminal.app key table above, and Esc as Meta
-- [ ] → `reference/gotchas.md`: the I-beam pointer and the window scrollbar in
+- [x] → `reference/platforms.md`: the macOS Terminal.app key table above, and Esc as Meta
+- [x] → `reference/gotchas.md`: the I-beam pointer and the window scrollbar in
       Terminal.app are not rcmd bugs; ask for `rcmd --show-keys` before guessing

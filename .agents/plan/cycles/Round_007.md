@@ -69,4 +69,4 @@ rather than tested. Both fail safe: nothing is written that does not read back a
 
 **Promotions** (proposed; waiting on the owner):
 
-- [ ] → `reference/config.md`: how Settings writes the file, and the read-back rule
+- [x] → `reference/config.md`: how Settings writes the file, and the read-back rule

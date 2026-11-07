@@ -41,18 +41,19 @@ were done first:
 
 ## Next, in this order
 
-Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-07). No
-round is open. What is left, in order:
+Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-07).
+[Round 010](cycles/Round_010.md), the mouse in Settings, is open and targets 0.2.0
+(owner, 2026-11-07). What is left, in order:
 
-1. **Land `feat/polish`** in `dev` by pull request: the About logo sized to the window,
-   Settings offering 3 shells and keeping hand-written values, the two-key group badge
-   with only resizing repeating, and the Check notes for 004 and 005.
+1. **Land `feat/settings-mouse`** in `dev` by one pull request: Round 010 and, beneath
+   it, `feat/polish` (the About logo sized to the window, Settings offering 3 shells and
+   keeping hand-written values, the two-key group badge with only resizing repeating).
 2. **Release 0.2.0** when the owner says so (below).
 3. **Item 8, one name**, then the packages; then **item 10**, the launch.
 4. Then items 11–13, each numbered when started.
 
 Carried from closed rounds, small enough for any later round: a unit test feeding a
-hostile file name through an `[[open]]` rule (005); mouse in Settings (007); undo of a
+hostile file name through an `[[open]]` rule (005); undo of a
 move that meets an overwrite question (009); Enter-opens-files tried by hand on Linux
 and Windows (005).
 
@@ -89,6 +90,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
+| 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Review |
 | 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
 | **Later: optional extras** | | | | |
 | 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |

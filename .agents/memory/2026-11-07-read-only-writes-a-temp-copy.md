@@ -3,7 +3,7 @@
 **Date**: 2026-11-07
 **Agent**: Claude Code
 **Confidence**: High
-**Status**: New
+**Status**: Promoted
 **Source**: documenting the files rcmd keeps (docs/config.md, "Files rcmd keeps")
 **Review-by**: n/a
 

@@ -36,6 +36,32 @@ test was proved by removing the guard: it reports `a command ran: [.../PWNED]`.
 `cd /d "…"` — refusing a path with `%`, `!`, `^` or `"`, which cmd.exe cannot quote.
 All of it ends with `\r`, the Enter key, which ConPTY expects too.
 
+**Running a program never goes through a shell.** "Run it?" (Enter or Shift+O on a
+console program) and `[[open]]` rules with `terminal = true` start a terminal tab on the
+program's argv (`TermPane::spawn_argv`: no splitting, nothing typed), so rule 5 holds
+without `safety.rs` and the file name is one argument. The tab stays after the program
+ends, showing its output and "ended (exit N) — Enter or Esc closes"; such tabs are not
+saved in the session. Before, "Run it?" handed console programs to the system opener
+with stdin, stdout and stderr closed: the output was lost, and what happened differed
+by platform (`xdg-open` might open a script in an editor, `open` started a new
+Terminal.app window). Refused in restricted (no terminal) and read-only (no programs);
+every path that starts a program asks `App::refused`, and Enter checks the `--root`
+policy before anything else.
+
+**Windows batch files.** A `.bat` / `.cmd` re-parses its arguments through `cmd.exe`
+(CVE-2024-24576). A rule run as a window goes through `std::process::Command`, which
+since Rust 1.77.2 (the MSRV is 1.88) escapes them or returns `InvalidInput`; rcmd reports
+that error and **never retries with `raw_arg`**. (The one `raw_arg`, `explorer.exe
+"path"` in `opener.rs`, takes a path, which cannot hold `"`.) A terminal tab starts
+through `portable-pty`, whose Windows command line quotes an argument only if it holds a
+space, tab or `"`, with none of std's batch escaping (`cmdbuilder.rs`, 0.9.0), and which
+finds a bare name through `PATH` and `PATHEXT` (a rule's `npm` is `npm.cmd`). So
+`TermPane::spawn_argv` calls `batch_refusal` first: on Windows, a program that is or
+resolves to a `.bat` / `.cmd` is refused when any argument holds a character `cmd.exe`
+acts on (`& | < > ^ % ! " ( )`, line breaks), with the reason, rather than escaped by
+hand. Found by reading the code before 0.2.0; unit-tested on every system (the check is
+a pure function of argv, `PATH` and `PATHEXT`), not yet tried on a Windows machine.
+
 **Scanning.** `cargo deny check` (installed user-level with `cargo install --locked
 cargo-deny`) checks dependencies against the RustSec advisory database, rejects any
 licence not in `deny.toml` — a GPL or LGPL crate fails it, proved by adding
@@ -48,9 +74,16 @@ set in both crates: any unsafe code rcmd runs is in a dependency.
 | | `normal` | `read_only` | `restricted` |
 |---|---|---|---|
 | copy, move, delete, rename, mkdir, F4 edit, drop | yes | **no** | **no** |
-| session file written on quit | yes | **no** — rcmd writes nothing | **no** |
+| session file written on quit | yes | **no** — rcmd writes nothing of yours (see below) | **no** |
 | view (F3), navigate, copy path | yes | yes | view and navigate only |
 | shell (F12, Alt+N, Alt+C), clipboard | yes | yes | **no** — no shell is ever started |
+
+"Nothing of yours" because read-only and restricted still write one thing: F3 on a file
+inside an archive copies it into rcmd's own temporary directory, `rcmd-run-<pid>/`
+(user-only, `tempfiles.rs`), and removes it when the viewer closes or rcmd ends. Viewing
+is reading; the copy is what the viewer reads. A start also removes run directories a
+killed rcmd left behind, recognised by their marker file. Session and bookmarks are not
+written.
 
 Set by `[security] mode` in the config or `--read-only` / `--restricted`. **A flag can
 only tighten the config**: the effective mode is the stricter of the two, so a wrapper

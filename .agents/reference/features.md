@@ -1,6 +1,6 @@
 # Features: finding, selecting, file operations
 
-> **Read this when**: working on quick search, filter, go to, history, hotlist, directory sizes, auto-refresh, open-with, cd on exit, find files, bulk rename, quick view, the small file operations, the user menu, background jobs, looks or pictures.
+> **Read this when**: working on quick search, filter, go to, history, hotlist, directory sizes, auto-refresh, Enter on a file, `[[open]]` rules, open-with, undo, cd on exit, find files, bulk rename, quick view, the small file operations, the user menu, background jobs, looks or pictures.
 
 ---
 
@@ -45,15 +45,49 @@ size with a `+` after it means some subdirectory could not be read.
 
 **`o` never goes through a shell.** A configured opener gets the path as one argument.
 Windows uses `explorer.exe "path"`, not `cmd /c start`, which re-parses its command line
-and would run `a&calc.exe`. On Linux with no `DISPLAY`/`WAYLAND_DISPLAY` — over SSH — it
-refuses instead of letting `xdg-open` fall back to a text browser in this terminal.
-Programs, scripts and `.desktop` launchers get a "Run it?" menu whose default is Cancel.
-Refused in read-only and restricted modes, like F4.
+and would run `a&calc.exe`. Where `opener::no_screen` finds no screen (below) it refuses
+rather than open the file on a remote machine's screen, or let `xdg-open` fall back to a
+text browser in this terminal; a configured opener is still used. Programs, scripts and
+`.desktop` launchers get a "Run it?" menu whose default is Cancel. Refused in read-only
+and restricted modes, like F4.
 
 **cd on exit**: `--cwd-file PATH` writes the last file pane's directory on `q` (raw bytes
 on Unix, no newline); `Q` quits without. Written even in read-only mode — the caller
 named the file, so it is their output, not rcmd's state. Shell functions are in the
 README.
+
+## Opening files: Enter, `[[open]]`, Open with
+
+**Enter on a file opens it**, as in Total Commander (`[files] enter = "open"`, the
+default; `"view"` keeps 0.1.0's F3). `App::enter_file`, in order:
+
+1. Inside an archive, or outside `--root`: view.
+2. The first `[[open]]` rule for the extension (case ignored; `os` scopes a rule;
+   `needs_display` rules are skipped where there is no screen): `action = "view"` /
+   `"edit"`, or `command`, an argv with the path pushed as one more argument — never a
+   string a shell splits. `terminal = true` runs it in a terminal tab (`security.md`).
+3. Read-only or restricted: view.
+4. A program, script, `.desktop` or `.lnk`: "Run it?" — Cancel first, Run in a terminal
+   tab (console programs only), Run with the system. Nothing runs from one keypress.
+5. Else the system's program, or `[commands] opener`, as `o`.
+
+Where nothing can be opened the file is viewed and the reason goes in the viewer's own
+bar: the first try wrote it to the status line, hidden behind the viewer.
+
+**One "can anything be opened here?" check**, `opener::no_screen`, for `o`, Enter and
+`needs_display`: not over SSH (`SSH_CONNECTION` / `SSH_TTY`) on any system, and on Linux
+and the BSDs not without `DISPLAY` / `WAYLAND_DISPLAY`. It replaced guesses in several
+places and found a bug: `o` over SSH into a Mac or Windows machine opened the file on
+that machine's own screen. Render and pty tests strip the SSH variables and set
+`DISPLAY`, so CI on three systems, and a developer working over SSH, see the same thing.
+
+**Shift+O, Open with…** (also in the File and right-click menus): the matching rules
+(`needs_display` ones greyed out without a screen), System default, View, Edit, and Run in
+a terminal tab for a console program. Windows' own chooser is left out:
+`SHOpenWithDialog` needs FFI, which `forbid(unsafe_code)` rules out.
+
+Not proved by a test: a hostile file name through a rule's argv (the path is one
+`OsString`, never joined, but nothing checks it).
 
 ## Find, rename many, quick view, small operations
 
@@ -113,6 +147,30 @@ do. Directories and dotfiles are selected whole.
 
 `LineEdit` counts positions in `char`s. In bytes, a cursor in `báo cáo` lands inside a
 letter and the next insert panics; `positions_are_characters_not_bytes` holds that.
+
+## Undo
+
+**Ctrl+Z undoes the last operation where that loses nothing** (`rcmd_core::undo`). Every
+place a write starts records it (`App::remember_job` for jobs; rename, rename many, F7
+and Shift+F4 directly), so "the last" really is the last. `Undo::plan` decides against
+the disk **as it is now**, not as recorded, and Ctrl+Z asks first, listing what will
+happen. One step: an undo is not undone. Refused in read-only and restricted;
+`undo::remove` checks again and refuses outside `--root`.
+
+| Last operation | Ctrl+Z |
+|---|---|
+| rename, one or many | turned round, while each new name is still there and each old one free |
+| move | moved back by the same job engine as F6 (progress, overwrite questions, across drives), for what is still where it went; from several source directories, refused |
+| F7 | removes the first level that did not exist (`first_missing`), while the tree holds only directories |
+| Shift+F4 | removes the file while it is empty |
+| copy, delete, extract, pack, synchronise, permissions, link | nothing, and says so |
+
+**Why not copies or deletes**: undoing a copy means deleting the copies, which loses
+whatever was done to them since. Undoing a delete means restoring from the trash: the
+Linux trash rcmd writes could be read back, but Windows and macOS keep their own, and a
+restore that works on one system only would surprise, so the message points at the
+system's trash. Recording these as `Undo::Cannot` matters as much as the rest: without
+it, Ctrl+Z after a copy would undo an older rename behind the user's back.
 
 ## Background jobs, looks, pictures
 

@@ -1,6 +1,6 @@
 # Gotchas that cost time
 
-> **Read this when**: something in ratatui, crossterm, vt100, the pty tests or `--screenshot` behaves unexpectedly — it may have happened before.
+> **Read this when**: something in ratatui, crossterm, vt100, the pty tests or `--screenshot` behaves unexpectedly, or a terminal (Terminal.app, SSH) does something that looks like an rcmd bug — it may have happened before.
 
 ---
 
@@ -102,3 +102,19 @@
 - **Enabling mouse capture is on us.** `ratatui::init()` does not do it, and if the
   process dies without `DisableMouseCapture` the user's shell prints escape codes on
   every click. `main.rs` chains a panic hook for exactly this.
+
+- **crossterm writes even the 16 named colours as `38;5;N`** (N 0–15), never `ESC[3Xm`.
+  Those are the user's own palette entries, which is what 16-colour depth wants. A test
+  asserting "no `38;5;`" at 16 colours was wrong, not the code: assert that only entries
+  0–15 appear.
+- **`COLORTERM` and `TERM_PROGRAM` do not survive SSH** (not forwarded without
+  `SendEnv` / `AcceptEnv`), and `COLORTERM=truecolor` is often exported in dotfiles where
+  it is untrue. Neither proves anything on its own; see `platforms.md`, Colour depth.
+- **Terminal.app's I-beam pointer and its window scrollbar are not rcmd bugs.** The
+  pointer is the I-beam everywhere in Terminal.app, a plain zsh included, so its shape
+  says nothing about mouse reporting. Dragging the window's scrollbar up shows the first
+  screen (the shell's history, with blank rows) above rcmd's alternate screen; rcmd
+  cannot hide it. A blue area once taken for a selection was the profile's background
+  showing through default-colour cells. Each was diagnosed wrong first: ask for
+  `rcmd --show-keys` output (the terminal's variables, colour depth, every key, click and
+  wheel event) before guessing.

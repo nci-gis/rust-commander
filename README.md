@@ -49,7 +49,7 @@ cargo install --git https://github.com/nci-gis/rust-commander xdevcmd-tui --lock
 
 Needs Rust 1.88 or newer. This installs the `xdevcmd` command.
 
-Or download a ready-made build for Linux, macOS or Windows from
+Or download a ready-made build for Linux (x86_64 and ARM64), macOS or Windows from
 [Releases](https://github.com/nci-gis/rust-commander/releases). They are not signed, so
 macOS and Windows warn the first time: see
 [troubleshooting](docs/troubleshooting.md#macos).

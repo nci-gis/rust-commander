@@ -113,9 +113,10 @@ newest heading of `CHANGELOG.md`, in the same commit. A release then takes four 
    ```
 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
-   dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (glibc
-   and static musl), macOS (ARM and Intel) and Windows, and opens a **draft** release with
-   the archives (each holding `LICENSE`, `README.md` and `THIRD-PARTY.md`),
+   dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (x86_64
+   glibc and static musl, ARM64 static musl), macOS (ARM and Intel) and Windows, and opens
+   a **draft** release with the archives (each holding `LICENSE`, `README.md`,
+   `THIRD-PARTY.md` and the example `themes/`),
    `SHA256SUMS`, and that CHANGELOG section as its notes.
    Read it, then Publish.
 

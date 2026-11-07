@@ -16,6 +16,8 @@ that heading and starts a new, empty one here. -->
 - **`xdevcmd --print-theme NAME`** writes a built-in theme out as a file with every
   colour listed, to start your own from.
 - **Ctrl+G** also goes to a path you type, beside Ctrl+L.
+- **A build for 64-bit ARM Linux** (`aarch64-unknown-linux-musl`, static): ARM servers
+  and a Raspberry Pi running a 64-bit system. The test suite runs on ARM too.
 
 ### Changed
 - **Idle, xdevcmd now uses almost no CPU**: about 0.3 % of a core instead of 5 %. The
@@ -31,6 +33,11 @@ that heading and starts a new, empty one here. -->
 - **A program is never found in the directory you browse.** On Linux and macOS a
   program run in a terminal tab by its bare name is looked up only in `PATH`'s absolute
   directories; a `.` or empty entry used to make it look in the browsed directory.
+- **Copying and moving never overwrite a file that appears meanwhile.** A name found
+  free is written only if still free (a new-file-only open for a copy, the rename
+  above for a move); a file created in between gets the usual overwrite question.
+- Updated libraries to their latest patch releases, among them `zip` and `flate2`,
+  which read archives.
 
 ### Fixed
 - **The logo in About looked striped and stepped on macOS** in Terminal.app. It is now

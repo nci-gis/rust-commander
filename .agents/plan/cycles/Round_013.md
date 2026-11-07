@@ -27,6 +27,9 @@ packaged version carries them.
 - [x] 8b. Programs in a terminal tab: ignore `.` and empty `PATH` entries.
 - [x] 8b. Carried tests: a hostile file name through an `[[open]]` rule; undo of a move
       that met an overwrite question.
+- [x] Added after a check for what else fits 0.2.1 (owner: "add both, ARM",
+      2026-11-08): F5/F6 never overwrite a file that appears meanwhile; libraries at
+      their latest patch releases; a 64-bit ARM Linux build, and CI tests on ARM.
 - [ ] By hand, by the owner: the logo on Terminal.app, iTerm2, Windows Terminal and the
       old console; the batch-file refusal on Windows; Enter opening files on Linux and
       Windows.
@@ -79,6 +82,23 @@ packaged version carries them.
   that runs `/bin/sh` with a name holding `;`, `$( )`, backticks and quotes: the program
   gets it as one argument and nothing runs. Undo of a move: a file that takes the old
   name after the plan gets F6's question; Skip keeps it, Yes replaces it.
+
+- 2026-11-08, a check for what else fits 0.2.1 (the owner asked): no open issues or
+  pull requests, no TODOs, no `unwrap` that user data can reach, no memory leak (20
+  re-reads of 100,000 files level at 102 MiB), heavy actions on 100,000 files under
+  50 ms each (sort, invert marks, filter, End/Home). Found: F5 and F6 kept the race
+  noted above (a file created between the free-name check and the write was
+  overwritten: `File::create`, `fs::rename`); 8 patch updates, `zip` and `flate2`
+  among them. Left for later: about 640 bytes of memory per listed file (64 MiB for
+  100,000), Windows' relative `PATH` entries (resolved against xdevcmd's own start
+  directory, not the browsed one), duplicate crate versions pulled in upstream.
+- 2026-11-08, F5/F6: the free-name check is remembered; a copy to a free name opens
+  with `create_new`, a move uses `rename_noreplace`, and `AlreadyExists` goes round
+  the loop again to the overwrite question. A test-only hook (`APPEAR` in `ops.rs`)
+  creates the file in exactly that window; the test fails with the fix undone.
+- 2026-11-08, ARM: `aarch64-unknown-linux-musl` on GitHub's `ubuntu-24.04-arm` runner,
+  native, since nothing on Linux compiles C; the CI test matrix gains the same runner,
+  its artifact named `…-Linux-ARM64-…` so the two Linux artifacts do not clash.
 
 ## Check
 

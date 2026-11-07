@@ -30,9 +30,11 @@ your permissions. It was tested against attacks on all three before release.
   program named without a path (in an `[[open]]` rule, or run in a terminal tab) is
   looked up only in the absolute directories of `PATH`: a `.` or an empty entry, which
   would mean the directory being browsed, is skipped.
-- **A file that appears while xdevcmd renames.** Renaming (F2, renaming many, and
-  moving into the Linux trash) is refused by the system itself if the new name is
-  taken, even by a file created a moment earlier: it never replaces it.
+- **A file that appears while xdevcmd writes.** Renaming (F2, renaming many, moving
+  into the Linux trash) is refused by the system itself if the new name is taken, even
+  by a file created a moment earlier. Copying and moving write to a name found free
+  only if it is still free; a file that appeared in between gets the usual overwrite
+  question. Nothing is replaced without asking.
 - **Typing into the wrong program.** Alt+C and the user menu type a line into the
   terminal only when a shell is at its prompt there, never into a program that owns
   it — an editor, a password prompt, a program run in a terminal tab.

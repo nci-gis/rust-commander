@@ -556,6 +556,9 @@ impl Worker {
             if self.stopped() {
                 return;
             }
+            // Free now: written only if it is still free when opened, so a file that
+            // appears meanwhile is asked about, not overwritten.
+            let free = dst.symlink_metadata().is_err();
             match self.resolve_conflict(dst, size) {
                 Some(true) => {}
                 Some(false) => {
@@ -565,11 +568,14 @@ impl Worker {
                 }
                 None => return,
             }
-            match self.copy_bytes(src, dst) {
+            appear_in_test(dst);
+            match self.copy_bytes(src, dst, free) {
                 Ok(true) => {
                     self.sum.done += 1;
                     return;
                 }
+                // Taken since it was found free: round again, to the question.
+                Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
                 // Cancelled mid-file: the partial destination is removed rather than
                 // left looking like a complete copy.
                 Ok(false) => {
@@ -596,11 +602,19 @@ impl Worker {
         }
     }
 
-    /// Returns Ok(false) when cancelled part-way.
-    fn copy_bytes(&mut self, src: &Path, dst: &Path) -> io::Result<bool> {
+    /// Returns Ok(false) when cancelled part-way. `new_only`: fail with `AlreadyExists`
+    /// rather than replace a file at `dst`.
+    fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
-        let mut w = File::create(dst)?;
+        let mut w = if new_only {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(dst)?
+        } else {
+            File::create(dst)?
+        };
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -640,16 +654,31 @@ impl Worker {
             return;
         }
         let size = fs::symlink_metadata(src).map(|m| m.len()).unwrap_or(0);
-        match self.resolve_conflict(&dst, size) {
-            Some(true) => {}
-            Some(false) => {
-                self.sum.skipped += 1;
-                return;
+        let moved = loop {
+            let free = dst.symlink_metadata().is_err();
+            match self.resolve_conflict(&dst, size) {
+                Some(true) => {}
+                Some(false) => {
+                    self.sum.skipped += 1;
+                    return;
+                }
+                None => return,
             }
-            None => return,
-        }
+            // A name found free is taken only if still free, in the same step as the
+            // move; one taken since goes round again, to the question.
+            appear_in_test(&dst);
+            let r = if free {
+                crate::noreplace::rename_noreplace(src, &dst)
+            } else {
+                fs::rename(src, &dst)
+            };
+            match r {
+                Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
+                r => break r,
+            }
+        };
 
-        match fs::rename(src, &dst) {
+        match moved {
             Ok(()) => {
                 self.sum.done += 1;
                 self.advance(size);
@@ -845,6 +874,23 @@ pub fn remove_tree(p: &Path) -> io::Result<()> {
         fs::remove_file(p)
     }
 }
+
+/// Tests put a path here to have a file appear at it between the check that found the
+/// name free and the write: the moment no test could otherwise reach.
+#[cfg(test)]
+static APPEAR: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn appear_in_test(dst: &Path) {
+    let mut paths = APPEAR.lock().unwrap();
+    if let Some(i) = paths.iter().position(|p| p == dst) {
+        paths.remove(i);
+        fs::write(dst, "theirs").unwrap();
+    }
+}
+
+#[cfg(not(test))]
+fn appear_in_test(_: &Path) {}
 
 fn is_cross_device(e: &io::Error) -> bool {
     #[cfg(unix)]
@@ -1080,6 +1126,48 @@ mod tests {
         assert_eq!(asked, 1);
         assert_eq!(s.done, 1);
         assert_eq!(fs::read(dst.join("f.txt")).unwrap(), b"new");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_file_that_appears_while_copying_or_moving_is_asked_about_not_overwritten() {
+        let root = tmp("appears");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("c.txt"), b"ours").unwrap();
+        fs::write(root.join("m.txt"), b"ours").unwrap();
+
+        // dst/c.txt is free when checked, and taken just before the copy writes it.
+        APPEAR.lock().unwrap().push(dst.join("c.txt"));
+        let (s, asked) = run_with(
+            Request::copy(vec![root.join("c.txt")], dst.clone()),
+            Answer::Skip,
+        );
+        assert_eq!(asked, 1, "the copy asks about the file that appeared");
+        assert_eq!(s.skipped, 1);
+        assert_eq!(fs::read(dst.join("c.txt")).unwrap(), b"theirs");
+
+        // The same for a move: the source stays, the newcomer is kept.
+        APPEAR.lock().unwrap().push(dst.join("m.txt"));
+        let (s, asked) = run_with(
+            Request::mv(vec![root.join("m.txt")], dst.clone()),
+            Answer::Skip,
+        );
+        assert_eq!(asked, 1, "the move asks about the file that appeared");
+        assert_eq!(s.skipped, 1);
+        assert_eq!(fs::read(dst.join("m.txt")).unwrap(), b"theirs");
+        assert_eq!(fs::read(root.join("m.txt")).unwrap(), b"ours");
+
+        // Answered Yes, it replaces it, as for any file that was there.
+        APPEAR.lock().unwrap().push(dst.join("m2.txt"));
+        fs::write(root.join("m2.txt"), b"ours").unwrap();
+        let (s, _) = run_with(
+            Request::mv(vec![root.join("m2.txt")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read(dst.join("m2.txt")).unwrap(), b"ours");
 
         fs::remove_dir_all(&root).unwrap();
     }

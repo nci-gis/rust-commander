@@ -79,8 +79,9 @@ những việc kế tiếp"), in this order:
      macOS Finder, and the habit of others). Checked free in the default keys.
 2. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
-   - Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds; servers
-     and Raspberry Pi need it. Windows ARM only if someone asks.
+   - ~~Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds~~: done
+     early, in 0.2.1 ([Round 013](cycles/Round_013.md)). Windows ARM only if someone
+     asks.
    - Homebrew tap, scoop bucket, winget manifest, AUR `xdevcmd-bin`, each filled from
      the release's `SHA256SUMS`.
    - The README's install section rewritten around them.

@@ -52,9 +52,9 @@ The SVGs in `assets/` are the source: `icon.svg`, `icon-16.svg` (the same pictur
 redrawn on whole pixels, because a scaled-down one blurs at 16 px), and the README's
 `logo-light.svg` / `logo-dark.svg`, whose wordmark is drawn as strokes so it looks the
 same without any font. After changing an icon SVG, rebuild `assets/xdevcmd.ico` and
-`assets/icon-14.png` (the logo About draws, built into the binary, drawn
-as pixel art by `scripts/logo_pixels.py` because a smoothed one blurs at two pixels a
-character cell):
+`assets/about-logo.png` (the logo About draws, built into the binary, drawn by hand
+one colour per character cell by `scripts/logo_pixels.py`, because half blocks depend
+on the terminal's font):
 
 ```bash
 cargo install --locked resvg   # once
@@ -113,9 +113,10 @@ newest heading of `CHANGELOG.md`, in the same commit. A release then takes four 
    ```
 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
-   dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (glibc
-   and static musl), macOS (ARM and Intel) and Windows, and opens a **draft** release with
-   the archives (each holding `LICENSE`, `README.md` and `THIRD-PARTY.md`),
+   dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (x86_64
+   glibc and static musl, ARM64 static musl), macOS (ARM and Intel) and Windows, and opens
+   a **draft** release with the archives (each holding `LICENSE`, `README.md`,
+   `THIRD-PARTY.md` and the example `themes/`),
    `SHA256SUMS`, and that CHANGELOG section as its notes.
    Read it, then Publish.
 

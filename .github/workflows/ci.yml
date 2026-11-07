@@ -33,7 +33,9 @@ jobs:
       # Report every platform's result. A Windows failure must not hide a macOS one.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # ubuntu-24.04-arm: the release has a 64-bit ARM Linux build, so its tests run on
+        # ARM too.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -66,7 +68,8 @@ jobs:
         shell: bash
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: echo "name=xdevcmd-${{ runner.os }}-${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
+        # Two Linux runners (x86_64 and ARM): the ARM one says so in its name.
+        run: echo "name=xdevcmd-${{ runner.os }}${{ runner.arch == 'ARM64' && runner.os == 'Linux' && '-ARM64' || '' }}-${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
       # The build that passed, ready to run: try a branch on Windows or macOS without
       # installing Rust there. Under the run's Artifacts; kept for two weeks.
       - uses: actions/upload-artifact@v4

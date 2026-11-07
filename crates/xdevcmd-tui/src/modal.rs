@@ -76,9 +76,42 @@ pub struct Confirm {
     /// says "counting…" until they arrive. The dialog does not wait for the count:
     /// Enter starts the job, Esc closes it, and either stops the count.
     pub counting: Option<(ops::Count, usize)>,
+    /// What cannot be undone (a permanent delete): Enter does not confirm it, only Y
+    /// or a click on the button, and the button says what it does.
+    pub permanent: bool,
+    /// Copy and move: the body line that says what happens to files already there, which
+    /// U changes.
+    pub existing_line: Option<usize>,
+}
+
+/// What the confirmation says for each choice of what to do with existing files.
+pub fn existing_label(e: ops::Existing) -> &'static str {
+    match e {
+        ops::Existing::Ask => "if a file is there: ask  (U changes)",
+        ops::Existing::Update => "if a file is there: replace it only if older; skip the same  (U)",
+        ops::Existing::Skip => "if a file is there: leave it  (U)",
+        ops::Existing::Replace => "if a file is there: replace it  (U)",
+    }
 }
 
 impl Confirm {
+    /// U: the next choice of what to do with files already at the destination.
+    pub fn next_existing(&mut self) {
+        let Some(line) = self.existing_line else {
+            return;
+        };
+        use ops::Existing::*;
+        self.request.existing = match self.request.existing {
+            Ask => Update,
+            Update => Skip,
+            Skip => Replace,
+            Replace => Ask,
+        };
+        if let Some(l) = self.body.get_mut(line) {
+            *l = existing_label(self.request.existing).to_string();
+        }
+    }
+
     /// The line that names the destination, and a warning when it is the source's own
     /// directory — said before Enter, not discovered afterwards as "1 skipped".
     pub fn set_destination(&mut self, i: usize) {
@@ -95,6 +128,12 @@ impl Confirm {
             self.body.push(String::new());
             self.body
                 .push("Same directory as the source \u{2014} nothing would change.".into());
+        }
+        if self.existing_line.is_some() {
+            self.body.push(String::new());
+            self.body
+                .push(existing_label(self.request.existing).to_string());
+            self.existing_line = Some(self.body.len() - 1);
         }
     }
 
@@ -216,6 +255,7 @@ pub fn options(q: &Question) -> Vec<(&'static str, &'static str, Answer)> {
             ("A", "overwrite all", Answer::YesToAll),
             ("S", "skip", Answer::Skip),
             ("L", "skip all", Answer::SkipAll),
+            ("U", "update all", Answer::Update),
             ("Esc", "abort", Answer::Abort),
         ],
         Question::CrossDevice { .. } => vec![
@@ -340,6 +380,11 @@ pub(crate) fn put(frame: &mut Frame, area: Rect, row: u16, text: &str, style: St
 /// Paint a picture in half blocks at (`x0`, `y0`): each cell two pixels, the upper as
 /// the foreground of `▀` and the lower as its background. An odd last row takes `bg`
 /// below.
+///
+/// A cell whose two pixels are the same colour is a space in that background colour,
+/// with no character at all. Some terminals draw `▀` from the font (macOS Terminal.app),
+/// and with line spacing it does not fill its half of the cell: a picture made only of
+/// such cells, as About's logo is, looks the same in every terminal.
 pub(crate) fn paint_picture(
     frame: &mut Frame,
     x0: u16,
@@ -360,9 +405,13 @@ pub(crate) fn paint_picture(
                 .unwrap_or(bg);
             let pos = ratatui::layout::Position::new(x0 + x as u16, y0 + r as u16);
             if let Some(cell) = buf.cell_mut(pos) {
-                cell.set_symbol("\u{2580}")
-                    .set_fg(rgb(top))
-                    .set_bg(rgb(bottom));
+                if top == bottom {
+                    cell.set_symbol(" ").set_bg(rgb(bottom));
+                } else {
+                    cell.set_symbol("\u{2580}")
+                        .set_fg(rgb(top))
+                        .set_bg(rgb(bottom));
+                }
             }
         }
     }
@@ -518,7 +567,12 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
         put(frame, inner, i as u16, line, Style::new().fg(th.fg));
     }
     let y = inner.y + inner.height.saturating_sub(1);
-    let mut items = vec![("Enter", "go", accent), ("Esc", "cancel", th.accent)];
+    let first = if c.permanent {
+        ("Y", "delete permanently", accent)
+    } else {
+        ("Enter", "go", accent)
+    };
+    let mut items = vec![first, ("Esc", "cancel", th.accent)];
     if c.choices.len() > 1 {
         items.push(("Tab", "other pane", th.accent));
     }

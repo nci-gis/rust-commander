@@ -38,6 +38,9 @@ portable-pty = "0.9"
 vt100 = "0.16"
 toml = "1.2.0"
 serde = { version = "1.0.229", features = ["derive"] }
+# Directory changes from the system (inotify, FSEvents, ReadDirectoryChangesW) instead of
+# polling every second; polling stays as the fallback for network drives. CC0-1.0.
+notify = "8"
 
 [dev-dependencies]
 tar = { version = "0.4.46", default-features = false }

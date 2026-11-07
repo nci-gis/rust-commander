@@ -507,7 +507,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "go_to_path",
         group: "Navigate",
         about: "Type a path to go to",
-        keys: &["Ctrl+l"],
+        keys: &["Ctrl+l", "Ctrl+g"],
     },
     Binding {
         action: Action::Back,

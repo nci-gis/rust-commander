@@ -99,15 +99,23 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, RenameError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let target = dir.join(new_name);
 
-    if target.symlink_metadata().is_ok() {
-        let case_only = new_name.to_lowercase() == old_name.to_lowercase();
-        if !(case_only && same_file(path, &target)) {
+    let case_only = new_name.to_lowercase() == old_name.to_lowercase();
+    if case_only && target.symlink_metadata().is_ok() {
+        // On a file system that ignores case the "other" name is this file itself.
+        if !same_file(path, &target) {
             return Err(RenameError::Exists(new_name.to_string()));
         }
+        fs::rename(path, &target).map_err(|e| RenameError::Io(e.to_string()))?;
+        return Ok(target);
     }
-
-    fs::rename(path, &target).map_err(|e| RenameError::Io(e.to_string()))?;
-    Ok(target)
+    // Refused by the system if the name is taken, even by a file that appeared just now.
+    match crate::noreplace::rename_noreplace(path, &target) {
+        Ok(()) => Ok(target),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(RenameError::Exists(new_name.to_string()))
+        }
+        Err(e) => Err(RenameError::Io(e.to_string())),
+    }
 }
 
 /// Whether two paths name the same file on disk (not merely equal contents).

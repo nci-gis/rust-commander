@@ -1,0 +1,21 @@
+# Gruvbox dark (https://github.com/morhetz/gruvbox, MIT) for xdevcmd: an example
+# theme file. Copy it into themes/ beside your config.toml, or keep it in themes/
+# beside the xdevcmd binary, then pick "gruvbox-dark" in View > Theme... or with
+# [theme] name = "gruvbox-dark". Start your own with: xdevcmd --print-theme dark
+base = "dark"
+background = "#1d2021"
+panel = "#282828"
+bar = "#3c3836"
+border = "#504945"
+border_active = "#8ec07c"
+accent = "#fabd2f"
+text = "#ebdbb2"
+text_dim = "#928374"
+directory = "#83a598"
+executable = "#b8bb26"
+symlink = "#d3869b"
+archive = "#fe8019"
+error = "#fb4934"
+marked = "#fabd2f"
+cursor = "#45403d"
+cursor_active = "#076678"

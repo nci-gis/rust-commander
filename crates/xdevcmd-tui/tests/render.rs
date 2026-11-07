@@ -245,6 +245,73 @@ fn f8_goes_to_the_trash_and_shift_f8_says_it_cannot_be_undone() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Linux only: there the trash is the sandbox's own (XDG_DATA_HOME); on macOS and
+/// Windows it would be the real Trash or Recycle Bin of whoever runs the tests.
+#[cfg(target_os = "linux")]
+#[test]
+fn ctrl_z_puts_back_what_went_to_the_trash() {
+    let (a, b) = fixture();
+    // F8, Enter: to the trash (the sandbox's own); then Ctrl+Z asks, Enter puts it back.
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z", &a, &b);
+    assert!(!a.join("victim.txt").exists(), "{s}");
+    assert!(
+        s.contains("Undo the delete of victim.txt to the trash?"),
+        "{s}"
+    );
+    assert!(s.contains("put back"), "{s}");
+    let s = shot_keys("110x24", "Ctrl+z", &a, &b);
+    assert!(
+        s.contains("nothing to undo"),
+        "a new run starts with no undo\n{s}"
+    );
+    // Run again in one go, with Enter at the question.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists(), "put back\n{s}");
+    assert!(s.contains("undone"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn f5_can_replace_only_older_files() {
+    let (a, b) = fixture();
+    // The copy on the other side is newer: "only if older" leaves it, without asking.
+    fs::write(b.join("victim.txt"), b"newer there").unwrap();
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+    fs::File::options()
+        .write(true)
+        .open(b.join("victim.txt"))
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(later))
+        .unwrap();
+    let s = shot_keys("110x24", "Down,Insert,F5", &a, &b);
+    assert!(s.contains("if a file is there: ask"), "{s}");
+    let s = shot_keys("110x24", "Down,Insert,F5,u", &a, &b);
+    assert!(s.contains("replace it only if older"), "{s}");
+    let s = shot_keys("110x24", "Down,Insert,F5,u,Enter", &a, &b);
+    assert!(!s.contains("Already exists"), "no question\n{s}");
+    assert_eq!(fs::read(b.join("victim.txt")).unwrap(), b"newer there");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn enter_never_confirms_a_permanent_delete() {
+    let (a, b) = fixture();
+    // Enter, out of habit: nothing goes, and the dialog says what does.
+    let s = shot_keys("110x24", "Down,Insert,S-F8,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists(), "Enter deleted it\n{s}");
+    assert!(
+        s.contains("[Y] delete permanently") || s.contains("Y delete permanently"),
+        "{s}"
+    );
+    assert!(s.contains("press Y to delete permanently"), "{s}");
+    // Y says it.
+    shot_keys("110x24", "Down,Insert,S-F8,y", &a, &b);
+    assert!(!a.join("victim.txt").exists(), "Y deletes it");
+    // To the trash stays one Enter away: it can be got back.
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn a_confirmation_counts_one_file_in_the_singular() {
     let (a, b) = fixture();
@@ -1984,6 +2051,29 @@ fn the_filter_hides_what_does_not_match_until_esc() {
 }
 
 #[test]
+fn the_filter_is_fuzzy_by_default_and_plain_by_setting() {
+    let (a, b) = files(&["config.toml", "my_config_file.rs", "notes.txt"]);
+    // Letters in order: c, f, g. The closer match comes first.
+    let s = shot_keys(SIZE, "Ctrl+f,c,f,g,Enter", &a, &b);
+    assert!(s.contains("config") && s.contains("my_config_file"), "{s}");
+    assert!(!s.contains("notes"), "{s}");
+    let (first, _) = locate(&s, "config ");
+    let (_, y_config) = locate(&s, "config ");
+    let (_, y_mine) = locate(&s, "my_config_file");
+    assert!(y_config < y_mine, "the tighter match first ({first})\n{s}");
+    // plain: the text as typed, so "cfg" matches nothing.
+    let s = shot_cfg_env(
+        "[files]\nfilter = \"plain\"\n",
+        &[],
+        "Ctrl+f,c,f,g,Enter",
+        &a,
+        &b,
+    );
+    assert!(!s.contains("config") && !s.contains("notes"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_mark_the_filter_hides_is_dropped_so_f8_cannot_reach_it() {
     let (a, b) = files(&["one.rs", "three.md"]);
     let s = shot_keys(SIZE, "Ctrl+a,Ctrl+f,.,r,s,Enter,F8", &a, &b);
@@ -3128,7 +3218,8 @@ fn synchronising_is_off_in_read_only_mode() {
 // ── group C: background jobs, looks, pictures ───────────────────────────────────────
 
 /// A PNG written byte by byte (zlib stored blocks), so the test needs no encoder.
-fn write_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
+/// A PNG of `w` x `h` whose rows take the colours in turn.
+fn write_png(path: &std::path::Path, w: u32, h: u32, rows: &[[u8; 3]]) {
     fn crc(data: &[u8]) -> u32 {
         let mut c = !0u32;
         for &b in data {
@@ -3151,10 +3242,12 @@ fn write_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
         out.extend_from_slice(&crc(&c).to_be_bytes());
     }
     // Each row: filter byte 0, then the pixels.
-    let row: Vec<u8> = std::iter::once(0u8)
-        .chain(std::iter::repeat_n(rgb, w as usize).flatten())
+    let raw: Vec<u8> = (0..h as usize)
+        .flat_map(|y| {
+            std::iter::once(0u8)
+                .chain(std::iter::repeat_n(rows[y % rows.len()], w as usize).flatten())
+        })
         .collect();
-    let raw: Vec<u8> = std::iter::repeat_n(row, h as usize).flatten().collect();
     let mut z = vec![0x78, 0x01, 0x01];
     z.extend_from_slice(&(raw.len() as u16).to_le_bytes());
     z.extend_from_slice(&(!(raw.len() as u16)).to_le_bytes());
@@ -3179,10 +3272,22 @@ fn write_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
 #[test]
 fn quick_view_draws_a_picture_in_half_blocks() {
     let (a, b) = files(&[]);
-    write_png(&a.join("red.png"), 8, 4, [255, 0, 0]);
+    // Red and blue rows in turn: every cell has two colours, so a half block.
+    write_png(&a.join("stripes.png"), 8, 4, &[[255, 0, 0], [0, 0, 255]]);
     let s = shot_keys(SIZE, "Down,Alt+q", &a, &b);
     assert!(s.contains("image 8\u{d7}4"), "{s}");
     assert!(s.contains('\u{2580}'), "drawn as half blocks\n{s}");
+    // All red: each cell is one colour, painted as background with no character, as
+    // About's logo is, so a terminal that draws half blocks from its font cannot
+    // stripe it.
+    fs::remove_file(a.join("stripes.png")).unwrap();
+    write_png(&a.join("red.png"), 8, 4, &[[255, 0, 0]]);
+    let s = shot_keys(SIZE, "Down,Alt+q", &a, &b);
+    assert!(s.contains("image 8\u{d7}4"), "{s}");
+    assert!(
+        !s.contains('\u{2580}'),
+        "one colour a cell, no half block\n{s}"
+    );
     fs::write(a.join("broken.png"), b"not a png").unwrap();
     let s = shot_keys(SIZE, "/,b,r,o,Enter,Alt+q", &a, &b);
     assert!(
@@ -3252,33 +3357,27 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
     );
 }
 
-/// The logo in About, as (columns, rows) of half blocks: `n` pixels square is `n`
-/// columns by `n / 2` rows.
-fn logo_size(s: &str) -> (usize, usize) {
-    let runs: Vec<usize> = s
-        .lines()
-        .map(|l| {
-            l.split(|c| c != '\u{2580}')
-                .map(|r| r.chars().count())
-                .max()
-                .unwrap_or(0)
-        })
-        .filter(|&n| n > 0)
-        .collect();
-    (runs.iter().copied().max().unwrap_or(0), runs.len())
-}
-
 #[test]
-fn about_draws_a_small_logo_beside_the_text() {
+fn about_draws_its_logo_without_half_blocks() {
     let (a, b) = fixture();
-    // One small logo, about as tall as the text, whatever the window.
-    for (size, logo) in [("80x24", (14, 7)), ("170x52", (14, 7))] {
+    // The logo is one colour per cell, painted as background: no `▀` in About at all,
+    // so it looks the same in a terminal that draws half blocks from its font (macOS
+    // Terminal.app). The plain-text screenshot cannot show colours; the logo's cells
+    // are checked in app.rs.
+    for size in ["80x24", "170x52"] {
         let s = shot_keys(size, "F9,Left,Up,Enter", &a, &b);
         assert!(
             s.contains("No network, no telemetry"),
             "About at {size}\n{s}"
         );
-        assert_eq!(logo_size(&s), logo, "the logo at {size}\n{s}");
+        assert!(!s.contains('\u{2580}'), "a half block at {size}\n{s}");
+        // The text starts 14 + 2 columns after the dialog's border: the logo's room.
+        let (bx, _) = locate(&s, "xdevcmd 0.2");
+        let (tx, _) = locate(&s, "No network");
+        assert!(
+            tx >= bx + 14,
+            "the text leaves room for the logo at {size}\n{s}"
+        );
     }
 }
 

@@ -38,7 +38,9 @@ sort = "name"             # name | ext | size | modified
 reverse = false           # the other way round
 dirs_first = true         # directories before files
 max_panes = 3             # how many file panes you can split into (2-16)
-auto_refresh_ms = 1000    # how often panes look for changes; 0 = never, or 100-60000
+auto_refresh_ms = 1000    # how often panes look for changes where the system cannot tell
+                          # (network drives; 10 times less often where it can); 0 = never
+filter = "fuzzy"          # Ctrl+F: fuzzy (letters in order, best first) or plain
 ls_colors = false         # use your $LS_COLORS
 icons = false             # file icons; needs a Nerd Font
 git_status = false        # a git letter per file; runs git (see security.md)
@@ -105,8 +107,17 @@ blue-panel look of the DOS-era commanders; `high-contrast` is black and white wi
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). It starts from a built-in theme and changes what it lists,
-with the same names as `[theme]`:
+binary, for a portable copy). The release files come with three examples in `themes/`
+(Nord, Gruvbox dark, Solarized light), which work as they are when kept beside
+`xdevcmd`. To start your own, print a built-in theme with every colour listed:
+
+```bash
+mkdir -p ~/.config/xdevcmd/themes
+xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml   # then [theme] name = "mine"
+```
+
+A theme file starts from a built-in theme and changes what it lists, with the same
+names as `[theme]`:
 
 ```toml
 # themes/sunset.toml — then [theme] name = "sunset"

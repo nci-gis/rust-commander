@@ -1,0 +1,21 @@
+# Nord (https://www.nordtheme.com, MIT) for xdevcmd: an example theme file.
+# Copy it into themes/ beside your config.toml, or keep it in themes/ beside the
+# xdevcmd binary, then pick "nord" in View > Theme... or with [theme] name = "nord".
+# Start your own with: xdevcmd --print-theme dark
+base = "dark"
+background = "#2e3440"
+panel = "#2e3440"
+bar = "#3b4252"
+border = "#4c566a"
+border_active = "#88c0d0"
+accent = "#88c0d0"
+text = "#d8dee9"
+text_dim = "#7b88a1"
+directory = "#81a1c1"
+executable = "#a3be8c"
+symlink = "#b48ead"
+archive = "#d08770"
+error = "#bf616a"
+marked = "#ebcb8b"
+cursor = "#434c5e"
+cursor_active = "#5e81ac"

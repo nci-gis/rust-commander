@@ -98,7 +98,7 @@ pub fn fit(c: Color, depth: Depth) -> Color {
 }
 
 /// ANSI colour `i` (0–15) by name.
-fn ansi(i: u8) -> Color {
+pub(crate) fn ansi(i: u8) -> Color {
     const NAMED: [Color; 16] = [
         Color::Black,
         Color::Red,
@@ -311,6 +311,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_example_theme_files_load_and_keep_their_rows_apart() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+        let mut seen = 0;
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.extension().is_none_or(|x| x != "toml") {
+                continue;
+            }
+            let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+            assert!(
+                !BUILT_IN.contains(&name.as_str()),
+                "{name} hides a built-in"
+            );
+            let text = std::fs::read_to_string(&p).unwrap();
+            let t = crate::config::theme_from_text(&text, &name).unwrap();
+            for depth in [Depth::True, Depth::X256] {
+                for (a, ca, b, cb) in apart(&t) {
+                    assert_ne!(
+                        fit(ca, depth),
+                        fit(cb, depth),
+                        "{name} at {depth:?}: {a} and {b} become the same colour"
+                    );
+                }
+            }
+            seen += 1;
+        }
+        assert!(
+            seen >= 3,
+            "the example themes are missing from {}",
+            dir.display()
+        );
+    }
+
+    #[test]
+    fn a_printed_theme_reads_back_as_the_same_theme() {
+        for name in BUILT_IN {
+            let text = crate::config::render_theme(name).unwrap();
+            let back = crate::config::theme_from_text(&text, name).unwrap();
+            let want = built_in(name).unwrap();
+            if *name == "ansi" {
+                // Its 16 named colours come back as palette entries 0-15, which a
+                // 16-colour terminal, the only one it is for, shows the same.
+                let at16 = |t: &Theme| -> Vec<Color> {
+                    apart(t)
+                        .into_iter()
+                        .flat_map(|(_, a, _, b)| [fit(a, Depth::Ansi16), fit(b, Depth::Ansi16)])
+                        .collect()
+                };
+                assert_eq!(at16(&back), at16(&want), "{name}");
+            } else {
+                assert_eq!(back, want, "{name}");
+            }
+        }
+        assert!(crate::config::render_theme("nope").is_err());
     }
 
     #[test]

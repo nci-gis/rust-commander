@@ -39,6 +39,8 @@ allow = [
     "Unlicense",
     "BSL-1.0",
     "Unicode-3.0",
+    # notify (directory watching), 2026-11-08: a public-domain dedication.
+    "CC0-1.0",
 ]
 confidence-threshold = 0.9
 

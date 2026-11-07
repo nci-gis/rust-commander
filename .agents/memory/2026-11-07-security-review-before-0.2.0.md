@@ -3,7 +3,7 @@
 **Date**: 2026-11-07
 **Agent**: Claude Code
 **Confidence**: High (fixed items have tests; open items are from reading)
-**Status**: New
+**Status**: Needs Review
 **Source**: a security review of `git diff ede93de..dev -- crates/` (0.1.0 → 0.2.0),
 done before tagging 0.2.0, with proof-of-concept runs for the confirmed findings
 **Review-by**: 2027-02-01
@@ -47,6 +47,11 @@ swapped in between the check and the open; batch files found on PATH by a bare
 `.cmd` name; the temp directory used by name rather than identity.
 
 ## Open (not fixed in 0.2.0)
+
+Update, 2026-11-07, Round 013 (`feat/v0.2.1`): the first two items below are fixed
+(`noreplace.rs`; `on_path` in `pane/term.rs`), with tests. Still open: the Windows
+run and active content. F5 and F6 had the same race (found 2026-11-08) and are fixed
+too. See also `2026-11-08-algorithm-review.md`, which fixed more and lists what is left.
 
 - `batch_rename::apply` checks the target is free, then `rename`s, which overwrites a
   file that appears in between. A no-replace rename (`renameat2(RENAME_NOREPLACE)` on

@@ -8,9 +8,14 @@ your permissions. It was tested against attacks on all three before release.
 - **File names that try to run commands.** A name with control characters is never
   typed into a shell or put on the clipboard.
 - **Files that hang a program.** FIFOs and devices are refused before they are opened.
-- **Hostile archives.** Names that point outside the target folder are never written.
-  Links inside archives are not created. Set-id bits are dropped. An entry bigger than
-  it claims is stopped.
+- **Hostile archives.** Names that point outside the target folder are never written,
+  and neither is a link already at a file's name followed (it is replaced). Links
+  inside archives are not created. Set-id bits are dropped. An entry bigger than it
+  claims is stopped. An archive that would not fit, or would unpack to over 1 GB at
+  more than 1000 times its own size, or to more than a million files, is refused.
+- **Losing a file half-way.** A file being replaced is written under a temporary name
+  and swapped in once complete. A move across drives removes each source only after
+  its own copy is done, so what you skipped stays. Shift+F8 needs **Y**, not Enter.
 - **Huge images.** A picture claiming billions of pixels is refused before it is
   decoded.
 - **Running programs by accident.** Opening a program, a script, a launcher, an
@@ -26,6 +31,15 @@ your permissions. It was tested against attacks on all three before release.
   acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when there is a space anywhere in the
   batch file's path (as in `C:\Program Files\nodejs\npm.cmd`), which `cmd.exe` can
   misread.
+- **A program of the same name in the directory you browse.** On Linux and macOS, a
+  program named without a path (in an `[[open]]` rule, or run in a terminal tab) is
+  looked up only in the absolute directories of `PATH`: a `.` or an empty entry, which
+  would mean the directory being browsed, is skipped.
+- **A file that appears while xdevcmd writes.** Renaming (F2, renaming many, moving
+  into the Linux trash) is refused by the system itself if the new name is taken, even
+  by a file created a moment earlier. Copying and moving write to a name found free
+  only if it is still free; a file that appeared in between gets the usual overwrite
+  question. Nothing is replaced without asking.
 - **Typing into the wrong program.** Alt+C and the user menu type a line into the
   terminal only when a shell is at its prompt there, never into a program that owns
   it — an editor, a password prompt, a program run in a terminal tab.

@@ -1,9 +1,9 @@
 # Round 012: Two mouse touches — the path, and an even border
 
-**Status**: In Progress
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md); ideas from the owner, 2026-11-07
 **Date started**: 2026-11-07 (owner: "hoãn v0.2.0 lại để thêm 2 cái này")
-**Date completed**:
+**Date completed**: 2026-11-07 (owner tested: "đã test xong, confirm okay nhé"; merged in #12)
 
 ## Goal
 
@@ -50,7 +50,7 @@ review, PR #11), so the final review covers both.
 ## Check
 
 - [x] Unit and render tests above; the whole suite, clippy and fmt pass locally.
-- [ ] The owner, by hand, in a real terminal.
+- [x] The owner, by hand, in a real terminal (2026-11-07).
 - [x] A last docs and security review over this round and the review branch; what it
       found is fixed here, with tests, except what the memory file lists as open.
 
@@ -60,7 +60,13 @@ Record what you could **not** verify as explicitly as what you could.
 
 **Learnings**:
 
-- ...
+- **A boundary in a binary layout tree is not between two panes**: it is between two
+  subtrees. Sharing "the two panes beside it" means flattening the same-axis splits
+  into pieces and changing only the two at the boundary.
+- **Clicks on drawn text must be measured in cells, not characters**: wide CJK
+  characters and macOS's decomposed accents put a character count off by several cells.
+- A final review after a review still found real problems (packing outside the root,
+  a configured opener skipping the question): worth the time before a release.
 
 **Promotions**:
 

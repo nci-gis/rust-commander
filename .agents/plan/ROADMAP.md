@@ -45,7 +45,7 @@ Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-
 [Round 010](cycles/Round_010.md), the mouse in Settings, is Complete (merged in #7);
 [Round 011](cycles/Round_011.md), the rename to xdevcmd, is Complete (merged in #8).
 [Round 012](cycles/Round_012.md), two mouse touches (click the path; double-click a
-border to share it evenly), is open: 0.2.0 waits for it (owner, 2026-11-07).
+border to share it evenly), is Complete (merged in #12).
 What is left, in order:
 
 1. ~~Land Rounds 010 and 011 in `dev`~~: done, #7 and #8.
@@ -93,7 +93,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011; packages next |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
-| 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | In Progress |
+| 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |
 | 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
 | **Later: optional extras** | | | | |
 | 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |

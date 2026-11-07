@@ -63,7 +63,7 @@ struct Session {
     /// Every byte xdevcmd wrote, for the few tests about the bytes themselves (colours);
     /// anything about text asks the screen instead.
     raw: Arc<Mutex<Vec<u8>>>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
 }
 
@@ -86,6 +86,18 @@ impl Session {
         editor: Option<&Path>,
         dirs: &[PathBuf],
         env: &[(&str, &str)],
+    ) -> Self {
+        Self::start_answering(s, editor, dirs, env, None)
+    }
+
+    /// As `start_env`, answering xdevcmd's start-up question about pictures (`CSI c`)
+    /// with `answer`, as a terminal would, before the first frame.
+    fn start_answering(
+        s: &Scratch,
+        editor: Option<&Path>,
+        dirs: &[PathBuf],
+        env: &[(&str, &str)],
+        answer: Option<&'static [u8]>,
     ) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -127,21 +139,31 @@ impl Session {
         let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
         let raw = Arc::new(Mutex::new(Vec::new()));
         let mut reader = pair.master.try_clone_reader().unwrap();
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
         {
             let parser = parser.clone();
             let raw = raw.clone();
+            let writer = writer.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16384];
+                let mut answer = answer;
                 while let Ok(n) = reader.read(&mut buf) {
                     if n == 0 {
                         break;
                     }
                     raw.lock().unwrap().extend_from_slice(&buf[..n]);
                     parser.lock().unwrap().process(&buf[..n]);
+                    let asked = raw.lock().unwrap().windows(3).any(|w| w == b"\x1b[c");
+                    if let Some(a) = answer.filter(|_| asked) {
+                        let mut w = writer.lock().unwrap();
+                        let _ = w.write_all(a);
+                        let _ = w.flush();
+                        answer = None;
+                    }
                 }
             });
         }
-        let writer = pair.master.take_writer().unwrap();
         // Keep the master alive for the session: dropping it hangs up the child.
         std::mem::forget(pair.master);
 
@@ -167,8 +189,10 @@ impl Session {
     }
 
     fn send(&mut self, bytes: &[u8]) {
-        self.writer.write_all(bytes).unwrap();
-        self.writer.flush().unwrap();
+        let mut w = self.writer.lock().unwrap();
+        w.write_all(bytes).unwrap();
+        w.flush().unwrap();
+        drop(w);
         // A beat for the event loop to read it and repaint; the waits below do the
         // real synchronising.
         std::thread::sleep(Duration::from_millis(60));
@@ -219,8 +243,10 @@ impl Session {
     fn mouse(&mut self, b: u8, x: u16, y: u16, release: bool) {
         let end = if release { 'm' } else { 'M' };
         let seq = format!("\x1b[<{b};{};{}{end}", x + 1, y + 1);
-        self.writer.write_all(seq.as_bytes()).unwrap();
-        self.writer.flush().unwrap();
+        let mut w = self.writer.lock().unwrap();
+        w.write_all(seq.as_bytes()).unwrap();
+        w.flush().unwrap();
+        drop(w);
         std::thread::sleep(Duration::from_millis(30));
     }
 
@@ -481,6 +507,41 @@ fn quick_view_draws_iterm2_and_sixel_pictures_and_repaints_them_away() {
         wait_bytes(&x, start, 2);
         x.quit();
     }
+}
+
+#[test]
+fn a_terminal_that_answers_sixel_gets_sixel_with_nothing_in_the_environment() {
+    // Windows Terminal over SSH: no WT_SESSION, but it answers the questions xdevcmd
+    // asks at start-up — its cell size and, in its device attributes, sixel (4).
+    let s = Scratch::new("probe");
+    let pic = xdevcmd_core::image::Picture {
+        width: 8,
+        height: 8,
+        source: (8, 8),
+        rgb: vec![[30, 30, 200]; 64],
+    };
+    std::fs::write(
+        s.left().join("a.png"),
+        xdevcmd_core::image::to_png(&pic).unwrap(),
+    )
+    .unwrap();
+    let mut x = Session::start_answering(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[
+            ("TERM_PROGRAM", ""),
+            ("WT_SESSION", ""),
+            ("KITTY_WINDOW_ID", ""),
+            ("LC_TERMINAL", ""),
+        ],
+        Some(b"\x1b[6;20;10t\x1b[?61;4;6;22c"),
+    );
+    x.wait_for("a ");
+    x.send(DOWN);
+    x.send(b"\x1bq");
+    wait_bytes(&x, "\x1bP9;1;0q", 1);
+    x.quit();
 }
 
 #[test]

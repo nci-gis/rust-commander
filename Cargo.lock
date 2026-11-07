@@ -2536,6 +2536,7 @@ dependencies = [
  "notify",
  "portable-pty",
  "ratatui",
+ "rustix",
  "serde",
  "tar",
  "toml",

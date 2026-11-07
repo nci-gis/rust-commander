@@ -272,6 +272,8 @@ pub struct App {
     graphics: crate::graphics::Protocol,
     /// A terminal cell in pixels, for decoding pictures at the terminal's resolution.
     cell_px: (u16, u16),
+    /// What the terminal answered at start-up about pictures (main.rs asks).
+    pub probe: crate::graphics::Probe,
     /// The picture this frame wants drawn by the terminal, and the one it shows now.
     graphic_want: Option<Graphic>,
     graphic_shown: Option<Graphic>,
@@ -383,6 +385,7 @@ impl App {
             decoding: None,
             graphics: crate::graphics::Protocol::Blocks,
             cell_px: (8, 16),
+            probe: crate::graphics::Probe::default(),
             graphic_want: None,
             graphic_shown: None,
             bar_hits: Vec::new(),
@@ -618,9 +621,14 @@ impl App {
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
         self.watcher = crate::watch::Watcher::new();
-        self.graphics = crate::graphics::detect(&self.settings.config.viewer.images, |k| {
-            std::env::var(k).ok()
-        });
+        self.graphics = crate::graphics::detect(
+            &self.settings.config.viewer.images,
+            |k| std::env::var(k).ok(),
+            self.probe,
+        );
+        if let Some((h, w)) = self.probe.cell {
+            self.cell_px = (w, h);
+        }
         self.measure_cells(terminal);
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
@@ -1148,6 +1156,12 @@ impl App {
     }
 
     /// One turn of the event loop without input: lets a running job report in.
+    /// Pictures are left to the terminal's own choice ("auto"): worth asking it.
+    #[cfg(unix)]
+    pub fn settings_images_auto(&self) -> bool {
+        self.settings.config.viewer.images == "auto"
+    }
+
     /// A job is working and not waiting on a question: a screenshot (the tests) waits
     /// for it before the last frame, rather than ending the process under it.
     pub fn job_working(&self) -> bool {
@@ -5434,8 +5448,11 @@ impl App {
         s.depth = self.settings.depth;
         crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
         if self.interactive {
-            self.graphics =
-                crate::graphics::detect(&s.config.viewer.images, |k| std::env::var(k).ok());
+            self.graphics = crate::graphics::detect(
+                &s.config.viewer.images,
+                |k| std::env::var(k).ok(),
+                self.probe,
+            );
         }
         self.settings = s;
         self.config_outcome = Outcome::Loaded(path.clone());

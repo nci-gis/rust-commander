@@ -46,6 +46,11 @@ notify = "8"
 # worth a crate: quantising a picture to a palette. MIT OR Apache-2.0.
 icy_sixel = "0.7"
 
+# Asking the terminal what it can draw (graphics.rs): a poll with a timeout on stdin,
+# which crossterm has not started reading yet. Already in the tree through crossterm.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["event", "stdio"] }
+
 [dev-dependencies]
 tar = { version = "0.4.46", default-features = false }
 

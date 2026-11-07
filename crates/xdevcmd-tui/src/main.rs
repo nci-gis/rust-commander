@@ -333,6 +333,12 @@ fn main() -> Result<()> {
     // init() for what it sets up (raw mode, the alternate screen, a panic hook that
     // undoes them); then our own Terminal, whose backend stays quiet when idle.
     drop(ratatui::init());
+    // What the terminal can draw, asked before anything reads its replies; over SSH the
+    // environment rarely says. Not inside tmux, which answers for itself.
+    #[cfg(unix)]
+    if std::env::var_os("TMUX").is_none() && app.settings_images_auto() {
+        app.probe = graphics::probe(Duration::from_millis(300));
+    }
     let mut terminal = ratatui::Terminal::new(
         quiet::Quiet::new(ratatui::backend::CrosstermBackend::new(stdout())).with_depth(depth),
     )?;

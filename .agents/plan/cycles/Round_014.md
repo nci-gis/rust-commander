@@ -59,6 +59,15 @@ Then, either way:
   a Kitty picture is removed by id; an iTerm2 or sixel one, being cells, by repainting
   the screen. Under any dialog nothing is drawn. A resize or an editor's return forgets
   what was shown. `Quiet::raw` writes the bytes past ratatui's cell diff.
+- 2026-11-08, the owner's first try (a screenshot over SSH): the picture came out large
+  and blocky — the half blocks, because `auto` found nothing in the environment; over
+  SSH `WT_SESSION`, `TERM_PROGRAM` and the like do not arrive. Now xdevcmd also **asks
+  the terminal** at start-up (Unix; not inside tmux): a Kitty graphics query, the cell
+  size (`CSI 16 t`) and the device attributes (`CSI c`, `4` = sixel), read straight from
+  the descriptor with a 300 ms limit before crossterm reads anything; the answers cross
+  SSH. The pty test terminal now answers that question when told to, as a real one
+  would (`Session::start_answering`), which the first version of the test missed: it
+  answered only after the first frame, which waits on the answer.
 - 2026-11-08: round opened on `feat/image-preview` from `dev` after 0.2.1. `ratatui-image`
   tried in a scratch build to measure what it brings (table above), then reverted.
 

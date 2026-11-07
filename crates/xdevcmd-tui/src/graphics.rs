@@ -19,9 +19,88 @@ pub enum Protocol {
     Blocks,
 }
 
+/// What the terminal said when asked at start-up ([`probe`]): whether it draws Kitty
+/// pictures or sixel, and a cell's size in pixels (height, width). Asking works over
+/// SSH, where the environment variables that name the terminal mostly do not arrive.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Probe {
+    pub kitty: bool,
+    pub sixel: bool,
+    pub cell: Option<(u16, u16)>,
+}
+
+/// Ask the terminal, before anything else reads its replies: a Kitty graphics query,
+/// the cell size (`CSI 16 t`), and the device attributes (`CSI c`), which every terminal
+/// answers and so marks the end. Waits at most `wait` for a terminal that answers none.
+#[cfg(unix)]
+pub fn probe(wait: std::time::Duration) -> Probe {
+    use rustix::event::{poll, PollFd, PollFlags, Timespec};
+    use std::io::Write;
+    use std::time::Instant;
+    let mut out = std::io::stdout();
+    let ask = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[16t\x1b[c";
+    if out.write_all(ask).and_then(|()| out.flush()).is_err() {
+        return Probe::default();
+    }
+    let stdin = std::io::stdin();
+    let deadline = Instant::now() + wait;
+    let mut got = Vec::new();
+    let mut buf = [0u8; 512];
+    while !answered(&got) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Ok(timeout) = Timespec::try_from(left) else {
+            break;
+        };
+        if left.is_zero() {
+            break;
+        }
+        let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+        match poll(&mut fds, Some(&timeout)) {
+            Ok(n) if n > 0 => {}
+            _ => break,
+        }
+        // Straight from the descriptor: std's Stdin would keep what it read ahead in its
+        // own buffer, where crossterm, which reads the descriptor, would never see it.
+        match rustix::io::read(&stdin, &mut buf) {
+            Ok(n) if n > 0 => got.extend_from_slice(&buf[..n]),
+            _ => break,
+        }
+    }
+    parse_probe(&got)
+}
+
+/// Whether the device attributes reply, the last one asked for, has come.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn answered(bytes: &[u8]) -> bool {
+    let s = String::from_utf8_lossy(bytes);
+    s.find("\x1b[?").is_some_and(|i| s[i..].contains('c'))
+}
+
+/// The terminal's replies to [`probe`]'s questions.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn parse_probe(bytes: &[u8]) -> Probe {
+    let s = String::from_utf8_lossy(bytes);
+    let kitty = s.contains("\x1b_Gi=31;OK");
+    // Cell size: CSI 6 ; height ; width t
+    let cell = s.find("\x1b[6;").and_then(|i| {
+        let rest = &s[i + 4..];
+        let end = rest.find('t')?;
+        let mut it = rest[..end].split(';').map(|n| n.parse::<u16>().ok());
+        let (h, w) = (it.next()??, it.next()??);
+        (h > 0 && w > 0).then_some((h, w))
+    });
+    // Device attributes: CSI ? 62 ; 4 ; … c — 4 is sixel.
+    let sixel = s.find("\x1b[?").is_some_and(|i| {
+        let rest = &s[i + 3..];
+        rest.find('c')
+            .is_some_and(|end| rest[..end].split(';').any(|p| p == "4"))
+    });
+    Probe { kitty, sixel, cell }
+}
+
 /// The protocol for `setting` (`[viewer] images`): a name chooses it; "auto" asks the
-/// environment, `var`.
-pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>) -> Protocol {
+/// environment, `var`, then what the terminal answered, `probe`.
+pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>, probe: Probe) -> Protocol {
     match setting {
         "kitty" => return Protocol::Kitty,
         "iterm2" => return Protocol::Iterm2,
@@ -54,6 +133,13 @@ pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>) -> Protocol {
     }
     // Windows Terminal draws sixel from 1.22 (2024); WT_SESSION is set in every tab.
     if has("WT_SESSION") {
+        return Protocol::Sixel;
+    }
+    // Nothing in the environment, as over SSH: what the terminal itself said.
+    if probe.kitty {
+        return Protocol::Kitty;
+    }
+    if probe.sixel {
         return Protocol::Sixel;
     }
     Protocol::Blocks
@@ -166,44 +252,82 @@ mod tests {
         }
     }
 
+    fn detect_env(setting: &str, var: impl Fn(&str) -> Option<String>) -> Protocol {
+        detect(setting, var, Probe::default())
+    }
+
+    #[test]
+    fn what_the_terminal_answers_decides_when_the_environment_says_nothing() {
+        // Windows Terminal over SSH: sixel in its device attributes, its cell size.
+        let wt = parse_probe(b"\x1b[6;20;10t\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c");
+        assert_eq!(
+            wt,
+            Probe {
+                kitty: false,
+                sixel: true,
+                cell: Some((20, 10))
+            }
+        );
+        assert_eq!(detect("auto", |_| None, wt), Protocol::Sixel);
+        // kitty or Ghostty: the graphics query answered OK.
+        let k = parse_probe(b"\x1b_Gi=31;OK\x1b\\\x1b[6;34;16t\x1b[?62;22c");
+        assert!(k.kitty && !k.sixel);
+        assert_eq!(detect("auto", |_| None, k), Protocol::Kitty);
+        // A terminal with neither: half blocks.
+        let plain = parse_probe(b"\x1b[?1;2c");
+        assert_eq!(detect("auto", |_| None, plain), Protocol::Blocks);
+        // tmux answers for itself: never trusted.
+        assert_eq!(
+            detect("auto", |k| (k == "TMUX").then(|| "x".into()), wt),
+            Protocol::Blocks
+        );
+        assert!(answered(b"\x1b[?62;4c") && !answered(b"\x1b[6;20;10t"));
+    }
+
     #[test]
     fn the_terminal_is_recognised_from_its_environment() {
         assert_eq!(
-            detect("auto", env(&[("TERM", "xterm-kitty")])),
+            detect_env("auto", env(&[("TERM", "xterm-kitty")])),
             Protocol::Kitty
         );
         assert_eq!(
-            detect("auto", env(&[("TERM_PROGRAM", "ghostty")])),
+            detect_env("auto", env(&[("TERM_PROGRAM", "ghostty")])),
             Protocol::Kitty
         );
         assert_eq!(
-            detect("auto", env(&[("TERM_PROGRAM", "iTerm.app")])),
+            detect_env("auto", env(&[("TERM_PROGRAM", "iTerm.app")])),
             Protocol::Iterm2
         );
         // Over SSH, iTerm2 is known by LC_TERMINAL.
         assert_eq!(
-            detect("auto", env(&[("LC_TERMINAL", "iTerm2")])),
+            detect_env("auto", env(&[("LC_TERMINAL", "iTerm2")])),
             Protocol::Iterm2
         );
         assert_eq!(
-            detect("auto", env(&[("TERM_PROGRAM", "WezTerm")])),
+            detect_env("auto", env(&[("TERM_PROGRAM", "WezTerm")])),
             Protocol::Iterm2
         );
-        assert_eq!(detect("auto", env(&[("WT_SESSION", "x")])), Protocol::Sixel);
-        assert_eq!(detect("auto", env(&[("TERM", "foot")])), Protocol::Sixel);
+        assert_eq!(
+            detect_env("auto", env(&[("WT_SESSION", "x")])),
+            Protocol::Sixel
+        );
+        assert_eq!(
+            detect_env("auto", env(&[("TERM", "foot")])),
+            Protocol::Sixel
+        );
         // Terminal.app, VS Code, an unknown terminal: half blocks.
         assert_eq!(
-            detect("auto", env(&[("TERM_PROGRAM", "Apple_Terminal")])),
+            detect_env("auto", env(&[("TERM_PROGRAM", "Apple_Terminal")])),
             Protocol::Blocks
         );
         assert_eq!(
-            detect("auto", env(&[("TERM_PROGRAM", "vscode")])),
+            detect_env("auto", env(&[("TERM_PROGRAM", "vscode")])),
             Protocol::Blocks
         );
-        assert_eq!(detect("auto", env(&[])), Protocol::Blocks);
+        assert_eq!(detect_env("auto", env(&[])), Protocol::Blocks);
         // Inside tmux, half blocks, whatever is outside.
         assert_eq!(
-            detect(
+            detect_env(
                 "auto",
                 env(&[("TERM", "xterm-kitty"), ("TMUX", "/tmp/t,1,0")])
             ),
@@ -211,11 +335,11 @@ mod tests {
         );
         // The setting wins.
         assert_eq!(
-            detect("sixel", env(&[("TERM", "xterm-kitty")])),
+            detect_env("sixel", env(&[("TERM", "xterm-kitty")])),
             Protocol::Sixel
         );
         assert_eq!(
-            detect("blocks", env(&[("TERM", "xterm-kitty")])),
+            detect_env("blocks", env(&[("TERM", "xterm-kitty")])),
             Protocol::Blocks
         );
     }

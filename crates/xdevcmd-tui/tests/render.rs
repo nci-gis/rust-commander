@@ -2059,7 +2059,13 @@ fn the_filter_is_fuzzy_by_default_and_plain_by_setting() {
     let (_, y_mine) = locate(&s, "my_config_file");
     assert!(y_config < y_mine, "the tighter match first ({first})\n{s}");
     // plain: the text as typed, so "cfg" matches nothing.
-    let s = shot_cfg_env("[files]\nfilter = \"plain\"\n", &[], "Ctrl+f,c,f,g,Enter", &a, &b);
+    let s = shot_cfg_env(
+        "[files]\nfilter = \"plain\"\n",
+        &[],
+        "Ctrl+f,c,f,g,Enter",
+        &a,
+        &b,
+    );
     assert!(!s.contains("config") && !s.contains("notes"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

@@ -119,6 +119,9 @@ packaged version carries them.
 - [x] CI on the branch, run by hand (no pull request yet, as the owner asked): Linux,
       macOS, Windows, cross-check and cargo-deny all pass (run 42393054690), so the
       no-replace rename tests passed on a real Mac and Windows.
+- [x] CI again after the copy/move fix, the updates and ARM (run 42396423153): Linux
+      x86_64, Linux ARM64 (`ubuntu-24.04-arm`), macOS, Windows, cross-check and
+      cargo-deny all pass. The ARM release build itself runs only on a tag.
 - [x] By the owner on macOS (2026-11-08): the logo is right, and the frame count in
       Usage now stays near one a second when idle ("mình confirm đã okay số frame, logo
       on macOS"). Measured here too, with strace: 10 terminal writes in 10 idle seconds

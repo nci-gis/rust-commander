@@ -1,9 +1,9 @@
 # Round 010: The mouse in Settings
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), carried from [Round 007](Round_007.md)
 **Date started**: 2026-11-07 (owner: "dùng chuột trong settings có thể mở 1 round mới và target v0.2.0")
-**Date completed**:
+**Date completed**: 2026-11-07 (owner: "xong thì flip r10 Complete luôn nhé"; merged in #7)
 
 ## Goal
 
@@ -49,9 +49,16 @@ Record what you could **not** verify as explicitly as what you could.
 
 ## Act
 
+**Unticked check, and why the round closes anyway:** the mouse was not tried by hand in a
+real terminal; `--screenshot` replays the same events a terminal sends, and CI passed on
+Linux, macOS and Windows (#7).
+
 **Learnings**:
 
-- ...
+- **Record hit areas while drawing**, as the other dialogs do: the click handler then
+  needs no layout arithmetic of its own, and cannot disagree with the screen.
+- **Keys and clicks should end in one handler** (`settings_outcome`): a click on a theme
+  previews it exactly as an arrow key does, with nothing to keep in step.
 
 **Promotions**:
 

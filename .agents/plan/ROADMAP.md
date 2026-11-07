@@ -42,12 +42,11 @@ were done first:
 ## Next, in this order
 
 Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-07).
-[Round 010](cycles/Round_010.md), the mouse in Settings, is open and targets 0.2.0
-(owner, 2026-11-07). What is left, in order:
+[Round 010](cycles/Round_010.md), the mouse in Settings, is Complete (merged in #7);
+[Round 011](cycles/Round_011.md), the rename to xdevcmd, is in Review (merged in #8).
+What is left, in order:
 
-1. **Land `feat/settings-mouse`** in `dev` by one pull request: Round 010 and, beneath
-   it, `feat/polish` (the About logo sized to the window, Settings offering 3 shells and
-   keeping hand-written values, the two-key group badge with only resizing repeating).
+1. ~~Land Rounds 010 and 011 in `dev`~~: done, #7 and #8.
 2. **Release 0.2.0** when the owner says so (below).
 3. **Item 8**: the name is decided, **xdevcmd** (owner, 2026-11-07), and done in
    [Round 011](cycles/Round_011.md) before 0.2.0; then the packages; then **item 10**, the launch.
@@ -91,7 +90,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011; packages next |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
-| 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Review |
+| 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
 | **Later: optional extras** | | | | |
 | 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |

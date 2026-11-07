@@ -1,6 +1,6 @@
 # Round 011: One name — rcmd becomes xdevcmd
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 8
 **Date started**: 2026-11-07 (owner: "okay, xdevcmd. đổi tên trước nhé rồi mới release")
 **Date completed**:
@@ -45,7 +45,7 @@ Steps:
 - [x] `tempfiles.rs`: the sweep of the pre-`tempfiles` names dropped; with a new
       prefix there is nothing old to sweep.
 - [x] CHANGELOG: one entry under Changed; the 0.1.0 section left as released.
-- [ ] Tests, clippy, a pull request into `dev`, CI on all three systems.
+- [x] Tests, clippy, a pull request into `dev` (#8), CI on all three systems.
 
 ## Do
 
@@ -59,9 +59,9 @@ Round 010 waits only for its pull request (#7) to be merged; this round's branch
 
 ## Check
 
-- [ ] `cargo test`, `cargo clippy --all-targets -D warnings`, `cargo fmt --check`.
-- [ ] CI green on Linux, macOS (universal artifact named `xdevcmd`) and Windows (the
-      icon embedded in `xdevcmd.exe`).
+- [x] `cargo test`, `cargo clippy --all-targets -D warnings`, `cargo fmt --check`.
+- [x] CI green on Linux, macOS (universal artifact named `xdevcmd`) and Windows (the
+      icon embedded in `xdevcmd.exe`): #8, merged into `dev` as 52239b8.
 - [ ] The release workflow's names (`xdevcmd-v0.2.0-<target>`) are only exercised by the
       tag; read, not run, until then.
 

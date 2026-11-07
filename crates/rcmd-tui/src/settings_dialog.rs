@@ -246,7 +246,7 @@ const FIELDS: &[Field] = &[
         "max_terminals",
         "Shells at most",
         "Across every terminal tab and split",
-        Kind::Pick(&["2", "4", "8", "16"]),
+        Kind::Pick(&["1", "2", "3", "4", "6", "8", "12", "16"]),
         true,
     ),
 ];
@@ -330,6 +330,27 @@ pub fn value(f: &Field, v: &str) -> Value {
     }
 }
 
+/// A pick's choices, with the value the file has among them even when it is not one
+/// of the usual ones — `max_panes = 5` written by hand — in its place by size, so
+/// stepping through the choices can come back to it rather than losing it.
+fn with_own(choices: &[&str], own: &str) -> Vec<String> {
+    let mut out: Vec<String> = choices.iter().map(|s| s.to_string()).collect();
+    if out.iter().any(|c| c == own) {
+        return out;
+    }
+    match own.parse::<i64>() {
+        Ok(n) if choices.iter().all(|c| c.parse::<i64>().is_ok()) => {
+            let at = choices
+                .iter()
+                .position(|c| c.parse::<i64>().is_ok_and(|c| c > n))
+                .unwrap_or(out.len());
+            out.insert(at, own.to_string());
+        }
+        _ => out.push(own.to_string()),
+    }
+    out
+}
+
 pub struct SettingsDialog {
     pub tab: usize,
     row: usize,
@@ -395,7 +416,7 @@ impl SettingsDialog {
         let cur = get(&self.now, f);
         let choices: Vec<String> = match f.kind {
             Kind::Bool => vec!["false".into(), "true".into()],
-            Kind::Pick(c) => c.iter().map(|s| s.to_string()).collect(),
+            Kind::Pick(c) => with_own(c, &get(&self.before, f)),
             Kind::Themes => self.themes.clone(),
         };
         if choices.is_empty() {
@@ -554,6 +575,31 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_default_is_one_of_its_choices() {
+        let base = Config::default();
+        for f in FIELDS {
+            if let Kind::Pick(c) = f.kind {
+                let v = get(&base, f);
+                assert!(
+                    c.contains(&v.as_str()),
+                    "{}.{}: the default {v} is not among {c:?}",
+                    f.section,
+                    f.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_value_written_by_hand_stays_among_the_choices() {
+        let c = &["2", "3", "4", "6"];
+        assert_eq!(with_own(c, "4"), ["2", "3", "4", "6"]);
+        assert_eq!(with_own(c, "5"), ["2", "3", "4", "5", "6"]);
+        assert_eq!(with_own(c, "9"), ["2", "3", "4", "6", "9"]);
+        assert_eq!(with_own(&["open", "view"], "odd"), ["open", "view", "odd"]);
+    }
 
     #[test]
     fn every_field_reads_and_writes_its_own_setting() {

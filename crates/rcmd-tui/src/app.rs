@@ -1032,11 +1032,33 @@ impl App {
             .iter()
             .map(|((c, m), _)| crate::keys::key_name(*c, *m))
             .collect();
-        format!(
-            "{}, then: {} \u{b7} Enter or Esc: done",
-            crate::keys::key_name(first.0, first.1),
-            keys.join(" ")
-        )
+        // A group whose keys all repeat is a mode, left with Enter or Esc; any other
+        // is a key to pick, after which it closes by itself.
+        if self.group_repeats(first) {
+            format!("{} \u{b7} Enter or Esc: done", keys.join(" "))
+        } else {
+            format!("then: {} \u{b7} Esc: cancel", keys.join(" "))
+        }
+    }
+
+    /// Whether every key in the group `first` opens repeats.
+    fn group_repeats(&self, first: crate::keys::Chord) -> bool {
+        let g = self.settings.keymap.group(first);
+        !g.is_empty() && g.iter().all(|(_, a)| a.repeats())
+    }
+
+    /// The badge at the left of the status line while a group is open: `RESIZE` for a
+    /// mode with a name, else the key that opened it, `ALT+R …`.
+    fn group_badge(&self) -> Option<String> {
+        let first = self.group?;
+        let label = match self.settings.keymap.group_name(first) {
+            Some(n) if self.group_repeats(first) => n.to_uppercase(),
+            _ => format!(
+                "{} \u{2026}",
+                crate::keys::key_name(first.0, first.1).to_uppercase()
+            ),
+        };
+        Some(format!(" {label} "))
     }
 
     /// A key of the open group: run it and keep the group open. `false` when the key is
@@ -1053,8 +1075,12 @@ impl App {
             self.status.clear();
             return false;
         };
-        self.group = Some(first);
-        self.status = self.group_hint(first);
+        if a.repeats() {
+            self.group = Some(first);
+            self.status = self.group_hint(first);
+        } else {
+            self.status.clear();
+        }
         self.run_bound(a, k);
         // An action may have put up its own message; the group's comes back next key.
         true
@@ -5083,7 +5109,11 @@ impl App {
             Mode::ReadOnly => " READ-ONLY ",
             Mode::Restricted => " RESTRICTED ",
         };
-        let left = format!("{}{left}", " ".repeat(badge.chars().count()));
+        // An open two-key group is shown the same way, in the accent colour, so a key
+        // waiting for its second is never a surprise.
+        let group = self.group_badge();
+        let badges = badge.chars().count() + group.as_ref().map_or(0, |g| g.chars().count() + 1);
+        let left = format!("{}{left}", " ".repeat(badges));
         let right = format!("{} ", self.status);
 
         let buf = frame.buffer_mut();
@@ -5124,6 +5154,22 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 )),
                 area.width,
+            );
+        }
+        if let Some(g) = group {
+            let th = theme::t();
+            let x = area.x + badge.chars().count() as u16;
+            frame.buffer_mut().set_line(
+                x,
+                area.y,
+                &Line::from(Span::styled(
+                    g,
+                    Style::new()
+                        .fg(th.bg)
+                        .bg(th.accent)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                area.width.saturating_sub(x - area.x),
             );
         }
     }

@@ -364,13 +364,43 @@ fn a_reader_that_stops_early_ends_rcmd_quietly() {
 fn a_group_says_what_it_takes_and_enter_closes_it() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Alt+r", &a, &b);
-    assert!(s.contains("Alt+r, then: Down Left Right Up"), "{s}");
-    assert!(s.contains("Enter or Esc: done"), "{s}");
+    // A mode: its keys repeat, so it is named on a badge and left with Enter or Esc.
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(status.starts_with(" RESIZE "), "the badge\n{s}");
+    assert!(
+        status.contains("Down Left Right Up \u{b7} Enter or Esc: done"),
+        "{s}"
+    );
+    // Still a mode after a step.
+    let s = shot_keys("110x24", "Alt+r,Left,Left", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(status.starts_with(" RESIZE "), "still open\n{s}");
     // After Enter, Left is a plain key again: it does not resize.
     let closed = shot_keys("110x24", "Alt+r,Enter,Left", &a, &b);
     let plain = shot_keys("110x24", "Left", &a, &b);
     let border = |s: &str| s.lines().nth(1).and_then(|l| l.find("\u{2510}\u{250c}"));
     assert_eq!(border(&closed), border(&plain), "{closed}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_group_of_keys_that_do_not_repeat_closes_after_one() {
+    // Hidden files are toggled once, not again and again: Alt+G waits for its second
+    // key, says so, and is gone after it.
+    let (a, b) = fixture();
+    fs::write(a.join(".secret"), "x").unwrap();
+    let cfg = "[keys]\ntoggle_hidden = [\"Ctrl+h\", \"Alt+g h\"]\nhelp = [\"F1\", \"Alt+g k\"]\n";
+    let s = shot_cfg_env(cfg, &[], "Alt+g", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(status.starts_with(" ALT+G \u{2026} "), "waiting\n{s}");
+    assert!(status.contains("then: h k \u{b7} Esc: cancel"), "{s}");
+    let s = shot_cfg_env(cfg, &[], "Alt+g,h", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(s.contains(".secret"), "hidden files shown\n{s}");
+    assert!(!status.contains("ALT+G"), "closed after one\n{s}");
+    // A second h is a plain h now: hidden files stay shown.
+    let s = shot_cfg_env(cfg, &[], "Alt+g,h,h", &a, &b);
+    assert!(s.contains(".secret"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

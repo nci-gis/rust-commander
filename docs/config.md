@@ -143,9 +143,17 @@ Naming an action replaces all of its default keys. The names are in
 `rcmd --print-config` and on the F1 screen.
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
-Left. Bindings that start with the same key form a group: after its first key, the
-second keys can be pressed again and again, until Enter, Esc, another key or a click.
-The status line shows the group while it is open. That is how **Alt+R, then arrows** resizes.
+Left. Bindings that start with the same key form a group, and there is no time limit
+on the second key: a badge at the left of the status line shows the group is waiting,
+and the hint beside it lists its keys.
+
+- **A group of resize actions is a mode**: the second keys can be pressed again and
+  again, until Enter, Esc, another key or a click. That is how **Alt+R, then arrows**
+  resizes, under a `RESIZE` badge.
+- **Any other action runs once**: after its second key the group closes, and the badge,
+  `ALT+G …` for a group opened by Alt+G, goes. Esc cancels it.
+
+Only resizing repeats; it is the one thing done in many small steps.
 
 ```toml
 [keys]

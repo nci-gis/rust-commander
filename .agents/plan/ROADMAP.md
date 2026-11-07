@@ -77,6 +77,12 @@ những việc kế tiếp"), in this order:
    - **Ctrl+G also goes to a path** (item 5c, S): Ctrl+L stays (the address bar key in
      browsers, Explorer and GNOME Files); Ctrl+G is added beside it (Go to folder in
      macOS Finder, and the habit of others). Checked free in the default keys.
+   **Also in 0.2.1, from the algorithm review** (owner, 2026-11-08; details in
+   `.agents/memory/2026-11-08-algorithm-review.md`): the cross-device move data-loss fix,
+   Shift+F8 on Y only, whole-file replacement, per-question "all", safe unpacking, the
+   Linux trash by the spec, undo of a delete to the trash (item 16), background compare
+   and decoding, bounded directory sizes, `notify` watching (item 17), robocopy-style
+   "replace only if older" (item 18) and a fuzzy filter (item 19).
 2. **Sharp image previews** (item 20, M), the round after 0.2.1 (owner, 2026-11-08:
    "Yes, next round"): quick view and About draw real pixels where the terminal can,
    through `ratatui-image` (MIT), which detects Kitty graphics (kitty, Ghostty), iTerm2
@@ -98,12 +104,6 @@ những việc kế tiếp"), in this order:
    AUR account.
 4. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
    after 3, so a reader can install with one command.
-   **Also in 0.2.1, from the algorithm review** (owner, 2026-11-08; details in
-   `.agents/memory/2026-11-08-algorithm-review.md`): the cross-device move data-loss fix,
-   Shift+F8 on Y only, whole-file replacement, per-question "all", safe unpacking, the
-   Linux trash by the spec, undo of a delete to the trash (item 16), background compare
-   and decoding, bounded directory sizes, `notify` watching (item 17), robocopy-style
-   "replace only if older" (item 18) and a fuzzy filter (item 19).
 5. **Settings shows built-in and your own, for themes and keys** (items 4c and 5b):
    - Theme tab: the list in two parts, built in and yours (with the folder each file
      came from), and a "Make my copy" button that writes the chosen theme into

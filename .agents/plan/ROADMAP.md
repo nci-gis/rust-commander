@@ -1,6 +1,6 @@
 # Roadmap
 
-> What comes after 0.1.0, in order, and why that order. Each line becomes a round in
+> What comes after 0.1.0 (and now 0.2.0), in order, and why that order. Each line becomes a round in
 > `cycles/` when work on it starts; a round says how, this file says what and when.
 > Reorder freely; strike through what is dropped rather than deleting it.
 
@@ -41,27 +41,44 @@ were done first:
 
 ## Next, in this order
 
-Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-07).
-[Round 010](cycles/Round_010.md), the mouse in Settings, is Complete (merged in #7);
-[Round 011](cycles/Round_011.md), the rename to xdevcmd, is Complete (merged in #8).
-[Round 012](cycles/Round_012.md), two mouse touches (click the path; double-click a
-border to share it evenly), is Complete (merged in #12).
-What is left, in order:
+**0.2.0 is out** (published by the owner on 2026-11-07). Rounds 001 and 003–012 are
+Complete; 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
+những việc kế tiếp"), in this order:
 
-1. ~~Land Rounds 010 and 011 in `dev`~~: done, #7 and #8.
-2. **Release 0.2.0** when the owner says so (below).
-3. **Item 8**: the name is decided, **xdevcmd** (owner, 2026-11-07), and done in
-   [Round 011](cycles/Round_011.md) before 0.2.0; then the packages; then **item 10**, the launch.
+1. **Leftover safety items** (item 8b, S). Small, and best done before the packages, so
+   the first packaged version carries them (0.2.1):
+   - Bulk rename: rename without replacing, so a file that appears between the check
+     and the rename is never overwritten.
+   - Programs in a terminal tab: ignore `.` and empty entries in `PATH`, which would
+     look for the program in the browsed directory.
+   - Try the batch-file refusal on a real Windows machine (the owner's, or CI).
+   - Carried from closed rounds: a test feeding a hostile file name through an
+     `[[open]]` rule (005); undo of a move that met an overwrite question (009);
+     Enter-opens-files tried by hand on Linux and Windows (005).
+   Source: `.agents/memory/2026-11-07-security-review-before-0.2.0.md`.
+2. **Packages** (item 8, S each), so nobody has to build from source:
+   - `cargo binstall` metadata pointing at the release archives.
+   - Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds; servers
+     and Raspberry Pi need it. Windows ARM only if someone asks.
+   - Homebrew tap, scoop bucket, winget manifest, AUR `xdevcmd-bin`, each filled from
+     the release's `SHA256SUMS`.
+   - The README's install section rewritten around them.
+   Needs the owner first (see below): crates.io, the tap and bucket repositories, an
+   AUR account.
+3. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
+   after 2, so a reader can install with one command.
 4. Then items 11–13, each numbered when started.
 
-Carried from closed rounds, small enough for any later round: a unit test feeding a
-hostile file name through an `[[open]]` rule (005); undo of a
-move that meets an overwrite question (009); Enter-opens-files tried by hand on Linux
-and Windows (005).
+**Waiting on the owner** before step 2:
 
-**Releasing is the owner's call** ("chưa release", 2026-11-07). `dev` already holds
-enough for 0.2.0 — Rounds 001 and 003–009, Round 001's colours above all, since 0.1.0 is hard to read on a Mac in
-Terminal.app — and the flow in `docs/development.md` is ready when asked.
+| Question | Why it matters | Suggested |
+|---|---|---|
+| Publish `xdevcmd` on crates.io? | `cargo install xdevcmd` works, and the name is held; today both crates say `publish = false` and the name is still free | yes, before the launch; needs a crates.io token kept outside the repository |
+| Where do the tap and the bucket live? | Homebrew and scoop each read a separate repository | `nci-gis/homebrew-xdevcmd` and `nci-gis/scoop-xdevcmd`, created by the owner |
+| AUR | needs a personal AUR account and SSH key | the owner's call; skip if no one maintains it |
+| winget | a pull request to `microsoft/winget-pkgs`, reviewed by Microsoft | yes, after scoop |
+
+**Releasing stays the owner's call**; the flow in `docs/development.md` is unchanged.
 
 **Small fixes, no round of their own** — all done on `feat/v0.2.0` (2026-11-07):
 
@@ -90,7 +107,8 @@ Rounds 001 and 003–009; the read-only finding in
 | 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | Complete (2026-11-07) |
 | 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
-| 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011; packages next |
+| 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011, released as 0.2.0; packages after 8b |
+| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | — | next |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

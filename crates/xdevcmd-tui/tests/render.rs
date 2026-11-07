@@ -2048,6 +2048,23 @@ fn the_filter_hides_what_does_not_match_until_esc() {
 }
 
 #[test]
+fn the_filter_is_fuzzy_by_default_and_plain_by_setting() {
+    let (a, b) = files(&["config.toml", "my_config_file.rs", "notes.txt"]);
+    // Letters in order: c, f, g. The closer match comes first.
+    let s = shot_keys(SIZE, "Ctrl+f,c,f,g,Enter", &a, &b);
+    assert!(s.contains("config") && s.contains("my_config_file"), "{s}");
+    assert!(!s.contains("notes"), "{s}");
+    let (first, _) = locate(&s, "config ");
+    let (_, y_config) = locate(&s, "config ");
+    let (_, y_mine) = locate(&s, "my_config_file");
+    assert!(y_config < y_mine, "the tighter match first ({first})\n{s}");
+    // plain: the text as typed, so "cfg" matches nothing.
+    let s = shot_cfg_env("[files]\nfilter = \"plain\"\n", &[], "Ctrl+f,c,f,g,Enter", &a, &b);
+    assert!(!s.contains("config") && !s.contains("notes"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_mark_the_filter_hides_is_dropped_so_f8_cannot_reach_it() {
     let (a, b) = files(&["one.rs", "three.md"]);
     let s = shot_keys(SIZE, "Ctrl+a,Ctrl+f,.,r,s,Enter,F8", &a, &b);

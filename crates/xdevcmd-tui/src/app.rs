@@ -5296,6 +5296,7 @@ impl App {
         s.mode = self.settings.mode;
         s.root = self.settings.root.clone();
         s.depth = self.settings.depth;
+        crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
         self.settings = s;
         self.config_outcome = Outcome::Loaded(path.clone());
         let name = self.settings.config.theme.name.clone();

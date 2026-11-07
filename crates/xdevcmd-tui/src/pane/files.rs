@@ -131,13 +131,30 @@ fn dir_mtime(p: &Path) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
 
-/// Whether `name` passes the quick filter `text`: a pattern when it has wildcards,
-/// otherwise anywhere in the name. Case is ignored either way.
-pub fn filter_matches(text: &str, name: &str, is_dir: bool) -> bool {
+/// `[files] filter`: "fuzzy" (the default) or "plain". Set at start and when Settings
+/// saves; read by every pane's filter.
+static FUZZY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_fuzzy(on: bool) {
+    FUZZY.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn fuzzy() -> bool {
+    FUZZY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether, and how well, `name` passes the quick filter `text`: a pattern when it has
+/// wildcards; otherwise its letters in order (fuzzy, scored for ranking), or anywhere in
+/// the name as typed (plain). Case is ignored, except in fuzzy with a capital in `text`.
+fn filter_score(text: &str, name: &str, is_dir: bool) -> Option<i32> {
     if has_wildcards(text) {
-        Pattern::new(text).matches(name, is_dir)
+        Pattern::new(text).matches(name, is_dir).then_some(0)
+    } else if fuzzy() {
+        xdevcmd_core::fuzzy::score(text, name)
     } else {
-        name.to_lowercase().contains(&text.to_lowercase())
+        name.to_lowercase()
+            .contains(&text.to_lowercase())
+            .then_some(0)
     }
 }
 
@@ -449,17 +466,25 @@ impl FilePane {
     /// Rebuild `entries` from `all` through the filter, keeping the cursor on `keep`.
     fn refilter(&mut self, keep: Option<PathBuf>) {
         let filter = self.filter.clone().filter(|f| !f.is_empty());
-        self.entries = self
+        let mut scored: Vec<(i32, &Entry)> = self
             .all
             .iter()
-            .filter(|e| {
-                e.is_parent()
-                    || filter
-                        .as_deref()
-                        .is_none_or(|t| filter_matches(t, &e.name, e.is_dir()))
+            .filter_map(|e| {
+                if e.is_parent() {
+                    return Some((i32::MAX, e));
+                }
+                match filter.as_deref() {
+                    None => Some((0, e)),
+                    Some(t) => filter_score(t, &e.name, e.is_dir()).map(|s| (s, e)),
+                }
             })
-            .cloned()
             .collect();
+        // A fuzzy filter puts the best matches first (directories still before files);
+        // equal scores keep the listing's order.
+        if filter.is_some() && fuzzy() {
+            scored.sort_by_key(|(s, e)| (!e.is_parent(), !e.is_dir(), std::cmp::Reverse(*s)));
+        }
+        self.entries = scored.into_iter().map(|(_, e)| e.clone()).collect();
         // A mark on a row the filter hides would be acted on by F8 without being on
         // screen. Hidden means unmarked.
         self.marked

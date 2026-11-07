@@ -117,6 +117,15 @@ const FIELDS: &[Field] = &[
     f(
         1,
         "files",
+        "filter",
+        "Ctrl+F filter",
+        "fuzzy: letters in order, best first; plain: the text as typed",
+        Kind::Pick(&["fuzzy", "plain"]),
+        true,
+    ),
+    f(
+        1,
+        "files",
         "show_hidden",
         "Show hidden files",
         "Ctrl+H changes it in a pane",
@@ -260,6 +269,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("general", "autosave_secs") => c.general.autosave_secs.to_string(),
         ("general", "menu_bar") => c.general.menu_bar.to_string(),
         ("files", "enter") => c.files.enter.clone(),
+        ("files", "filter") => c.files.filter.clone(),
         ("files", "show_hidden") => c.files.show_hidden.to_string(),
         ("files", "sort") => c.files.sort.clone(),
         ("files", "dirs_first") => c.files.dirs_first.to_string(),
@@ -292,6 +302,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         }
         ("general", "menu_bar") => c.general.menu_bar = b,
         ("files", "enter") => c.files.enter = v.to_string(),
+        ("files", "filter") => c.files.filter = v.to_string(),
         ("files", "show_hidden") => c.files.show_hidden = b,
         ("files", "sort") => c.files.sort = v.to_string(),
         ("files", "dirs_first") => c.files.dirs_first = b,

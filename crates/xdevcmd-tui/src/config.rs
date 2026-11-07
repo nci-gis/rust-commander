@@ -166,6 +166,9 @@ pub struct Files {
     /// What Enter does on a file: "open" it with its program, as Total Commander does
     /// (an `[[open]]` rule first, else the system's), or "view" it (F3).
     pub enter: String,
+    /// Ctrl+F's filter: "fuzzy", the letters in order, best matches first; or "plain",
+    /// the text as typed anywhere in the name. Wildcards (`*.rs`) work in both.
+    pub filter: String,
 }
 
 impl Default for Files {
@@ -181,6 +184,7 @@ impl Default for Files {
             icons: false,
             git_status: false,
             enter: "open".into(),
+            filter: "fuzzy".into(),
         }
     }
 }
@@ -466,6 +470,12 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         }
     }
 
+    if !matches!(config.files.filter.as_str(), "fuzzy" | "plain") {
+        return Err(format!(
+            "[files] filter = \"{}\": expected fuzzy or plain",
+            config.files.filter
+        ));
+    }
     if !matches!(config.files.enter.as_str(), "open" | "view") {
         return Err(format!(
             "[files] enter = \"{}\": expected open or view",

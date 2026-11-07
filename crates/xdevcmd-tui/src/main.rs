@@ -275,6 +275,7 @@ fn main() -> Result<()> {
         settings.root = Some(r);
     }
     let files = &settings.config.files;
+    crate::pane::files::set_fuzzy(files.filter == "fuzzy");
     look::init(look::Look {
         ls: files
             .ls_colors

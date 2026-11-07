@@ -16,6 +16,7 @@ pub mod document;
 pub mod entry;
 pub mod find;
 pub mod format;
+pub mod fuzzy;
 pub mod glob;
 pub mod image;
 pub mod listing;

@@ -22,13 +22,22 @@ zune-jpeg = "0.5.15"
 # (quick view). Already in the tree through ratatui.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# A rename that never replaces what is there (renameat2 on Linux, renameatx_np on
+# macOS), without unsafe code here. Already in the tree through crossterm.
+rustix = { version = "1", features = ["fs", "process"] }
 
 # Windows' Recycle Bin and macOS' Trash are OS APIs, not a directory you can rename
 # into, so they get a crate. Linux keeps the implementation in ops.rs: it is tested
 # here, it takes an injectable root so tests never touch the real trash, and when it
 # cannot honour the request it asks instead of deciding.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-trash = "5"
+# 5.3: restores keep their extension (fixed 2026-11-05).
+trash = "5.3"
+
+# macOS: NSFileManager's trashItem gives back where the item went in the Trash, which
+# undo needs; the trash crate drops it. A safe binding, already in the tree via trash.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSFileManager", "NSURL", "NSError", "NSString"] }
 
 # Released with xdevcmd-tui, never on its own; see release.toml.
 [package.metadata.release]

@@ -26,6 +26,8 @@ pub enum Undo {
     MadeDir(PathBuf),
     /// Shift+F4: a new, empty file.
     MadeFile(PathBuf),
+    /// F8: what went to the trash, and where each item went there.
+    Trashed(Vec<crate::trashed::Trashed>),
     /// The last operation was one that is not undone: "a copy", "a delete".
     Cannot(String),
 }
@@ -39,6 +41,8 @@ pub enum Plan {
     Move { back: Vec<PathBuf>, into: PathBuf },
     /// Remove this empty directory tree, or this empty file.
     Remove(PathBuf),
+    /// Put these back from the trash where they were.
+    Restore(Vec<crate::trashed::Trashed>),
 }
 
 fn there(p: &Path) -> bool {
@@ -81,6 +85,10 @@ impl Undo {
             }
             Undo::MadeDir(d) => format!("new directory {}", name(d)),
             Undo::MadeFile(f) => format!("new file {}", name(f)),
+            Undo::Trashed(t) if t.len() == 1 => {
+                format!("delete of {} to the trash", name(&t[0].original))
+            }
+            Undo::Trashed(t) => format!("delete of {} items to the trash", t.len()),
             Undo::Cannot(what) => what.clone(),
         }
     }
@@ -152,6 +160,26 @@ impl Undo {
                 Ok(_) => Err(format!("{} is not empty any more", name(f))),
                 Err(_) => Err(format!("{} is not there any more", name(f))),
             },
+            // What can still go back goes back; what cannot (taken name, emptied
+            // trash) stays, and if nothing can, the first reason says why.
+            Undo::Trashed(items) => {
+                let mut why = None;
+                let back: Vec<_> = items
+                    .iter()
+                    .filter(|t| match crate::trashed::check(t) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            why.get_or_insert(e);
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                if back.is_empty() {
+                    return Err(why.unwrap_or_else(|| "nothing to put back".into()));
+                }
+                Ok(Plan::Restore(back))
+            }
         }
     }
 }
@@ -257,6 +285,49 @@ mod tests {
             rename_to: None,
         };
         assert!(mixed.plan().unwrap_err().contains("several directories"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn undoing_a_move_asks_before_overwriting_what_appeared_meanwhile() {
+        use crate::ops::{start, Answer, Event, Request};
+        // Moving back runs the F6 job: a file that took the old name after the plan was
+        // made gets the same overwrite question, and Skip keeps it.
+        let run = |back: Vec<PathBuf>, into: PathBuf, answer: Answer| -> u32 {
+            let h = start(Request::mv(back, into));
+            let mut asked = 0;
+            loop {
+                match h.events.recv_timeout(std::time::Duration::from_secs(20)) {
+                    Ok(Event::Ask(_)) => {
+                        asked += 1;
+                        h.answer(answer);
+                    }
+                    Ok(Event::Done(_)) => return asked,
+                    Ok(_) => {}
+                    Err(e) => panic!("the job never finished: {e}"),
+                }
+            }
+        };
+        let d = dir("move-asks");
+        let (src, dst) = (d.join("src"), d.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(dst.join("x"), "moved").unwrap();
+        let u = Undo::Move {
+            sources: vec![src.join("x")],
+            dest: dst.clone(),
+            rename_to: None,
+        };
+        let Ok(Plan::Move { back, into }) = u.plan() else {
+            panic!("a plan to move x back");
+        };
+        fs::write(src.join("x"), "theirs").unwrap();
+        assert_eq!(run(back.clone(), into.clone(), Answer::Skip), 1, "it asked");
+        assert_eq!(fs::read_to_string(src.join("x")).unwrap(), "theirs");
+        assert_eq!(fs::read_to_string(dst.join("x")).unwrap(), "moved");
+        assert_eq!(run(back, into, Answer::Yes), 1);
+        assert_eq!(fs::read_to_string(src.join("x")).unwrap(), "moved");
+        assert!(!dst.join("x").exists());
         let _ = fs::remove_dir_all(&d);
     }
 

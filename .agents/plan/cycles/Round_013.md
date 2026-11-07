@@ -1,0 +1,184 @@
+# Round 013: 0.2.1 — the macOS logo, theme files, leftover safety items
+
+**Status**: Complete
+**Part of**: [ROADMAP.md](../ROADMAP.md), items 7b, 4b, 8b, and 5c and 15 (added by the
+owner: "Yes, add both", 2026-11-07)
+**Date started**: 2026-11-07 (owner: "bro tạo nhánh feat/v0.2.1 và làm nhé. Chỉ làm
+trên nhánh này, ko tạo PR tới khi mình test okay nhé")
+**Date completed**: 2026-11-08 (owner tested: "đã test okay nhé")
+
+## Goal
+
+Fix what the owner found after 0.2.0 — the About logo striped on macOS, no theme files
+in the release — and close the safety items the 0.2.0 review left open, so the first
+packaged version carries them.
+
+## Plan
+
+- [x] 7b. The About logo drawn with background colour only: one colour per cell, no
+      half blocks, so the terminal's font cannot stripe it. Any picture cell whose two
+      halves are one colour is drawn the same way.
+- [x] 4b. `themes/` with three examples (Nord, Gruvbox dark, Solarized light) in every
+      release archive; `xdevcmd --print-theme NAME`.
+- [x] 15. Idle CPU near zero: draw only when something changed, else once a second.
+- [x] 5c. Ctrl+G beside Ctrl+L to go to a path.
+- [x] 8b. Bulk rename without replacing a file that appears between check and rename;
+      F2 and the Linux trash the same.
+- [x] 8b. Programs in a terminal tab: ignore `.` and empty `PATH` entries.
+- [x] 8b. Carried tests: a hostile file name through an `[[open]]` rule; undo of a move
+      that met an overwrite question.
+- [x] Added after a check for what else fits 0.2.1 (owner: "add both, ARM",
+      2026-11-08): F5/F6 never overwrite a file that appears meanwhile; libraries at
+      their latest patch releases; a 64-bit ARM Linux build, and CI tests on ARM.
+- [x] From the algorithm review (owner: "Yes, fix it. Enter guard. các mục 1,2,3. Riêng
+      mục 4, tính năng copy … giống robocopy? lọc fuzzy", 2026-11-08):
+      - [x] A move across devices no longer deletes what was skipped (data loss).
+      - [x] Shift+F8: Enter never confirms; Y or a click does; first names listed.
+      - [x] Replacing a file through a temporary name (copy and extraction); "all"
+            answers per question; sync replaces only planned files; unpack never through
+            a link, with bomb and free-space limits.
+      - [x] Linux trash by the spec (record first, a link's own path, per volume) and
+            undo of a delete to the trash on Linux, macOS and Windows.
+      - [x] Alt+Y's compare and picture decoding off the drawing thread; bounded,
+            hard-link-aware, one-file-system directory sizes; `notify` watching.
+      - [x] F5/F6 "replace only if older" (robocopy); a fuzzy Ctrl+F filter.
+- [x] By hand, by the owner (2026-11-08, "đã test okay nhé"): the logo on Terminal.app, iTerm2, Windows Terminal and the
+      old console; the batch-file refusal on Windows; Enter opening files on Linux and
+      Windows.
+
+## Do
+
+- 2026-11-07, logo: the owner's screenshot from macOS showed the 0.2.0 logo striped
+  and stepped. Every cell was `▀` with two colours; Terminal.app draws that character
+  from the font, and with line spacing it does not fill its half of the cell. Redrawn
+  by hand in `scripts/logo_pixels.py` on a 14 × 7 grid of cells (a cell is about twice
+  as tall as wide, so two columns per row is 45°), written as a 14 × 14 PNG with every
+  row twice; `paint_picture` paints a cell with equal halves as a space in background
+  colour. `assets/icon-14.png` became `assets/about-logo.png`. Three layouts were
+  drawn and compared; the one with the chevron's rows overlapping by a cell (a joined
+  stroke) and the corners cut was kept.
+- 2026-11-07, themes: the five themes are built in, so 0.2.0 shipped no files and a
+  user had nothing to start from. `themes/*.toml` are copied into each archive by
+  `release.yml`, beside the binary, where `theme_dirs` already looks. The theme parser
+  was split out of `named_theme` (`theme_from_text`) so a test loads every shipped file
+  and checks its rows stay apart at 24-bit and 256 colours. `color_name` now writes the
+  16 named colours as `0`–`15`, which `--print-theme ansi` needed (it wrote `reset`).
+- 2026-11-07, measured on the release binary in a 200 × 50 pty (the owner asked about
+  speed and memory): first frame about 10 ms (200 ms with 100,000 files in a pane);
+  memory 6 MiB (64 MiB with the 100,000 files); 200 Page Downs through them 40 ms of
+  CPU; binary 4 MB. **Idle, xdevcmd uses about 5 % of a core**: the loop redraws every
+  40 ms whether or not anything changed. Not fixed here; proposed in the roadmap.
+- 2026-11-07, idle CPU (owner added it to the round): `perf` is not allowed on this
+  machine without sudo, so the loop's parts were switched off one at a time in a
+  throwaway build: drawing was the whole cost (5.1 % → 0.3 % without it; background
+  polling 0.2 %). Now the loop draws when something changed: an event of any kind, a
+  shell's output (a flag its reader thread sets, `term::take_output`), a job open or
+  running, or `background()` reporting a change (the `poll_*` functions already said
+  so); and every second otherwise (`HEARTBEAT`), for what changes without telling.
+  Measured after: 0.2–0.5 % idle; first frame and scrolling unchanged; the pty tests,
+  which type into shells and read the screen, pass.
+- 2026-11-07, renames: `noreplace::rename_noreplace` in the core crate uses
+  `renameat2(RENAME_NOREPLACE)` on Linux and `renameatx_np(RENAME_EXCL)` on macOS
+  through rustix (already in the tree through crossterm; the crate keeps
+  `forbid(unsafe_code)`). Elsewhere, or where the file system does not support it, a
+  file is hard-linked under the new name (which fails if taken) and the old name
+  removed; only a directory or a link there falls back to check-then-rename, where
+  the worst case is an empty directory replaced. Used by rename many, F2 (not for a
+  change of case only, where the "other" name is the file itself) and the Linux trash.
+  Not used by F6's move, which asks its overwrite question first and keeps the race
+  between that answer and the rename; noted for later.
+- 2026-11-07, PATH: `on_path` looks a bare program name up in PATH's absolute
+  directories only, on Unix, before handing it to portable-pty. Windows is unchanged:
+  portable-pty searches PATH relative to xdevcmd's own directory there, not the tab's.
+- 2026-11-07, carried tests: `OpenRule::argv` (taken out of `apply_rule`) and a test
+  that runs `/bin/sh` with a name holding `;`, `$( )`, backticks and quotes: the program
+  gets it as one argument and nothing runs. Undo of a move: a file that takes the old
+  name after the plan gets F6's question; Skip keeps it, Yes replaces it.
+
+- 2026-11-08, a check for what else fits 0.2.1 (the owner asked): no open issues or
+  pull requests, no TODOs, no `unwrap` that user data can reach, no memory leak (20
+  re-reads of 100,000 files level at 102 MiB), heavy actions on 100,000 files under
+  50 ms each (sort, invert marks, filter, End/Home). Found: F5 and F6 kept the race
+  noted above (a file created between the free-name check and the write was
+  overwritten: `File::create`, `fs::rename`); 8 patch updates, `zip` and `flate2`
+  among them. Left for later: about 640 bytes of memory per listed file (64 MiB for
+  100,000), Windows' relative `PATH` entries (resolved against xdevcmd's own start
+  directory, not the browsed one), duplicate crate versions pulled in upstream.
+- 2026-11-08, F5/F6: the free-name check is remembered; a copy to a free name opens
+  with `create_new`, a move uses `rename_noreplace`, and `AlreadyExists` goes round
+  the loop again to the overwrite question. A test-only hook (`APPEAR` in `ops.rs`)
+  creates the file in exactly that window; the test fails with the fix undone.
+- 2026-11-08, ARM: `aarch64-unknown-linux-musl` on GitHub's `ubuntu-24.04-arm` runner,
+  native, since nothing on Linux compiles C; the CI test matrix gains the same runner,
+  its artifact named `…-Linux-ARM64-…` so the two Linux artifacts do not clash.
+
+- 2026-11-08, the algorithm review's fixes (memory:
+  `2026-11-08-algorithm-review.md`). The move bug was reproduced with a throwaway test
+  (home disk → `/dev/shm`: `done=2 skipped=1 failed=0`, the skipped file gone) before
+  fixing; the fix removes each source in `copy_node` once `sum.done` rose for it, and a
+  directory with `remove_dir` once empty. The Enter guard also broke the pty test that
+  deleted with Enter; it now sends Y. macOS's trash undo calls `trashItemAtURL` through
+  `objc2-foundation`, which binds it safely, so the crate keeps `forbid(unsafe_code)`;
+  whether macOS lets a terminal program move an item out of `~/.Trash` without Full
+  Disk Access is not known here, and the message points at Put Back if not. `notify` is
+  CC0-1.0, added to `deny.toml` and `about.toml`. The watcher's first pty test failed:
+  the file was made between the first frame and the watch, so a newly watched directory
+  is now looked at once. The fuzzy score is our own small fzf-like scorer, no
+  dependency.
+
+## Check
+
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
+      --workspace`: all pass (2026-11-07).
+- [x] Tests: `the_logo_is_one_colour_per_cell_of_the_size_about_expects`,
+      `about_draws_its_logo_without_half_blocks`, `quick_view_draws_a_picture_in_half_blocks`
+      (two colours: half blocks; one colour: none),
+      `the_example_theme_files_load_and_keep_their_rows_apart`,
+      `a_printed_theme_reads_back_as_the_same_theme`.
+- [x] Tests added: `noreplace` (taken, free, the fallback),
+      `a_file_that_appears_after_the_plan_is_never_overwritten`,
+      `a_program_is_never_found_through_a_relative_path_entry`,
+      `a_hostile_file_name_reaches_an_open_rule_as_one_argument`,
+      `undoing_a_move_asks_before_overwriting_what_appeared_meanwhile`.
+- [x] `cargo check` for macOS and Windows targets on Linux (the rename code is per
+      system).
+- [x] CI on the branch, run by hand (no pull request yet, as the owner asked): Linux,
+      macOS, Windows, cross-check and cargo-deny all pass (run 42393054690), so the
+      no-replace rename tests passed on a real Mac and Windows.
+- [x] CI again after the copy/move fix, the updates and ARM (run 42396423153): Linux
+      x86_64, Linux ARM64 (`ubuntu-24.04-arm`), macOS, Windows, cross-check and
+      cargo-deny all pass. The ARM release build itself runs only on a tag.
+- [x] By the owner on macOS (2026-11-08): the logo is right, and the frame count in
+      Usage now stays near one a second when idle ("mình confirm đã okay số frame, logo
+      on macOS"). Measured here too, with strace: 10 terminal writes in 10 idle seconds
+      with Usage open, against 220 in 0.2.0.
+- [x] After the review's fixes: fmt, clippy (Linux, and the macOS and Windows targets
+      from Linux), `cargo test --workspace`: core 146, tui 131 + 147 render + 33 pty,
+      all pass. Idle CPU with the watcher: 0.4 %.
+- [x] CI after the review's fixes (run 42402890739): Linux x86_64 and ARM64, macOS,
+      Windows, cross-check, cargo-deny all pass, the watcher's pty test included. Two
+      runs before it failed on the tests only: formatting, a pack the screenshot ended
+      too early on macOS (screenshots now wait for a working job), and the trash undo
+      test using Windows' real Recycle Bin (now Linux only, where the trash is sandboxed).
+- [ ] Not verified: undo from the macOS Trash and the Windows Recycle Bin on real
+      machines; the watcher on macOS and Windows (CI runs the pty test there); the
+      logo on a real Mac or Windows screen (only Linux, and the
+      plain-text screenshot cannot show colours); the archive layout, until a release
+      build runs.
+
+## Act
+
+**Learnings**:
+
+- A character's look depends on the terminal and its font; a cell's background does
+  not. For anything that must look the same everywhere, draw with backgrounds.
+- Two safe parts can make an unsafe whole: "skipped" was not "failed", so a move across
+  devices deleted what the user skipped. Test the engine across two file systems
+  (`/dev/shm`), not only within one.
+- A check-then-act on a name (free? then write) is a race; ask the system to refuse in
+  the same step (`create_new`, `renameat2(RENAME_NOREPLACE)`, a hard link).
+- A watcher misses what happens before its watch begins; look once when it starts.
+
+**Promotions**:
+
+- [ ] → context/ : —

@@ -1,16 +1,20 @@
-"""Draw the logo About shows as pixel art, one PNG per size, on whole pixels.
+"""Draw the logo About shows, one colour per character cell.
 
-About draws the logo in half blocks, two pixels to a character cell, so each pixel is
-large. A logo shrunk from icon.svg with smoothing has blended pixels along every edge,
-and at that size they read as blur. Here every feature of icon.svg (drawn on a 64-unit
-grid) is placed on whole pixels for the size asked, and each pixel is one of the logo's
-five colours or transparent: no blending. Strokes keep one width throughout, and the two
-bars stay equal.
+The logo is 14 cells wide and 7 tall, and every cell is a single colour: About paints
+it as background colour only, with no character drawn. Half blocks (two pixels to a
+cell, the upper as the foreground of a half-block character) depend on the font: in
+macOS Terminal.app, with any line spacing, the character does not fill its half of the
+cell, and the logo came out striped and stepped. A background colour fills the whole
+cell in every terminal.
 
-Standard library only: python3 -I scripts/logo_pixels.py OUT_DIR SIZE...
+A cell is about twice as tall as it is wide, so a step of two columns per row is a
+45-degree line; the chevron's rows are three cells long, so each overlaps the next by
+one and the stroke stays joined. The PNG is 14 x 14, each row of cells written twice, so it is drawn by
+the same code as a picture and every cell's two halves are equal.
+
+Standard library only: python3 -I scripts/logo_pixels.py OUT_FILE
 """
 
-import math
 import struct
 import sys
 import zlib
@@ -20,50 +24,27 @@ ORANGE = (0xF2, 0x8C, 0x28)
 WHITE = (0xE6, 0xED, 0xF3)
 TEAL = (0x2D, 0xB5, 0xA3)
 
+# The tile with its corners cut, the chevron, the cursor under the prompt and the two
+# bars of icon.svg; one character per cell. "." is transparent.
+CELLS = [
+    ".TTTTTTTTTTTT.",
+    "TTTTTTTTTTTTTT",
+    "TTOOOTTTTBTBTT",
+    "TTTTOOOTTBTBTT",
+    "TTOOOTTWWWTTTT",
+    "TTTTTTTTTTTTTT",
+    ".TTTTTTTTTTTT.",
+]
+COLOURS = {"T": TILE, "O": ORANGE, "W": WHITE, "B": TEAL}
 
-def draw(n):
-    """The logo at n x n pixels, as rows of (r, g, b, a)."""
-    k = n / 64
-    px = [[(0, 0, 0, 0)] * n for _ in range(n)]
 
-    # The tile: a square with rounded corners, a pixel in when its centre is inside.
-    r = max(2, round(14 * k))
-    for y in range(n):
-        for x in range(n):
-            cx, cy = x + 0.5, y + 0.5
-            dx = max(r - cx, 0, cx - (n - r))
-            dy = max(r - cy, 0, cy - (n - r))
-            if dx * dx + dy * dy <= r * r:
-                px[y][x] = TILE + (255,)
-
-    # The chevron, drawn as pixel art draws a diagonal: each row a run of the same
-    # length, one pixel further across than the row above, so the steps are even and
-    # the slope exactly 45 degrees. icon.svg's arms are 15 across and 13 down: close.
-    x0, y0 = round(15 * k), round(19 * k)
-    half = round(13 * k)
-    run = max(2, round(6 * math.sqrt(2) * k))  # a 6-unit stroke, measured across
-    for i in range(half + 1):
-        for y in (y0 + i, y0 + 2 * half - i):
-            for x in range(x0 + i, x0 + i + run):
-                if 0 <= x < n and 0 <= y < n:
-                    px[y][x] = ORANGE + (255,)
-
-    def rect(x0, y0, wd, ht, colour):
-        for y in range(y0, y0 + ht):
-            for x in range(x0, x0 + wd):
-                if 0 <= x < n and 0 <= y < n:
-                    px[y][x] = colour + (255,)
-
-    # The cursor under the prompt.
-    rect(round(34 * k), round(39 * k), max(3, round(15 * k)), max(2, round(6 * k)), WHITE)
-    # The two bars: equal widths, the gap no narrower than a bar.
-    bw = max(1, round(2.5 * k))
-    gap = max(bw, round(2.5 * k))
-    top, bottom = round(12 * k), round(30 * k)
-    x0 = round(45 * k)
-    rect(x0, top, bw, bottom - top, TEAL)
-    rect(x0 + bw + gap, top, bw, bottom - top, TEAL)
-    return px
+def draw():
+    """The logo as rows of (r, g, b, a), each row of cells twice."""
+    rows = []
+    for line in CELLS:
+        row = [COLOURS[c] + (255,) if c in COLOURS else (0, 0, 0, 0) for c in line]
+        rows += [row, list(row)]
+    return rows
 
 
 def png(px):
@@ -85,7 +66,5 @@ def png(px):
 
 
 if __name__ == "__main__":
-    out = sys.argv[1]
-    for size in map(int, sys.argv[2:]):
-        with open(f"{out}/icon-{size}.png", "wb") as f:
-            f.write(png(draw(size)))
+    with open(sys.argv[1], "wb") as f:
+        f.write(png(draw()))

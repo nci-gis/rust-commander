@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -89,14 +89,41 @@ enum ModalAct {
 }
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-const TICK: Duration = Duration::from_millis(40);
+/// A deep compare running for Alt+Y: the two roots, how far it has got, and the
+/// diffs when they come.
+struct Comparing {
+    left: PathBuf,
+    right: PathBuf,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seen: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    shown: u64,
+    rx: Receiver<Option<Vec<xdevcmd_core::compare::Diff>>>,
+}
 
-/// A picture quick view has decoded: the file, the cell size it was shrunk for, and
-/// the picture or why there is none.
+/// What undo says while a delete to the trash is still running.
+const TRASH_RUNNING: &str = "a delete to the trash that is still running";
+const TICK: Duration = Duration::from_millis(40);
+/// With nothing known to have changed, the screen is still drawn this often, for what
+/// changes without telling (the usage view's clock, a listing's age). Drawing every
+/// tick cost about 5 % of a core while idle (2026-11-07); a frame is about 2 ms.
+const HEARTBEAT: Duration = Duration::from_secs(1);
+
+/// A picture quick view has decoded: the file, the cell size it was shrunk for, the
+/// file's modification time then (a changed file is decoded again), and the picture or
+/// why there is none.
 type Shrunk = (
     PathBuf,
     (u16, u16),
+    Option<std::time::SystemTime>,
     Result<xdevcmd_core::image::Picture, String>,
+);
+
+/// A picture being decoded on a thread: what it is for, and where the result comes.
+type Decoding = (
+    PathBuf,
+    (u16, u16),
+    Option<std::time::SystemTime>,
+    Receiver<Result<xdevcmd_core::image::Picture, String>>,
 );
 
 /// Where a confirmation's count goes until the count has been made.
@@ -173,6 +200,9 @@ pub struct App {
     theme_name: String,
     /// The last operation that wrote to the disk, for Ctrl+Z.
     last_undo: Option<xdevcmd_core::undo::Undo>,
+    /// The sources of a delete to the trash still running, so its result can become
+    /// the undo once it has said where everything went.
+    trash_pending: Option<Vec<PathBuf>>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -206,6 +236,16 @@ pub struct App {
     quick_view: Option<(PaneId, Option<Preview>)>,
     /// Alt+H: a checksum being worked out on its own thread.
     hashing: Option<(PathBuf, Receiver<std::io::Result<Option<String>>>)>,
+    /// Alt+Y's deep compare, on a thread of its own: Esc stops it.
+    comparing: Option<Comparing>,
+    /// The system's directory watcher (interactive runs only; tests poll).
+    watcher: Option<crate::watch::Watcher>,
+    /// Each shown directory's canonical path, as the watcher reports it.
+    canonical: HashMap<PathBuf, PathBuf>,
+    /// Panes whose directory changed, to re-read when no dialog or drag is up.
+    to_reload: HashSet<PaneId>,
+    /// Panes whose directory has just begun to be watched, to look at once.
+    to_check: HashSet<PaneId>,
     /// A file extracted from an archive so F3 can show it; removed when the viewer
     /// closes.
     view_temp: Option<PathBuf>,
@@ -214,6 +254,8 @@ pub struct App {
     jobs: Vec<Job>,
     /// Quick view's last picture: the file, the size it was shrunk for, the result.
     quick_image: Option<Shrunk>,
+    /// A big photo takes a moment to decode: never on the drawing thread.
+    decoding: Option<Decoding>,
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
@@ -224,13 +266,13 @@ pub struct App {
     last_autosave: Instant,
 }
 
-/// xdevcmd's icon for About, 14 pixels square: drawn in half blocks, 14 columns by 7
-/// rows, about as tall as About's text, so the picture sits beside it rather than
-/// taking the dialog over (the owner's call, 2026-11-07). Pixel art drawn for this size
-/// by `scripts/logo_pixels.py` from the shapes of `assets/icon.svg`: every pixel one of
-/// the logo's colours, none blended, because at two pixels a cell a smoothed edge reads
-/// as blur.
-const LOGO: &[u8] = include_bytes!("../../../assets/icon-14.png");
+/// xdevcmd's icon for About: 14 columns by 7 rows, about as tall as About's text, so the
+/// picture sits beside it rather than taking the dialog over (the owner's call,
+/// 2026-11-07). Drawn by hand by `scripts/logo_pixels.py`, one colour per cell: the PNG
+/// is 14 x 14 with every row twice, so each cell's two halves are equal and
+/// [`modal::paint_picture`] paints it as background colour only. Half blocks came out
+/// striped on macOS Terminal.app, which draws `▀` from the font (0.2.0).
+const LOGO: &[u8] = include_bytes!("../../../assets/about-logo.png");
 
 /// What xdevcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
@@ -295,6 +337,7 @@ impl App {
             option_hinted: false,
             theme_name,
             last_undo: None,
+            trash_pending: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -310,9 +353,15 @@ impl App {
             pending_batch: None,
             quick_view: None,
             hashing: None,
+            comparing: None,
+            watcher: None,
+            canonical: HashMap::new(),
+            to_reload: HashSet::new(),
+            to_check: HashSet::new(),
             view_temp: None,
             jobs: Vec::new(),
             quick_image: None,
+            decoding: None,
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
             pending_view: None,
@@ -545,17 +594,31 @@ impl App {
 
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
+        self.watcher = crate::watch::Watcher::new();
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
+        // Drawn only when something changed: input, a shell's output, background work
+        // reporting in, a job's progress; or after HEARTBEAT, whatever happened.
+        let mut dirty = true;
+        let mut drawn = Instant::now();
         while !self.quit {
             self.pump_job();
-            self.reap_terminals();
-            self.background();
-            let t0 = Instant::now();
-            terminal.draw(|f| self.draw(f))?;
-            self.usage.frame(t0.elapsed());
+            dirty |= self.reap_terminals();
+            dirty |= self.background();
+            dirty |= crate::pane::term::take_output();
+            // A job's progress moves on its own, with no message to say so.
+            dirty |= matches!(self.modal, Some(Modal::Job(_))) || !self.jobs.is_empty();
+            if dirty || drawn.elapsed() >= HEARTBEAT {
+                let t0 = Instant::now();
+                terminal.draw(|f| self.draw(f))?;
+                self.usage.frame(t0.elapsed());
+                drawn = Instant::now();
+                dirty = false;
+            }
             if event::poll(TICK)? {
+                // Any event, a resize or a focus change included, may change the screen.
+                dirty = true;
                 match event::read()? {
                     Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
                     Event::Mouse(m) => self.on_mouse(m),
@@ -615,21 +678,24 @@ impl App {
     }
 
     /// Work that happens between keys: directory sizes arriving, directories that
-    /// changed on disk, and messages from programs started in the background.
-    fn background(&mut self) {
+    /// changed on disk, and messages from programs started in the background. True when
+    /// any of it changed what is on screen.
+    fn background(&mut self) -> bool {
+        let mut changed = false;
         // Not under an open dialog or a drag: a listing that shifted while you were
         // answering "delete these?" or dragging a row is the wrong moment to move it.
         let quiet = self.modal.is_none() && self.drag.is_none();
         let every = Duration::from_millis(self.settings.config.files.auto_refresh_ms);
         let shown: Vec<PaneId> = self.rects.iter().map(|(id, _)| *id).collect();
+        self.watch_panes(&shown, every);
         for (id, p) in self.panes.iter_mut() {
             if let Some(t) = p.as_tabs_mut() {
                 for f in t.tabs_mut() {
-                    f.poll_sizes();
-                    f.poll_git();
-                    f.poll_opening();
+                    changed |= f.poll_sizes();
+                    changed |= f.poll_git();
+                    changed |= f.poll_opening();
                     let was = f.results.as_ref().is_some_and(|r| r.running());
-                    f.poll_results();
+                    changed |= f.poll_results();
                     if let Some(r) = f.results.as_ref().filter(|r| was && !r.running()) {
                         let n = f.entries.iter().filter(|e| !e.is_parent()).count();
                         let skipped = match r.unreadable {
@@ -643,14 +709,33 @@ impl App {
                     }
                 }
                 if quiet && shown.contains(id) {
-                    t.active_mut().poll_changes(every);
+                    let f = t.active_mut();
+                    if self.to_reload.remove(id) {
+                        f.reload();
+                        changed = true;
+                    } else if self.to_check.remove(id) {
+                        // Just watched: a change from before the watch began.
+                        changed |= f.check_now();
+                    } else {
+                        // Watched: the system says when it changes, and polling is only
+                        // the safety net for what sends no events (network drives).
+                        let watched = self
+                            .watcher
+                            .as_ref()
+                            .zip(self.canonical.get(&f.cwd))
+                            .is_some_and(|(w, c)| w.watching(c));
+                        changed |= f.poll_changes(if watched { every * 10 } else { every });
+                    }
                 }
             }
         }
         while let Ok(n) = self.notes.1.try_recv() {
             self.status = n;
+            changed = true;
         }
+        let modal_before = self.modal.is_some();
         self.pump_background_jobs();
+        changed |= modal_before != self.modal.is_some();
         self.autosave();
         let viewed = self
             .pending_view
@@ -658,6 +743,7 @@ impl App {
             .and_then(|(rx, ..)| rx.try_recv().ok());
         if let (Some(out), Some((_, tmp, name, _))) = (viewed, self.pending_view.take()) {
             self.show_extracted(out, tmp, name);
+            changed = true;
         }
         // A count for the open confirmation, if it has come in.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
@@ -666,6 +752,15 @@ impl App {
                 if let Some(l) = c.body.get_mut(line) {
                     *l = Self::count_label(files, bytes);
                 }
+                changed = true;
+            }
+        }
+        changed |= self.poll_comparing();
+        if let Some((p, sz, m, rx)) = &self.decoding {
+            if let Ok(pic) = rx.try_recv() {
+                self.quick_image = Some((p.clone(), *sz, *m, pic));
+                self.decoding = None;
+                changed = true;
             }
         }
         let viewing = matches!(self.modal, Some(Modal::Usage));
@@ -677,7 +772,9 @@ impl App {
         if let Some((path, result)) = hashed {
             self.hashing = None;
             self.show_checksum(&path, result);
+            changed = true;
         }
+        changed
     }
 
     // ── identity helpers ───────────────────────────────────────────────────────────
@@ -931,8 +1028,9 @@ impl App {
     }
 
     /// Shells that have exited close themselves, as `exit` does in an editor.
-    fn reap_terminals(&mut self) {
-        let Some(p) = self.panel() else { return };
+    /// True when a shell went, so the screen changed.
+    fn reap_terminals(&mut self) -> bool {
+        let Some(p) = self.panel() else { return false };
         let (gone, empty) = p.reap();
         if gone > 0 {
             self.status = if gone == 1 {
@@ -944,6 +1042,7 @@ impl App {
         if empty {
             self.remove_terminal_panel();
         }
+        gone > 0 || empty
     }
 
     /// Jump between the file panes and the shell, the way Ctrl+` works in an editor.
@@ -1009,6 +1108,13 @@ impl App {
     }
 
     /// One turn of the event loop without input: lets a running job report in.
+    /// A job is working and not waiting on a question: a screenshot (the tests) waits
+    /// for it before the last frame, rather than ending the process under it.
+    pub fn job_working(&self) -> bool {
+        let working = |j: &Job| j.done.is_none() && j.question.is_none();
+        matches!(&self.modal, Some(Modal::Job(j)) if working(j)) || self.jobs.iter().any(working)
+    }
+
     pub fn tick(&mut self) {
         self.pump_job();
         self.reap_terminals();
@@ -1143,6 +1249,13 @@ impl App {
     fn on_key(&mut self, k: KeyEvent) {
         if self.modal.is_some() {
             return self.on_modal_key(k);
+        }
+        if k.code == KeyCode::Esc {
+            if let Some(c) = self.comparing.take() {
+                c.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.status = "comparison stopped".into();
+                return;
+            }
         }
         if self.search.is_some() && self.on_search_key(k) {
             return;
@@ -2662,6 +2775,9 @@ impl App {
             choice: 0,
             source_dir: Some(self.focused_cwd()),
             counting: Some((ops::count(sources), 3)),
+            permanent: false,
+            // set_destination writes the line, after the destination's own lines.
+            existing_line: Some(0),
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -2677,6 +2793,20 @@ impl App {
         let mut body = vec![Self::describe(&targets), String::new(), COUNTING.into()];
         let counting = Some((ops::count(targets.clone()), 2));
         if permanent {
+            // What goes, by name: the first few, so a wrong selection shows.
+            if targets.len() > 1 {
+                body.push(String::new());
+                for t in targets.iter().take(3) {
+                    let name = t.file_name().map(|n| n.to_string_lossy().into_owned());
+                    body.push(format!(
+                        "  {}",
+                        name.unwrap_or_else(|| t.display().to_string())
+                    ));
+                }
+                if targets.len() > 3 {
+                    body.push(format!("  \u{2026} and {} more", targets.len() - 3));
+                }
+            }
             body.push(String::new());
             body.push("Deleted permanently. This cannot be undone.".into());
         } else {
@@ -2696,6 +2826,8 @@ impl App {
             choice: 0,
             source_dir: None,
             counting,
+            permanent,
+            existing_line: None,
         }));
     }
 
@@ -3101,6 +3233,7 @@ impl App {
         if let Some(Modal::Job(j)) = self.modal.take() {
             if let Some(s) = &j.done {
                 self.status = s.describe(j.kind);
+                self.note_trashed(s);
             }
         }
         // Marks are cleared once an operation has run, the way every orthodox manager
@@ -3131,6 +3264,12 @@ impl App {
             }
             Some(Modal::Confirm(c)) => match k.code {
                 KeyCode::Tab => c.next_destination(),
+                // What cannot be undone is never one Enter away: Enter is what a hand
+                // presses out of habit. Y, or a click on the button, says it.
+                KeyCode::Enter if c.permanent => {
+                    self.status = "press Y to delete permanently, Esc to cancel".into();
+                }
+                KeyCode::Char('u' | 'U') if c.existing_line.is_some() => c.next_existing(),
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => act = ModalAct::Start,
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => act = ModalAct::Close,
                 _ => {}
@@ -3637,8 +3776,7 @@ impl App {
             let why = format!("{} mode", self.settings.mode.label());
             return self.view_instead(&why);
         }
-        let mut argv: Vec<std::ffi::OsString> = rule.command.iter().map(Into::into).collect();
-        argv.push(path.clone().into_os_string());
+        let argv = rule.argv(&path);
         if rule.terminal {
             let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
             return self.run_in_terminal(argv, cwd);
@@ -4222,6 +4360,8 @@ impl App {
             let j = self.jobs.remove(i);
             if let Some(s) = &j.done {
                 self.status = format!("background: {}", s.describe(j.kind));
+                let s = s.clone();
+                self.note_trashed(&s);
                 // A job that ended in errors comes forward so they can be read.
                 if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
                     self.modal = Some(Modal::Job(j));
@@ -4337,21 +4477,84 @@ impl App {
         );
     }
 
-    /// Alt+Y: both trees, compared all the way down, and a plan to make them agree.
+    /// Alt+Y: both trees, compared all the way down on a thread (a big tree or a network
+    /// drive can take a while, and Esc stops it), then a plan to make them agree.
     fn begin_sync(&mut self) {
-        use xdevcmd_core::compare::{compare, plan, State};
+        use std::sync::atomic::{AtomicBool, AtomicU64};
+        use std::sync::Arc;
         let Some((_, left, _, right, hidden)) = self.compare_pair() else {
             return;
         };
-        let diffs = compare(&left, &right, true, hidden);
-        let pairs = plan(&left, &right, &diffs);
+        if let Some(old) = self.comparing.take() {
+            old.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        // A screenshot (the tests) has no later frame to bring the result to: compare
+        // there and then.
+        if !self.interactive {
+            let diffs = xdevcmd_core::compare::compare(&left, &right, true, hidden);
+            return self.show_sync_plan(&left, &right, &diffs);
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(AtomicU64::new(0));
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let (l, r, stop, seen) = (left.clone(), right.clone(), stop.clone(), seen.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(xdevcmd_core::compare::compare_until(
+                    &l, &r, true, hidden, &stop, &seen,
+                ));
+            });
+        }
+        self.status = "comparing the two trees\u{2026} Esc stops".into();
+        self.comparing = Some(Comparing {
+            left,
+            right,
+            stop,
+            seen,
+            shown: 0,
+            rx,
+        });
+    }
+
+    /// Alt+Y's compare has come in, or moved on: show its plan, or how far it is.
+    fn poll_comparing(&mut self) -> bool {
+        let Some(c) = self.comparing.as_mut() else {
+            return false;
+        };
+        match c.rx.try_recv() {
+            Ok(Some(diffs)) => {
+                let (left, right) = (c.left.clone(), c.right.clone());
+                self.comparing = None;
+                self.show_sync_plan(&left, &right, &diffs);
+                true
+            }
+            Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.comparing = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                let n = c.seen.load(std::sync::atomic::Ordering::Relaxed);
+                if n != c.shown {
+                    c.shown = n;
+                    self.status =
+                        format!("comparing the two trees\u{2026} {n} looked at \u{b7} Esc stops");
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
+    fn show_sync_plan(&mut self, left: &Path, right: &Path, diffs: &[xdevcmd_core::compare::Diff]) {
+        use xdevcmd_core::compare::{plan, State};
+        let pairs = plan(left, right, diffs);
         let mut body = vec![
-            format!("\u{2192} this pane  {}", tidy(&left)),
-            format!("\u{2190} the other  {}", tidy(&right)),
+            format!("\u{2192} this pane  {}", tidy(left)),
+            format!("\u{2190} the other  {}", tidy(right)),
             String::new(),
         ];
         let mut overwrites = 0;
-        for d in &diffs {
+        for d in diffs {
             let slash = if d.is_dir { "/" } else { "" };
             let line = match d.state {
                 State::LeftOnly => format!("\u{2192} {}{slash}", d.rel),
@@ -4463,6 +4666,8 @@ impl App {
             choice: 0,
             source_dir: None,
             counting,
+            permanent: false,
+            existing_line: None,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -4647,21 +4852,48 @@ impl App {
             _ => [0, 0, 0],
         };
         let size = (inner.width, inner.height);
+        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let fresh = |p: &Path, s: (u16, u16), m: Option<std::time::SystemTime>| {
+            p == path && s == size && m == mtime
+        };
         let stale = self
             .quick_image
             .as_ref()
-            .is_none_or(|(p, s, _)| p != path || *s != size);
+            .is_none_or(|(p, s, m, _)| !fresh(p, *s, *m));
         if stale {
-            let pic = xdevcmd_core::image::load(
-                path,
-                inner.width as usize,
-                inner.height as usize * 2,
-                bg,
-            )
-            .map_err(|e| e.to_string());
-            self.quick_image = Some((path.to_path_buf(), size, pic));
+            let (w, h) = (inner.width as usize, inner.height as usize * 2);
+            if !self.interactive {
+                // A screenshot has no later frame for the picture to arrive in.
+                let pic = xdevcmd_core::image::load(path, w, h, bg).map_err(|e| e.to_string());
+                self.quick_image = Some((path.to_path_buf(), size, mtime, pic));
+            } else if !self
+                .decoding
+                .as_ref()
+                .is_some_and(|(p, s, m, _)| fresh(p, *s, *m))
+            {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let file = path.to_path_buf();
+                std::thread::spawn(move || {
+                    let _ = tx.send(
+                        xdevcmd_core::image::load(&file, w, h, bg).map_err(|e| e.to_string()),
+                    );
+                });
+                self.decoding = Some((path.to_path_buf(), size, mtime, rx));
+            }
         }
-        let Some((_, _, pic)) = &self.quick_image else {
+        let current = self
+            .quick_image
+            .as_ref()
+            .filter(|(p, s, m, _)| fresh(p, *s, *m));
+        let Some((_, _, _, pic)) = current else {
+            let inner = modal::frame_box(frame, area, "image", th.accent);
+            modal::put(
+                frame,
+                inner,
+                0,
+                "decoding\u{2026}",
+                Style::new().fg(th.fg_dim),
+            );
             return;
         };
         let title = match pic {
@@ -4796,14 +5028,68 @@ impl App {
                 rename_to: r.rename_to.clone(),
             },
             ops::Kind::Copy => Undo::Cannot("a copy".into()),
-            ops::Kind::Delete => Undo::Cannot(if r.to_trash {
-                "a delete to the trash (your system's trash can restore it)".into()
-            } else {
-                "a permanent delete".into()
-            }),
+            ops::Kind::Delete if r.to_trash => {
+                // Undoable once it has finished and said where each item went.
+                self.trash_pending = Some(r.sources.clone());
+                Undo::Cannot(TRASH_RUNNING.into())
+            }
+            ops::Kind::Delete => Undo::Cannot("a permanent delete".into()),
             ops::Kind::Extract => Undo::Cannot("an extraction".into()),
             ops::Kind::Pack => Undo::Cannot("packing".into()),
         });
+    }
+
+    /// Keep the system watching the directories on screen, and note the panes whose
+    /// directory it says changed; they re-read on the next quiet moment.
+    fn watch_panes(&mut self, shown: &[PaneId], every: Duration) {
+        let Some(w) = self.watcher.as_mut() else {
+            return;
+        };
+        let mut dirs = HashSet::new();
+        let mut owners: Vec<(PaneId, PathBuf)> = Vec::new();
+        if !every.is_zero() {
+            for id in shown {
+                let Some(f) = self.panes.get(id).and_then(Pane::as_files) else {
+                    continue;
+                };
+                if f.archive.is_some() || f.results.is_some() {
+                    continue;
+                }
+                // The system reports canonical paths (macOS's /tmp is /private/tmp).
+                let canon = self
+                    .canonical
+                    .entry(f.cwd.clone())
+                    .or_insert_with(|| f.cwd.canonicalize().unwrap_or_else(|_| f.cwd.clone()))
+                    .clone();
+                dirs.insert(canon.clone());
+                owners.push((*id, canon));
+            }
+        }
+        let new = w.sync(&dirs);
+        let changed = w.changed();
+        for (id, canon) in owners {
+            if changed.contains(&canon) {
+                self.to_reload.insert(id);
+            } else if new.contains(&canon) {
+                self.to_check.insert(id);
+            }
+        }
+        // Forget what is no longer shown, so the map does not grow without end.
+        self.canonical.retain(|_, c| dirs.contains(c));
+    }
+
+    /// A delete to the trash has finished: if it is still the last operation, undo
+    /// can now put back what it moved.
+    fn note_trashed(&mut self, s: &ops::Summary) {
+        let Some(sources) = &self.trash_pending else {
+            return;
+        };
+        let ours = !s.trashed.is_empty() && s.trashed.iter().all(|t| sources.contains(&t.original));
+        let still_last = matches!(&self.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(w)) if w == TRASH_RUNNING);
+        if ours && still_last {
+            self.last_undo = Some(xdevcmd_core::undo::Undo::Trashed(s.trashed.clone()));
+            self.trash_pending = None;
+        }
     }
 
     /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
@@ -4838,6 +5124,17 @@ impl App {
                 tidy(into)
             )],
             Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+            Plan::Restore(items) => {
+                let mut lines: Vec<String> = items
+                    .iter()
+                    .take(8)
+                    .map(|i| format!("put back {}", tidy(&i.original)))
+                    .collect();
+                if items.len() > 8 {
+                    lines.push(format!("\u{2026} and {} more", items.len() - 8));
+                }
+                lines
+            }
         };
         let mut body = vec![format!("Undo the {}?", u.describe()), String::new()];
         body.extend(what);
@@ -4886,6 +5183,22 @@ impl App {
                 self.status = match xdevcmd_core::undo::remove(&p) {
                     Ok(()) => format!("undone: {}", u.describe()),
                     Err(e) => format!("cannot undo: {e}"),
+                };
+            }
+            Plan::Restore(items) => {
+                let mut failed = Vec::new();
+                for t in &items {
+                    if let Err(e) = xdevcmd_core::trashed::restore(t) {
+                        failed.push(e.to_string());
+                    }
+                }
+                self.status = match failed.first() {
+                    None => format!("undone: {}", u.describe()),
+                    Some(e) => format!(
+                        "undo: {} put back, {} not \u{2014} {e}",
+                        items.len() - failed.len(),
+                        failed.len()
+                    ),
                 };
             }
         }
@@ -4990,6 +5303,7 @@ impl App {
         s.mode = self.settings.mode;
         s.root = self.settings.root.clone();
         s.depth = self.settings.depth;
+        crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
         self.settings = s;
         self.config_outcome = Outcome::Loaded(path.clone());
         let name = self.settings.config.theme.name.clone();
@@ -5498,7 +5812,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_logo_is_sharp_pixel_art_of_the_size_about_expects() {
+    fn the_logo_is_one_colour_per_cell_of_the_size_about_expects() {
         // Laid over a colour that is none of the logo's, every pixel is either that
         // colour or one of the logo's five: a smoothed edge would blend the two.
         let bg = [255, 0, 255];
@@ -5513,6 +5827,11 @@ mod tests {
         assert_eq!((p.width, p.height), (14, 14));
         let odd = p.rgb.iter().find(|c| !colours.contains(c));
         assert_eq!(odd, None, "the logo has a blended pixel");
+        // Each cell's two halves are equal, so About draws no half block anywhere.
+        for r in 0..7 {
+            let (top, bottom) = (&p.rgb[2 * r * 14..][..14], &p.rgb[(2 * r + 1) * 14..][..14]);
+            assert_eq!(top, bottom, "cell row {r} has two colours");
+        }
     }
 
     fn logo_picture(bytes: &[u8], bg: [u8; 3]) -> xdevcmd_core::image::Picture {

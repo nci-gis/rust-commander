@@ -43,6 +43,21 @@ impl Kind {
     }
 }
 
+/// What a copy or move does with a file already at the destination.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Existing {
+    /// Ask about each one (the default).
+    #[default]
+    Ask,
+    /// Replace it only when the source is newer; skip it when the two are the same or
+    /// the destination is newer. robocopy's and rsync's `--update`.
+    Update,
+    /// Leave every existing file as it is.
+    Skip,
+    /// Replace every existing file.
+    Replace,
+}
+
 #[derive(Debug, Clone)]
 pub struct Request {
     pub kind: Kind,
@@ -67,6 +82,8 @@ pub struct Request {
     /// Overwrites were listed in a plan the user confirmed, so they are not asked
     /// about one by one. Only a plan that names every overwrite may set this.
     pub overwrite_confirmed: bool,
+    /// Copy and move: what to do with files already at the destination.
+    pub existing: Existing,
 }
 
 impl Request {
@@ -113,6 +130,7 @@ impl Request {
             base: String::new(),
             pairs: Vec::new(),
             overwrite_confirmed: false,
+            existing: Existing::Ask,
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -128,6 +146,7 @@ impl Request {
             base: String::new(),
             pairs: Vec::new(),
             overwrite_confirmed: false,
+            existing: Existing::Ask,
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -143,6 +162,7 @@ impl Request {
             base: String::new(),
             pairs: Vec::new(),
             overwrite_confirmed: false,
+            existing: Existing::Ask,
         }
     }
 }
@@ -172,6 +192,8 @@ pub enum Answer {
     YesToAll,
     Skip,
     SkipAll,
+    /// From here on: replace a destination only when the source is newer, skip the rest.
+    Update,
     Retry,
     Abort,
 }
@@ -184,6 +206,8 @@ pub struct Summary {
     pub bytes: u64,
     pub cancelled: bool,
     pub errors: Vec<String>,
+    /// A delete to the trash: where each item went, for undo.
+    pub trashed: Vec<crate::trashed::Trashed>,
 }
 
 impl Summary {
@@ -258,12 +282,18 @@ pub fn start(req: Request) -> Handle {
             tx: etx,
             answers: arx,
             cancel: worker_cancel,
-            yes_to_all: false,
+            overwrite_all: false,
             skip_all: false,
+            update: false,
+            cross_all: false,
+            trash_all: false,
+            planned: None,
             abort: false,
             bytes_done: 0,
             last_report: 0,
             sum: Summary::default(),
+            moving: false,
+            approved: None,
         };
         w.run(req);
     });
@@ -279,12 +309,27 @@ struct Worker {
     tx: Sender<Event>,
     answers: Receiver<Answer>,
     cancel: Arc<AtomicBool>,
-    yes_to_all: bool,
+    /// "All" answers, one per kind of question: overwriting all is not also agreeing
+    /// to copy-then-delete across devices, or to delete permanently.
+    overwrite_all: bool,
     skip_all: bool,
+    /// Replace only what is older than its source; skip what is the same or newer.
+    update: bool,
+    cross_all: bool,
+    trash_all: bool,
+    /// Synchronising: the destinations the confirmed plan overwrites. Only these are
+    /// replaced without asking; a file that appears elsewhere is asked about.
+    planned: Option<std::collections::HashSet<PathBuf>>,
     abort: bool,
     bytes_done: u64,
     last_report: u64,
     sum: Summary,
+    /// Copying for a move across devices: each source is removed as soon as its copy
+    /// is complete, so what was skipped or failed stays where it was.
+    moving: bool,
+    /// A destination the user already agreed to replace, so the copy a cross-device
+    /// move falls back to does not ask about it a second time.
+    approved: Option<PathBuf>,
 }
 
 impl Worker {
@@ -303,7 +348,21 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
-        self.yes_to_all = req.overwrite_confirmed;
+        match req.existing {
+            Existing::Ask => {}
+            Existing::Update => self.update = true,
+            Existing::Skip => self.skip_all = true,
+            Existing::Replace => self.overwrite_all = true,
+        }
+        if req.overwrite_confirmed {
+            self.planned = Some(
+                req.pairs
+                    .iter()
+                    .filter_map(|(src, into)| Some(into.join(src.file_name()?)))
+                    .filter(|dst| dst.symlink_metadata().is_ok())
+                    .collect(),
+            );
+        }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
@@ -386,7 +445,7 @@ impl Worker {
                 let (files, bytes) = scan(&req.sources);
                 let _ = self.tx.send(Event::Scanned { files, bytes });
                 // The archive is one new file: an existing one is asked about first.
-                match self.resolve_conflict(&dest, bytes) {
+                match self.resolve_conflict(None, &dest, bytes) {
                     Some(true) => crate::archive::pack(&req.sources, &dest, self),
                     _ => Ok(()),
                 }
@@ -425,16 +484,24 @@ impl Worker {
         }
     }
 
-    /// Decide what to do about an existing destination. `Ok(true)` means go ahead.
-    fn resolve_conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
+    /// Decide what to do about an existing destination. `Some(true)` means go ahead.
+    /// `src`: the file that would replace it, for the update rule; none for an archive.
+    fn resolve_conflict(&mut self, src: Option<&Path>, dst: &Path, incoming: u64) -> Option<bool> {
         if dst.symlink_metadata().is_err() {
             return Some(true);
         }
-        if self.yes_to_all {
+        if self.approved.as_deref() == Some(dst) {
+            self.approved = None;
+            return Some(true);
+        }
+        if self.overwrite_all || self.planned.as_ref().is_some_and(|p| p.contains(dst)) {
             return Some(true);
         }
         if self.skip_all {
             return Some(false);
+        }
+        if self.update {
+            return Some(self.is_older(src, dst));
         }
         let existing = fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
         match self.ask(Question::Conflict {
@@ -444,7 +511,7 @@ impl Worker {
         }) {
             Answer::Yes => Some(true),
             Answer::YesToAll => {
-                self.yes_to_all = true;
+                self.overwrite_all = true;
                 Some(true)
             }
             Answer::Skip => Some(false),
@@ -452,11 +519,30 @@ impl Worker {
                 self.skip_all = true;
                 Some(false)
             }
+            Answer::Update => {
+                self.update = true;
+                Some(self.is_older(src, dst))
+            }
             _ => {
                 self.abort = true;
                 None
             }
         }
+    }
+
+    /// The update rule: `dst` is replaced only when `src` is newer (beyond a FAT drive's
+    /// two seconds). Two directories merge. Without a source (an archive) it is kept.
+    fn is_older(&self, src: Option<&Path>, dst: &Path) -> bool {
+        let (Some(s), Ok(d)) = (
+            src.and_then(|s| fs::symlink_metadata(s).ok()),
+            fs::symlink_metadata(dst),
+        ) else {
+            return false;
+        };
+        if s.is_dir() && d.is_dir() {
+            return true;
+        }
+        crate::compare::newer_than(&s, &d) == std::cmp::Ordering::Greater
     }
 
     // ── copy ───────────────────────────────────────────────────────────────────────
@@ -499,7 +585,9 @@ impl Worker {
             return;
         }
         if meta.file_type().is_symlink() {
+            let before = self.sum.done;
             self.copy_symlink(src, dst);
+            self.moved(src, before);
         } else if meta.is_dir() {
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
@@ -520,8 +608,25 @@ impl Worker {
             }
             let _ = fs::set_permissions(dst, meta.permissions());
             self.sum.done += 1;
+            // Moving: the directory goes only once empty, that is when everything in
+            // it was copied and removed; anything skipped keeps it.
+            if self.moving && !self.stopped() {
+                let _ = fs::remove_dir(src);
+            }
         } else {
+            let before = self.sum.done;
             self.copy_file(src, dst, meta.len());
+            self.moved(src, before);
+        }
+    }
+
+    /// While moving across devices: remove `src` if its copy just completed (the count
+    /// of done items went up). A skipped or failed copy leaves it.
+    fn moved(&mut self, src: &Path, done_before: u64) {
+        if self.moving && self.sum.done > done_before {
+            if let Err(e) = fs::remove_file(src) {
+                self.note_error(src, &e);
+            }
         }
     }
 
@@ -529,7 +634,7 @@ impl Worker {
     fn copy_symlink(&mut self, src: &Path, dst: &Path) {
         match fs::read_link(src) {
             Ok(target) => {
-                if matches!(self.resolve_conflict(dst, 0), Some(false) | None) {
+                if matches!(self.resolve_conflict(Some(src), dst, 0), Some(false) | None) {
                     if !self.abort {
                         self.sum.skipped += 1;
                     }
@@ -556,7 +661,10 @@ impl Worker {
             if self.stopped() {
                 return;
             }
-            match self.resolve_conflict(dst, size) {
+            // Free now: written only if it is still free when opened, so a file that
+            // appears meanwhile is asked about, not overwritten.
+            let free = dst.symlink_metadata().is_err();
+            match self.resolve_conflict(Some(src), dst, size) {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
@@ -565,17 +673,17 @@ impl Worker {
                 }
                 None => return,
             }
-            match self.copy_bytes(src, dst) {
+            appear_in_test(dst);
+            match self.copy_bytes(src, dst, free) {
                 Ok(true) => {
                     self.sum.done += 1;
                     return;
                 }
-                // Cancelled mid-file: the partial destination is removed rather than
-                // left looking like a complete copy.
-                Ok(false) => {
-                    let _ = fs::remove_file(dst);
-                    return;
-                }
+                // Taken since it was found free: round again, to the question.
+                Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
+                // Cancelled mid-file: copy_bytes removed what it wrote, and a file
+                // being replaced is still the old one.
+                Ok(false) => return,
                 Err(e) => match self.ask(Question::Failed {
                     path: dst.to_path_buf(),
                     error: e.to_string(),
@@ -596,11 +704,51 @@ impl Worker {
         }
     }
 
-    /// Returns Ok(false) when cancelled part-way.
-    fn copy_bytes(&mut self, src: &Path, dst: &Path) -> io::Result<bool> {
+    /// Returns Ok(false) when cancelled part-way. `new_only`: fail with `AlreadyExists`
+    /// rather than replace a file at `dst`.
+    ///
+    /// Replacing writes beside `dst` under a temporary name and renames it over `dst`
+    /// only once complete: a cancel or an error part-way leaves the old file as it
+    /// was, rather than both old and new gone. Whatever was written and not kept is
+    /// removed here.
+    fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
-        let mut w = File::create(dst)?;
+        let target = if new_only {
+            dst.to_path_buf()
+        } else {
+            part_name(dst)
+        };
+        let mut w = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)?;
+        let written = self.write_all_from(&mut r, &mut w);
+        let kept = match written {
+            Ok(true) => {
+                // Permissions and mtime are part of the file as far as a user is
+                // concerned; a copy that loses the executable bit broke something.
+                let _ = fs::set_permissions(&target, meta.permissions());
+                if let Ok(mtime) = meta.modified() {
+                    let _ = w.set_times(FileTimes::new().set_modified(mtime));
+                }
+                drop(w);
+                if new_only {
+                    Ok(true)
+                } else {
+                    fs::rename(&target, dst).map(|()| true)
+                }
+            }
+            other => other,
+        };
+        if !matches!(kept, Ok(true)) {
+            let _ = fs::remove_file(&target);
+        }
+        kept
+    }
+
+    /// Copy `r` into `w`; Ok(false) when cancelled part-way.
+    fn write_all_from(&mut self, r: &mut File, w: &mut File) -> io::Result<bool> {
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -614,18 +762,13 @@ impl Worker {
             self.advance(n as u64);
         }
         w.flush()?;
-        // Permissions and mtime are part of the file as far as a user is concerned; a
-        // copy that loses the executable bit is a copy that broke something.
-        let _ = fs::set_permissions(dst, meta.permissions());
-        if let Ok(mtime) = meta.modified() {
-            let _ = w.set_times(FileTimes::new().set_modified(mtime));
-        }
         Ok(true)
     }
 
     // ── move ───────────────────────────────────────────────────────────────────────
 
     fn move_into(&mut self, src: &Path, dest_dir: &Path, rename: Option<&std::ffi::OsStr>) {
+        self.approved = None;
         let Some(name) = rename.or(src.file_name()) else {
             return;
         };
@@ -640,16 +783,32 @@ impl Worker {
             return;
         }
         let size = fs::symlink_metadata(src).map(|m| m.len()).unwrap_or(0);
-        match self.resolve_conflict(&dst, size) {
-            Some(true) => {}
-            Some(false) => {
-                self.sum.skipped += 1;
-                return;
+        let moved = loop {
+            let free = dst.symlink_metadata().is_err();
+            match self.resolve_conflict(Some(src), &dst, size) {
+                Some(true) if !free => self.approved = Some(dst.clone()),
+                Some(true) => {}
+                Some(false) => {
+                    self.sum.skipped += 1;
+                    return;
+                }
+                None => return,
             }
-            None => return,
-        }
+            // A name found free is taken only if still free, in the same step as the
+            // move; one taken since goes round again, to the question.
+            appear_in_test(&dst);
+            let r = if free {
+                crate::noreplace::rename_noreplace(src, &dst)
+            } else {
+                fs::rename(src, &dst)
+            };
+            match r {
+                Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
+                r => break r,
+            }
+        };
 
-        match fs::rename(src, &dst) {
+        match moved {
             Ok(()) => {
                 self.sum.done += 1;
                 self.advance(size);
@@ -657,7 +816,7 @@ impl Worker {
             Err(e) if is_cross_device(&e) => {
                 // Not a rename at all: a copy followed by a delete, which can half-fail.
                 // The user is told before it starts.
-                let go = if self.yes_to_all {
+                let go = if self.cross_all {
                     true
                 } else {
                     match self.ask(Question::CrossDevice {
@@ -665,7 +824,7 @@ impl Worker {
                     }) {
                         Answer::Yes => true,
                         Answer::YesToAll => {
-                            self.yes_to_all = true;
+                            self.cross_all = true;
                             true
                         }
                         Answer::Skip | Answer::SkipAll => false,
@@ -679,16 +838,20 @@ impl Worker {
                     self.sum.skipped += 1;
                     return;
                 }
-                let before = self.sum.failed;
+                // Each source is removed once its own copy is complete. Before, the
+                // whole tree was removed when nothing had *failed*, and a file the
+                // user chose to skip was deleted with it, never copied (0.2.0).
+                self.moving = true;
                 self.copy_node(src, &dst);
-                if self.sum.failed == before && !self.stopped() {
-                    if let Err(e) = remove_tree(src) {
-                        self.note_error(src, &e);
-                    }
-                }
+                self.moving = false;
+                self.approved = None;
             }
-            Err(e) => self.note_error(&dst, &e),
+            Err(e) => {
+                self.approved = None;
+                self.note_error(&dst, &e)
+            }
         }
+        self.approved = None;
     }
 
     // ── delete ─────────────────────────────────────────────────────────────────────
@@ -699,12 +862,13 @@ impl Worker {
         }
         if to_trash {
             match send_to_trash(target, trash_root) {
-                Ok(()) => {
+                Ok(t) => {
                     self.sum.done += 1;
+                    self.sum.trashed.push(t);
                     return;
                 }
                 Err(e) => {
-                    let answer = if self.yes_to_all {
+                    let answer = if self.trash_all {
                         Answer::Yes
                     } else {
                         self.ask(Question::TrashUnavailable {
@@ -714,7 +878,7 @@ impl Worker {
                     };
                     match answer {
                         Answer::Yes => {}
-                        Answer::YesToAll => self.yes_to_all = true,
+                        Answer::YesToAll => self.trash_all = true,
                         Answer::Skip | Answer::SkipAll => {
                             self.sum.skipped += 1;
                             return;
@@ -744,7 +908,7 @@ impl crate::archive::Hooks for Worker {
         });
     }
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
-        self.resolve_conflict(dst, incoming)
+        self.resolve_conflict(None, dst, incoming)
     }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
@@ -846,6 +1010,36 @@ pub fn remove_tree(p: &Path) -> io::Result<()> {
     }
 }
 
+/// A temporary name beside `dst` to write a replacement under: hidden, and unique to
+/// this process and call, so two jobs never share one.
+pub(crate) fn part_name(dst: &Path) -> PathBuf {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let name = dst
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let dir = dst.parent().unwrap_or(Path::new("."));
+    dir.join(format!(".{name}.xdevcmd-part-{}-{n}", std::process::id()))
+}
+
+/// Tests put a path here to have a file appear at it between the check that found the
+/// name free and the write: the moment no test could otherwise reach.
+#[cfg(test)]
+static APPEAR: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn appear_in_test(dst: &Path) {
+    let mut paths = APPEAR.lock().unwrap();
+    if let Some(i) = paths.iter().position(|p| p == dst) {
+        paths.remove(i);
+        fs::write(dst, "theirs").unwrap();
+    }
+}
+
+#[cfg(not(test))]
+fn appear_in_test(_: &Path) {}
+
 fn is_cross_device(e: &io::Error) -> bool {
     #[cfg(unix)]
     {
@@ -862,27 +1056,102 @@ fn is_cross_device(e: &io::Error) -> bool {
     }
 }
 
-/// Move one entry to wherever this platform keeps deleted files.
-pub fn send_to_trash(path: &Path, root: Option<&Path>) -> io::Result<()> {
+/// Move one entry to wherever this platform keeps deleted files, and say where it went.
+pub fn send_to_trash(path: &Path, root: Option<&Path>) -> io::Result<crate::trashed::Trashed> {
     if let Some(base) = root {
         // Tests pass a temp directory here, so a test run never puts anything in the
         // real trash of whoever happens to be running it.
-        return trash_into(base, path);
+        return trash_into(base, path, None);
     }
     #[cfg(target_os = "linux")]
     {
-        let base = default_trash_base()
+        let home = default_trash_base()
             .ok_or_else(|| io::Error::other("no HOME, so no trash directory"))?;
-        trash_into(&base, path)
+        match volume_trash(path, &home)? {
+            None => trash_into(&home, path, None),
+            Some((base, topdir)) => trash_into(&base, path, Some(&topdir)),
+        }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        ::trash::delete(path).map_err(|e| io::Error::other(e.to_string()))
+        use crate::trashed::{Place, Trashed};
+        let when = std::time::SystemTime::now();
+        let at = crate::trashed::mac_trash(path)?;
+        Ok(Trashed {
+            original: path.to_path_buf(),
+            when,
+            place: Place::At(at),
+        })
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        use crate::trashed::{Place, Trashed};
+        let when = std::time::SystemTime::now();
+        ::trash::delete(path).map_err(|e| io::Error::other(e.to_string()))?;
+        Ok(Trashed {
+            original: path.to_path_buf(),
+            when,
+            place: Place::RecycleBin,
+        })
     }
 }
 
-/// `$XDG_DATA_HOME/Trash`, falling back to `~/.local/share/Trash`.
+/// The freedesktop trash for a path on another file system than the home trash: the
+/// spec's `$topdir/.Trash/$uid` when an administrator made `.Trash` (a real, sticky
+/// directory), else `$topdir/.Trash-$uid`, made here, private. `None` for the same file
+/// system as `home`, whose trash is used.
 #[cfg(target_os = "linux")]
+fn volume_trash(path: &Path, home: &Path) -> io::Result<Option<(PathBuf, PathBuf)>> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let dir = path.parent().unwrap_or(Path::new("/"));
+    let dev = fs::metadata(dir)?.dev();
+    // The home trash may not exist yet: its nearest existing ancestor decides.
+    let home_dev = home
+        .ancestors()
+        .find_map(|a| fs::metadata(a).ok())
+        .map(|m| m.dev());
+    if home_dev == Some(dev) {
+        return Ok(None);
+    }
+    // The top of the mount: the last ancestor still on this device.
+    let mut topdir = dir.to_path_buf();
+    while let Some(up) = topdir.parent() {
+        match fs::metadata(up) {
+            Ok(m) if m.dev() == dev => topdir = up.to_path_buf(),
+            _ => break,
+        }
+    }
+    let uid = rustix::process::getuid().as_raw();
+    let shared = topdir.join(".Trash");
+    if let Ok(m) = fs::symlink_metadata(&shared) {
+        let sticky = m.permissions().mode() & 0o1000 != 0;
+        if m.is_dir() && !m.file_type().is_symlink() && sticky {
+            let mine = shared.join(uid.to_string());
+            if fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&mine)
+                .is_ok()
+            {
+                return Ok(Some((mine, topdir)));
+            }
+        }
+    }
+    let own = topdir.join(format!(".Trash-{uid}"));
+    if let Ok(m) = fs::symlink_metadata(&own) {
+        if !m.is_dir() || m.file_type().is_symlink() || m.uid() != uid {
+            return Err(io::Error::other(format!(
+                "{} is not a trash directory of yours",
+                own.display()
+            )));
+        }
+    } else {
+        fs::DirBuilder::new().mode(0o700).create(&own)?;
+    }
+    Ok(Some((own, topdir)))
+}
+
+/// Where deleted files go on Linux: `$XDG_DATA_HOME/Trash`, per the freedesktop spec.
 pub fn default_trash_base() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -891,44 +1160,86 @@ pub fn default_trash_base() -> Option<PathBuf> {
     Some(data.join("Trash"))
 }
 
-/// Move one entry into a freedesktop trash directory, writing the `.trashinfo` that
+/// Move one entry into a freedesktop trash directory, with the `.trashinfo` that
 /// makes it restorable.
 ///
-/// This is a rename, so it only works within one filesystem. Crossing one is reported
-/// rather than silently turned into a permanent delete — the caller turns that into a
-/// question. The spec's per-filesystem `.Trash-$uid` directories are not implemented;
-/// asking is the honest answer until they are.
-fn trash_into(base: &Path, path: &Path) -> io::Result<()> {
+/// As the spec says, the `.trashinfo` is made first (with `O_EXCL`, which also reserves
+/// the name), then the entry moved: a crash in between leaves a record without a file,
+/// which tools ignore, never a file nobody can restore. `topdir`: a per-volume trash,
+/// whose records give the path relative to the volume's top.
+fn trash_into(
+    base: &Path,
+    path: &Path,
+    topdir: Option<&Path>,
+) -> io::Result<crate::trashed::Trashed> {
+    use crate::trashed::{Place, Trashed};
+    let when = std::time::SystemTime::now();
     let files = base.join("files");
     let info = base.join("info");
     fs::create_dir_all(&files)?;
     fs::create_dir_all(&info)?;
 
-    let original = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let stem = path
+    // The path of the entry itself, not of what a link points to: the directory is
+    // made canonical, the name kept.
+    let name_os = path
         .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unnamed".to_string());
-
-    let mut name = stem.clone();
-    let mut n = 1;
-    while files.join(&name).symlink_metadata().is_ok()
-        || info.join(format!("{name}.trashinfo")).exists()
-    {
-        name = format!("{stem}.{n}");
-        n += 1;
-    }
-
-    fs::rename(path, files.join(&name))?;
-
+        .ok_or_else(|| io::Error::other("that has no name to put in the trash"))?;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let original = dir
+        .canonicalize()
+        .unwrap_or_else(|_| dir.to_path_buf())
+        .join(name_os);
+    let recorded = match topdir.and_then(|t| original.strip_prefix(t).ok()) {
+        Some(rel) => rel.to_path_buf(),
+        None => original.clone(),
+    };
+    let stem = name_os.to_string_lossy().into_owned();
     let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
     let body = format!(
         "[Trash Info]\nPath={}\nDeletionDate={}\n",
-        percent_encode(&original.to_string_lossy()),
+        percent_encode(&recorded.to_string_lossy()),
         stamp
     );
-    fs::write(info.join(format!("{name}.trashinfo")), body)?;
-    Ok(())
+
+    // The first free name: its record reserved, then the entry moved in the same step
+    // as the name is checked, so nothing in the trash is ever overwritten.
+    let mut name = stem.clone();
+    let mut n = 1;
+    loop {
+        let record = info.join(format!("{name}.trashinfo"));
+        let reserved = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&record);
+        match reserved {
+            Ok(mut f) => {
+                f.write_all(body.as_bytes())?;
+                drop(f);
+                match crate::noreplace::rename_noreplace(path, &files.join(&name)) {
+                    Ok(()) => {
+                        return Ok(Trashed {
+                            original: path.to_path_buf(),
+                            when,
+                            place: Place::Freedesktop {
+                                file: files.join(&name),
+                                info: record,
+                            },
+                        });
+                    }
+                    Err(e) => {
+                        let _ = fs::remove_file(&record);
+                        if e.kind() != io::ErrorKind::AlreadyExists {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+        name = format!("{stem}.{n}");
+        n += 1;
+    }
 }
 
 /// Percent-encoding as the trash spec wants it: path separators stay readable,
@@ -1080,6 +1391,317 @@ mod tests {
     }
 
     #[test]
+    fn a_file_that_appears_while_copying_or_moving_is_asked_about_not_overwritten() {
+        let root = tmp("appears");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("c.txt"), b"ours").unwrap();
+        fs::write(root.join("m.txt"), b"ours").unwrap();
+
+        // dst/c.txt is free when checked, and taken just before the copy writes it.
+        APPEAR.lock().unwrap().push(dst.join("c.txt"));
+        let (s, asked) = run_with(
+            Request::copy(vec![root.join("c.txt")], dst.clone()),
+            Answer::Skip,
+        );
+        assert_eq!(asked, 1, "the copy asks about the file that appeared");
+        assert_eq!(s.skipped, 1);
+        assert_eq!(fs::read(dst.join("c.txt")).unwrap(), b"theirs");
+
+        // The same for a move: the source stays, the newcomer is kept.
+        APPEAR.lock().unwrap().push(dst.join("m.txt"));
+        let (s, asked) = run_with(
+            Request::mv(vec![root.join("m.txt")], dst.clone()),
+            Answer::Skip,
+        );
+        assert_eq!(asked, 1, "the move asks about the file that appeared");
+        assert_eq!(s.skipped, 1);
+        assert_eq!(fs::read(dst.join("m.txt")).unwrap(), b"theirs");
+        assert_eq!(fs::read(root.join("m.txt")).unwrap(), b"ours");
+
+        // Answered Yes, it replaces it, as for any file that was there.
+        APPEAR.lock().unwrap().push(dst.join("m2.txt"));
+        fs::write(root.join("m2.txt"), b"ours").unwrap();
+        let (s, _) = run_with(
+            Request::mv(vec![root.join("m2.txt")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read(dst.join("m2.txt")).unwrap(), b"ours");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A directory on another file system than the temporary directory, for moves
+    /// across devices: tmpfs at /dev/shm on Linux. None where there is no such place.
+    fn other_device(tag: &str) -> Option<PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let shm = Path::new("/dev/shm");
+            let tmp = fs::metadata(std::env::temp_dir()).ok()?;
+            let other = fs::metadata(shm).ok()?;
+            if other.dev() != tmp.dev() {
+                let d = shm.join(format!("xdevcmd-xdev-{tag}-{}", std::process::id()));
+                let _ = fs::remove_dir_all(&d);
+                fs::create_dir_all(&d).ok()?;
+                return Some(d);
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = tag;
+        None
+    }
+
+    /// Run `req`, answering each question with `answer(question)`; the summary and
+    /// the questions asked.
+    fn run_answering(req: Request, answer: impl Fn(&Question) -> Answer) -> (Summary, Vec<String>) {
+        let h = start(req);
+        let mut asked = Vec::new();
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)) {
+                Ok(Event::Ask(q)) => {
+                    asked.push(format!("{q:?}"));
+                    h.answer(answer(&q));
+                }
+                Ok(Event::Done(s)) => return (s, asked),
+                Ok(_) => {}
+                Err(e) => panic!("worker never finished: {e}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_move_across_devices_keeps_what_was_skipped() {
+        let Some(other) = other_device("skip") else {
+            return;
+        };
+        let root = tmp("xdev-skip");
+        let src = root.join("d");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("a"), b"A").unwrap();
+        fs::write(src.join("b"), b"only copy of b").unwrap();
+        fs::write(src.join("sub/c"), b"C").unwrap();
+        fs::create_dir_all(other.join("d")).unwrap();
+        fs::write(other.join("d/b"), b"theirs").unwrap();
+        // Merge into the existing d, copy-then-delete across devices, but skip b.
+        let (s, asked) =
+            run_answering(Request::mv(vec![src.clone()], other.clone()), |q| match q {
+                Question::Conflict { path, .. } if path.ends_with("b") => Answer::Skip,
+                _ => Answer::Yes,
+            });
+        assert_eq!(s.skipped, 1, "{asked:#?} {s:?}");
+        assert_eq!(
+            fs::read(src.join("b")).unwrap(),
+            b"only copy of b",
+            "b stays: it was not copied"
+        );
+        assert_eq!(fs::read(other.join("d/b")).unwrap(), b"theirs");
+        assert!(!src.join("a").exists() && fs::read(other.join("d/a")).unwrap() == b"A");
+        assert!(!src.join("sub").exists(), "a directory moved in full goes");
+        assert_eq!(fs::read(other.join("d/sub/c")).unwrap(), b"C");
+        assert!(src.is_dir(), "d stays, since b is still in it");
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_file_moved_across_devices_onto_another_is_asked_about_once() {
+        let Some(other) = other_device("once") else {
+            return;
+        };
+        let root = tmp("xdev-once");
+        fs::write(root.join("f"), b"ours").unwrap();
+        fs::write(other.join("f"), b"theirs").unwrap();
+        let (s, asked) = run_answering(Request::mv(vec![root.join("f")], other.clone()), |_| {
+            Answer::Yes
+        });
+        let conflicts = asked.iter().filter(|q| q.starts_with("Conflict")).count();
+        assert_eq!(conflicts, 1, "{asked:?}");
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read(other.join("f")).unwrap(), b"ours");
+        assert!(!root.join("f").exists());
+        // Skipped at the one question: nothing moves, nothing is lost.
+        fs::write(root.join("g"), b"ours").unwrap();
+        fs::write(other.join("g"), b"theirs").unwrap();
+        let (s, _) = run_answering(
+            Request::mv(vec![root.join("g")], other.clone()),
+            |q| match q {
+                Question::Conflict { .. } => Answer::Skip,
+                _ => Answer::Yes,
+            },
+        );
+        assert_eq!(s.skipped, 1);
+        assert_eq!(fs::read(root.join("g")).unwrap(), b"ours");
+        assert_eq!(fs::read(other.join("g")).unwrap(), b"theirs");
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_replacement_cancelled_part_way_keeps_the_old_file() {
+        let root = tmp("replace-cancel");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("f"), vec![7u8; 1 << 20]).unwrap();
+        fs::write(dst.join("f"), b"old").unwrap();
+        let h = start(Request::copy(vec![root.join("f")], dst.clone()));
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                // Agree to overwrite, and cancel at once: the copy stops before it is
+                // complete.
+                Event::Ask(_) => {
+                    h.cancel();
+                    h.answer(Answer::Yes);
+                }
+                Event::Done(_) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            fs::read(dst.join("f")).unwrap(),
+            b"old",
+            "the old file is intact"
+        );
+        let left: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left.len(), 1, "no temporary file left behind: {left:?}");
+        // Not cancelled, the replacement lands whole.
+        let (s, _) = run_with(
+            Request::copy(vec![root.join("f")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read(dst.join("f")).unwrap().len(), 1 << 20);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn overwrite_all_does_not_also_agree_to_copy_then_delete() {
+        let Some(other) = other_device("split") else {
+            return;
+        };
+        let root = tmp("split-all");
+        fs::write(root.join("a"), b"A").unwrap();
+        fs::write(root.join("b"), b"B").unwrap();
+        fs::write(other.join("a"), b"theirs").unwrap();
+        // "Overwrite all" at a's question; b's copy-then-delete is still asked about.
+        let (_, asked) = run_answering(
+            Request::mv(vec![root.join("a"), root.join("b")], other.clone()),
+            |q| match q {
+                Question::Conflict { .. } => Answer::YesToAll,
+                _ => Answer::Yes,
+            },
+        );
+        let cross = asked
+            .iter()
+            .filter(|q| q.starts_with("CrossDevice"))
+            .count();
+        assert_eq!(cross, 2, "{asked:?}");
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_sync_replaces_only_what_its_plan_named() {
+        let root = tmp("sync-planned");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("a"), b"new a").unwrap();
+        fs::write(root.join("b"), b"new b").unwrap();
+        fs::write(dst.join("a"), b"old a").unwrap();
+        // a is a planned overwrite; b was free, and a file takes its name meanwhile.
+        APPEAR.lock().unwrap().push(dst.join("b"));
+        let (_, asked) = run_with(
+            Request::sync(vec![
+                (root.join("a"), dst.clone()),
+                (root.join("b"), dst.clone()),
+            ]),
+            Answer::Skip,
+        );
+        assert_eq!(
+            asked, 1,
+            "only b, which the plan did not name, is asked about"
+        );
+        assert_eq!(fs::read(dst.join("a")).unwrap(), b"new a");
+        assert_eq!(fs::read(dst.join("b")).unwrap(), b"theirs");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Set `p`'s modification time to `secs` after the epoch.
+    fn age(p: &Path, secs: u64) {
+        let t = std::time::UNIX_EPOCH + Duration::from_secs(secs);
+        File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(t))
+            .unwrap();
+    }
+
+    #[test]
+    fn update_replaces_only_what_is_older_and_skips_the_same_and_newer() {
+        let root = tmp("update");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        // older: the copy there is older; same: equal times (within 2 s); newer: the
+        // copy there is newer; fresh: not there at all.
+        for (name, ours, theirs) in [
+            ("older", 2_000_000, 1_000_000),
+            ("same", 1_000_000, 1_000_001),
+            ("newer", 1_000_000, 2_000_000),
+        ] {
+            fs::write(root.join(name), b"ours").unwrap();
+            age(&root.join(name), ours);
+            fs::write(dst.join(name), b"theirs").unwrap();
+            age(&dst.join(name), theirs);
+        }
+        fs::write(root.join("fresh"), b"ours").unwrap();
+        let names = ["older", "same", "newer", "fresh"];
+        let mut req = Request::copy(names.iter().map(|n| root.join(n)).collect(), dst.clone());
+        req.existing = Existing::Update;
+        let (s, asked) = run_with(req, Answer::Abort);
+        assert_eq!(asked, 0, "update never asks");
+        assert_eq!((s.done, s.skipped), (2, 2));
+        assert_eq!(fs::read(dst.join("older")).unwrap(), b"ours");
+        assert_eq!(fs::read(dst.join("same")).unwrap(), b"theirs");
+        assert_eq!(fs::read(dst.join("newer")).unwrap(), b"theirs");
+        assert_eq!(fs::read(dst.join("fresh")).unwrap(), b"ours");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn answering_update_at_a_question_applies_it_to_the_rest() {
+        let root = tmp("update-answer");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        for (name, ours, theirs) in [("a", 1_000_000, 2_000_000), ("b", 2_000_000, 1_000_000)] {
+            fs::write(root.join(name), b"ours").unwrap();
+            age(&root.join(name), ours);
+            fs::write(dst.join(name), b"theirs").unwrap();
+            age(&dst.join(name), theirs);
+        }
+        let req = Request::copy(vec![root.join("a"), root.join("b")], dst.clone());
+        let (s, asked) = run_with(req, Answer::Update);
+        assert_eq!(asked, 1, "asked once, then the rule decides");
+        assert_eq!(
+            fs::read(dst.join("a")).unwrap(),
+            b"theirs",
+            "newer there: kept"
+        );
+        assert_eq!(
+            fs::read(dst.join("b")).unwrap(),
+            b"ours",
+            "older there: replaced"
+        );
+        assert_eq!((s.done, s.skipped), (1, 1));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn a_move_on_one_filesystem_removes_the_source() {
         let root = tmp("move");
         let dst = root.join("dst");
@@ -1140,6 +1762,89 @@ mod tests {
         assert!(info.contains("DeletionDate="), "{info}");
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn what_went_to_the_trash_comes_back_and_only_while_it_can() {
+        let root = tmp("trash-back");
+        let trash_root = root.join("Trash");
+        let f = root.join("note.txt");
+        fs::write(&f, b"keep me").unwrap();
+        let mut req = Request::delete(vec![f.clone()], true);
+        req.trash_root = Some(trash_root.clone());
+        let s = run(req);
+        let [t] = s.trashed.as_slice() else {
+            panic!("one item trashed: {s:?}");
+        };
+        assert_eq!(t.original, f);
+        // Its old name taken meanwhile: refused, nothing replaced.
+        fs::write(&f, b"newer").unwrap();
+        assert!(crate::trashed::check(t)
+            .unwrap_err()
+            .contains("exists again"));
+        assert!(crate::trashed::restore(t).is_err());
+        assert_eq!(fs::read(&f).unwrap(), b"newer");
+        // Free again: back where it was, its record gone from the trash.
+        fs::remove_file(&f).unwrap();
+        crate::trashed::restore(t).unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"keep me");
+        assert!(!trash_root.join("info/note.txt.trashinfo").exists());
+        assert!(!trash_root.join("files/note.txt").exists());
+        // Gone from the trash: undo says so.
+        assert!(crate::trashed::check(t).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_trashed_link_records_its_own_path_not_its_target() {
+        let root = tmp("trash-link");
+        let trash_root = root.join("Trash");
+        fs::create_dir_all(root.join("elsewhere")).unwrap();
+        fs::write(root.join("elsewhere/target.txt"), b"t").unwrap();
+        let link = root.join("link.txt");
+        std::os::unix::fs::symlink(root.join("elsewhere/target.txt"), &link).unwrap();
+        let mut req = Request::delete(vec![link.clone()], true);
+        req.trash_root = Some(trash_root.clone());
+        run(req);
+        let info = fs::read_to_string(trash_root.join("info/link.txt.trashinfo")).unwrap();
+        assert!(info.contains("link.txt"), "{info}");
+        assert!(!info.contains("target.txt"), "{info}");
+        assert!(
+            root.join("elsewhere/target.txt").exists(),
+            "the target is untouched"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_on_another_volume_goes_to_that_volumes_trash_and_back() {
+        let Some(other) = other_device("vol-trash") else {
+            return;
+        };
+        let f = other.join("on-the-other-volume.txt");
+        fs::write(&f, b"v").unwrap();
+        let t = send_to_trash(&f, None).unwrap();
+        let crate::trashed::Place::Freedesktop { file, info } = &t.place else {
+            panic!("{t:?}");
+        };
+        let uid = rustix::process::getuid().as_raw();
+        assert!(
+            file.starts_with(format!("/dev/shm/.Trash-{uid}/files")),
+            "{file:?}"
+        );
+        let record = fs::read_to_string(info).unwrap();
+        // Relative to the volume's top, as the spec prefers for these.
+        assert!(record.contains("Path=xdevcmd-xdev-vol-trash-"), "{record}");
+        crate::trashed::restore(&t).unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"v");
+        fs::remove_dir_all(&other).unwrap();
+        // Leave no trash directory behind if this test made it (only empty ones go).
+        let trash = PathBuf::from(format!("/dev/shm/.Trash-{uid}"));
+        let _ = fs::remove_dir(trash.join("files"));
+        let _ = fs::remove_dir(trash.join("info"));
+        let _ = fs::remove_dir(&trash);
     }
 
     #[test]

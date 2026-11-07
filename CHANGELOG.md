@@ -10,6 +10,81 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.2.1] - 2026-11-07
+
+### Added
+- **Example themes in the release files**: `themes/` holds Nord, Gruvbox dark and
+  Solarized light. Kept beside `xdevcmd`, they appear in View → Theme… as they are.
+- **`xdevcmd --print-theme NAME`** writes a built-in theme out as a file with every
+  colour listed, to start your own from.
+- **Ctrl+G** also goes to a path you type, beside Ctrl+L.
+- **A build for 64-bit ARM Linux** (`aarch64-unknown-linux-musl`, static): ARM servers
+  and a Raspberry Pi running a 64-bit system. The test suite runs on ARM too.
+- **Ctrl+Z undoes a delete to the trash**: what F8 moved goes back where it was, if its
+  name is still free and it is still in the trash. On Linux from xdevcmd's own trash
+  records, on macOS from where the Trash said it put it, on Windows by finding it in
+  the Recycle Bin.
+- **Copy and move can replace only older files**, as robocopy does: F5/F6's
+  confirmation has a line for files already there, which **U** changes (ask; replace
+  only if older and skip the same; leave all; replace all), and the overwrite question
+  has **U**, "update all".
+- **A fuzzy Ctrl+F filter**, the default: the letters in order, best matches first.
+  `[files] filter = "plain"` keeps the old behaviour.
+- **On Linux, a file on another drive goes to that drive's trash** (`.Trash-$uid`, as
+  the freedesktop spec says) instead of being offered a permanent delete.
+
+### Changed
+- **Idle, xdevcmd now uses almost no CPU**: about 0.3 % of a core instead of 5 %. The
+  screen is drawn when something changed (a key, a click, a shell's output, a job's
+  progress, background work reporting in) and once a second otherwise, not 25 times a
+  second.
+- **Panes learn of changes from the system** (inotify, FSEvents, ReadDirectoryChangesW)
+  for the directories on screen, instead of re-reading every second; polling stays,
+  less often, for network drives.
+- **Nothing heavy runs on the drawing thread any more**: Alt+Y's compare runs on its
+  own, counts as it goes, and Esc stops it; quick view decodes pictures on a thread.
+- **Directory sizes** use a few threads (one per core, at most four) instead of one per
+  directory, count a hard-linked file once, and stay on the directory's own drive.
+- **Shift+F8 deletes only on Y** (or a click on its button), never on Enter, and lists
+  the first names when several items go.
+
+### Security
+- **Renaming never replaces a file that appears meanwhile.** F2, renaming many and
+  moving into the Linux trash ask the system to refuse a name that is taken, in the
+  same step as the rename; before, a file created between xdevcmd's check and the
+  rename was overwritten.
+- **A program is never found in the directory you browse.** On Linux and macOS a
+  program run in a terminal tab by its bare name is looked up only in `PATH`'s absolute
+  directories; a `.` or empty entry used to make it look in the browsed directory.
+- **Copying and moving never overwrite a file that appears meanwhile.** A name found
+  free is written only if still free (a new-file-only open for a copy, the rename
+  above for a move); a file created in between gets the usual overwrite question.
+- Updated libraries to their latest patch releases, among them `zip` and `flate2`,
+  which read archives.
+- **Replacing a file never loses the old one part-way.** A copy or an extraction that
+  replaces a file writes the new one under a temporary name and swaps it in only when
+  complete; a cancel or an error used to leave neither.
+- **"All" answers stay with their question.** "Overwrite all" no longer also agrees to
+  copy-then-delete across drives or to permanent deletes when the trash is unavailable.
+  A synchronisation replaces only the files its plan listed.
+- **Unpacking never writes through a link** already at a file's name (the link is
+  replaced), and refuses an archive that would not fit, or that would unpack to over
+  1 GB at more than 1000 times its size, or to more than a million files.
+- **The Linux trash follows the spec**: the `.trashinfo` is written before the file is
+  moved, so a crash cannot leave a file nobody can restore, and a trashed link records
+  its own path, not its target's.
+
+### Fixed
+- **A move to another drive deleted files the user had chosen to skip.** Across drives
+  a move is a copy then a delete, and the whole source was deleted when nothing had
+  *failed*; a file skipped at the overwrite question was deleted without being copied.
+  Now each file is removed only once its own copy is complete. A single file moved onto
+  another across drives is asked about once, not twice. (0.2.0 has this bug.)
+- **The logo in About looked striped and stepped on macOS** in Terminal.app. It is now
+  drawn with background colour only, one colour per character cell, so it no longer
+  depends on how the terminal's font draws half blocks. In picture previews too, a cell
+  whose two halves are one colour is drawn the same way.
+
 ## [0.2.0] - 2026-11-07
 
 ### Changed

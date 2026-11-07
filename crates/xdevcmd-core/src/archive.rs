@@ -320,6 +320,7 @@ pub fn extract(
         .into_iter()
         .map(|i| i.path.clone())
         .collect();
+    check_room(archive, dest, &listing.items, &wanted)?;
     let rel_of = |path: &str| -> Option<String> {
         let rel = if base.is_empty() {
             path
@@ -381,21 +382,18 @@ pub fn extract(
         if let Some(parent) = dst.parent() {
             let _ = fs::create_dir_all(parent);
         }
+        let free = dst.symlink_metadata().is_err();
         match hooks.conflict(&dst, size) {
             None => return false,
             Some(false) => return true,
             Some(true) => {}
         }
-        match write_entry(&dst, size, mode, data, hooks) {
+        // write_entry removes what it wrote when it does not finish, and leaves an
+        // existing file as it was until the new one is complete.
+        match write_entry(&dst, free, size, mode, data, hooks) {
             Ok(true) => hooks.done(),
-            Ok(false) => {
-                let _ = fs::remove_file(&dst);
-                return false;
-            }
-            Err(e) => {
-                let _ = fs::remove_file(&dst);
-                hooks.failed(&shown, &e);
-            }
+            Ok(false) => return false,
+            Err(e) => hooks.failed(&shown, &e),
         }
         true
     };
@@ -447,14 +445,54 @@ pub fn extract(
 }
 
 /// Copy one entry's bytes to `dst`. `Ok(false)` when stopped part-way.
+///
+/// Written under a temporary name beside `dst` and renamed into place once complete:
+/// a stop or an error leaves an existing file as it was, and a symlink at `dst` is
+/// replaced, never written through (it could point outside the destination). `free`:
+/// `dst` was not there when checked; one that appears meanwhile is kept, not replaced.
 fn write_entry(
     dst: &Path,
+    free: bool,
     size: u64,
     mode: Option<u32>,
     data: &mut dyn Read,
     hooks: &mut dyn Hooks,
 ) -> io::Result<bool> {
-    let mut out = File::create(dst)?;
+    let part = crate::ops::part_name(dst);
+    let result = write_part(&part, size, mode, data, hooks).and_then(|complete| {
+        if !complete {
+            return Ok(false);
+        }
+        if free {
+            crate::noreplace::rename_noreplace(&part, dst).map_err(|e| {
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    io::Error::other("a file of that name appeared meanwhile \u{2014} kept")
+                } else {
+                    e
+                }
+            })?;
+        } else {
+            fs::rename(&part, dst)?;
+        }
+        Ok(true)
+    });
+    if !matches!(result, Ok(true)) {
+        let _ = fs::remove_file(&part);
+    }
+    result
+}
+
+fn write_part(
+    part: &Path,
+    size: u64,
+    mode: Option<u32>,
+    data: &mut dyn Read,
+    hooks: &mut dyn Hooks,
+) -> io::Result<bool> {
+    let mut out = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(part)?;
     // One byte more than declared is allowed in, so that a lie is seen rather than
     // silently cut short.
     let mut limited = data.take(size.saturating_add(1));
@@ -481,11 +519,63 @@ fn write_entry(
     if let Some(m) = mode {
         use std::os::unix::fs::PermissionsExt;
         // rwx for user, group and other only: never setuid, setgid or sticky.
-        let _ = fs::set_permissions(dst, fs::Permissions::from_mode(m & 0o777));
+        let _ = fs::set_permissions(part, fs::Permissions::from_mode(m & 0o777));
     }
     #[cfg(not(unix))]
     let _ = mode;
     Ok(true)
+}
+
+/// Above this many entries, or this ratio of unpacked size to archive size beyond a
+/// gigabyte, an extraction is refused as a likely decompression bomb: a 10 MB zip can
+/// claim hundreds of terabytes (Fifield, USENIX WOOT 2019). Each entry is still held to
+/// its declared size as it is written.
+const MAX_ENTRIES: usize = 1_000_000;
+const MAX_RATIO: u64 = 1000;
+const RATIO_FROM: u64 = 1 << 30;
+
+/// Refuse an extraction that would not fit, or looks like a bomb, before writing
+/// anything.
+fn check_room(
+    archive: &Path,
+    dest: &Path,
+    items: &[Item],
+    wanted: &std::collections::HashSet<String>,
+) -> io::Result<()> {
+    let files: Vec<&Item> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::File && wanted.contains(&i.path))
+        .collect();
+    if files.len() > MAX_ENTRIES {
+        return Err(io::Error::other(format!(
+            "{} files \u{2014} more than {MAX_ENTRIES}; refused",
+            files.len()
+        )));
+    }
+    let total: u64 = files.iter().map(|i| i.size).fold(0, u64::saturating_add);
+    let packed = fs::metadata(archive).map(|m| m.len()).unwrap_or(0).max(1);
+    if total > RATIO_FROM && total / packed > MAX_RATIO {
+        return Err(io::Error::other(format!(
+            "it would unpack to {}, {}\u{d7} its own size \u{2014} refused as a likely \
+             decompression bomb",
+            crate::format::human_size(total),
+            total / packed
+        )));
+    }
+    #[cfg(unix)]
+    if let Ok(st) = rustix::fs::statvfs(dest) {
+        let free = st.f_bavail.saturating_mul(st.f_frsize);
+        if total > free {
+            return Err(io::Error::other(format!(
+                "it needs {}, and only {} is free there",
+                crate::format::human_size(total),
+                crate::format::human_size(free)
+            )));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dest;
+    Ok(())
 }
 
 /// Pack `sources` into a new archive at `dest`, its format from its name. Each source
@@ -839,6 +929,62 @@ mod tests {
         };
         extract(&z, &["f.txt".into()], "", &out, &mut log).unwrap();
         assert_eq!(fs::read_to_string(out.join("f.txt")).unwrap(), "old");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overwriting_a_link_in_the_destination_replaces_the_link_not_its_target() {
+        let d = scratch("last-link");
+        let out = d.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let victim = d.join("victim.txt");
+        fs::write(&victim, "precious").unwrap();
+        // out/f.txt is a link to a file outside; the archive has an f.txt too.
+        std::os::unix::fs::symlink(&victim, out.join("f.txt")).unwrap();
+        let z = d.join("a.zip");
+        zip_with(&z, &[("f.txt", b"from the archive")]);
+        let mut log = Log {
+            answer: Some(true),
+            ..Log::default()
+        };
+        extract(&z, &["f.txt".into()], "", &out, &mut log).unwrap();
+        assert_eq!(
+            fs::read_to_string(&victim).unwrap(),
+            "precious",
+            "{:?}",
+            log.failed
+        );
+        let m = fs::symlink_metadata(out.join("f.txt")).unwrap();
+        assert!(m.is_file(), "the link itself was replaced by the file");
+        assert_eq!(
+            fs::read_to_string(out.join("f.txt")).unwrap(),
+            "from the archive"
+        );
+        let left: Vec<_> = fs::read_dir(&out).unwrap().flatten().collect();
+        assert_eq!(left.len(), 1, "no temporary file left");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_archive_that_would_unpack_to_far_more_than_its_size_is_refused() {
+        let d = scratch("bomb");
+        let z = d.join("small.zip");
+        fs::write(&z, vec![0u8; 1000]).unwrap();
+        let item = |path: &str, size: u64| Item {
+            path: path.into(),
+            kind: ItemKind::File,
+            size,
+            modified: None,
+            mode: None,
+        };
+        let items = vec![item("a", 3 << 30), item("b", 10)];
+        let all: std::collections::HashSet<String> = ["a".into(), "b".into()].into();
+        let e = check_room(&z, &d, &items, &all).unwrap_err();
+        assert!(e.to_string().contains("decompression bomb"), "{e}");
+        // Only b chosen: small, fine.
+        let b: std::collections::HashSet<String> = ["b".into()].into();
+        assert!(check_room(&z, &d, &items, &b).is_ok());
         let _ = fs::remove_dir_all(&d);
     }
 

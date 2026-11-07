@@ -68,6 +68,14 @@ pub struct OpenRule {
 }
 
 impl OpenRule {
+    /// The program and arguments for `path`: the command as written, then the path as
+    /// one more argument, whatever characters its name holds. No shell reads it.
+    pub fn argv(&self, path: &Path) -> Vec<std::ffi::OsString> {
+        let mut argv: Vec<std::ffi::OsString> = self.command.iter().map(Into::into).collect();
+        argv.push(path.as_os_str().to_owned());
+        argv
+    }
+
     /// Whether this rule is for `ext` (lower case, without the dot) on system `os`.
     pub fn matches(&self, ext: &str, os: &str) -> bool {
         (self.os.is_empty() || self.os.iter().any(|o| o == os))
@@ -158,6 +166,9 @@ pub struct Files {
     /// What Enter does on a file: "open" it with its program, as Total Commander does
     /// (an `[[open]]` rule first, else the system's), or "view" it (F3).
     pub enter: String,
+    /// Ctrl+F's filter: "fuzzy", the letters in order, best matches first; or "plain",
+    /// the text as typed anywhere in the name. Wildcards (`*.rs`) work in both.
+    pub filter: String,
 }
 
 impl Default for Files {
@@ -173,6 +184,7 @@ impl Default for Files {
             icons: false,
             git_status: false,
             enter: "open".into(),
+            filter: "fuzzy".into(),
         }
     }
 }
@@ -458,6 +470,12 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         }
     }
 
+    if !matches!(config.files.filter.as_str(), "fuzzy" | "plain") {
+        return Err(format!(
+            "[files] filter = \"{}\": expected fuzzy or plain",
+            config.files.filter
+        ));
+    }
     if !matches!(config.files.enter.as_str(), "open" | "view") {
         return Err(format!(
             "[files] enter = \"{}\": expected open or view",
@@ -643,11 +661,16 @@ pub fn named_theme(name: &str) -> Result<Theme, String> {
             available_themes().join(", ")
         ));
     };
-    let shown = path.display();
+    let shown = path.display().to_string();
     let text = std::fs::read(&path)
         .and_then(|b| decode(&b))
         .map_err(|e| format!("{shown}: {e}"))?;
-    let f: ThemeFile = toml::from_str(&text).map_err(|e| {
+    theme_from_text(&text, &shown)
+}
+
+/// A theme file's text, as `named_theme` reads it; `shown` names it in errors.
+pub fn theme_from_text(text: &str, shown: &str) -> Result<Theme, String> {
+    let f: ThemeFile = toml::from_str(text).map_err(|e| {
         format!(
             "{shown}: {}",
             e.to_string()
@@ -670,23 +693,60 @@ pub fn named_theme(name: &str) -> Result<Theme, String> {
         }
         Ok(())
     };
-    set(&mut t.bg, "background", &f.background)?;
-    set(&mut t.bg_panel, "panel", &f.panel)?;
-    set(&mut t.bg_bar, "bar", &f.bar)?;
-    set(&mut t.border, "border", &f.border)?;
-    set(&mut t.border_active, "border_active", &f.border_active)?;
-    set(&mut t.accent, "accent", &f.accent)?;
-    set(&mut t.fg, "text", &f.text)?;
-    set(&mut t.fg_dim, "text_dim", &f.text_dim)?;
-    set(&mut t.dir, "directory", &f.directory)?;
-    set(&mut t.exec, "executable", &f.executable)?;
-    set(&mut t.link, "symlink", &f.symlink)?;
-    set(&mut t.archive, "archive", &f.archive)?;
-    set(&mut t.err, "error", &f.error)?;
-    set(&mut t.mark, "marked", &f.marked)?;
-    set(&mut t.row_cursor, "cursor", &f.cursor)?;
-    set(&mut t.row_cursor_active, "cursor_active", &f.cursor_active)?;
+    for (slot, field, v) in theme_slots(&mut t, &f) {
+        set(slot, field, v)?;
+    }
     Ok(t)
+}
+
+/// Each colour of a theme with its name in a theme file, in the order
+/// `--print-theme` writes them.
+fn theme_slots<'a>(
+    t: &'a mut Theme,
+    f: &'a ThemeFile,
+) -> [(&'a mut Color, &'static str, &'a Option<String>); 16] {
+    [
+        (&mut t.bg, "background", &f.background),
+        (&mut t.bg_panel, "panel", &f.panel),
+        (&mut t.bg_bar, "bar", &f.bar),
+        (&mut t.border, "border", &f.border),
+        (&mut t.border_active, "border_active", &f.border_active),
+        (&mut t.accent, "accent", &f.accent),
+        (&mut t.fg, "text", &f.text),
+        (&mut t.fg_dim, "text_dim", &f.text_dim),
+        (&mut t.dir, "directory", &f.directory),
+        (&mut t.exec, "executable", &f.executable),
+        (&mut t.link, "symlink", &f.symlink),
+        (&mut t.archive, "archive", &f.archive),
+        (&mut t.err, "error", &f.error),
+        (&mut t.mark, "marked", &f.marked),
+        (&mut t.row_cursor, "cursor", &f.cursor),
+        (&mut t.row_cursor_active, "cursor_active", &f.cursor_active),
+    ]
+}
+
+/// A built-in theme written out as a theme file, every colour listed: a start for
+/// one's own (`xdevcmd --print-theme dark > themes/mine.toml`).
+pub fn render_theme(name: &str) -> Result<String, String> {
+    let mut t = crate::theme::built_in(name).ok_or_else(|| {
+        format!(
+            "--print-theme {name}: not a built-in theme; there are {}",
+            crate::theme::BUILT_IN.join(", ")
+        )
+    })?;
+    let f = ThemeFile::default();
+    let mut out = format!(
+        "# The built-in theme \"{name}\", from `xdevcmd --print-theme {name}`.\n\
+         # Save it as themes/<your-name>.toml beside config.toml, change the colours you\n\
+         # want, and pick it in View > Theme... or with [theme] name = \"<your-name>\".\n\
+         # A line you delete keeps the base theme's colour.\n\
+         # Colours: \"#rrggbb\", \"reset\" (the terminal's own), or \"0\"-\"255\".\n\
+         base = \"{name}\"\n"
+    );
+    for (slot, field, _) in theme_slots(&mut t, &f) {
+        out.push_str(&format!("{field} = \"{}\"\n", color_name(*slot)));
+    }
+    Ok(out)
 }
 
 /// The theme the user sees for `name`: the named theme with `[theme]`'s own colours on
@@ -763,7 +823,10 @@ fn color_name(c: Color) -> String {
     match c {
         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
         Color::Indexed(n) => n.to_string(),
-        _ => "reset".to_string(),
+        // The 16 named colours are palette entries 0-15, which is how a file writes them.
+        c => (0..16u8)
+            .find(|&i| crate::theme::ansi(i) == c)
+            .map_or_else(|| "reset".to_string(), |i| i.to_string()),
     }
 }
 
@@ -1065,6 +1128,47 @@ mod tests {
     fn a_misspelt_key_is_an_error_not_silence() {
         let e = parse("[general]\nconfirm_tranfser = false\n").unwrap_err();
         assert!(e.contains("confirm_tranfser"), "{e}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_file_name_reaches_an_open_rule_as_one_argument() {
+        // Spaces, quotes, a ; and a $( ) that a shell would run: the program sees the
+        // name exactly, as one argument, and nothing else runs.
+        let d = std::env::temp_dir().join(format!("xdevcmd-openrule-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let name = "a b; touch pwned $(touch pwned2) `touch pwned3` 'q\" && echo x.txt";
+        let file = d.join(name);
+        std::fs::write(&file, "").unwrap();
+        let out = d.join("seen");
+        let rule = OpenRule {
+            ext: vec!["txt".into()],
+            action: String::new(),
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!("printf '%s|%s' \"$#\" \"$1\" > '{}'", out.display()),
+                "sh".into(),
+            ],
+            terminal: false,
+            needs_display: false,
+            os: Vec::new(),
+        };
+        let argv = rule.argv(&file);
+        assert_eq!(argv.last().unwrap(), file.as_os_str());
+        let status = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .current_dir(&d)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let seen = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(seen, format!("1|{}", file.display()));
+        for p in ["pwned", "pwned2", "pwned3"] {
+            assert!(!d.join(p).exists(), "{p} was created: the name was run");
+        }
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

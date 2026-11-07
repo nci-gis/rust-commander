@@ -27,8 +27,8 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     env:
-      # A Windows build fails rather than make rcmd.exe without its icon.
-      RCMD_REQUIRE_ICON: ${{ matrix.os == 'windows-latest' && '1' || '' }}
+      # A Windows build fails rather than make xdevcmd.exe without its icon.
+      XDEVCMD_REQUIRE_ICON: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     strategy:
       # Report every platform's result. A Windows failure must not hide a macOS one.
       fail-fast: false
@@ -43,7 +43,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       # The suite starts a real pty and renders real frames, so this is the step that
-      # actually says whether rcmd works on this platform.
+      # actually says whether xdevcmd works on this platform.
       - run: cargo test --all
       - run: cargo build --release
       # macos-latest is Apple Silicon, and an Intel Mac cannot run what it builds. Build
@@ -53,11 +53,11 @@ jobs:
         run: |
           rustup target add x86_64-apple-darwin
           cargo build --release --target x86_64-apple-darwin
-          lipo -create -output rcmd-universal \
-            target/release/rcmd target/x86_64-apple-darwin/release/rcmd
-          lipo rcmd-universal -verify_arch x86_64 arm64
-          mv rcmd-universal target/release/rcmd
-          lipo -info target/release/rcmd
+          lipo -create -output xdevcmd-universal \
+            target/release/xdevcmd target/x86_64-apple-darwin/release/xdevcmd
+          lipo xdevcmd-universal -verify_arch x86_64 arm64
+          mv xdevcmd-universal target/release/xdevcmd
+          lipo -info target/release/xdevcmd
       # "/" is not allowed in an artifact name, and branches have them (feat/topic), as
       # does a pull request's own ref ("1/merge"): name it after the source branch,
       # with "/" made "-".
@@ -66,15 +66,15 @@ jobs:
         shell: bash
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: echo "name=rcmd-${{ runner.os }}-${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
+        run: echo "name=xdevcmd-${{ runner.os }}-${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
       # The build that passed, ready to run: try a branch on Windows or macOS without
       # installing Rust there. Under the run's Artifacts; kept for two weeks.
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: |
-            target/release/rcmd
-            target/release/rcmd.exe
+            target/release/xdevcmd
+            target/release/xdevcmd.exe
           if-no-files-found: error
           retention-days: 14
 

@@ -6,10 +6,10 @@
 
 ## Keys
 
-The one source of truth is `BINDINGS` in `crates/rcmd-tui/src/keys.rs`: each row holds an
+The one source of truth is `BINDINGS` in `crates/xdevcmd-tui/src/keys.rs`: each row holds an
 action's config name, its help-screen group and description, and its default keys. The
 parser, the defaults, the F1 screen, the key bar and `--print-config` all read that table.
-To see the live set, press **F1** or run `rcmd --print-config`.
+To see the live set, press **F1** or run `xdevcmd --print-config`.
 
 **Never write a key into UI text by hand.** The key bar and the startup hint are generated
 from the keymap because a user who sets `copy = ["F2"]` and still sees `5 Copy` has been
@@ -22,7 +22,7 @@ history and resize could not be typed. So those actions got second keys that arr
 everywhere — `Alt+J` history, `Alt+R` then arrows resize, `Alt+1`…`Alt+9` tab N
 (`go_tab`, global, so it works from the shell too), `Alt+B` / `Alt+F` parent / enter
 (what Terminal.app sends for ⌥← / ⌥→) — instead of a keymap per system. Named presets
-(`[keys] preset`, `keymaps/*.toml`, `RCMD_KEYS`) are deferred until a second set is
+(`[keys] preset`, `keymaps/*.toml`, `XDEVCMD_KEYS`) are deferred until a second set is
 really wanted; Round 004's design §2 is the plan for then.
 
 ### Two-key bindings and groups
@@ -107,16 +107,16 @@ directory, sort and hidden-file setting, which pane had focus, and the terminal 
 or hidden, its height, and where each of its tabs' shells was (Linux, from `/proc`;
 elsewhere they open in the focused pane's directory).
 
-- Saved on a normal quit to `$RCMD_STATE`, `$XDG_STATE_HOME/rcmd/session.toml`,
-  `%LOCALAPPDATA%\rcmd` on Windows, or `~/.local/state/rcmd/session.toml`. Written
+- Saved on a normal quit to `$XDEVCMD_STATE`, `$XDG_STATE_HOME/xdevcmd/session.toml`,
+  `%LOCALAPPDATA%\xdevcmd` on Windows, or `~/.local/state/xdevcmd/session.toml`. Written
   beside the old one and renamed over it, so a crash mid-write cannot corrupt it; mode
   `600`, since it lists the directories you work in.
 - **Directories on the command line win**; `--no-restore` starts fresh; and
   `[general] restore_session = false` turns it off.
-- **A session never stops rcmd opening.** Unreadable, from another version, or with
+- **A session never stops xdevcmd opening.** Unreadable, from another version, or with
   more panes than `max_panes` now allows: a fresh start instead. A directory that no
   longer exists opens at its nearest existing parent.
-- Every test sets `RCMD_STATE` to a scratch file. Without it, the pty tests — which quit
+- Every test sets `XDEVCMD_STATE` to a scratch file. Without it, the pty tests — which quit
   with `q`, which saves — would overwrite the developer's own session.
 
 ## Pane size and zoom

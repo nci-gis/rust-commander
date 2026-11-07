@@ -1,22 +1,22 @@
 # Config
 
-rcmd works without a config file. To change something, create one:
+xdevcmd works without a config file. To change something, create one:
 
 ```bash
-rcmd --print-config > ~/.config/rcmd/config.toml   # every setting, with its default
-rcmd --check-config                                # check it; exit code 1 if wrong
+xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # every setting, with its default
+xdevcmd --check-config                                # check it; exit code 1 if wrong
 ```
 
 Keep only the lines you change. Anything you leave out keeps its default.
 
-**Where rcmd looks**, first match wins: `$RCMD_CONFIG`,
-`$XDG_CONFIG_HOME/rcmd/config.toml`, `%APPDATA%\rcmd\config.toml` (Windows),
-`~/.config/rcmd/config.toml`.
+**Where xdevcmd looks**, first match wins: `$XDEVCMD_CONFIG`,
+`$XDG_CONFIG_HOME/xdevcmd/config.toml`, `%APPDATA%\xdevcmd\config.toml` (Windows),
+`~/.config/xdevcmd/config.toml`.
 
-**If the file has a mistake**, rcmd ignores the whole file, starts with the defaults,
+**If the file has a mistake**, xdevcmd ignores the whole file, starts with the defaults,
 and the status line names the problem. **F1 → Settings** shows what is in use.
 
-**File → Settings…** inside rcmd changes the common settings and saves them here,
+**File → Settings…** inside xdevcmd changes the common settings and saves them here,
 writing only the lines that changed. Everything else, keys included, is set in this
 file.
 
@@ -62,11 +62,11 @@ extension, else with the system's program (`open`, `explorer.exe`, `xdg-open`, o
 
 ```toml
 [files]
-enter = "open"            # or "view": Enter views files, as in rcmd 0.1.0
+enter = "open"            # or "view": Enter views files, as in xdevcmd 0.1.0
 
 [[open]]
 ext = ["txt", "log", "md"]
-action = "view"           # or "edit": rcmd's viewer, or your editor
+action = "view"           # or "edit": xdevcmd's viewer, or your editor
 
 [[open]]
 ext = ["pdf"]
@@ -97,9 +97,9 @@ colors = "auto"           # how many colours the terminal shows: auto, truecolor
 **Themes.** `dark` is the default; `light` is for a light terminal; `ansi` uses only
 your terminal's 16 colours, so it follows your terminal's palette; `blue` is the
 blue-panel look of the DOS-era commanders; `high-contrast` is black and white with
-bright colours. **View → Theme…** switches while rcmd runs; `name` keeps the choice.
+bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
-Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the rcmd
+Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
 binary, for a portable copy). It starts from a built-in theme and changes what it lists,
 with the same names as `[theme]`:
 
@@ -120,17 +120,17 @@ the 256-colour palette, which every current terminal shows; the Linux console
 Terminal.app is never sent 24-bit colour, whatever `COLORTERM` says, because it shows
 it as green and red backgrounds.
 
-Over SSH, `COLORTERM` does not usually reach the server, so rcmd there uses 256 colours.
+Over SSH, `COLORTERM` does not usually reach the server, so xdevcmd there uses 256 colours.
 To get 24-bit colour back, set it for that host:
 
 ```bash
-export RCMD_COLORS=truecolor   # in the server's shell profile; overrides [theme] colors
+export XDEVCMD_COLORS=truecolor   # in the server's shell profile; overrides [theme] colors
 ```
 
-`RCMD_COLORS` takes the same values, and is the way to set colours per machine when one
+`XDEVCMD_COLORS` takes the same values, and is the way to set colours per machine when one
 config file is shared between several.
 
-`rcmd --print-config` lists every colour you can set.
+`xdevcmd --print-config` lists every colour you can set.
 
 ## Keys
 
@@ -140,7 +140,7 @@ copy = ["F2", "Ctrl+c"]   # copy is now F2 or Ctrl+C, and no longer F5
 ```
 
 Naming an action replaces all of its default keys. The names are in
-`rcmd --print-config` and on the F1 screen.
+`xdevcmd --print-config` and on the F1 screen.
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
 Left. Bindings that start with the same key form a group, and there is no time limit
@@ -161,7 +161,7 @@ resize_left = ["Alt+Shift+Left", "Alt+r Left", "Alt+r h"]
 ```
 
 Two actions given the same key here is an error, and so is a key that both runs an
-action and starts a group. Taking a key that rcmd uses by default is fine: that action
+action and starts a group. Taking a key that xdevcmd uses by default is fine: that action
 loses it.
 
 ## Bookmarks
@@ -172,7 +172,7 @@ projects = "~/projects"
 logs = "/var/log"
 ```
 
-Bookmarks you add inside rcmd are saved separately, never into this file.
+Bookmarks you add inside xdevcmd are saved separately, never into this file.
 
 ## Your own commands
 
@@ -197,32 +197,32 @@ command = "zip -r %D/selection.zip %s"
 | `%d` / `%D` | this pane's directory / the other pane's |
 | `%%` | a `%` sign |
 
-rcmd quotes every file name for your shell, so spaces and quotes in names are safe.
+xdevcmd quotes every file name for your shell, so spaces and quotes in names are safe.
 
 ## Security
 
 ```toml
 [security]
 mode = "normal"           # normal | read_only | restricted
-root = ""                 # if set, rcmd never goes above this directory
+root = ""                 # if set, xdevcmd never goes above this directory
 ```
 
 See [security.md](security.md).
 
-## Files rcmd keeps
+## Files xdevcmd keeps
 
-rcmd writes `config.toml` only when you save in **File → Settings…**, and then only the
+xdevcmd writes `config.toml` only when you save in **File → Settings…**, and then only the
 lines you changed. What else it writes, and nothing more:
 
 | File | Where | What |
 |---|---|---|
-| `session.toml` | `~/.local/state/rcmd/` (Linux, macOS); `%LOCALAPPDATA%\rcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
-| `bookmarks.toml` | beside `session.toml` | Bookmarks added inside rcmd (Ctrl+D). Bookmarks in this config are not copied there. |
-| `rcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when rcmd ends; one left by a crash is removed at the next start, an hour on. |
+| `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
+| `bookmarks.toml` | beside `session.toml` | Bookmarks added inside xdevcmd (Ctrl+D). Bookmarks in this config are not copied there. |
+| `xdevcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when xdevcmd ends; one left by a crash is removed at the next start, an hour on. |
 
 No logs, no cache, nothing sent anywhere. F8 moves files to your system's own trash.
 
-- `$XDG_STATE_HOME/rcmd/` replaces the state directory, and `RCMD_STATE` names the
+- `$XDG_STATE_HOME/xdevcmd/` replaces the state directory, and `XDEVCMD_STATE` names the
   session file itself (bookmarks go beside it).
 - `restore_session = false` stops the session being saved.
 - `--read-only` and `--restricted` save no session and no bookmarks. The one thing

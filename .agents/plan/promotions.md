@@ -47,3 +47,13 @@ superseded by Round 005 and done once there.
   read-back rule (R007). Trigger line widened.
 
 **Promoted by**: XDevTeam (approved the proposals: "còn lại mình: okay theo đề xuất"). Written by Claude Code through the shell/editor.
+
+## 2026-11-07: The name rcmd → xdevcmd in `AGENTS.md`, `context/`, `reference/`, `skills/`
+
+**Source**: [Round 011](cycles/Round_011.md), the owner's choice of one name
+**Rationale**: The project is renamed; canon that names the command, crates, paths or
+environment variables must say what is true. Only the name changed, mechanically
+(`rcmd` → `xdevcmd`, `RCMD` → `XDEVCMD`); no rule was added or altered. Rounds, memory
+and this log keep the old name, as history.
+**Promoted by**: XDevTeam (asked to allow it: "Cho sửa"). Written by Claude Code through
+the shell.

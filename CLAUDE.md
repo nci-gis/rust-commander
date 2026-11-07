@@ -1,4 +1,4 @@
-# rcmd
+# xdevcmd
 
 <!-- a2scaffold:start -->
 

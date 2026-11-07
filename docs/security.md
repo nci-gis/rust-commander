@@ -1,9 +1,9 @@
 # Security
 
-rcmd shows names and files that other people made, runs a shell, and changes files with
+xdevcmd shows names and files that other people made, runs a shell, and changes files with
 your permissions. It was tested against attacks on all three before release.
 
-## What rcmd guards against
+## What xdevcmd guards against
 
 - **File names that try to run commands.** A name with control characters is never
   typed into a shell or put on the clipboard.
@@ -15,8 +15,8 @@ your permissions. It was tested against attacks on all three before release.
   decoded.
 - **Running programs by accident.** Opening a program or script with **o** asks first,
   and Cancel is the default.
-- **A config file others can write.** rcmd refuses it on Unix, because it names the
-  programs rcmd runs.
+- **A config file others can write.** xdevcmd refuses it on Unix, because it names the
+  programs xdevcmd runs.
 
 No network access, no telemetry. Dependencies are checked for known vulnerabilities and
 licences (`cargo deny`) on every change and weekly.
@@ -31,24 +31,24 @@ licences (`cargo deny`) on every change and weekly.
 | terminal, clipboard | yes | yes | no |
 
 ```bash
-rcmd --read-only        # rcmd changes nothing on disk
-rcmd --restricted       # read-only, and no shell, no editor, no clipboard
-rcmd --root /srv/data   # never go above /srv/data, links included
+xdevcmd --read-only        # xdevcmd changes nothing on disk
+xdevcmd --restricted       # read-only, and no shell, no editor, no clipboard
+xdevcmd --root /srv/data   # never go above /srv/data, links included
 ```
 
 The same settings exist in the config (`[security] mode` and `root`). A command-line
 flag can make the config stricter, never looser.
 
 These modes protect against mistakes and hostile files. They do not stop someone who
-can start rcmd without the flag. For a real boundary, use the operating system's own
+can start xdevcmd without the flag. For a real boundary, use the operating system's own
 sandboxing.
 
 ## The config file is trusted
 
-rcmd trusts its config file the way your shell trusts `.bashrc`: it names programs rcmd
-runs (the shell, the editor, the opener, your `[[menu]]` commands). Keep it yours. rcmd
+xdevcmd trusts its config file the way your shell trusts `.bashrc`: it names programs xdevcmd
+runs (the shell, the editor, the opener, your `[[menu]]` commands). Keep it yours. xdevcmd
 refuses one that every user can write (on Unix), and never reads a config from the
-directory you are browsing — but do not point `--config` or `RCMD_CONFIG` at a file
+directory you are browsing — but do not point `--config` or `XDEVCMD_CONFIG` at a file
 someone else can change.
 
 ## Opt-in features that run programs

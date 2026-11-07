@@ -1,10 +1,10 @@
-# rcmd — the project
+# xdevcmd — the project
 
 > Canonical. Read this first in any task in this repository; it is short on purpose.
 > Detail lives in `reference/`, each file saying when to read it (table at the end).
 
 A two-pane (orthodox) file manager for the terminal, in Rust, with a terminal panel
-below the panes. Command `rcmd`; repository `nci-gis/rust-commander`; MIT, XDevTeam.
+below the panes. Command `xdevcmd`; repository `nci-gis/rust-commander`; MIT, XDevTeam.
 Modelled on Total Commander and Double Commander **at the level of UI and feature set**.
 
 ## Hard rules
@@ -33,12 +33,12 @@ Modelled on Total Commander and Double Commander **at the level of UI and featur
   `--help`, `--version` read it; `scripts/sync-about.sh` copies it to GitHub; a test
   checks the README tagline).
 - **Two walls for writes.** `App::refused` is the one place the UI decides what a mode
-  allows; `rcmd-core/policy.rs` refuses again in the engine. A new write path goes through
+  allows; `xdevcmd-core/policy.rs` refuses again in the engine. A new write path goes through
   both.
-- **Logic lives in `rcmd-core`**, which has no terminal code, so it is testable without
+- **Logic lives in `xdevcmd-core`**, which has no terminal code, so it is testable without
   one. Nothing in core depends on ratatui or crossterm.
-- **Tests run isolated** from the developer: `RCMD_CONFIG`, `XDG_DATA_HOME`,
-  `RCMD_STATE` point at scratch paths. A new test does the same.
+- **Tests run isolated** from the developer: `XDEVCMD_CONFIG`, `XDG_DATA_HOME`,
+  `XDEVCMD_STATE` point at scratch paths. A new test does the same.
 - **A fix comes with a test that fails without it.** Several here were proved by putting
   the bug back; do the same.
 - **No path a host happens to have** in tests (`/etc` is not on Windows), and no `/` in
@@ -54,14 +54,14 @@ green on Linux, Windows and macOS.
 ## Layout
 
 ```
-crates/rcmd-core/   engine, no terminal code
+crates/xdevcmd-core/   engine, no terminal code
   listing, sort, format   reading and ordering a directory, sizes and dates
   ops.rs            copy, move, delete, extract, pack on a worker thread; asks, never decides
   policy.rs         read-only and root, installed once; the engine's own wall
   rename.rs  batch_rename.rs  glob.rs  size.rs  find.rs  compare.rs
   archive.rs        zip / tar / tar.gz, with the hostile-archive rules
   attrs.rs  sha256.rs  image.rs  document.rs
-crates/rcmd-tui/    binary `rcmd`
+crates/xdevcmd-tui/    binary `xdevcmd`
   app.rs            event loop, focus, key and mouse dispatch, App::refused
   keys.rs           Action, BINDINGS, key parsing
   config.rs         config.toml schema and validation
@@ -78,8 +78,8 @@ scripts/sync-about.sh
 ## Run and check
 
 ```bash
-cargo run -p rcmd-tui -- /etc /var                # two directories
-./target/release/rcmd --screenshot=118x34 --keys=F9 /etc /usr   # look without a terminal
+cargo run -p xdevcmd-tui -- /etc /var                # two directories
+./target/release/xdevcmd --screenshot=118x34 --keys=F9 /etc /usr   # look without a terminal
 cargo test                                        # ~300 tests, about 15 s
 cargo clippy --all-targets -- -D warnings         # also --target x86_64-pc-windows-gnu
 cargo fmt --check && cargo deny check

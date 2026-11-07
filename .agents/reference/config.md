@@ -6,14 +6,14 @@
 
 ## Config
 
-`config.toml`, looked for at `$RCMD_CONFIG`, `$XDG_CONFIG_HOME/rcmd/config.toml`,
-`%APPDATA%\rcmd\config.toml` on Windows, then `~/.config/rcmd/config.toml` (macOS too —
+`config.toml`, looked for at `$XDEVCMD_CONFIG`, `$XDG_CONFIG_HOME/xdevcmd/config.toml`,
+`%APPDATA%\xdevcmd\config.toml` on Windows, then `~/.config/xdevcmd/config.toml` (macOS too —
 terminal tools live there, not in `~/Library`).
 
 - **Every field is optional.** A one-line file is valid; the rest stays default.
 - **A wrong file is rejected whole**, never half-applied: bad TOML, a misspelt key
   (`deny_unknown_fields`), a colour that is not a colour, an unknown action under
-  `[keys]`. rcmd starts on the defaults and the status line says `config ignored — …`
+  `[keys]`. xdevcmd starts on the defaults and the status line says `config ignored — …`
   with the field named. A config applied halfway is harder to reason about than one not
   applied at all.
 - **Listing an action under `[keys]` replaces all its default keys**, so the old key
@@ -28,7 +28,7 @@ terminal tools live there, not in `~/Library`).
 
 `[theme] name` picks a built-in theme (`theme::BUILT_IN`: `dark`, the default, `light`,
 `ansi`, `blue`, `high-contrast`) or a file `themes/<name>.toml`. Files are looked for
-(`config::theme_dirs`) beside **the config file in use**, then beside the rcmd binary
+(`config::theme_dirs`) beside **the config file in use**, then beside the xdevcmd binary
 (a portable copy). A file has `base` (a built-in, default `dark`) and any of the
 `[theme]` colour names; colours set in `[theme]` itself go on top of whichever theme is
 chosen. View → Theme… switches while running (`theme::set`; `t()` returns a copy, so a

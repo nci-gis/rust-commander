@@ -1,4 +1,4 @@
-# Philosophy — rcmd
+# Philosophy — xdevcmd
 
 > Canonical. The principles that decide close calls when the rules do not
 > cover the case. Summarised in the root instruction files; this is the

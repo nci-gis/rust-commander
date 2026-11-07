@@ -53,7 +53,7 @@ and restricted modes, like F4.
 
 **cd on exit**: `--cwd-file PATH` writes the last file pane's directory on `q` (raw bytes
 on Unix, no newline); `Q` quits without. Written even in read-only mode — the caller
-named the file, so it is their output, not rcmd's state. Shell functions are in the
+named the file, so it is their output, not xdevcmd's state. Shell functions are in the
 README.
 
 ## Opening files: Enter, `[[open]]`, Open with
@@ -122,7 +122,7 @@ thread and checks `name.sha256`, `SHA256SUMS` or `sha256sums.txt` beside the fil
 mismatch turns the box red.
 
 **Shift+F9 types `[[menu]]` commands into the terminal**, so their output is where you can
-read it. The command is the user's own (from a config rcmd refuses if others can write
+read it. The command is the user's own (from a config xdevcmd refuses if others can write
 it), but the placeholders are file names somebody else chose: each goes through
 `safety::quote` for the shell in the panel, and one that cannot be quoted safely stops
 the command. `f9_types_a_menu_command_into_the_shell_with_names_quoted` uses a name
@@ -150,7 +150,7 @@ letter and the next insert panics; `positions_are_characters_not_bytes` holds th
 
 ## Undo
 
-**Ctrl+Z undoes the last operation where that loses nothing** (`rcmd_core::undo`). Every
+**Ctrl+Z undoes the last operation where that loses nothing** (`xdevcmd_core::undo`). Every
 place a write starts records it (`App::remember_job` for jobs; rename, rename many, F7
 and Shift+F4 directly), so "the last" really is the last. `Undo::plan` decides against
 the disk **as it is now**, not as recorded, and Ctrl+Z asks first, listing what will
@@ -167,7 +167,7 @@ happen. One step: an undo is not undone. Refused in read-only and restricted;
 
 **Why not copies or deletes**: undoing a copy means deleting the copies, which loses
 whatever was done to them since. Undoing a delete means restoring from the trash: the
-Linux trash rcmd writes could be read back, but Windows and macOS keep their own, and a
+Linux trash xdevcmd writes could be read back, but Windows and macOS keep their own, and a
 restore that works on one system only would surprise, so the message points at the
 system's trash. Recording these as `Undo::Cannot` matters as much as the rest: without
 it, Ctrl+Z after a copy would undo an older rename behind the user's back.
@@ -182,7 +182,7 @@ background, as when one finishes. Quitting with jobs running asks; yes cancels t
 waits (up to five seconds) for the workers to remove their half-written files.
 
 **Looks are opt-in** (`[files] ls_colors`, `icons`, `git_status`) because each depends on
-something rcmd cannot see: `LS_COLORS` is written for some background, icons need a Nerd
+something xdevcmd cannot see: `LS_COLORS` is written for some background, icons need a Nerd
 Font, and git status runs a program. Backgrounds in `LS_COLORS` are ignored — the row's
 background belongs to the cursor. The git letter shares the mark gutter, so turning it
 on changes no layout; a marked row shows its mark.

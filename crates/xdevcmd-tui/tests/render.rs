@@ -246,6 +246,30 @@ fn f8_goes_to_the_trash_and_shift_f8_says_it_cannot_be_undone() {
 }
 
 #[test]
+fn ctrl_z_puts_back_what_went_to_the_trash() {
+    let (a, b) = fixture();
+    // F8, Enter: to the trash (the sandbox's own); then Ctrl+Z asks, Enter puts it back.
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z", &a, &b);
+    assert!(!a.join("victim.txt").exists(), "{s}");
+    assert!(
+        s.contains("Undo the delete of victim.txt to the trash?"),
+        "{s}"
+    );
+    assert!(s.contains("put back"), "{s}");
+    let s = shot_keys("110x24", "Ctrl+z", &a, &b);
+    assert!(
+        s.contains("nothing to undo"),
+        "a new run starts with no undo\n{s}"
+    );
+    // Run again in one go, with Enter at the question.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists(), "put back\n{s}");
+    assert!(s.contains("undone"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_never_confirms_a_permanent_delete() {
     let (a, b) = fixture();
     // Enter, out of habit: nothing goes, and the dialog says what does.

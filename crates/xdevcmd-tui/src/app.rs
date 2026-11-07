@@ -89,6 +89,8 @@ enum ModalAct {
 }
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// What undo says while a delete to the trash is still running.
+const TRASH_RUNNING: &str = "a delete to the trash that is still running";
 const TICK: Duration = Duration::from_millis(40);
 /// With nothing known to have changed, the screen is still drawn this often, for what
 /// changes without telling (the usage view's clock, a listing's age). Drawing every
@@ -177,6 +179,9 @@ pub struct App {
     theme_name: String,
     /// The last operation that wrote to the disk, for Ctrl+Z.
     last_undo: Option<xdevcmd_core::undo::Undo>,
+    /// The sources of a delete to the trash still running, so its result can become
+    /// the undo once it has said where everything went.
+    trash_pending: Option<Vec<PathBuf>>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -299,6 +304,7 @@ impl App {
             option_hinted: false,
             theme_name,
             last_undo: None,
+            trash_pending: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,
@@ -3145,6 +3151,7 @@ impl App {
         if let Some(Modal::Job(j)) = self.modal.take() {
             if let Some(s) = &j.done {
                 self.status = s.describe(j.kind);
+                self.note_trashed(s);
             }
         }
         // Marks are cleared once an operation has run, the way every orthodox manager
@@ -4270,6 +4277,8 @@ impl App {
             let j = self.jobs.remove(i);
             if let Some(s) = &j.done {
                 self.status = format!("background: {}", s.describe(j.kind));
+                let s = s.clone();
+                self.note_trashed(&s);
                 // A job that ended in errors comes forward so they can be read.
                 if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
                     self.modal = Some(Modal::Job(j));
@@ -4845,14 +4854,29 @@ impl App {
                 rename_to: r.rename_to.clone(),
             },
             ops::Kind::Copy => Undo::Cannot("a copy".into()),
-            ops::Kind::Delete => Undo::Cannot(if r.to_trash {
-                "a delete to the trash (your system's trash can restore it)".into()
-            } else {
-                "a permanent delete".into()
-            }),
+            ops::Kind::Delete if r.to_trash => {
+                // Undoable once it has finished and said where each item went.
+                self.trash_pending = Some(r.sources.clone());
+                Undo::Cannot(TRASH_RUNNING.into())
+            }
+            ops::Kind::Delete => Undo::Cannot("a permanent delete".into()),
             ops::Kind::Extract => Undo::Cannot("an extraction".into()),
             ops::Kind::Pack => Undo::Cannot("packing".into()),
         });
+    }
+
+    /// A delete to the trash has finished: if it is still the last operation, undo
+    /// can now put back what it moved.
+    fn note_trashed(&mut self, s: &ops::Summary) {
+        let Some(sources) = &self.trash_pending else {
+            return;
+        };
+        let ours = !s.trashed.is_empty() && s.trashed.iter().all(|t| sources.contains(&t.original));
+        let still_last = matches!(&self.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(w)) if w == TRASH_RUNNING);
+        if ours && still_last {
+            self.last_undo = Some(xdevcmd_core::undo::Undo::Trashed(s.trashed.clone()));
+            self.trash_pending = None;
+        }
     }
 
     /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
@@ -4887,6 +4911,17 @@ impl App {
                 tidy(into)
             )],
             Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+            Plan::Restore(items) => {
+                let mut lines: Vec<String> = items
+                    .iter()
+                    .take(8)
+                    .map(|i| format!("put back {}", tidy(&i.original)))
+                    .collect();
+                if items.len() > 8 {
+                    lines.push(format!("\u{2026} and {} more", items.len() - 8));
+                }
+                lines
+            }
         };
         let mut body = vec![format!("Undo the {}?", u.describe()), String::new()];
         body.extend(what);
@@ -4935,6 +4970,22 @@ impl App {
                 self.status = match xdevcmd_core::undo::remove(&p) {
                     Ok(()) => format!("undone: {}", u.describe()),
                     Err(e) => format!("cannot undo: {e}"),
+                };
+            }
+            Plan::Restore(items) => {
+                let mut failed = Vec::new();
+                for t in &items {
+                    if let Err(e) = xdevcmd_core::trashed::restore(t) {
+                        failed.push(e.to_string());
+                    }
+                }
+                self.status = match failed.first() {
+                    None => format!("undone: {}", u.describe()),
+                    Some(e) => format!(
+                        "undo: {} put back, {} not \u{2014} {e}",
+                        items.len() - failed.len(),
+                        failed.len()
+                    ),
                 };
             }
         }

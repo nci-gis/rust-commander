@@ -26,6 +26,8 @@ pub enum Undo {
     MadeDir(PathBuf),
     /// Shift+F4: a new, empty file.
     MadeFile(PathBuf),
+    /// F8: what went to the trash, and where each item went there.
+    Trashed(Vec<crate::trashed::Trashed>),
     /// The last operation was one that is not undone: "a copy", "a delete".
     Cannot(String),
 }
@@ -39,6 +41,8 @@ pub enum Plan {
     Move { back: Vec<PathBuf>, into: PathBuf },
     /// Remove this empty directory tree, or this empty file.
     Remove(PathBuf),
+    /// Put these back from the trash where they were.
+    Restore(Vec<crate::trashed::Trashed>),
 }
 
 fn there(p: &Path) -> bool {
@@ -81,6 +85,10 @@ impl Undo {
             }
             Undo::MadeDir(d) => format!("new directory {}", name(d)),
             Undo::MadeFile(f) => format!("new file {}", name(f)),
+            Undo::Trashed(t) if t.len() == 1 => {
+                format!("delete of {} to the trash", name(&t[0].original))
+            }
+            Undo::Trashed(t) => format!("delete of {} items to the trash", t.len()),
             Undo::Cannot(what) => what.clone(),
         }
     }
@@ -152,6 +160,26 @@ impl Undo {
                 Ok(_) => Err(format!("{} is not empty any more", name(f))),
                 Err(_) => Err(format!("{} is not there any more", name(f))),
             },
+            // What can still go back goes back; what cannot (taken name, emptied
+            // trash) stays, and if nothing can, the first reason says why.
+            Undo::Trashed(items) => {
+                let mut why = None;
+                let back: Vec<_> = items
+                    .iter()
+                    .filter(|t| match crate::trashed::check(t) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            why.get_or_insert(e);
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                if back.is_empty() {
+                    return Err(why.unwrap_or_else(|| "nothing to put back".into()));
+                }
+                Ok(Plan::Restore(back))
+            }
         }
     }
 }

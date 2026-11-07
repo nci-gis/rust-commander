@@ -184,6 +184,8 @@ pub struct Summary {
     pub bytes: u64,
     pub cancelled: bool,
     pub errors: Vec<String>,
+    /// A delete to the trash: where each item went, for undo.
+    pub trashed: Vec<crate::trashed::Trashed>,
 }
 
 impl Summary {
@@ -806,8 +808,9 @@ impl Worker {
         }
         if to_trash {
             match send_to_trash(target, trash_root) {
-                Ok(()) => {
+                Ok(t) => {
                     self.sum.done += 1;
+                    self.sum.trashed.push(t);
                     return;
                 }
                 Err(e) => {
@@ -999,27 +1002,102 @@ fn is_cross_device(e: &io::Error) -> bool {
     }
 }
 
-/// Move one entry to wherever this platform keeps deleted files.
-pub fn send_to_trash(path: &Path, root: Option<&Path>) -> io::Result<()> {
+/// Move one entry to wherever this platform keeps deleted files, and say where it went.
+pub fn send_to_trash(path: &Path, root: Option<&Path>) -> io::Result<crate::trashed::Trashed> {
     if let Some(base) = root {
         // Tests pass a temp directory here, so a test run never puts anything in the
         // real trash of whoever happens to be running it.
-        return trash_into(base, path);
+        return trash_into(base, path, None);
     }
     #[cfg(target_os = "linux")]
     {
-        let base = default_trash_base()
+        let home = default_trash_base()
             .ok_or_else(|| io::Error::other("no HOME, so no trash directory"))?;
-        trash_into(&base, path)
+        match volume_trash(path, &home)? {
+            None => trash_into(&home, path, None),
+            Some((base, topdir)) => trash_into(&base, path, Some(&topdir)),
+        }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        ::trash::delete(path).map_err(|e| io::Error::other(e.to_string()))
+        use crate::trashed::{Place, Trashed};
+        let when = std::time::SystemTime::now();
+        let at = crate::trashed::mac_trash(path)?;
+        Ok(Trashed {
+            original: path.to_path_buf(),
+            when,
+            place: Place::At(at),
+        })
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        use crate::trashed::{Place, Trashed};
+        let when = std::time::SystemTime::now();
+        ::trash::delete(path).map_err(|e| io::Error::other(e.to_string()))?;
+        Ok(Trashed {
+            original: path.to_path_buf(),
+            when,
+            place: Place::RecycleBin,
+        })
     }
 }
 
-/// `$XDG_DATA_HOME/Trash`, falling back to `~/.local/share/Trash`.
+/// The freedesktop trash for a path on another file system than the home trash: the
+/// spec's `$topdir/.Trash/$uid` when an administrator made `.Trash` (a real, sticky
+/// directory), else `$topdir/.Trash-$uid`, made here, private. `None` for the same file
+/// system as `home`, whose trash is used.
 #[cfg(target_os = "linux")]
+fn volume_trash(path: &Path, home: &Path) -> io::Result<Option<(PathBuf, PathBuf)>> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let dir = path.parent().unwrap_or(Path::new("/"));
+    let dev = fs::metadata(dir)?.dev();
+    // The home trash may not exist yet: its nearest existing ancestor decides.
+    let home_dev = home
+        .ancestors()
+        .find_map(|a| fs::metadata(a).ok())
+        .map(|m| m.dev());
+    if home_dev == Some(dev) {
+        return Ok(None);
+    }
+    // The top of the mount: the last ancestor still on this device.
+    let mut topdir = dir.to_path_buf();
+    while let Some(up) = topdir.parent() {
+        match fs::metadata(up) {
+            Ok(m) if m.dev() == dev => topdir = up.to_path_buf(),
+            _ => break,
+        }
+    }
+    let uid = rustix::process::getuid().as_raw();
+    let shared = topdir.join(".Trash");
+    if let Ok(m) = fs::symlink_metadata(&shared) {
+        let sticky = m.permissions().mode() & 0o1000 != 0;
+        if m.is_dir() && !m.file_type().is_symlink() && sticky {
+            let mine = shared.join(uid.to_string());
+            if fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&mine)
+                .is_ok()
+            {
+                return Ok(Some((mine, topdir)));
+            }
+        }
+    }
+    let own = topdir.join(format!(".Trash-{uid}"));
+    if let Ok(m) = fs::symlink_metadata(&own) {
+        if !m.is_dir() || m.file_type().is_symlink() || m.uid() != uid {
+            return Err(io::Error::other(format!(
+                "{} is not a trash directory of yours",
+                own.display()
+            )));
+        }
+    } else {
+        fs::DirBuilder::new().mode(0o700).create(&own)?;
+    }
+    Ok(Some((own, topdir)))
+}
+
+/// Where deleted files go on Linux: `$XDG_DATA_HOME/Trash`, per the freedesktop spec.
 pub fn default_trash_base() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -1028,49 +1106,86 @@ pub fn default_trash_base() -> Option<PathBuf> {
     Some(data.join("Trash"))
 }
 
-/// Move one entry into a freedesktop trash directory, writing the `.trashinfo` that
+/// Move one entry into a freedesktop trash directory, with the `.trashinfo` that
 /// makes it restorable.
 ///
-/// This is a rename, so it only works within one filesystem. Crossing one is reported
-/// rather than silently turned into a permanent delete — the caller turns that into a
-/// question. The spec's per-filesystem `.Trash-$uid` directories are not implemented;
-/// asking is the honest answer until they are.
-fn trash_into(base: &Path, path: &Path) -> io::Result<()> {
+/// As the spec says, the `.trashinfo` is made first (with `O_EXCL`, which also reserves
+/// the name), then the entry moved: a crash in between leaves a record without a file,
+/// which tools ignore, never a file nobody can restore. `topdir`: a per-volume trash,
+/// whose records give the path relative to the volume's top.
+fn trash_into(
+    base: &Path,
+    path: &Path,
+    topdir: Option<&Path>,
+) -> io::Result<crate::trashed::Trashed> {
+    use crate::trashed::{Place, Trashed};
+    let when = std::time::SystemTime::now();
     let files = base.join("files");
     let info = base.join("info");
     fs::create_dir_all(&files)?;
     fs::create_dir_all(&info)?;
 
-    let original = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let stem = path
+    // The path of the entry itself, not of what a link points to: the directory is
+    // made canonical, the name kept.
+    let name_os = path
         .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unnamed".to_string());
+        .ok_or_else(|| io::Error::other("that has no name to put in the trash"))?;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let original = dir
+        .canonicalize()
+        .unwrap_or_else(|_| dir.to_path_buf())
+        .join(name_os);
+    let recorded = match topdir.and_then(|t| original.strip_prefix(t).ok()) {
+        Some(rel) => rel.to_path_buf(),
+        None => original.clone(),
+    };
+    let stem = name_os.to_string_lossy().into_owned();
+    let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
+    let body = format!(
+        "[Trash Info]\nPath={}\nDeletionDate={}\n",
+        percent_encode(&recorded.to_string_lossy()),
+        stamp
+    );
 
-    // The first free name, taken in the same step as the move: a file put in the trash
-    // by another program at the same moment is never overwritten.
+    // The first free name: its record reserved, then the entry moved in the same step
+    // as the name is checked, so nothing in the trash is ever overwritten.
     let mut name = stem.clone();
     let mut n = 1;
     loop {
-        if !info.join(format!("{name}.trashinfo")).exists() {
-            match crate::noreplace::rename_noreplace(path, &files.join(&name)) {
-                Ok(()) => break,
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(e),
+        let record = info.join(format!("{name}.trashinfo"));
+        let reserved = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&record);
+        match reserved {
+            Ok(mut f) => {
+                f.write_all(body.as_bytes())?;
+                drop(f);
+                match crate::noreplace::rename_noreplace(path, &files.join(&name)) {
+                    Ok(()) => {
+                        return Ok(Trashed {
+                            original: path.to_path_buf(),
+                            when,
+                            place: Place::Freedesktop {
+                                file: files.join(&name),
+                                info: record,
+                            },
+                        });
+                    }
+                    Err(e) => {
+                        let _ = fs::remove_file(&record);
+                        if e.kind() != io::ErrorKind::AlreadyExists {
+                            return Err(e);
+                        }
+                    }
+                }
             }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
         }
         name = format!("{stem}.{n}");
         n += 1;
     }
-
-    let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
-    let body = format!(
-        "[Trash Info]\nPath={}\nDeletionDate={}\n",
-        percent_encode(&original.to_string_lossy()),
-        stamp
-    );
-    fs::write(info.join(format!("{name}.trashinfo")), body)?;
-    Ok(())
 }
 
 /// Percent-encoding as the trash spec wants it: path separators stay readable,
@@ -1279,6 +1394,8 @@ mod tests {
                 return Some(d);
             }
         }
+        #[cfg(not(target_os = "linux"))]
+        let _ = tag;
         None
     }
 
@@ -1521,6 +1638,89 @@ mod tests {
         assert!(info.contains("DeletionDate="), "{info}");
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn what_went_to_the_trash_comes_back_and_only_while_it_can() {
+        let root = tmp("trash-back");
+        let trash_root = root.join("Trash");
+        let f = root.join("note.txt");
+        fs::write(&f, b"keep me").unwrap();
+        let mut req = Request::delete(vec![f.clone()], true);
+        req.trash_root = Some(trash_root.clone());
+        let s = run(req);
+        let [t] = s.trashed.as_slice() else {
+            panic!("one item trashed: {s:?}");
+        };
+        assert_eq!(t.original, f);
+        // Its old name taken meanwhile: refused, nothing replaced.
+        fs::write(&f, b"newer").unwrap();
+        assert!(crate::trashed::check(t)
+            .unwrap_err()
+            .contains("exists again"));
+        assert!(crate::trashed::restore(t).is_err());
+        assert_eq!(fs::read(&f).unwrap(), b"newer");
+        // Free again: back where it was, its record gone from the trash.
+        fs::remove_file(&f).unwrap();
+        crate::trashed::restore(t).unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"keep me");
+        assert!(!trash_root.join("info/note.txt.trashinfo").exists());
+        assert!(!trash_root.join("files/note.txt").exists());
+        // Gone from the trash: undo says so.
+        assert!(crate::trashed::check(t).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_trashed_link_records_its_own_path_not_its_target() {
+        let root = tmp("trash-link");
+        let trash_root = root.join("Trash");
+        fs::create_dir_all(root.join("elsewhere")).unwrap();
+        fs::write(root.join("elsewhere/target.txt"), b"t").unwrap();
+        let link = root.join("link.txt");
+        std::os::unix::fs::symlink(root.join("elsewhere/target.txt"), &link).unwrap();
+        let mut req = Request::delete(vec![link.clone()], true);
+        req.trash_root = Some(trash_root.clone());
+        run(req);
+        let info = fs::read_to_string(trash_root.join("info/link.txt.trashinfo")).unwrap();
+        assert!(info.contains("link.txt"), "{info}");
+        assert!(!info.contains("target.txt"), "{info}");
+        assert!(
+            root.join("elsewhere/target.txt").exists(),
+            "the target is untouched"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_on_another_volume_goes_to_that_volumes_trash_and_back() {
+        let Some(other) = other_device("vol-trash") else {
+            return;
+        };
+        let f = other.join("on-the-other-volume.txt");
+        fs::write(&f, b"v").unwrap();
+        let t = send_to_trash(&f, None).unwrap();
+        let crate::trashed::Place::Freedesktop { file, info } = &t.place else {
+            panic!("{t:?}");
+        };
+        let uid = rustix::process::getuid().as_raw();
+        assert!(
+            file.starts_with(format!("/dev/shm/.Trash-{uid}/files")),
+            "{file:?}"
+        );
+        let record = fs::read_to_string(info).unwrap();
+        // Relative to the volume's top, as the spec prefers for these.
+        assert!(record.contains("Path=xdevcmd-xdev-vol-trash-"), "{record}");
+        crate::trashed::restore(&t).unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"v");
+        fs::remove_dir_all(&other).unwrap();
+        // Leave no trash directory behind if this test made it (only empty ones go).
+        let trash = PathBuf::from(format!("/dev/shm/.Trash-{uid}"));
+        let _ = fs::remove_dir(trash.join("files"));
+        let _ = fs::remove_dir(trash.join("info"));
+        let _ = fs::remove_dir(&trash);
     }
 
     #[test]

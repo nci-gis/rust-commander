@@ -264,6 +264,8 @@ pub fn start(req: Request) -> Handle {
             bytes_done: 0,
             last_report: 0,
             sum: Summary::default(),
+            moving: false,
+            approved: None,
         };
         w.run(req);
     });
@@ -285,6 +287,12 @@ struct Worker {
     bytes_done: u64,
     last_report: u64,
     sum: Summary,
+    /// Copying for a move across devices: each source is removed as soon as its copy
+    /// is complete, so what was skipped or failed stays where it was.
+    moving: bool,
+    /// A destination the user already agreed to replace, so the copy a cross-device
+    /// move falls back to does not ask about it a second time.
+    approved: Option<PathBuf>,
 }
 
 impl Worker {
@@ -430,6 +438,10 @@ impl Worker {
         if dst.symlink_metadata().is_err() {
             return Some(true);
         }
+        if self.approved.as_deref() == Some(dst) {
+            self.approved = None;
+            return Some(true);
+        }
         if self.yes_to_all {
             return Some(true);
         }
@@ -499,7 +511,9 @@ impl Worker {
             return;
         }
         if meta.file_type().is_symlink() {
+            let before = self.sum.done;
             self.copy_symlink(src, dst);
+            self.moved(src, before);
         } else if meta.is_dir() {
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
@@ -520,8 +534,25 @@ impl Worker {
             }
             let _ = fs::set_permissions(dst, meta.permissions());
             self.sum.done += 1;
+            // Moving: the directory goes only once empty, that is when everything in
+            // it was copied and removed; anything skipped keeps it.
+            if self.moving && !self.stopped() {
+                let _ = fs::remove_dir(src);
+            }
         } else {
+            let before = self.sum.done;
             self.copy_file(src, dst, meta.len());
+            self.moved(src, before);
+        }
+    }
+
+    /// While moving across devices: remove `src` if its copy just completed (the count
+    /// of done items went up). A skipped or failed copy leaves it.
+    fn moved(&mut self, src: &Path, done_before: u64) {
+        if self.moving && self.sum.done > done_before {
+            if let Err(e) = fs::remove_file(src) {
+                self.note_error(src, &e);
+            }
         }
     }
 
@@ -640,6 +671,7 @@ impl Worker {
     // ── move ───────────────────────────────────────────────────────────────────────
 
     fn move_into(&mut self, src: &Path, dest_dir: &Path, rename: Option<&std::ffi::OsStr>) {
+        self.approved = None;
         let Some(name) = rename.or(src.file_name()) else {
             return;
         };
@@ -657,6 +689,7 @@ impl Worker {
         let moved = loop {
             let free = dst.symlink_metadata().is_err();
             match self.resolve_conflict(&dst, size) {
+                Some(true) if !free => self.approved = Some(dst.clone()),
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
@@ -708,16 +741,20 @@ impl Worker {
                     self.sum.skipped += 1;
                     return;
                 }
-                let before = self.sum.failed;
+                // Each source is removed once its own copy is complete. Before, the
+                // whole tree was removed when nothing had *failed*, and a file the
+                // user chose to skip was deleted with it, never copied (0.2.0).
+                self.moving = true;
                 self.copy_node(src, &dst);
-                if self.sum.failed == before && !self.stopped() {
-                    if let Err(e) = remove_tree(src) {
-                        self.note_error(src, &e);
-                    }
-                }
+                self.moving = false;
+                self.approved = None;
             }
-            Err(e) => self.note_error(&dst, &e),
+            Err(e) => {
+                self.approved = None;
+                self.note_error(&dst, &e)
+            }
         }
+        self.approved = None;
     }
 
     // ── delete ─────────────────────────────────────────────────────────────────────
@@ -1169,6 +1206,110 @@ mod tests {
         assert_eq!(s.done, 1);
         assert_eq!(fs::read(dst.join("m2.txt")).unwrap(), b"ours");
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A directory on another file system than the temporary directory, for moves
+    /// across devices: tmpfs at /dev/shm on Linux. None where there is no such place.
+    fn other_device(tag: &str) -> Option<PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let shm = Path::new("/dev/shm");
+            let tmp = fs::metadata(std::env::temp_dir()).ok()?;
+            let other = fs::metadata(shm).ok()?;
+            if other.dev() != tmp.dev() {
+                let d = shm.join(format!("xdevcmd-xdev-{tag}-{}", std::process::id()));
+                let _ = fs::remove_dir_all(&d);
+                fs::create_dir_all(&d).ok()?;
+                return Some(d);
+            }
+        }
+        None
+    }
+
+    /// Run `req`, answering each question with `answer(question)`; the summary and
+    /// the questions asked.
+    fn run_answering(req: Request, answer: impl Fn(&Question) -> Answer) -> (Summary, Vec<String>) {
+        let h = start(req);
+        let mut asked = Vec::new();
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)) {
+                Ok(Event::Ask(q)) => {
+                    asked.push(format!("{q:?}"));
+                    h.answer(answer(&q));
+                }
+                Ok(Event::Done(s)) => return (s, asked),
+                Ok(_) => {}
+                Err(e) => panic!("worker never finished: {e}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_move_across_devices_keeps_what_was_skipped() {
+        let Some(other) = other_device("skip") else {
+            return;
+        };
+        let root = tmp("xdev-skip");
+        let src = root.join("d");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("a"), b"A").unwrap();
+        fs::write(src.join("b"), b"only copy of b").unwrap();
+        fs::write(src.join("sub/c"), b"C").unwrap();
+        fs::create_dir_all(other.join("d")).unwrap();
+        fs::write(other.join("d/b"), b"theirs").unwrap();
+        // Merge into the existing d, copy-then-delete across devices, but skip b.
+        let (s, asked) =
+            run_answering(Request::mv(vec![src.clone()], other.clone()), |q| match q {
+                Question::Conflict { path, .. } if path.ends_with("b") => Answer::Skip,
+                _ => Answer::Yes,
+            });
+        assert_eq!(s.skipped, 1, "{asked:#?} {s:?}");
+        assert_eq!(
+            fs::read(src.join("b")).unwrap(),
+            b"only copy of b",
+            "b stays: it was not copied"
+        );
+        assert_eq!(fs::read(other.join("d/b")).unwrap(), b"theirs");
+        assert!(!src.join("a").exists() && fs::read(other.join("d/a")).unwrap() == b"A");
+        assert!(!src.join("sub").exists(), "a directory moved in full goes");
+        assert_eq!(fs::read(other.join("d/sub/c")).unwrap(), b"C");
+        assert!(src.is_dir(), "d stays, since b is still in it");
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_file_moved_across_devices_onto_another_is_asked_about_once() {
+        let Some(other) = other_device("once") else {
+            return;
+        };
+        let root = tmp("xdev-once");
+        fs::write(root.join("f"), b"ours").unwrap();
+        fs::write(other.join("f"), b"theirs").unwrap();
+        let (s, asked) = run_answering(Request::mv(vec![root.join("f")], other.clone()), |_| {
+            Answer::Yes
+        });
+        let conflicts = asked.iter().filter(|q| q.starts_with("Conflict")).count();
+        assert_eq!(conflicts, 1, "{asked:?}");
+        assert_eq!(s.done, 1);
+        assert_eq!(fs::read(other.join("f")).unwrap(), b"ours");
+        assert!(!root.join("f").exists());
+        // Skipped at the one question: nothing moves, nothing is lost.
+        fs::write(root.join("g"), b"ours").unwrap();
+        fs::write(other.join("g"), b"theirs").unwrap();
+        let (s, _) = run_answering(
+            Request::mv(vec![root.join("g")], other.clone()),
+            |q| match q {
+                Question::Conflict { .. } => Answer::Skip,
+                _ => Answer::Yes,
+            },
+        );
+        assert_eq!(s.skipped, 1);
+        assert_eq!(fs::read(root.join("g")).unwrap(), b"ours");
+        assert_eq!(fs::read(other.join("g")).unwrap(), b"theirs");
+        fs::remove_dir_all(&other).unwrap();
         fs::remove_dir_all(&root).unwrap();
     }
 

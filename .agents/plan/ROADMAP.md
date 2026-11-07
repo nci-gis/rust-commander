@@ -14,7 +14,7 @@ users want Enter to open files.
 
 ## Direction
 
-- **rcmd's edge is a combination, not a feature**: MIT, the Total Commander model,
+- **xdevcmd's edge (rcmd until 2026-11-07) is a combination, not a feature**: MIT, the Total Commander model,
   native Windows, one static binary to drop on a server, no network, nothing destructive
   done silently. Nothing below thins it.
 - **Make it pleasant before making it bigger.** macOS is a third of the platforms and
@@ -49,7 +49,8 @@ Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-
    it, `feat/polish` (the About logo sized to the window, Settings offering 3 shells and
    keeping hand-written values, the two-key group badge with only resizing repeating).
 2. **Release 0.2.0** when the owner says so (below).
-3. **Item 8, one name**, then the packages; then **item 10**, the launch.
+3. **Item 8**: the name is decided, **xdevcmd** (owner, 2026-11-07), and done in
+   [Round 011](cycles/Round_011.md) before 0.2.0; then the packages; then **item 10**, the launch.
 4. Then items 11–13, each numbered when started.
 
 Carried from closed rounds, small enough for any later round: a unit test feeding a
@@ -71,7 +72,7 @@ Terminal.app — and the flow in `docs/development.md` is ready when asked.
   directory per run, user-only; a marker refreshed while running; removed on exit; at
   start, runs whose marker is over an hour old are removed (only marked directories).
 
-Waiting on a person, at any point: the one name (item 8); the promotions proposed in
+Waiting on a person, at any point: the promotions proposed in
 Rounds 001 and 003–009; the read-only finding in
 `.agents/memory/2026-11-07-read-only-writes-a-temp-copy.md`.
 
@@ -88,7 +89,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | Complete (2026-11-07) |
 | 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
-| 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | — | needs the name decision |
+| 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011; packages next |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Review |
 | 10 | Launch: Show HN with a GIF | S | — | after 1–8 |
@@ -118,7 +119,7 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
   keymap; the list of keys, editing them later), **Panels and layout** (how many file
   panes, the terminal panel). Security shows the mode but is not editable from inside,
   or a restricted session could lift its own restriction. Writes `config.toml` keeping the user's comments and order. Refused in
-  read-only and restricted modes, where rcmd writes nothing.
+  read-only and restricted modes, where xdevcmd writes nothing.
 - **7 Logo.** Quick view already draws PNG and JPEG with half blocks, two pixels a cell,
   in any terminal: the icon can be an embedded PNG drawn the same way. At 256 colours
   it is quantised like everything else.
@@ -129,7 +130,7 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
 ## Decisions
 
 The owner accepted every recommendation below on 2026-11-06 ("mình đồng ý theo đề xuất
-của bro"). What the one name is remains open.
+của bro"). The one name was chosen on 2026-11-07: **xdevcmd**.
 
 | Decision | Options | Decided |
 |---|---|---|
@@ -137,7 +138,7 @@ của bro"). What the one name is remains open.
 | Default theme | `dark` (today) / `ansi` | keep `dark`; revisit after the launch |
 | Enter on a file | `view` / `open` (Total Commander) | `open` by default, falling back to view where nothing can be opened; `view` by setting |
 | Where theme files live | config directory / also beside the binary (portable, as Total Commander's ini) | config directory; also read `themes/` beside the binary for portable installs |
-| Name | keep `rcmd` + `rust-commander` / one name | one name before Homebrew and the launch |
+| Name | keep `rcmd` + `rust-commander` / one name | **xdevcmd** (2026-11-07): command, package, config paths, environment variables. The repository keeps `rust-commander`. `rust-commander` was taken on crates.io by another TUI file manager and `rcmd` by a 2020 crate and a Homebrew cask; xdevcmd was free everywhere checked (crates.io, Homebrew, AUR, scoop, Debian, npm, PyPI, GitHub) |
 | Extension points in secure modes | — | off in read-only and restricted unless whitelisted |
 
 ## Not planned

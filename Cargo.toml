@@ -1,8 +1,8 @@
 [workspace]
-members = ["crates/rcmd-core", "crates/rcmd-tui"]
+members = ["crates/xdevcmd-core", "crates/xdevcmd-tui"]
 resolver = "2"
 
-# The one place rcmd says what it is. Help > About, --help and --version read these at
+# The one place xdevcmd says what it is. Help > About, --help and --version read these at
 # compile time, and scripts/sync-about.sh copies them to the GitHub repository's About
 # box, so a change here is a change everywhere.
 [workspace.package]

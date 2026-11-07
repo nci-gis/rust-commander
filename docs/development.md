@@ -3,9 +3,9 @@
 ## Build and run
 
 ```bash
-cargo build --release                 # target/release/rcmd
-cargo run -p rcmd-tui -- /etc /var    # start with two directories
-cargo install --path crates/rcmd-tui --locked   # install your build as `rcmd`
+cargo build --release                 # target/release/xdevcmd
+cargo run -p xdevcmd-tui -- /etc /var    # start with two directories
+cargo install --path crates/xdevcmd-tui --locked   # install your build as `xdevcmd`
 ```
 
 Needs Rust 1.88 or newer (`rustup`). Nothing needs root.
@@ -26,7 +26,7 @@ platforms from Linux. CI runs the full tests on Linux, Windows and macOS.
 ## See the screen without a terminal
 
 ```bash
-./target/release/rcmd --screenshot=118x34 --keys=F9 /etc /usr
+./target/release/xdevcmd --screenshot=118x34 --keys=F9 /etc /usr
 ```
 
 Draws one frame as text, after typing the keys. Most UI tests work this way.
@@ -34,15 +34,15 @@ Draws one frame as text, after typing the keys. Most UI tests work this way.
 ## Memory over time
 
 ```bash
-RCMD_SOAK_SECS=600 cargo test --release --test pty -- --ignored soak --nocapture
+XDEVCMD_SOAK_SECS=600 cargo test --release --test pty -- --ignored soak --nocapture
 ```
 
-Uses rcmd heavily for ten minutes and fails if memory keeps growing. Linux only.
+Uses xdevcmd heavily for ten minutes and fails if memory keeps growing. Linux only.
 Samples go to `target/tmp/soak-rss.csv`.
 
 ## Docs that are generated
 
-- `docs/keys.md`: `rcmd --print-keys > docs/keys.md`. A test fails if it is out of date.
+- `docs/keys.md`: `xdevcmd --print-keys > docs/keys.md`. A test fails if it is out of date.
 - The tagline in `README.md` is the `description` in `Cargo.toml`. A test checks it.
 - The GitHub About box: `scripts/sync-about.sh --apply`.
 
@@ -51,7 +51,7 @@ Samples go to `target/tmp/soak-rss.csv`.
 The SVGs in `assets/` are the source: `icon.svg`, `icon-16.svg` (the same picture
 redrawn on whole pixels, because a scaled-down one blurs at 16 px), and the README's
 `logo-light.svg` / `logo-dark.svg`, whose wordmark is drawn as strokes so it looks the
-same without any font. After changing an icon SVG, rebuild `assets/rcmd.ico` and
+same without any font. After changing an icon SVG, rebuild `assets/xdevcmd.ico` and
 `assets/icon-24.png` … `icon-64.png` (the logos About draws, built into the binary):
 
 ```bash
@@ -59,9 +59,9 @@ cargo install --locked resvg   # once
 scripts/icons.sh
 ```
 
-On Windows, `build.rs` puts the icon and the version details into `rcmd.exe`. It needs
+On Windows, `build.rs` puts the icon and the version details into `xdevcmd.exe`. It needs
 the Windows SDK's `rc.exe` (or MinGW's `windres`); without one it warns and builds
-without the icon, unless `RCMD_REQUIRE_ICON=1`, which CI and releases set.
+without the icon, unless `XDEVCMD_REQUIRE_ICON=1`, which CI and releases set.
 
 ## Branches
 

@@ -1,4 +1,4 @@
-# copilot-instructions.md — rcmd
+# copilot-instructions.md — xdevcmd
 
 <!-- a2scaffold:start -->
 

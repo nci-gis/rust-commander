@@ -1,6 +1,6 @@
 # Gotchas that cost time
 
-> **Read this when**: something in ratatui, crossterm, vt100, the pty tests or `--screenshot` behaves unexpectedly, or a terminal (Terminal.app, SSH) does something that looks like an rcmd bug — it may have happened before.
+> **Read this when**: something in ratatui, crossterm, vt100, the pty tests or `--screenshot` behaves unexpectedly, or a terminal (Terminal.app, SSH) does something that looks like an xdevcmd bug — it may have happened before.
 
 ---
 
@@ -18,7 +18,7 @@
 - **`--screenshot` ticks once before the first frame.** Without it, a frame with no
   `--keys` never saw anything a thread delivered (git letters, sizes), because only
   input drove `tick()`; the git column looked broken when it was not.
-- **`RCMD_SCREENSHOT_WAIT_MS`** (default 900) is how long `--screenshot` waits for a shell
+- **`XDEVCMD_SCREENSHOT_WAIT_MS`** (default 900) is how long `--screenshot` waits for a shell
   prompt. The sweep sets it to 0; anything that asserts on shell output must not.
 
 - **The tab bar shares a row with the resize strip.** The strip that resizes the
@@ -71,18 +71,18 @@
   and never answers, so on Windows the shell pane drew nothing and took no input,
   whatever the shell. The output thread in `pane/term.rs` now answers every cursor
   query from the vt100 screen (`cursor_queries`, which also catches a query split
-  across two reads). Found by the first person to run rcmd on Windows; CI could not, as
+  across two reads). Found by the first person to run xdevcmd on Windows; CI could not, as
   the pty tests are Unix-only. `the_terminal_answers_where_the_cursor_is` fails without
   the answer.
 - **`std::fs::canonicalize` on Windows returns `\\?\D:\…`.** It showed in pane titles
   after going up, and would have reached Alt+C (`cmd.exe` cannot `cd` into it), copy
-  path, cd-on-exit, bookmarks and the session. Use `rcmd_core::paths::canonical`
+  path, cd-on-exit, bookmarks and the session. Use `xdevcmd_core::paths::canonical`
   everywhere a canonical path reaches the user or the policy: it drops the prefix when
   the plain form means the same file, and keeps both sides of the root check in one
   form. Found on the first Windows run.
 - **An identical frame is not a silent one.** ratatui's crossterm backend writes a
   colour reset after every draw, empty diff or not, and the terminal hides the cursor
-  again every frame: about 600 bytes a second with rcmd idle. `quiet.rs` wraps the
+  again every frame: about 600 bytes a second with xdevcmd idle. `quiet.rs` wraps the
   backend and drops what changes nothing; call `forget()` after anything else has used
   the terminal (an editor), or a needed cursor move is skipped.
 - **A file pane scrolls back to its cursor on every frame** (`scroll_into_view` in
@@ -110,11 +110,11 @@
 - **`COLORTERM` and `TERM_PROGRAM` do not survive SSH** (not forwarded without
   `SendEnv` / `AcceptEnv`), and `COLORTERM=truecolor` is often exported in dotfiles where
   it is untrue. Neither proves anything on its own; see `platforms.md`, Colour depth.
-- **Terminal.app's I-beam pointer and its window scrollbar are not rcmd bugs.** The
+- **Terminal.app's I-beam pointer and its window scrollbar are not xdevcmd bugs.** The
   pointer is the I-beam everywhere in Terminal.app, a plain zsh included, so its shape
   says nothing about mouse reporting. Dragging the window's scrollbar up shows the first
-  screen (the shell's history, with blank rows) above rcmd's alternate screen; rcmd
+  screen (the shell's history, with blank rows) above xdevcmd's alternate screen; xdevcmd
   cannot hide it. A blue area once taken for a selection was the profile's background
   showing through default-colour cells. Each was diagnosed wrong first: ask for
-  `rcmd --show-keys` output (the terminal's variables, colour depth, every key, click and
+  `xdevcmd --show-keys` output (the terminal's variables, colour depth, every key, click and
   wheel event) before guessing.

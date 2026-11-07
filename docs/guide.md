@@ -1,7 +1,7 @@
 # Guide
 
-What rcmd can do, one topic at a time. Every key below is a default; press **F1** in
-rcmd for yours, or see [keys.md](keys.md).
+What xdevcmd can do, one topic at a time. Every key below is a default; press **F1** in
+xdevcmd for yours, or see [keys.md](keys.md).
 
 - [Panes and tabs](#panes-and-tabs)
 - [Moving around](#moving-around)
@@ -22,7 +22,7 @@ rcmd for yours, or see [keys.md](keys.md).
 - **Ctrl+T** opens a tab in a pane, **Ctrl+W** closes it, **Ctrl+PgUp/PgDn** switch,
   **Alt+1**…**Alt+9** go to tab N.
 - **Ctrl+U** swaps two panes. **Alt+=** shows this pane's directory in the other one.
-- rcmd remembers your panes, tabs and directories, and opens them again next time.
+- xdevcmd remembers your panes, tabs and directories, and opens them again next time.
   Start with `--no-restore`, or name directories on the command line, to start fresh.
 
 ## Moving around
@@ -66,12 +66,12 @@ rcmd for yours, or see [keys.md](keys.md).
   tab.
 - Where nothing can be opened on a screen — over SSH, without a desktop, in read-only
   mode — Enter views the file instead and says why. `enter = "view"` under `[files]`
-  makes Enter always view, as in rcmd 0.1.0.
+  makes Enter always view, as in xdevcmd 0.1.0.
 - **Ctrl+Z** undoes the last rename (one file or many), move, new directory or new
   file, after showing what it will do. It checks the disk first: a file renamed since,
   or a new directory with something in it now, is left alone. Copies and deletes are not
   undone (your system's trash restores what F8 sent there), and Ctrl+Z says so.
-- rcmd always asks before it deletes or overwrites anything.
+- xdevcmd always asks before it deletes or overwrites anything.
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
 
@@ -94,7 +94,7 @@ Then **Find** / **Replace with** changes text in the whole name, and **Case** ma
 lower, UPPER or Title Case. The counter follows the order the pane shows.
 
 **F4** opens the names in your editor instead, as the pattern has them so far. Save and
-close the editor; rcmd asks before it renames. The editor must wait until you close
+close the editor; xdevcmd asks before it renames. The editor must wait until you close
 it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain `code`.
 
 ## Find, filter, compare
@@ -112,7 +112,7 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **Enter** on a `.zip`, `.tar` or `.tar.gz` opens it like a folder.
 - **F3** reads a file inside. **F5** extracts what you marked to the other pane.
 - **Alt+F5** packs the selection. **Alt+F9** unpacks everything.
-- rcmd does not change an archive in place.
+- xdevcmd does not change an archive in place.
 
 ## The terminal
 
@@ -120,7 +120,7 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **Alt+N** opens a new terminal tab. **Alt+S** / **Alt+D** split it.
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
-- Want your shell to follow you when you quit rcmd? See [shell.md](shell.md).
+- Want your shell to follow you when you quit xdevcmd? See [shell.md](shell.md).
 
 ## Mouse
 
@@ -133,10 +133,10 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 
 ## Keys a terminal does not send
 
-Some terminals keep keys for themselves, or drop Ctrl or Shift on the way. rcmd gives
+Some terminals keep keys for themselves, or drop Ctrl or Shift on the way. xdevcmd gives
 those actions a second key that arrives everywhere: **Alt+R, then arrows** resizes
 panes (as often as you like; Enter when done), **Alt+J** opens the directory history,
-**Alt+1**…**Alt+9** go to a tab. `rcmd --show-keys` shows what your terminal sends, and
+**Alt+1**…**Alt+9** go to a tab. `xdevcmd --show-keys` shows what your terminal sends, and
 [troubleshooting.md](troubleshooting.md) lists what is known for each system.
 
 ## Menus and help
@@ -148,5 +148,5 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
   `config.toml`; your comments stay. Rows marked *next start* apply after a restart.
 - **View → Theme…** tries a theme at once.
 - **F1** lists every key and setting.
-- **Shift+F1** shows what rcmd is using: memory, CPU, and whether memory keeps growing.
+- **Shift+F1** shows what xdevcmd is using: memory, CPU, and whether memory keeps growing.
 - **Shift+F9** runs your own commands. See [config.md](config.md#your-own-commands).

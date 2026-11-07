@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-about.sh - copy rcmd's description and keywords from Cargo.toml to the GitHub
+# sync-about.sh - copy xdevcmd's description and keywords from Cargo.toml to the GitHub
 # repository's About box (description, topics). Cargo.toml is the one source; this only
 # copies it. Needs `gh` logged in with admin rights on the repository.
 #
@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 meta=$(cargo metadata --no-deps --format-version 1)
-field() { python3 -c 'import json,sys; p=[p for p in json.load(sys.stdin)["packages"] if p["name"]=="rcmd-tui"][0]; v=p[sys.argv[1]]; print(" ".join(v) if isinstance(v,list) else v)' "$1" <<<"$meta"; }
+field() { python3 -c 'import json,sys; p=[p for p in json.load(sys.stdin)["packages"] if p["name"]=="xdevcmd-tui"][0]; v=p[sys.argv[1]]; print(" ".join(v) if isinstance(v,list) else v)' "$1" <<<"$meta"; }
 desc=$(field description)
 repo_url=$(field repository)
 keywords=$(field keywords)

@@ -44,9 +44,9 @@ reads each number after `38;2` / `48;2` as an attribute of its own, so the theme
 (28, 42, 58) cursor row came out as a green background (42) and (101, 119, 139) dim text
 as a bright red one (101). ratatui and crossterm never check; the app has to.
 
-`main.rs` decides the depth once at start-up: `RCMD_COLORS` (a bad value stops start-up,
+`main.rs` decides the depth once at start-up: `XDEVCMD_COLORS` (a bad value stops start-up,
 as a bad flag does), then `[theme] colors`, then for `auto` (the default)
-`rcmd_core::color::detect`, which reads environment variables only. 24-bit **only on
+`xdevcmd_core::color::detect`, which reads environment variables only. 24-bit **only on
 positive evidence**, in this order:
 
 1. `TERM_PROGRAM=Apple_Terminal`: 24-bit from `TERM_PROGRAM_VERSION` 464
@@ -62,8 +62,8 @@ positive evidence**, in this order:
 Why not "downgrade only where known broken": `COLORTERM` and `TERM_PROGRAM` do not cross
 SSH, so a server reached from an old Terminal.app would still be sent 24-bit colour. The
 cost is 256 colours over SSH on a capable terminal unless `COLORTERM` is forwarded or
-`RCMD_COLORS` is set. No terminal query: it needs an answer, and a cursor query over a
-slow link has already killed rcmd once (see gotchas). Below 24-bit, `quiet.rs` fits every
+`XDEVCMD_COLORS` is set. No terminal query: it needs an answer, and a cursor query over a
+slow link has already killed xdevcmd once (see gotchas). Below 24-bit, `quiet.rs` fits every
 cell — theme, `LS_COLORS`, pictures, the terminal panel — in one place.
 
 Confirmed on a Mac in Terminal.app (no more green or red). **Unconfirmed**: the 464
@@ -72,7 +72,7 @@ the suspect.
 
 ## macOS Terminal.app keys
 
-Measured with `rcmd --show-keys`, "Use Option as Meta key" on (Settings → Profiles →
+Measured with `xdevcmd --show-keys`, "Use Option as Meta key" on (Settings → Profiles →
 Keyboard). Without it Option types characters (`ç`, `ƒ`) and no Alt key arrives; on
 macOS such a character with no binding, in a file pane, shows a hint once per session
 (`keyfix.rs`).
@@ -86,7 +86,7 @@ macOS such a character with no binding, in a file pane, shows a hint once per se
 | ⇧← / ⇧→ | themselves |
 | ⇧↑ / ⇧↓; F-keys with and without Fn | not itemised |
 
-F-keys are media keys unless Fn is held or the system setting is on, and then rcmd sees
+F-keys are media keys unless Fn is held or the system setting is on, and then xdevcmd sees
 nothing, so that advice lives in F1 and `docs/troubleshooting.md`, not in a hint. The
 mouse works with View → Allow Mouse Reporting on.
 
@@ -98,17 +98,17 @@ drops gets a second binding, not a prefix.
 
 ## Keys each default terminal keeps
 
-Measured with `rcmd --show-keys` in Windows Terminal, a Linux desktop terminal (Ubuntu;
+Measured with `xdevcmd --show-keys` in Windows Terminal, a Linux desktop terminal (Ubuntu;
 which one not noted) and Terminal.app (above):
 
-- **Windows and Linux deliver every key rcmd binds** — Alt+arrows, Alt+Shift+arrows,
+- **Windows and Linux deliver every key xdevcmd binds** — Alt+arrows, Alt+Shift+arrows,
   F1–F10, F12, Shift+F1–F10, Alt+F5 / F7 / F9, Ctrl+Space, Ctrl+\ (as Ctrl+4 on Linux,
   which `normalise` maps back), Alt+digits — **except Ctrl+PageUp / PageDown**, which
   arrive as plain PageUp / PageDown on a laptop, where PageUp is Fn+↑. Hence Alt+1…9
   for tabs.
 - The belief that Windows Terminal keeps Alt+arrows and Alt+Shift+arrows for its own
   panes was **wrong**: they arrive.
-- **F11** is the terminal's full screen everywhere; rcmd binds nothing to it.
+- **F11** is the terminal's full screen everywhere; xdevcmd binds nothing to it.
 - **Ctrl+Tab** is taken on both (the terminal or desktop on Linux; on Windows it switches
   away), so it is not a tab key.
 - **macOS Terminal.app**: only history (Alt+↓) and resize (Alt+Shift+arrows) cannot be

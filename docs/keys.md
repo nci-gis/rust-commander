@@ -1,20 +1,20 @@
 # Keys
 
-These are the defaults. Press **F1** in rcmd to see your own, after any changes in
-`[keys]` in the config. This file is generated: `rcmd --print-keys > docs/keys.md`.
+These are the defaults. Press **F1** in xdevcmd to see your own, after any changes in
+`[keys]` in the config. This file is generated: `xdevcmd --print-keys > docs/keys.md`.
 
 ## General
 
 | Keys | Does |
 |---|---|
-| `Ctrl+q` `F10` `q` | Quit rcmd |
+| `Ctrl+q` `F10` `q` | Quit xdevcmd |
 | `F1` | This screen: every key and setting |
 | `Ctrl+r` | Re-read the active pane |
 | `Ctrl+h` | Show or hide hidden files |
 | `Q` | Quit, leaving the shell where it was (with --cwd-file) |
 | `Shift+F9` | Your commands from [[menu]], run in the terminal |
 | `F9` | The menu bar: File, View, Help |
-| `Shift+F1` | What rcmd is using: memory and its trend, CPU, threads, draw time |
+| `Shift+F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
 
 ## Navigate
 

@@ -8,7 +8,7 @@
 
 ## Load first
 
-1. **This file**, then **[context/project.md](context/project.md)** — what rcmd is,
+1. **This file**, then **[context/project.md](context/project.md)** — what xdevcmd is,
    its hard rules, layout and conventions. Every task here needs it.
 2. The files in `context/` that your task touches. Read a `context/` file when
    the work is in its subject, not because it exists.

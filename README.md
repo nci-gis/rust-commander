@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img alt="rcmd" src="assets/logo-light.svg" width="330">
+    <img alt="xdevcmd" src="assets/logo-light.svg" width="498">
   </picture>
 </p>
 
@@ -44,10 +44,10 @@ F5 copy, F6 move, F8 delete. Runs on Linux, macOS and Windows.
 ## Install
 
 ```bash
-cargo install --git https://github.com/nci-gis/rust-commander rcmd-tui --locked
+cargo install --git https://github.com/nci-gis/rust-commander xdevcmd-tui --locked
 ```
 
-Needs Rust 1.88 or newer. This installs the `rcmd` command.
+Needs Rust 1.88 or newer. This installs the `xdevcmd` command.
 
 Or download a ready-made build for Linux, macOS or Windows from
 [Releases](https://github.com/nci-gis/rust-commander/releases). They are not signed, so
@@ -57,8 +57,8 @@ macOS and Windows warn the first time: see
 ## Quick start
 
 ```bash
-rcmd                  # open in the current directory
-rcmd ~/src /tmp       # or with two directories
+xdevcmd                  # open in the current directory
+xdevcmd ~/src /tmp       # or with two directories
 ```
 
 | Key | Does |
@@ -90,18 +90,18 @@ The [guide](docs/guide.md) explains each one.
 ## Configure
 
 ```bash
-rcmd --print-config > ~/.config/rcmd/config.toml   # all settings, with defaults
+xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # all settings, with defaults
 ```
 
 Keep only the lines you change. See [docs/config.md](docs/config.md).
 
 ## Docs
 
-- [Guide](docs/guide.md): what rcmd does, by topic
+- [Guide](docs/guide.md): what xdevcmd does, by topic
 - [Keys](docs/keys.md): every key
 - [Config](docs/config.md): settings, bookmarks, your own commands
 - [Shell](docs/shell.md): stay in the directory you were in when you quit
-- [Security](docs/security.md): what rcmd protects against, and safe modes
+- [Security](docs/security.md): what xdevcmd protects against, and safe modes
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system, and fixes
 - [Development](docs/development.md): build, test, contribute
 
@@ -109,5 +109,5 @@ Keep only the lines you change. See [docs/config.md](docs/config.md).
 
 [MIT](LICENSE). Developed by XDevTeam.
 
-rcmd is written from scratch: a two-pane file manager with a terminal-style look and
+xdevcmd is written from scratch: a two-pane file manager with a terminal-style look and
 feel.

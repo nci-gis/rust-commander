@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rcmd. The format follows
+All notable changes to xdevcmd. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
@@ -9,6 +9,13 @@ that heading and starts a new, empty one here. -->
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+### Changed
+- **rcmd is now xdevcmd**, everywhere: the command, the release files, the config and
+  state directories (`~/.config/xdevcmd/`, `~/.local/state/xdevcmd/`;
+  `%APPDATA%\xdevcmd\` and `%LOCALAPPDATA%\xdevcmd\` on Windows) and the environment
+  variables (`XDEVCMD_CONFIG`, `XDEVCMD_STATE`, `XDEVCMD_COLORS`). Nothing is read from
+  the old names. The repository stays `nci-gis/rust-commander`.
 
 ### Added
 - Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
@@ -27,7 +34,7 @@ that heading and starts a new, empty one here. -->
   Not in read-only or restricted mode.
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
   `[theme] name`, or a file of your own in `themes/` that starts from one of them.
-  **View → Theme…** switches while rcmd runs.
+  **View → Theme…** switches while xdevcmd runs.
 - **Ctrl+Z** undoes the last rename, rename-many, move, new directory or new file,
   after asking, and only while the disk still matches: nothing is overwritten or lost.
   After a copy or a delete it says those cannot be undone.
@@ -40,12 +47,12 @@ that heading and starts a new, empty one here. -->
   to do; F1 links to it.
 - Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends
   Option+← and Option+→ as those, even with Option as Meta.
-- `rcmd --show-keys` prints each key, click and scroll as rcmd receives it, and what
+- `xdevcmd --show-keys` prints each key, click and scroll as xdevcmd receives it, and what
   it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
 ### Changed
-- About shows rcmd's logo, drawn in the terminal, at the largest size the window has room for (24 to 64 pixels square).
+- About shows xdevcmd's logo, drawn in the terminal, at the largest size the window has room for (24 to 64 pixels square).
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
   extension, else the system's program; programs still ask "Run it?" first. Over SSH,
   without a desktop or in read-only mode it views the file and says why.
@@ -53,24 +60,24 @@ that heading and starts a new, empty one here. -->
 - About: the credit sits at the bottom right, beside the close button.
 - Two actions given the same key in `[keys]` are now an error that names both; before,
   the one written later silently took it.
-- The config documentation lists every file rcmd keeps, and where.
+- The config documentation lists every file xdevcmd keeps, and where.
 
 ### Fixed
-- `rcmd --screenshot … | head`, and any long output cut short by its reader, ended in
+- `xdevcmd --screenshot … | head`, and any long output cut short by its reader, ended in
   a panic; it now ends quietly, as `cat` does.
-- rcmd keeps its temporary files in one directory per run, removes it on exit, and at
+- xdevcmd keeps its temporary files in one directory per run, removes it on exit, and at
   start removes what a crashed or killed run left behind.
 - Theme files are looked for beside the config in use, including one given with
   `--config`.
 - `o` over SSH into a Mac or a Windows machine opened the file on that machine's own
   screen; now it says there is no screen here, as it did on Linux.
 - A file viewed from inside an archive is no longer left in the temporary directory
-  when rcmd ends with the viewer still open.
+  when xdevcmd ends with the viewer still open.
 - Colours on terminals without 24-bit colour. macOS Terminal.app before macOS 26 showed
   green and red backgrounds and hard-to-read text, because it reads 24-bit colour codes
-  as other attributes. rcmd now sends 24-bit colour only where the terminal is known to
+  as other attributes. xdevcmd now sends 24-bit colour only where the terminal is known to
   take it and the 256-colour palette everywhere else; the Linux console gets a
-  16-colour theme. `[theme] colors` (`auto`, `truecolor`, `256`, `16`) or `RCMD_COLORS`
+  16-colour theme. `[theme] colors` (`auto`, `truecolor`, `256`, `16`) or `XDEVCMD_COLORS`
   sets it by hand.
 
 ## [0.1.0] - 2026-11-06

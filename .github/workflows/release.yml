@@ -1,6 +1,6 @@
 name: release
 
-# A tag v* on main builds rcmd for every platform and opens a DRAFT release with the
+# A tag v* on main builds xdevcmd for every platform and opens a DRAFT release with the
 # archives, SHA256SUMS and the third-party licences; a person reads it and presses
 # Publish. Nothing else runs this workflow. A tag cannot be filtered by branch here, so
 # the first job refuses a tag that is not on main, and nothing is built after it.
@@ -30,7 +30,7 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           bad=0
           cargo_v=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "rcmd-tui") | .version')
+            | jq -r '.packages[] | select(.name == "xdevcmd-tui") | .version')
           if [ "$cargo_v" != "$v" ]; then
             echo "::error::tag $GITHUB_REF_NAME, but Cargo.toml says $cargo_v"; bad=1
           fi
@@ -76,32 +76,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --locked -p rcmd-tui --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p xdevcmd-tui --target ${{ matrix.target }}
         env:
-          # rcmd.exe without its icon is a broken release, not a warning.
-          RCMD_REQUIRE_ICON: ${{ contains(matrix.target, 'windows') && '1' || '' }}
+          # xdevcmd.exe without its icon is a broken release, not a warning.
+          XDEVCMD_REQUIRE_ICON: ${{ contains(matrix.target, 'windows') && '1' || '' }}
       - uses: actions/download-artifact@v4
         with:
           name: licences
       - name: package
         shell: bash
         run: |
-          name="rcmd-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="xdevcmd-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$name"
           cp LICENSE README.md THIRD-PARTY.md "$name/"
           if [[ "${{ matrix.target }}" == *windows* ]]; then
-            cp "target/${{ matrix.target }}/release/rcmd.exe" "$name/"
+            cp "target/${{ matrix.target }}/release/xdevcmd.exe" "$name/"
             7z a -tzip "$name.zip" "$name" > /dev/null
           else
-            cp "target/${{ matrix.target }}/release/rcmd" "$name/"
+            cp "target/${{ matrix.target }}/release/xdevcmd" "$name/"
             tar czf "$name.tar.gz" "$name"
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: rcmd-${{ matrix.target }}
+          name: xdevcmd-${{ matrix.target }}
           path: |
-            rcmd-*.tar.gz
-            rcmd-*.zip
+            xdevcmd-*.tar.gz
+            xdevcmd-*.zip
           if-no-files-found: error
 
   release:
@@ -114,11 +114,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: rcmd-*
+          pattern: xdevcmd-*
           merge-multiple: true
           path: dist
       - name: checksums
-        run: cd dist && sha256sum rcmd-* > SHA256SUMS && cat SHA256SUMS
+        run: cd dist && sha256sum xdevcmd-* > SHA256SUMS && cat SHA256SUMS
       # Notes: this version's section of CHANGELOG.md.
       - name: notes
         run: |
@@ -131,4 +131,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --draft \
-            --title "rcmd ${GITHUB_REF_NAME}" --notes-file notes.md
+            --title "xdevcmd ${GITHUB_REF_NAME}" --notes-file notes.md

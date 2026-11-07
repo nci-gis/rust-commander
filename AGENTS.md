@@ -1,4 +1,4 @@
-# AGENTS.md — rcmd
+# AGENTS.md — xdevcmd
 
 <!-- a2scaffold:start -->
 

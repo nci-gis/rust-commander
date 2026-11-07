@@ -155,6 +155,11 @@ packaged version carries them.
 - [x] After the review's fixes: fmt, clippy (Linux, and the macOS and Windows targets
       from Linux), `cargo test --workspace`: core 146, tui 131 + 147 render + 33 pty,
       all pass. Idle CPU with the watcher: 0.4 %.
+- [x] CI after the review's fixes (run 42402890739): Linux x86_64 and ARM64, macOS,
+      Windows, cross-check, cargo-deny all pass, the watcher's pty test included. Two
+      runs before it failed on the tests only: formatting, a pack the screenshot ended
+      too early on macOS (screenshots now wait for a working job), and the trash undo
+      test using Windows' real Recycle Bin (now Linux only, where the trash is sandboxed).
 - [ ] Not verified: undo from the macOS Trash and the Windows Recycle Bin on real
       machines; the watcher on macOS and Windows (CI runs the pty test there); the
       logo on a real Mac or Windows screen (only Linux, and the

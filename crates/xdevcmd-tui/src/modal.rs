@@ -76,6 +76,9 @@ pub struct Confirm {
     /// says "counting…" until they arrive. The dialog does not wait for the count:
     /// Enter starts the job, Esc closes it, and either stops the count.
     pub counting: Option<(ops::Count, usize)>,
+    /// What cannot be undone (a permanent delete): Enter does not confirm it, only Y
+    /// or a click on the button, and the button says what it does.
+    pub permanent: bool,
 }
 
 impl Confirm {
@@ -527,7 +530,12 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
         put(frame, inner, i as u16, line, Style::new().fg(th.fg));
     }
     let y = inner.y + inner.height.saturating_sub(1);
-    let mut items = vec![("Enter", "go", accent), ("Esc", "cancel", th.accent)];
+    let first = if c.permanent {
+        ("Y", "delete permanently", accent)
+    } else {
+        ("Enter", "go", accent)
+    };
+    let mut items = vec![first, ("Esc", "cancel", th.accent)];
     if c.choices.len() > 1 {
         items.push(("Tab", "other pane", th.accent));
     }

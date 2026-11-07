@@ -2690,6 +2690,7 @@ impl App {
             choice: 0,
             source_dir: Some(self.focused_cwd()),
             counting: Some((ops::count(sources), 3)),
+            permanent: false,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
@@ -2705,6 +2706,20 @@ impl App {
         let mut body = vec![Self::describe(&targets), String::new(), COUNTING.into()];
         let counting = Some((ops::count(targets.clone()), 2));
         if permanent {
+            // What goes, by name: the first few, so a wrong selection shows.
+            if targets.len() > 1 {
+                body.push(String::new());
+                for t in targets.iter().take(3) {
+                    let name = t.file_name().map(|n| n.to_string_lossy().into_owned());
+                    body.push(format!(
+                        "  {}",
+                        name.unwrap_or_else(|| t.display().to_string())
+                    ));
+                }
+                if targets.len() > 3 {
+                    body.push(format!("  \u{2026} and {} more", targets.len() - 3));
+                }
+            }
             body.push(String::new());
             body.push("Deleted permanently. This cannot be undone.".into());
         } else {
@@ -2724,6 +2739,7 @@ impl App {
             choice: 0,
             source_dir: None,
             counting,
+            permanent,
         }));
     }
 
@@ -3159,6 +3175,11 @@ impl App {
             }
             Some(Modal::Confirm(c)) => match k.code {
                 KeyCode::Tab => c.next_destination(),
+                // What cannot be undone is never one Enter away: Enter is what a hand
+                // presses out of habit. Y, or a click on the button, says it.
+                KeyCode::Enter if c.permanent => {
+                    self.status = "press Y to delete permanently, Esc to cancel".into();
+                }
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => act = ModalAct::Start,
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => act = ModalAct::Close,
                 _ => {}
@@ -4490,6 +4511,7 @@ impl App {
             choice: 0,
             source_dir: None,
             counting,
+            permanent: false,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);

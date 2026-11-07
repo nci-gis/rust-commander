@@ -246,6 +246,24 @@ fn f8_goes_to_the_trash_and_shift_f8_says_it_cannot_be_undone() {
 }
 
 #[test]
+fn enter_never_confirms_a_permanent_delete() {
+    let (a, b) = fixture();
+    // Enter, out of habit: nothing goes, and the dialog says what does.
+    let s = shot_keys("110x24", "Down,Insert,S-F8,Enter", &a, &b);
+    assert!(a.join("victim.txt").exists(), "Enter deleted it\n{s}");
+    assert!(
+        s.contains("[Y] delete permanently") || s.contains("Y delete permanently"),
+        "{s}"
+    );
+    assert!(s.contains("press Y to delete permanently"), "{s}");
+    // Y says it.
+    shot_keys("110x24", "Down,Insert,S-F8,y", &a, &b);
+    assert!(!a.join("victim.txt").exists(), "Y deletes it");
+    // To the trash stays one Enter away: it can be got back.
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_confirmation_counts_one_file_in_the_singular() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Down,Insert,F8", &a, &b);

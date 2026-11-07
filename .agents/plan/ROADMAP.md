@@ -41,7 +41,7 @@ were done first:
 
 ## Next, in this order
 
-**0.2.0 is out** (published by the owner on 2026-11-07). Rounds 001 and 003–013 are
+**0.2.0 is out** (published by the owner on 2026-11-07), **and 0.2.1** (2026-11-08). Rounds 001 and 003–013 are
 Complete (013 closed by the owner on 2026-11-08); 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
 những việc kế tiếp"), in this order:
 
@@ -91,7 +91,8 @@ những việc kế tiếp"), in this order:
    and keeps the half blocks. To settle in the round: the picture redrawn only when it
    changes (these protocols do not fit ratatui's cell diffing), nothing drawn under an
    open dialog or over the terminal panel, resizing, detection over SSH and inside tmux,
-   and a setting to turn it off. Starts when Round 013 is Complete.
+   and a setting to turn it off. Opened as [Round 014](cycles/Round_014.md) on
+   `feat/image-preview` (2026-11-08), after 0.2.1 was published.
 3. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
    - ~~Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds~~: done
@@ -182,7 +183,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 17 | Directory watching with the system's events, polling as fallback | M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 18 | Copy/move "replace only if older" (robocopy) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 19 | Fuzzy Ctrl+F filter, best first | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
-| 20 | Sharp image previews: Kitty, iTerm2, sixel via `ratatui-image`, half blocks as fallback | M | — | next round, after 013 (owner, 2026-11-08); Terminal.app has none |
+| 20 | Sharp image previews: Kitty, iTerm2, sixel, half blocks as fallback | M | [014](cycles/Round_014.md) | Planning: the owner picks how (a crate or our own) |
 | 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
 | 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |

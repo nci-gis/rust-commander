@@ -3128,7 +3128,8 @@ fn synchronising_is_off_in_read_only_mode() {
 // ── group C: background jobs, looks, pictures ───────────────────────────────────────
 
 /// A PNG written byte by byte (zlib stored blocks), so the test needs no encoder.
-fn write_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
+/// A PNG of `w` x `h` whose rows take the colours in turn.
+fn write_png(path: &std::path::Path, w: u32, h: u32, rows: &[[u8; 3]]) {
     fn crc(data: &[u8]) -> u32 {
         let mut c = !0u32;
         for &b in data {
@@ -3151,10 +3152,12 @@ fn write_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
         out.extend_from_slice(&crc(&c).to_be_bytes());
     }
     // Each row: filter byte 0, then the pixels.
-    let row: Vec<u8> = std::iter::once(0u8)
-        .chain(std::iter::repeat_n(rgb, w as usize).flatten())
+    let raw: Vec<u8> = (0..h as usize)
+        .flat_map(|y| {
+            std::iter::once(0u8)
+                .chain(std::iter::repeat_n(rows[y % rows.len()], w as usize).flatten())
+        })
         .collect();
-    let raw: Vec<u8> = std::iter::repeat_n(row, h as usize).flatten().collect();
     let mut z = vec![0x78, 0x01, 0x01];
     z.extend_from_slice(&(raw.len() as u16).to_le_bytes());
     z.extend_from_slice(&(!(raw.len() as u16)).to_le_bytes());
@@ -3179,10 +3182,22 @@ fn write_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
 #[test]
 fn quick_view_draws_a_picture_in_half_blocks() {
     let (a, b) = files(&[]);
-    write_png(&a.join("red.png"), 8, 4, [255, 0, 0]);
+    // Red and blue rows in turn: every cell has two colours, so a half block.
+    write_png(&a.join("stripes.png"), 8, 4, &[[255, 0, 0], [0, 0, 255]]);
     let s = shot_keys(SIZE, "Down,Alt+q", &a, &b);
     assert!(s.contains("image 8\u{d7}4"), "{s}");
     assert!(s.contains('\u{2580}'), "drawn as half blocks\n{s}");
+    // All red: each cell is one colour, painted as background with no character, as
+    // About's logo is, so a terminal that draws half blocks from its font cannot
+    // stripe it.
+    fs::remove_file(a.join("stripes.png")).unwrap();
+    write_png(&a.join("red.png"), 8, 4, &[[255, 0, 0]]);
+    let s = shot_keys(SIZE, "Down,Alt+q", &a, &b);
+    assert!(s.contains("image 8\u{d7}4"), "{s}");
+    assert!(
+        !s.contains('\u{2580}'),
+        "one colour a cell, no half block\n{s}"
+    );
     fs::write(a.join("broken.png"), b"not a png").unwrap();
     let s = shot_keys(SIZE, "/,b,r,o,Enter,Alt+q", &a, &b);
     assert!(
@@ -3252,33 +3267,27 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
     );
 }
 
-/// The logo in About, as (columns, rows) of half blocks: `n` pixels square is `n`
-/// columns by `n / 2` rows.
-fn logo_size(s: &str) -> (usize, usize) {
-    let runs: Vec<usize> = s
-        .lines()
-        .map(|l| {
-            l.split(|c| c != '\u{2580}')
-                .map(|r| r.chars().count())
-                .max()
-                .unwrap_or(0)
-        })
-        .filter(|&n| n > 0)
-        .collect();
-    (runs.iter().copied().max().unwrap_or(0), runs.len())
-}
-
 #[test]
-fn about_draws_a_small_logo_beside_the_text() {
+fn about_draws_its_logo_without_half_blocks() {
     let (a, b) = fixture();
-    // One small logo, about as tall as the text, whatever the window.
-    for (size, logo) in [("80x24", (14, 7)), ("170x52", (14, 7))] {
+    // The logo is one colour per cell, painted as background: no `▀` in About at all,
+    // so it looks the same in a terminal that draws half blocks from its font (macOS
+    // Terminal.app). The plain-text screenshot cannot show colours; the logo's cells
+    // are checked in app.rs.
+    for size in ["80x24", "170x52"] {
         let s = shot_keys(size, "F9,Left,Up,Enter", &a, &b);
         assert!(
             s.contains("No network, no telemetry"),
             "About at {size}\n{s}"
         );
-        assert_eq!(logo_size(&s), logo, "the logo at {size}\n{s}");
+        assert!(!s.contains('\u{2580}'), "a half block at {size}\n{s}");
+        // The text starts 14 + 2 columns after the dialog's border: the logo's room.
+        let (bx, _) = locate(&s, "xdevcmd 0.2");
+        let (tx, _) = locate(&s, "No network");
+        assert!(
+            tx >= bx + 14,
+            "the text leaves room for the logo at {size}\n{s}"
+        );
     }
 }
 

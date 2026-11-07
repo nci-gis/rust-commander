@@ -10,6 +10,18 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **Example themes in the release files**: `themes/` holds Nord, Gruvbox dark and
+  Solarized light. Kept beside `xdevcmd`, they appear in View → Theme… as they are.
+- **`xdevcmd --print-theme NAME`** writes a built-in theme out as a file with every
+  colour listed, to start your own from.
+
+### Fixed
+- **The logo in About looked striped and stepped on macOS** in Terminal.app. It is now
+  drawn with background colour only, one colour per character cell, so it no longer
+  depends on how the terminal's font draws half blocks. In picture previews too, a cell
+  whose two halves are one colour is drawn the same way.
+
 ## [0.2.0] - 2026-11-07
 
 ### Changed

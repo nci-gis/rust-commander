@@ -340,6 +340,11 @@ pub(crate) fn put(frame: &mut Frame, area: Rect, row: u16, text: &str, style: St
 /// Paint a picture in half blocks at (`x0`, `y0`): each cell two pixels, the upper as
 /// the foreground of `▀` and the lower as its background. An odd last row takes `bg`
 /// below.
+///
+/// A cell whose two pixels are the same colour is a space in that background colour,
+/// with no character at all. Some terminals draw `▀` from the font (macOS Terminal.app),
+/// and with line spacing it does not fill its half of the cell: a picture made only of
+/// such cells, as About's logo is, looks the same in every terminal.
 pub(crate) fn paint_picture(
     frame: &mut Frame,
     x0: u16,
@@ -360,9 +365,13 @@ pub(crate) fn paint_picture(
                 .unwrap_or(bg);
             let pos = ratatui::layout::Position::new(x0 + x as u16, y0 + r as u16);
             if let Some(cell) = buf.cell_mut(pos) {
-                cell.set_symbol("\u{2580}")
-                    .set_fg(rgb(top))
-                    .set_bg(rgb(bottom));
+                if top == bottom {
+                    cell.set_symbol(" ").set_bg(rgb(bottom));
+                } else {
+                    cell.set_symbol("\u{2580}")
+                        .set_fg(rgb(top))
+                        .set_bg(rgb(bottom));
+                }
             }
         }
     }

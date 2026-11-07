@@ -62,6 +62,7 @@ Usage:
                                shell function can cd there (Q quits without it)
   xdevcmd --config PATH        use this config file instead of the default one
   xdevcmd --print-config       print every setting at its default, ready to save
+  xdevcmd --print-theme NAME   print a built-in theme as a file, to start your own
   xdevcmd --print-keys         print every key as Markdown (as configured)
   xdevcmd --check-config       validate the config file; exit 1 if it is wrong
   xdevcmd --show-keys          print each key, click and scroll as xdevcmd receives it, and
@@ -82,6 +83,10 @@ Config file, first match wins:
   ~/.config/xdevcmd/config.toml
 
   mkdir -p ~/.config/xdevcmd && xdevcmd --print-config > ~/.config/xdevcmd/config.toml
+
+Your own theme starts from a built-in one (dark, light, ansi, blue, high-contrast):
+  mkdir -p ~/.config/xdevcmd/themes
+  xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml
 ";
 
 #[derive(Default)]
@@ -91,6 +96,7 @@ struct Cli {
     screenshot: Option<(u16, u16)>,
     keys: String,
     print_config: bool,
+    print_theme: Option<String>,
     print_keys: bool,
     show_keys: bool,
     check_config: bool,
@@ -111,6 +117,12 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "-h" | "--help" => cli.help = true,
             "-V" | "--version" => cli.version = true,
             "--print-config" => cli.print_config = true,
+            "--print-theme" => {
+                cli.print_theme = Some(args.next().ok_or("--print-theme needs a theme name")?);
+            }
+            s if s.starts_with("--print-theme=") => {
+                cli.print_theme = Some(s["--print-theme=".len()..].to_string());
+            }
             "--print-keys" => cli.print_keys = true,
             "--show-keys" => cli.show_keys = true,
             "--check-config" => cli.check_config = true,
@@ -176,6 +188,16 @@ fn main() -> Result<()> {
     }
     if cli.print_config {
         emit(&config::render_default());
+        return Ok(());
+    }
+    if let Some(name) = &cli.print_theme {
+        match config::render_theme(name) {
+            Ok(text) => emit(&text),
+            Err(e) => {
+                eprintln!("xdevcmd: {e}");
+                std::process::exit(2);
+            }
+        }
         return Ok(());
     }
 

@@ -105,8 +105,17 @@ blue-panel look of the DOS-era commanders; `high-contrast` is black and white wi
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). It starts from a built-in theme and changes what it lists,
-with the same names as `[theme]`:
+binary, for a portable copy). The release files come with three examples in `themes/`
+(Nord, Gruvbox dark, Solarized light), which work as they are when kept beside
+`xdevcmd`. To start your own, print a built-in theme with every colour listed:
+
+```bash
+mkdir -p ~/.config/xdevcmd/themes
+xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml   # then [theme] name = "mine"
+```
+
+A theme file starts from a built-in theme and changes what it lists, with the same
+names as `[theme]`:
 
 ```toml
 # themes/sunset.toml — then [theme] name = "sunset"

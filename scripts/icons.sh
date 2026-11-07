@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild assets/xdevcmd.ico and assets/icon-14.png from the SVGs. Needs `resvg` (cargo install --locked resvg).
+# Rebuild assets/xdevcmd.ico and assets/about-logo.png from the SVGs. Needs `resvg` (cargo install --locked resvg).
 # The .ico is committed, so nobody needs this to build xdevcmd; run it after changing an SVG.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,8 +27,7 @@ for z, png in zip(sizes, pngs):
 open(out, "wb").write(head + entries + data)
 PY
 echo "assets/xdevcmd.ico: $(wc -c < assets/xdevcmd.ico) bytes"
-# The logo About draws in half blocks (14 x 7 cells), built into the binary. Drawn as
-# pixel art on whole pixels, not shrunk with smoothing, which blurs at two pixels a
-# character cell; see scripts/logo_pixels.py.
-python3 -I scripts/logo_pixels.py assets 14
-echo "assets/icon-14.png: $(wc -c < assets/icon-14.png) bytes"
+# The logo About draws (14 x 7 cells, one colour each), built into the binary; see
+# scripts/logo_pixels.py for why it is drawn by hand rather than shrunk from icon.svg.
+python3 -I scripts/logo_pixels.py assets/about-logo.png
+echo "assets/about-logo.png: $(wc -c < assets/about-logo.png) bytes"

@@ -67,7 +67,16 @@ những việc kế tiếp"), in this order:
        `[[open]]` rule (005); undo of a move that met an overwrite question (009);
        Enter-opens-files tried by hand on Linux and Windows (005).
      Source: `.agents/memory/2026-11-07-security-review-before-0.2.0.md`.
-   Done before the packages, so the first packaged version carries them.
+   Done before the packages, so the first packaged version carries them. Work is in
+   [Round 013](cycles/Round_013.md) on `feat/v0.2.1`.
+   **Proposed for 0.2.1, owner to decide** (from the owner's questions, 2026-11-07):
+   - **Idle CPU** (item 15, S–M): measured at about 5 % of a core with nothing
+     happening, because the screen is redrawn every 40 ms. Redraw only when something
+     changed (a key, a resize, a job, the terminal tab's output, a listing refresh);
+     target under 0.5 %. Matters on laptops and on servers with many sessions.
+   - **Ctrl+G also goes to a path** (item 5c, S): Ctrl+L stays (the address bar key in
+     browsers, Explorer and GNOME Files); Ctrl+G is added beside it (Go to folder in
+     macOS Finder, and the habit of others). Checked free in the default keys.
 2. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
    - Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds; servers
@@ -79,7 +88,26 @@ những việc kế tiếp"), in this order:
    AUR account.
 3. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
    after 2, so a reader can install with one command.
-4. Then items 11–13, each numbered when started. **Plugins are items 12 and 13**,
+4. **Settings shows built-in and your own, for themes and keys** (items 4c and 5b):
+   - Theme tab: the list in two parts, built in and yours (with the folder each file
+     came from), and a "Make my copy" button that writes the chosen theme into
+     `themes/` (what `--print-theme` does) for editing. S.
+   - Keys: the keymap presets deferred in Round 004 (`windows`, `macos`, `linux`,
+     `classic`, perhaps `mc`), then the Keys tab as two columns, the preset's key and
+     yours, with what you changed marked. M.
+5. **An app to click, on Windows and macOS** (item 14), in two steps:
+   - 14a, with the packages (S): Windows already runs `xdevcmd.exe` in a console
+     window when it is double-clicked, with its icon; add a Start-menu shortcut
+     through scoop and winget. macOS: an `xdevcmd.app` that opens the user's terminal
+     running xdevcmd, with the icon, through a Homebrew cask. Both still draw in a
+     terminal.
+   - 14b, later and only if wanted (L–XL): xdevcmd in its own window, drawing the
+     cells itself (a GPU window behind ratatui) instead of in a terminal. That would
+     end every terminal difference (colours, keys, fonts) at once, but it is a second
+     front end to keep up, and on macOS a downloaded app needs Apple's signing and
+     notarisation (a paid developer account), on Windows a code-signing certificate,
+     or users see warnings. Decide after the launch, from what users ask for.
+6. Then items 11–13, each numbered when started. **Plugins are items 12 and 13**,
    low priority by the owner's choice (2026-11-06): first the user menu we already
    have (`[[menu]]`, Shift+F9) gets documented variables and the selection; separate
    plugin programs only for a need the menu cannot meet. No Lua, no Total Commander
@@ -124,9 +152,14 @@ Rounds 001 and 003–009; the read-only finding in
 | 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011, released as 0.2.0; packages after 8b |
-| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | — | next, in 0.2.1 |
-| 7b | The About logo on macOS (and checked by hand on Windows) | S | — | next, in 0.2.1 |
-| 4b | Example theme files in the release archives; `--print-theme` | S | — | next, in 0.2.1 |
+| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | [013](cycles/Round_013.md) | in progress |
+| 7b | The About logo on macOS (and checked by hand on Windows) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test |
+| 4b | Example theme files in the release archives; `--print-theme` | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1`, owner to test |
+| 4c | Settings → Theme: built-in and your own apart; "Make my copy" | S | — | after the packages |
+| 5b | Keymap presets (deferred in 004); Keys tab shows the preset's key and yours | M | — | after the packages |
+| 5c | Ctrl+G beside Ctrl+L to go to a path | S | — | proposed for 0.2.1 |
+| 14 | An app to click: launchers on Windows and macOS (14a); later perhaps its own window (14b) | S / L–XL | — | 14a with the packages; 14b after the launch |
+| 15 | Idle CPU near zero: redraw only on change (measured about 5 % of a core) | S–M | — | proposed for 0.2.1 |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

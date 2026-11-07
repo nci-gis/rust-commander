@@ -224,13 +224,13 @@ pub struct App {
     last_autosave: Instant,
 }
 
-/// xdevcmd's icon for About, 14 pixels square: drawn in half blocks, 14 columns by 7
-/// rows, about as tall as About's text, so the picture sits beside it rather than
-/// taking the dialog over (the owner's call, 2026-11-07). Pixel art drawn for this size
-/// by `scripts/logo_pixels.py` from the shapes of `assets/icon.svg`: every pixel one of
-/// the logo's colours, none blended, because at two pixels a cell a smoothed edge reads
-/// as blur.
-const LOGO: &[u8] = include_bytes!("../../../assets/icon-14.png");
+/// xdevcmd's icon for About: 14 columns by 7 rows, about as tall as About's text, so the
+/// picture sits beside it rather than taking the dialog over (the owner's call,
+/// 2026-11-07). Drawn by hand by `scripts/logo_pixels.py`, one colour per cell: the PNG
+/// is 14 x 14 with every row twice, so each cell's two halves are equal and
+/// [`modal::paint_picture`] paints it as background colour only. Half blocks came out
+/// striped on macOS Terminal.app, which draws `▀` from the font (0.2.0).
+const LOGO: &[u8] = include_bytes!("../../../assets/about-logo.png");
 
 /// What xdevcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when
@@ -5498,7 +5498,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_logo_is_sharp_pixel_art_of_the_size_about_expects() {
+    fn the_logo_is_one_colour_per_cell_of_the_size_about_expects() {
         // Laid over a colour that is none of the logo's, every pixel is either that
         // colour or one of the logo's five: a smoothed edge would blend the two.
         let bg = [255, 0, 255];
@@ -5513,6 +5513,11 @@ mod tests {
         assert_eq!((p.width, p.height), (14, 14));
         let odd = p.rgb.iter().find(|c| !colours.contains(c));
         assert_eq!(odd, None, "the logo has a blended pixel");
+        // Each cell's two halves are equal, so About draws no half block anywhere.
+        for r in 0..7 {
+            let (top, bottom) = (&p.rgb[2 * r * 14..][..14], &p.rgb[(2 * r + 1) * 14..][..14]);
+            assert_eq!(top, bottom, "cell row {r} has two colours");
+        }
     }
 
     fn logo_picture(bytes: &[u8], bg: [u8; 3]) -> xdevcmd_core::image::Picture {

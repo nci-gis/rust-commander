@@ -158,6 +158,8 @@ owner's go-ahead to work through the roadmap toward v0.2.0.
       on every system (an environment variable, so CI covers all three).
 - [ ] By hand on each system (CI cannot open windows): a PDF opens; Enter over SSH on
       Linux views; a `.cmd` rule with a hostile name is refused, not run.
+      **macOS: confirmed by the owner on 2026-11-07** ("R2 confirmed trên macOS"; which
+      cases were tried was not said). Linux and Windows by hand: not yet reported.
 
 Record what you could **not** verify as explicitly as what you could.
 

@@ -45,17 +45,29 @@ were done first:
 Complete; 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
 những việc kế tiếp"), in this order:
 
-1. **Leftover safety items** (item 8b, S). Small, and best done before the packages, so
-   the first packaged version carries them (0.2.1):
-   - Bulk rename: rename without replacing, so a file that appears between the check
-     and the rename is never overwritten.
-   - Programs in a terminal tab: ignore `.` and empty entries in `PATH`, which would
-     look for the program in the browsed directory.
-   - Try the batch-file refusal on a real Windows machine (the owner's, or CI).
-   - Carried from closed rounds: a test feeding a hostile file name through an
-     `[[open]]` rule (005); undo of a move that met an overwrite question (009);
-     Enter-opens-files tried by hand on Linux and Windows (005).
-   Source: `.agents/memory/2026-11-07-security-review-before-0.2.0.md`.
+1. **0.2.1: fixes found after 0.2.0** (items 7b, 4b, 8b; S each):
+   - **The About logo is wrong on macOS** (owner, 2026-11-07). The 14-pixel logo was
+     only checked on Linux, in the screenshot tests; never on macOS or Windows. Likely
+     causes, to confirm with a screenshot from the owner: Terminal.app has no 24-bit
+     colour, so the logo is drawn in 256 colours; and its line spacing can leave gaps
+     between the half-block rows. Fix, then check by hand on Terminal.app, iTerm2,
+     Windows Terminal and the old Windows console, and record each result.
+   - **No theme files in the release archives** (owner, 2026-11-07). The five themes are
+     built into the program, so they work, but a user who wants their own has nothing to
+     start from. Ship a `themes/` folder of examples in each archive (they also work
+     beside the binary, for a portable copy), and add `xdevcmd --print-theme <name>`,
+     which prints a built-in theme as a file to edit.
+   - **Leftover safety items** from the 0.2.0 review:
+     - Bulk rename: rename without replacing, so a file that appears between the check
+       and the rename is never overwritten.
+     - Programs in a terminal tab: ignore `.` and empty entries in `PATH`, which would
+       look for the program in the browsed directory.
+     - Try the batch-file refusal on a real Windows machine (the owner's, or CI).
+     - Carried from closed rounds: a test feeding a hostile file name through an
+       `[[open]]` rule (005); undo of a move that met an overwrite question (009);
+       Enter-opens-files tried by hand on Linux and Windows (005).
+     Source: `.agents/memory/2026-11-07-security-review-before-0.2.0.md`.
+   Done before the packages, so the first packaged version carries them.
 2. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
    - Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds; servers
@@ -67,7 +79,11 @@ những việc kế tiếp"), in this order:
    AUR account.
 3. **Launch** (item 10, S): a short GIF of the main moves, then a Show HN post. Only
    after 2, so a reader can install with one command.
-4. Then items 11–13, each numbered when started.
+4. Then items 11–13, each numbered when started. **Plugins are items 12 and 13**,
+   low priority by the owner's choice (2026-11-06): first the user menu we already
+   have (`[[menu]]`, Shift+F9) gets documented variables and the selection; separate
+   plugin programs only for a need the menu cannot meet. No Lua, no Total Commander
+   DLLs, nothing fetched (see Not planned).
 
 **Waiting on the owner** before step 2:
 
@@ -108,7 +124,9 @@ Rounds 001 and 003–009; the read-only finding in
 | 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
 | 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
 | 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md) | name: **xdevcmd**, renamed in 011, released as 0.2.0; packages after 8b |
-| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | — | next |
+| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | — | next, in 0.2.1 |
+| 7b | The About logo on macOS (and checked by hand on Windows) | S | — | next, in 0.2.1 |
+| 4b | Example theme files in the release archives; `--print-theme` | S | — | next, in 0.2.1 |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

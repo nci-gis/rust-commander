@@ -26,10 +26,15 @@ key. Either way, give the action another key under `[keys]` (see
 - **Ctrl+Tab** belongs to the terminal or the desktop.
 - **F11** is the terminal's full screen. xdevcmd does not use it.
 
-**Enter views a file instead of opening it.** Over SSH, without a desktop, or in
-read-only mode, there is no screen here to open it on, so xdevcmd views it and says why at
-the bottom of the viewer. Set an `[[open]]` rule with `terminal = true` for programs
-that work in a terminal (see [config.md](config.md#opening-files)).
+**Enter views a file instead of opening it.** Over SSH or without a desktop there is no
+screen here to open it on, so xdevcmd views it and says why at the bottom of the viewer.
+An `[[open]]` rule with `terminal = true` opens programs that work in a terminal, and
+`[commands] opener` is used for everything else (see
+[config.md](config.md#opening-files)). In read-only mode nothing is opened in another
+program.
+
+**`o` says "over SSH there is no screen here to open it on".** Set `[commands] opener`,
+or use F3.
 
 **Colours look muted over SSH.** xdevcmd uses 24-bit colour only when it knows the
 terminal takes it, usually from `COLORTERM`, which SSH does not pass on. On the server:
@@ -66,8 +71,8 @@ arrive:
 → Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
 function keys**.
 
-**Green or red backgrounds, hard-to-read text** (xdevcmd 0.1.0 in Terminal.app before
-macOS 26). Terminal.app there cannot show 24-bit colour and misreads it. Fixed after
+**Green or red backgrounds, hard-to-read text** (0.1.0, then called rcmd, in
+Terminal.app before macOS 26). Terminal.app there cannot show 24-bit colour and misreads it. Fixed after
 0.1.0: xdevcmd now sends it 256 colours, so upgrading is the fix. With 0.1.0 itself,
 setting every `[theme]` colour to a palette number (`"0"`–`"255"`) avoids it.
 
@@ -87,7 +92,7 @@ what the shell prints, and where the shell sets no colour, your terminal profile
 background shows through, as it would outside xdevcmd.
 
 **"xdevcmd cannot be opened because the developer cannot be verified."** The downloads
-are not signed. After unpacking:
+are not signed. After unpacking, in the `xdevcmd-…-apple-darwin` folder:
 
 ```bash
 xattr -d com.apple.quarantine xdevcmd
@@ -107,9 +112,9 @@ config.toml` writes UTF-8.
 
 ## Linux
 
-**`o` says "no desktop session to open it in".** Over SSH there is no `DISPLAY`, so
-there is no program to open the file with. Set `[commands] opener` (for example a
-terminal viewer), or use F3.
+**`o` says "no desktop session to open it in (no DISPLAY)".** Without `DISPLAY` or
+`WAYLAND_DISPLAY` there is no desktop to open the file in. Set `[commands] opener` (for
+example a terminal viewer), or use F3.
 
 **The Linux console (`TERM=linux`) shows only 16 colours.** xdevcmd switches to a
 16-colour theme there by itself.

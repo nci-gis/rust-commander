@@ -190,7 +190,7 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::Open,
         name: "open",
         group: "Navigate",
-        about: "Enter a directory, or view a file",
+        about: "Enter a directory, or open a file with its program",
         keys: &["Enter"],
     },
     Binding {

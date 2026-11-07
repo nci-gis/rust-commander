@@ -90,6 +90,7 @@ The [guide](docs/guide.md) explains each one.
 ## Configure
 
 ```bash
+mkdir -p ~/.config/xdevcmd
 xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # all settings, with defaults
 ```
 

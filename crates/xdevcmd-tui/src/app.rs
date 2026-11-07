@@ -1698,8 +1698,9 @@ impl App {
                 }
                 f.go_to(i);
                 if double {
+                    // What Enter does: into a directory, or open the file.
                     if f.activate().is_some() {
-                        self.begin_view();
+                        self.enter_file();
                     }
                     return;
                 }

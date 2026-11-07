@@ -57,19 +57,21 @@ Usage:
   xdevcmd --read-only          xdevcmd writes nothing: no copy, move, delete, rename, edit
   xdevcmd --restricted         read-only, and no shell, no editor, no clipboard
   xdevcmd --root DIR           never navigate above DIR
-                            These only tighten [security] in the config, never loosen it.
+                               These only tighten [security] in the config, never loosen it.
   xdevcmd --cwd-file PATH      on quit, write the directory you were in to PATH, so a
-                            shell function can cd there (Q quits without it)
+                               shell function can cd there (Q quits without it)
   xdevcmd --config PATH        use this config file instead of the default one
   xdevcmd --print-config       print every setting at its default, ready to save
   xdevcmd --print-keys         print every key as Markdown (as configured)
   xdevcmd --check-config       validate the config file; exit 1 if it is wrong
   xdevcmd --show-keys          print each key, click and scroll as xdevcmd receives it, and
-                            what it would do (for a key that does nothing)
+                               what it would do (for a key that does nothing)
   xdevcmd --screenshot[=WxH]   render one frame as plain text and exit
-       --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
-                            click:X:Y rclick:X:Y ctrl-click:X:Y drag:X1:Y1:X2:Y2
-                            wheel:X:Y:N move:X:Y
+          --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
+                               click:X:Y rclick:X:Y ctrl-click:X:Y drag:X1:Y1:X2:Y2
+                               wheel:X:Y:N move:X:Y
+  xdevcmd --version            print the version and exit
+  xdevcmd --help               print this and exit
 
 Press F1 inside xdevcmd for every key and setting as currently configured.
 
@@ -79,7 +81,7 @@ Config file, first match wins:
   %APPDATA%\\xdevcmd\\config.toml            (Windows)
   ~/.config/xdevcmd/config.toml
 
-  xdevcmd --print-config > ~/.config/xdevcmd/config.toml
+  mkdir -p ~/.config/xdevcmd && xdevcmd --print-config > ~/.config/xdevcmd/config.toml
 ";
 
 #[derive(Default)]

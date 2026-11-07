@@ -18,6 +18,15 @@ that heading and starts a new, empty one here. -->
   `%APPDATA%\xdevcmd\` and `%LOCALAPPDATA%\xdevcmd\` on Windows) and the environment
   variables (`XDEVCMD_CONFIG`, `XDEVCMD_STATE`, `XDEVCMD_COLORS`). Nothing is read from
   the old names. The repository stays `nci-gis/rust-commander`.
+- About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
+- **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
+  extension, else the system's program; programs still ask "Run it?" first. Over SSH,
+  without a desktop or in read-only mode it views the file and says why.
+  `[files] enter = "view"` keeps the old Enter.
+- About: the credit sits at the bottom right, beside the close button.
+- Two actions given the same key in `[keys]` are now an error that names both; before,
+  the one written later silently took it.
+- The config documentation lists every file xdevcmd keeps, and where.
 
 ### Added
 - Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
@@ -30,10 +39,12 @@ that heading and starts a new, empty one here. -->
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
 - `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
   window or a terminal tab, for some systems only, or only where there is a screen.
-- **File → Settings…**: tabs for General, Files, Theme and Terminal; ←/→ to change,
-  Enter to save, or the mouse: click a tab, a check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are rewritten, comments kept;
-  the result is read back before it is written. Rows say which apply at the next start.
-  Not in read-only or restricted mode.
+- **File → Settings…**: tabs for General, Files, Theme and Terminal, and a Keys tab
+  that says how to rebind; ←/→ to change, Enter to save, or the mouse: click a tab, a
+  check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are
+  rewritten, comments kept; the result is read back before it is written. Rows say
+  which apply at the next start. In read-only and restricted mode it shows the
+  settings but saves nothing.
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
   `[theme] name`, or a file of your own in `themes/` that starts from one of them.
   **View → Theme…** switches while xdevcmd runs.
@@ -52,17 +63,6 @@ that heading and starts a new, empty one here. -->
 - `xdevcmd --show-keys` prints each key, click and scroll as xdevcmd receives it, and what
   it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
-
-### Changed
-- About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
-- **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
-  extension, else the system's program; programs still ask "Run it?" first. Over SSH,
-  without a desktop or in read-only mode it views the file and says why.
-  `[files] enter = "view"` keeps the old Enter.
-- About: the credit sits at the bottom right, beside the close button.
-- Two actions given the same key in `[keys]` are now an error that names both; before,
-  the one written later silently took it.
-- The config documentation lists every file xdevcmd keeps, and where.
 
 ### Fixed
 - `xdevcmd --screenshot … | head`, and any long output cut short by its reader, ended in

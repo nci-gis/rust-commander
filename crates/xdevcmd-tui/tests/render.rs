@@ -2148,6 +2148,19 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
 }
 
 #[test]
+fn a_double_click_on_a_file_does_what_enter_does() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "", &a, &b);
+    let (x, y) = locate(&s, "victim");
+    let enter = shot_keys("110x24", &format!("click:{x}:{y},Enter"), &a, &b);
+    let double = shot_keys("110x24", &format!("click:{x}:{y},click:{x}:{y}"), &a, &b);
+    let status = |s: &str| s.lines().rev().nth(1).unwrap_or_default().to_string();
+    assert!(status(&enter).contains("would open"), "{enter}");
+    assert_eq!(status(&double), status(&enter), "{double}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn settings_works_with_the_mouse() {
     let (a, b) = fixture();
     let dir = a.parent().unwrap().join("settings-mouse");

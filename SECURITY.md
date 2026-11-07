@@ -15,7 +15,7 @@ We aim to reply within a week.
 
 Only the latest release, and the `dev` branch, receive fixes.
 
-## What rcmd defends against
+## What xdevcmd defends against
 
 See [docs/security.md](docs/security.md): untrusted file names, archives and images,
 the safe modes, and what is not covered.

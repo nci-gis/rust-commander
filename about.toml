@@ -1,4 +1,4 @@
-# cargo-about: the licences of everything shipped inside an rcmd binary, written next
+# cargo-about: the licences of everything shipped inside an xdevcmd binary, written next
 # to it in every release. The same list deny.toml allows; a crate under anything else
 # fails the build here too.
 accepted = [

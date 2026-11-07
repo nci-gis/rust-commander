@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <title>rcmd, drawn for 16 px</title>
+  <title>xdevcmd, drawn for 16 px</title>
   <rect width="16" height="16" rx="3" fill="#1E2530"/>
   <path d="M3.5 4.5 L7 8 L3.5 11.5" fill="none" stroke="#F28C28" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"/>
   <rect x="8" y="10" width="4" height="2" fill="#E6EDF3"/>

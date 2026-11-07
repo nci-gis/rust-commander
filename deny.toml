@@ -3,14 +3,14 @@
 # Four checks, each answering a different question:
 #   advisories  does any dependency have a known vulnerability (RustSec database),
 #               or is it unmaintained or yanked?
-#   licenses    is everything we ship compatible with rcmd's MIT licence?
+#   licenses    is everything we ship compatible with xdevcmd's MIT licence?
 #               A GPL crate would put the whole binary under the GPL, which the
 #               provenance rule in .agents/context/project.md exists to avoid.
 #   bans        are we pulling in duplicate versions or wildcard requirements?
 #   sources     does everything come from crates.io, not an unknown git repo?
 
 [graph]
-# Every platform rcmd ships on. Some dependencies are platform-only (the `trash`
+# Every platform xdevcmd ships on. Some dependencies are platform-only (the `trash`
 # crate is Windows and macOS only); checking just the host would miss them.
 targets = [
     "x86_64-unknown-linux-gnu",
@@ -43,7 +43,7 @@ allow = [
 confidence-threshold = 0.9
 
 [licenses.private]
-# rcmd's own crates are not published; their licence is in the workspace manifest.
+# xdevcmd's own crates are not published; their licence is in the workspace manifest.
 ignore = true
 
 [bans]
@@ -51,7 +51,7 @@ ignore = true
 # two bitflags with it. Not ours to fix; a warning, so a new duplicate is noticed.
 multiple-versions = "warn"
 wildcards = "deny"
-# rcmd-tui depends on rcmd-core by path, with no version. Allowed only because
+# xdevcmd-tui depends on xdevcmd-core by path, with no version. Allowed only because
 # neither crate is published (publish = false); a published crate could not do this.
 allow-wildcard-paths = true
 

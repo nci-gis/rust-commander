@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Rebuild assets/rcmd.ico from the SVGs. Needs `resvg` (cargo install --locked resvg).
-# The .ico is committed, so nobody needs this to build rcmd; run it after changing an SVG.
+# Rebuild assets/xdevcmd.ico and assets/icon-14.png from the SVGs. Needs `resvg` (cargo install --locked resvg).
+# The .ico is committed, so nobody needs this to build xdevcmd; run it after changing an SVG.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v resvg >/dev/null || { echo "resvg not found: cargo install --locked resvg" >&2; exit 1; }
@@ -12,7 +12,7 @@ for z in 24 32 48 64 128 256; do
   resvg -w "$z" -h "$z" assets/icon.svg "$tmp/$z.png"
 done
 # An .ico is a directory of images; PNG entries work on every Windows since Vista.
-python3 -I - "$tmp" assets/rcmd.ico <<'PY'
+python3 -I - "$tmp" assets/xdevcmd.ico <<'PY'
 import struct, sys
 src, out = sys.argv[1], sys.argv[2]
 sizes = [16, 24, 32, 48, 64, 128, 256]
@@ -26,4 +26,9 @@ for z, png in zip(sizes, pngs):
     data += png
 open(out, "wb").write(head + entries + data)
 PY
-echo "assets/rcmd.ico: $(wc -c < assets/rcmd.ico) bytes"
+echo "assets/xdevcmd.ico: $(wc -c < assets/xdevcmd.ico) bytes"
+# The logo About draws in half blocks (14 x 7 cells), built into the binary. Drawn as
+# pixel art on whole pixels, not shrunk with smoothing, which blurs at two pixels a
+# character cell; see scripts/logo_pixels.py.
+python3 -I scripts/logo_pixels.py assets 14
+echo "assets/icon-14.png: $(wc -c < assets/icon-14.png) bytes"

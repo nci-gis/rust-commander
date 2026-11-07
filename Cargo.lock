@@ -1316,35 +1316,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rcmd-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "flate2",
- "png",
- "tar",
- "trash",
- "zip",
- "zune-jpeg",
-]
-
-[[package]]
-name = "rcmd-tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "portable-pty",
- "ratatui",
- "rcmd-core",
- "serde",
- "tar",
- "toml",
- "tui-term",
- "vt100",
- "winresource",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2269,6 +2240,37 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "xdevcmd-core"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "flate2",
+ "libc",
+ "png",
+ "tar",
+ "trash",
+ "zip",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "xdevcmd-tui"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "portable-pty",
+ "ratatui",
+ "serde",
+ "tar",
+ "toml",
+ "tui-term",
+ "unicode-width",
+ "vt100",
+ "winresource",
+ "xdevcmd-core",
+]
 
 [[package]]
 name = "zip"

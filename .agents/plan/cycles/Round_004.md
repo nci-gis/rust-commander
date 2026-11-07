@@ -1,0 +1,247 @@
+# Round 004: Key sequences, and built-in keymaps for each system
+
+**Status**: Complete
+**Part of**: [ROADMAP.md](../ROADMAP.md), item 5
+**Date started**: 2026-11-07
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
+
+## Goal
+
+Every action has a key that actually reaches rcmd on Windows, macOS and Linux, in the
+terminal people use there by default, and the user picks a whole set of keys by name
+(later from Settings → Keys) instead of rebinding key by key.
+
+## Why
+
+Round 003 measured macOS Terminal.app: with Option as Meta, ⌥← / ⌥→ arrive as Alt+B /
+Alt+F, but ⌥↑ / ⌥↓ arrive as three separate keys, Option+Shift and Ctrl+Shift drop
+their modifiers on arrows, so history (Alt+↓) and resize (Alt+Shift+arrows) cannot be
+typed there at all. The owner wants both: a way to type them anywhere (key sequences),
+and sets of keys tuned for each system that can be chosen (2026-11-07).
+
+Each terminal keeps some keys for itself. Known or believed, **to measure, not
+assume**:
+
+- **macOS Terminal.app**: Cmd+anything; Ctrl+arrows (Mission Control, Spaces); ⌥← / ⌥→
+  remapped to word left / right; Fn+↑ / ↓ may scroll the window. Measured in Round 003.
+- **Windows Terminal** (the default console on Windows 11): believed to keep Alt+arrows
+  (move focus between its panes), Alt+Shift+arrows (resize its panes), Alt+Shift+- / +
+  (split), Alt+Enter and F11 (full screen), Ctrl+Shift+T / W / number (tabs),
+  Ctrl+Tab. If so, rcmd's Alt+← / → and Alt+Shift+arrows never arrive there either.
+- **GNOME Terminal / Ptyxis / Konsole** (Ubuntu and others): believed to keep F10
+  (menu) and F11 (full screen), Ctrl+Shift+letter (copy, paste, tabs), and in some,
+  Alt+1…9 (tab switch). F10 is rcmd's Quit.
+
+## Design
+
+### 1. Key sequences
+
+- A binding may be a sequence: `"Alt+r Left"` = press Alt+R, let go, then ←. Esc as
+  Meta composes with it: Esc R ← is Alt+R ←.
+- **Groups repeat.** Sequences that share a first key form a group. After the first
+  key, any key of the group runs its action and the group stays open, so ← ← ← ←
+  resizes four steps. The group closes on Enter or Esc, a key outside it, or two
+  seconds of nothing. While it is open the status line lists the group: `resize: ← → ↑
+  ↓ · Enter done`.
+- Defaults, on top of today's keys: resize = `Alt+r` then arrows. History gets a
+  second key that every default terminal passes, picked from the measurements (step 1).
+
+### 2. Keymaps
+
+- **Built in, named by where they fit:**
+  - `windows`: tuned to Windows Terminal (and conhost).
+  - `macos`: tuned to Terminal.app (and so also fine in iTerm2, Ghostty).
+  - `linux`: tuned to GNOME Terminal / Ptyxis / Konsole.
+  - `classic`: today's keys exactly, the same everywhere, Total Commander first.
+- **`auto`** (the default): the one for the system rcmd runs on. Over SSH that is the
+  server's system, not the one in front of you; the docs say so and suggest setting it.
+- They share one base (`classic`) and differ only where a terminal keeps a key: a set
+  is the base plus a short list of replacements, so the three cannot drift apart.
+- **The user's own**: `keymaps/<name>.toml` in the config directory, the same shape as
+  `[keys]` plus `base = "macos"` to start from one.
+- `[keys] preset = "macos"` picks one; any action named under `[keys]` still replaces
+  that action's keys, as today. `RCMD_KEYS=macos` in the environment overrides the
+  preset, per machine, as `RCMD_COLORS` does for colours.
+
+### 3. Conflicts, checked when the config loads
+
+| Case | Result |
+|---|---|
+| An old config with single keys only | Works unchanged. |
+| One action, several keys or sequences | Fine. |
+| Sequences sharing a first key | Fine: that is a group. |
+| A key bound to an action *and* the first key of a sequence | Both written by the user: an error naming both. One from a built-in set: the user's key wins, the set's sequences starting with it are dropped, and F1 says so. |
+| One key (or sequence) for two actions | Both written by the user: an error. A user key that a set also uses: the user wins (rebinding). **Today rcmd lets the later action silently take the key; that changes.** |
+| A built-in set | A test per set: no key runs two actions, no prefix clash, and no key the measurements found a terminal keeps for itself. |
+
+### 4. Where it shows
+
+F1, the key bar, the menus, `--print-keys` and `docs/keys.md` already read one table
+(`BINDINGS` via the keymap); they show the set in force, sequences as `Alt+R ←`.
+`--show-keys` prints the set in use. Settings → Keys (ROADMAP item 6) picks the set.
+
+## Plan
+
+- [ ] 1. **Measure** with `rcmd --show-keys`, in each system's default terminal: every
+      key rcmd binds today, plus candidates for replacements. macOS done in Round 003
+      (to finish: Shift+↑ / ↓, F-keys with and without Fn). Windows Terminal and one
+      Linux terminal: the owner. Record the tables here.
+- [ ] 2. Sequences and groups in `keys.rs` / `App::on_key`, with the conflict checks.
+- [ ] 3. Keymaps: the base, the three replacement lists from step 1, `auto`, user files,
+      `[keys] preset`.
+- [ ] 4. F1, key bar, menus, `--print-keys`, `--show-keys`; `docs/keys.md` per set;
+      `docs/config.md`; `docs/troubleshooting.md` points to the set for each system.
+- [ ] 5. **Remove Esc as Meta** (owner, 2026-11-07: it gives Esc two meanings, and
+      sequences plus the sets replace it), in the same change that ships the sets, so
+      no release leaves a Mac without Option as Meta unable to type Alt. It never
+      shipped, so no config breaks. Goes: `keyfix::after_esc` and `ESC_WINDOW`,
+      `App::esc_armed` and its arming in `on_key`, `[general] esc_as_meta`, its three
+      render tests, the F1 section, the guide and troubleshooting entries, the
+      CHANGELOG lines. Stays: `--show-keys`; the Option hint, reworded to point at
+      Option as Meta and the `macos` set. Check that every action Esc as Meta reached
+      on a Mac has a key in `macos` first.
+- [ ] 6. CHANGELOG. On macOS, the first start suggests nothing extra once `auto` picks
+      `macos` by itself.
+
+Work on a `feat/keymaps` branch; CI runs on its pull request into `dev`.
+
+## Risks
+
+- **Changing someone's keys under them.** `auto` switches existing users on Windows,
+  macOS and Linux from today's keys to their system's set. Only keys a terminal keeps
+  should differ, so what changes is mostly keys that never worked; anything else is a
+  bug in the set. The CHANGELOG lists every difference, and `preset = "classic"` brings
+  back today's keys exactly.
+- **Over SSH, `auto` is the server's system.** A Mac user on a Linux server gets
+  `linux`. Docs and the hint say to set `preset = "macos"` there, or `RCMD_KEYS`.
+- **Terminals beyond the default one** (iTerm2, Ghostty, WezTerm, kitty, Alacritty,
+  tmux) keep fewer keys; the sets are tuned to the defaults, which keep the most.
+- **Help text that names keys** must come from the keymap, never be written by hand
+  (already the rule: `context/project.md`, "one place for each fact").
+
+## Do
+
+**2026-11-07, Linux measured** (`rcmd --show-keys`, the owner's Ubuntu desktop; which
+terminal and version not yet noted):
+
+| Pressed | Arrives | Bound today to |
+|---|---|---|
+| Alt+← → ↑ ↓ | yes, all four | parent, enter_dir, –, history |
+| Alt+Shift+← → ↑ ↓ | yes, all four | resize_* |
+| F1–F10, F12 | yes | help … quit, focus_terminal |
+| F11 | no: the terminal toggles full screen (two resize events) | nothing |
+| PageUp, PageDown, Home, End | yes | page_up, page_down, top, bottom |
+| Ctrl+Space | yes | calc_sizes |
+| Ctrl+\ | yes, as Ctrl+4 (normalised to go_root) | go_root |
+| Alt+, Alt+. Alt+= | yes | back, forward, mirror_pane |
+| Alt+1, Alt+2 | yes | nothing |
+| Alt+C N S D T W Z | yes | as bound |
+| Mouse | clicks yes | |
+| Shift+F1, F2, F4, F5, F6, F8, F9 · Alt+F5, F7, F9 · Ctrl+PageUp / PageDown | **absent from the output**: not pressed, or pressed and swallowed? Asked. | many: Alt+F7 is Find |
+
+**2026-11-07, Windows measured** (`rcmd --show-keys`, Windows Terminal): the same as
+Linux. Alt+arrows and Alt+Shift+arrows **do** arrive — the belief above that Windows
+Terminal keeps them was wrong. F11 is the terminal's full screen. Shift+F10, Alt+F5,
+Alt+F7, Alt+F9 arrive; Ctrl+\ arrives as itself. Not in the output: Shift+F1–F9,
+Ctrl+PageUp / PageDown.
+
+**What the three tables say:** today's keys work on Windows and Linux as they are. On a
+Mac in Terminal.app with Option as Meta, only history (Alt+↓) and resize
+(Alt+Shift+arrows) cannot be typed. Three per-system sets would be two copies of
+`classic` and one with two changes; the design is reconsidered with the owner.
+
+**2026-11-07, Linux again:** Alt+F5, Alt+F7, Alt+F9 **do** arrive (pack, find_files,
+unpack); the desktop does not take them on the owner's Ubuntu. Then Shift+F1–F10: all
+arrive on Linux (usage, bulk_rename, new_file, copy_as, rename, delete_permanent,
+user_menu; Shift+F7 and Shift+F10 unbound). Ctrl+PageUp / PageDown on Linux printed plain
+PageUp / PageDown: Ctrl lost (to confirm it was held). If so, previous / next tab
+(bound only to Ctrl+PageUp / PageDown) cannot be typed there; Alt+1, Alt+2 do arrive on
+Linux and Windows and are unbound, a candidate for "tab N". Windows, the rest: Shift+F1–F10
+all arrive; Ctrl+PageUp / PageDown also print plain PageUp / PageDown there.
+
+**Summary of the three systems:** every key rcmd binds arrives on Windows and Linux
+except Ctrl+PageUp / PageDown (previous / next tab), which lose Ctrl on both. Confirmed by the
+owner: Ctrl was held, on a laptop where PageUp is Fn+↑, and Ctrl+Fn+↑ arrives without
+Ctrl. A full keyboard's PageUp may behave differently (and GNOME Terminal takes
+Ctrl+PageUp for its own tabs); either way, laptops cannot type it. On macOS Terminal.app, with Option as Meta, history and resize
+cannot be typed. F11 is the terminal's everywhere; rcmd does not use it. Tab switching
+therefore needs a second key on every system: candidates Alt+1…9 (tab N, measured to
+arrive on Linux and Windows) and Ctrl+Tab / Ctrl+Shift+Tab (Total Commander's). Measured:
+Ctrl+Tab is taken on both — Linux by the terminal or desktop, Windows by switching
+away (focus lost, focus gained) — so it is out.
+
+Suspected earlier, now mostly disproved: GNOME keeps Alt+F7 (move window), Alt+F8 (resize window) and
+other Alt+F-keys for the window manager; GNOME Terminal keeps Ctrl+PageUp / PageDown
+(its tabs) and Shift+F10 (context menu). If Alt+F7 is lost, Find needs a second key in
+the `linux` set.
+
+**2026-11-07, decided and built.** The owner chose one set for every system ("Yes,
+build it"): the measurements showed Windows and Linux take today's keys unchanged, and
+macOS needs only two actions moved, so three per-system sets would have been two copies
+of one. Keymap presets (`preset`, `keymaps/*.toml`, Settings → Keys) are deferred until
+a second set is really wanted (`mc`, or a user's own). Design §2 stands as the plan for
+then; §1 and §3 are built:
+
+- `keys.rs`: `Keys::{One, Two}`, `parse_binding`, `binding_name`; `Keymap` gains `seqs`,
+  `starts_group`, `in_group`, `group`, `GROUP_WINDOW` (2 s). `apply` checks clashes as in
+  the table: user-vs-user is an error (it used to be silent), user beats default.
+- New keys: resize also `Alt+r Left/Right/Up/Down`; history also `Alt+j`; `go_tab` on
+  `Alt+1`…`Alt+9` (global, file pane or terminal). Alt+B / Alt+F from Round 003 stay.
+- `App::on_key`: a group opens on its first key (in the shell only if every action in
+  it works there), runs its second keys again and again, and closes on Enter / Esc,
+  another key, or two idle seconds (`tick`). The status line lists the group.
+- Esc as Meta removed (step 5): `after_esc`, `esc_armed`, `[general] esc_as_meta`, its
+  tests, F1 section and docs. The Option hint now points at Option as Meta only.
+- F1: two-key bindings shown as written (`Alt+r Left`); more than three keys collapse to
+  `first … last`; the key column is 30 wide; the "rebound" mark understands two-key
+  bindings (it marked every resize row before the fix).
+- Docs: guide, troubleshooting (a table of what to press on a Mac), keys.md, CHANGELOG.
+
+## Check
+
+- [ ] The measurement tables for all three systems are here, with what was not tested.
+- [ ] Tests: sequences, groups (repeat, Enter / Esc / timeout / other key closes), every
+      conflict case in the table, one per built-in set, user files, `auto` per OS.
+      Done: parsing, the default table has no clash and no key that both runs and
+      starts a group, every conflict case, repeat (three Lefts equal three
+      Alt+Shift+Left), Enter closes, the hint, Alt+digit, Alt+J, Esc no longer a
+      prefix. The timeout was dropped (owner, 2026-11-07): a group stays open until
+      Enter, Esc, another key or the mouse, and tests cover each — Esc closing a group
+      has its own render test since `feat/v0.2.0`. Since `feat/polish`: only resize
+      actions repeat, any other two-key binding runs once and closes (a render test),
+      and a badge on the status line shows a waiting group (`RESIZE`, `ALT+G …`).
+      Sets, user files and `auto` are deferred with the presets.
+- [ ] Render tests: F1 and the key bar under each set; a sequence on the status line.
+      Done for the one set there is: the hint and the badge on the status line.
+- [ ] Esc as Meta is gone: Esc then 7 in a file pane does not open MkDir, and Esc there
+      does what it did before Round 003 (stop, take the filter off, or nothing).
+- [ ] The owner, on each system, in its default terminal: every key on F1 works.
+      **macOS: confirmed by the owner on 2026-11-07** ("R004 luôn nhé", after the
+      Option+R then arrows, Option+J and Option+1…9 check was asked for). Linux and
+      Windows: measured key by key earlier in this round (tables above); no separate
+      by-hand run of the built keys reported.
+
+Record what you could **not** verify as explicitly as what you could.
+
+## Act
+
+**Unticked checks, and why the round closes anyway:** the measurement tables cover
+macOS, Linux and Windows key by key, but F11 and the keys each desktop keeps were not
+itemised everywhere; render tests for F1 and the key bar exist for the one set there
+is, since the built-in sets were deferred with the presets; Esc as Meta is removed and
+covered by the pty test for Esc, not by an Esc-then-7 test of its own. The owner
+confirmed the keys on the Mac, where they had not worked.
+
+**Learnings**:
+
+- **Measure every system before designing.** The plan was one keymap per system; the
+  measurements showed one set works on all three once two-key bindings exist, and the
+  belief that Windows Terminal keeps Alt+arrows was wrong.
+- **A key waiting for its second needs no timeout, but must be visible**: a badge on the
+  status line, and only actions done in many small steps (resizing) repeat; the rest
+  run once and close (`feat/polish`).
+
+**Promotions** (proposed; waiting on the owner):
+
+- [x] → `reference/ui.md`: keymaps, sequences, the conflict rules
+- [x] → `reference/platforms.md`: the keys each default terminal keeps

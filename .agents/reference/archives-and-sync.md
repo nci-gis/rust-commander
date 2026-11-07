@@ -12,7 +12,7 @@ path is `archive/inside/name`, so marks and the selection need nothing special.
 `ArchiveView::inner` turns those back into names inside. Only reading and extracting
 happen there: F8, F6, F2, F7, F4 and the other writes say so, an archive pane is never a
 copy destination, and drags into or out of one are refused — rewriting an archive to add
-one file is not something rcmd does.
+one file is not something xdevcmd does.
 
 **F5 inside extracts** through the copy engine (`Kind::Extract`), so it has the same
 progress, overwrite question and cancel. The directory being browsed is taken off the
@@ -36,7 +36,7 @@ code under test:
 
 **`zip` 9 is the floor**, and why the workspace's `rust-version` is 1.88: `cargo deny`
 rejected zip 7 for RUSTSEC-2026-0367, -0368, -0369 (set-id bits and symlinks escaping on
-extraction) and -0429 (abort on a crafted symlink). rcmd does not call the crate's
+extraction) and -0429 (abort on a crafted symlink). xdevcmd does not call the crate's
 `extract()` that those are about, but a known-vulnerable version is not shipped either way.
 
 ## Compare and synchronise

@@ -115,6 +115,14 @@ impl TermPane {
         let Some((program, args)) = argv.split_first() else {
             anyhow::bail!("nothing to run");
         };
+        if let Some(why) = batch_refusal(
+            argv,
+            cfg!(windows),
+            std::env::var_os("PATH").as_deref(),
+            std::env::var_os("PATHEXT").as_deref(),
+        ) {
+            anyhow::bail!(why);
+        }
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
         let label = Path::new(program).file_name().map_or_else(
@@ -591,5 +599,150 @@ mod tests {
         assert_eq!(cursor_queries(&mut tail, b"x"), 0);
         // Other sequences that look alike are not queries.
         assert_eq!(cursor_queries(&mut tail, b"\x1b[5n\x1b[6m\x1b[16n"), 0);
+    }
+}
+
+/// What `cmd.exe` acts on in a command line: command separators, redirection, its
+/// escape, variable expansion (`%`, and `!` where delayed expansion is on), grouping,
+/// quotes, and line ends.
+const CMD_SPECIAL: &[char] = &['&', '|', '<', '>', '^', '%', '!', '"', '(', ')', '\r', '\n'];
+
+fn is_batch(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"))
+}
+
+/// Whether `program` will start a batch file, found as portable-pty finds it on
+/// Windows: the name as given in each `PATH` directory, then with each `PATHEXT`
+/// extension — so a rule's `npm` is `npm.cmd`.
+fn resolves_to_batch(
+    program: &std::ffi::OsStr,
+    path: Option<&std::ffi::OsStr>,
+    pathext: Option<&std::ffi::OsStr>,
+) -> bool {
+    let program = Path::new(program);
+    if is_batch(program) {
+        return true;
+    }
+    let Some(path) = path else {
+        return false;
+    };
+    let exts: Vec<String> = pathext
+        .map(|e| {
+            std::env::split_paths(e)
+                .filter_map(|x| x.to_str().map(|x| x.trim_start_matches('.').to_string()))
+                .collect()
+        })
+        .unwrap_or_else(|| vec!["EXE".into()]);
+    for dir in std::env::split_paths(path) {
+        let exact = dir.join(program);
+        if exact.exists() {
+            return is_batch(&exact);
+        }
+        for ext in &exts {
+            let c = dir.join(program).with_extension(ext);
+            if c.exists() {
+                return is_batch(&c);
+            }
+        }
+    }
+    false
+}
+
+/// Why `argv` may not run in a terminal tab, if it may not. On Windows a batch file is
+/// run by `cmd.exe`, which parses its whole command line again; the pty library
+/// quotes an argument only when it holds a space, and nothing quotes `%`. A file
+/// named `a&calc.txt` handed to a `.cmd` would start `calc`. Rather than escape for
+/// `cmd.exe` — which even the standard library gets right only with care — such a
+/// command is refused, and the user can run it from the shell themselves.
+pub fn batch_refusal(
+    argv: &[std::ffi::OsString],
+    windows: bool,
+    path: Option<&std::ffi::OsStr>,
+    pathext: Option<&std::ffi::OsStr>,
+) -> Option<String> {
+    let program = argv.first()?;
+    if !windows || !resolves_to_batch(program, path, pathext) {
+        return None;
+    }
+    argv.iter().find_map(|a| {
+        let a = a.to_string_lossy();
+        let c = a.chars().find(|c| CMD_SPECIAL.contains(c))?;
+        let shown = match c {
+            '\r' | '\n' => "a line break".to_string(),
+            c => format!("\u{201c}{c}\u{201d}"),
+        };
+        Some(format!(
+            "{} is a batch file, and {a} holds {shown}, which cmd.exe would act on \u{2014} \
+             run it from the shell yourself",
+            Path::new(program).display()
+        ))
+    })
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn argv(v: &[&str]) -> Vec<OsString> {
+        v.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn a_batch_file_with_a_name_cmd_would_act_on_is_refused() {
+        let run = argv(&["build.cmd", "a&calc.txt"]);
+        let why = batch_refusal(&run, true, None, None).expect("refused");
+        assert!(
+            why.contains("a&calc.txt") && why.contains("\u{201c}&\u{201d}"),
+            "{why}"
+        );
+        for name in [
+            "50%.txt",
+            "x|y",
+            "a^b",
+            "q\"uote",
+            "(1)",
+            "line\nbreak",
+            "bang!",
+        ] {
+            assert!(
+                batch_refusal(&argv(&["x.BAT", name]), true, None, None).is_some(),
+                "{name}"
+            );
+        }
+        // An ordinary name, spaces included, runs; so does anything not a batch file.
+        assert_eq!(
+            batch_refusal(&argv(&["x.bat", "My Report.txt"]), true, None, None),
+            None
+        );
+        assert_eq!(
+            batch_refusal(&argv(&["tool.exe", "a&calc.txt"]), true, None, None),
+            None
+        );
+        // Only Windows runs batch files through cmd.exe.
+        assert_eq!(batch_refusal(&run, false, None, None), None);
+    }
+
+    #[test]
+    fn a_bare_name_that_path_turns_into_a_batch_file_counts() {
+        let dir = std::env::temp_dir().join(format!("rcmd-batch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("npm.cmd"), "").unwrap();
+        std::fs::write(dir.join("tool.exe"), "").unwrap();
+        let path = std::env::join_paths([&dir]).unwrap();
+        // Lower case: Windows writes PATHEXT in capitals but its file names ignore
+        // case, which the file system this test runs on may not.
+        let pathext = std::env::join_paths([".com", ".exe", ".bat", ".cmd"]).unwrap();
+        let (p, e) = (Some(path.as_os_str()), Some(pathext.as_os_str()));
+        assert!(
+            batch_refusal(&argv(&["npm", "a&b"]), true, p, e).is_some(),
+            "npm is npm.cmd"
+        );
+        assert_eq!(batch_refusal(&argv(&["tool", "a&b"]), true, p, e), None);
+        assert_eq!(batch_refusal(&argv(&["missing", "a&b"]), true, p, e), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

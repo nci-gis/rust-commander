@@ -33,6 +33,9 @@ that heading and starts a new, empty one here. -->
   After a copy or a delete it says those cannot be undone.
 - **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
 - "Run it?" can run a program in a terminal tab, where its output stays after it ends.
+  On Windows, a batch file is refused there when a file name holds a character
+  `cmd.exe` would act on (`&`, `%`, `^`…), so a name like `a&calc.txt` cannot start a
+  second command.
 - [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
   to do; F1 links to it.
 - Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends

@@ -211,14 +211,14 @@ See [security.md](security.md).
 
 ## Files rcmd keeps
 
-rcmd reads `config.toml` and never writes it. What it does write, and nothing else:
+rcmd writes `config.toml` only when you save in **File → Settings…**, and then only the
+lines you changed. What else it writes, and nothing more:
 
 | File | Where | What |
 |---|---|---|
 | `session.toml` | `~/.local/state/rcmd/` (Linux, macOS); `%LOCALAPPDATA%\rcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside rcmd (Ctrl+D). Bookmarks in this config are not copied there. |
-| `rcmd-view-…/` | the system's temporary directory | A file from inside an archive, extracted for F3. Removed when the viewer closes, or when rcmd ends. |
-| `rcmd-rename-….txt` | the system's temporary directory | The list of names when renaming many files in your editor. Removed when the editor closes. |
+| `rcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when rcmd ends; one left by a crash is removed at the next start, an hour on. |
 
 No logs, no cache, nothing sent anywhere. F8 moves files to your system's own trash.
 

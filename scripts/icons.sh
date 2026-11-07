@@ -28,8 +28,9 @@ open(out, "wb").write(head + entries + data)
 PY
 echo "assets/xdevcmd.ico: $(wc -c < assets/xdevcmd.ico) bytes"
 # The logos About draws in half blocks, built into the binary: it shows the largest one
-# the window has room for. Each is rendered at its own size, not shrunk from another.
+# the window has room for. Drawn as pixel art on whole pixels, not shrunk with
+# smoothing, which blurs at two pixels a character cell; see scripts/logo_pixels.py.
+python3 -I scripts/logo_pixels.py assets 24 32 48 64
 for z in 24 32 48 64; do
-  resvg -w "$z" -h "$z" assets/icon.svg "assets/icon-$z.png"
   echo "assets/icon-$z.png: $(wc -c < "assets/icon-$z.png") bytes"
 done

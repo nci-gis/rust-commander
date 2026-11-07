@@ -226,7 +226,9 @@ pub struct App {
 
 /// xdevcmd's icon for About, largest first: drawn in half blocks, so `n` pixels square is
 /// `n` columns by `n / 2` rows, and About shows the largest the window has room for.
-/// Each is rendered from `assets/icon.svg` at its own size by `scripts/icons.sh`.
+/// Each is pixel art drawn for its size by `scripts/logo_pixels.py`, from the shapes of
+/// `assets/icon.svg`: every pixel one of the logo's colours, none blended, because at
+/// two pixels a cell a smoothed edge reads as blur.
 const LOGOS: [&[u8]; 4] = [
     include_bytes!("../../../assets/icon-64.png"),
     include_bytes!("../../../assets/icon-48.png"),
@@ -5358,6 +5360,30 @@ fn base64(data: &[u8]) -> String {
 mod tests {
     use super::base64;
     use super::*;
+
+    #[test]
+    fn the_logos_are_sharp_pixel_art_in_the_sizes_about_expects() {
+        // Laid over a colour that is none of the logo's, every pixel is either that
+        // colour or one of the logo's five: a smoothed edge would blend the two.
+        let bg = [255, 0, 255];
+        let colours = [
+            bg,
+            [0x1E, 0x25, 0x30],
+            [0xF2, 0x8C, 0x28],
+            [0xE6, 0xED, 0xF3],
+            [0x2D, 0xB5, 0xA3],
+        ];
+        for (logo, size) in LOGOS.iter().zip([64, 48, 32, 24]) {
+            let p = logo_picture(logo, bg);
+            assert_eq!((p.width, p.height), (size, size));
+            let odd = p.rgb.iter().find(|c| !colours.contains(c));
+            assert_eq!(odd, None, "the {size} px logo has a blended pixel");
+        }
+    }
+
+    fn logo_picture(bytes: &[u8], bg: [u8; 3]) -> xdevcmd_core::image::Picture {
+        xdevcmd_core::image::png_bytes(bytes, 64, 64, bg).unwrap()
+    }
 
     #[test]
     fn a_session_restores_to_exactly_what_was_saved() {

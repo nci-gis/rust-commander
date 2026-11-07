@@ -1,11 +1,11 @@
 # Round 013: 0.2.1 — the macOS logo, theme files, leftover safety items
 
-**Status**: In Progress
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), items 7b, 4b, 8b, and 5c and 15 (added by the
 owner: "Yes, add both", 2026-11-07)
 **Date started**: 2026-11-07 (owner: "bro tạo nhánh feat/v0.2.1 và làm nhé. Chỉ làm
 trên nhánh này, ko tạo PR tới khi mình test okay nhé")
-**Date completed**: —
+**Date completed**: 2026-11-08 (owner tested: "đã test okay nhé")
 
 ## Goal
 
@@ -42,7 +42,7 @@ packaged version carries them.
       - [x] Alt+Y's compare and picture decoding off the drawing thread; bounded,
             hard-link-aware, one-file-system directory sizes; `notify` watching.
       - [x] F5/F6 "replace only if older" (robocopy); a fuzzy Ctrl+F filter.
-- [ ] By hand, by the owner: the logo on Terminal.app, iTerm2, Windows Terminal and the
+- [x] By hand, by the owner (2026-11-08, "đã test okay nhé"): the logo on Terminal.app, iTerm2, Windows Terminal and the
       old console; the batch-file refusal on Windows; Enter opening files on Linux and
       Windows.
 
@@ -172,6 +172,12 @@ packaged version carries them.
 
 - A character's look depends on the terminal and its font; a cell's background does
   not. For anything that must look the same everywhere, draw with backgrounds.
+- Two safe parts can make an unsafe whole: "skipped" was not "failed", so a move across
+  devices deleted what the user skipped. Test the engine across two file systems
+  (`/dev/shm`), not only within one.
+- A check-then-act on a name (free? then write) is a race; ask the system to refuse in
+  the same step (`create_new`, `renameat2(RENAME_NOREPLACE)`, a hard link).
+- A watcher misses what happens before its watch begins; look once when it starts.
 
 **Promotions**:
 

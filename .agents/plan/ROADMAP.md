@@ -41,8 +41,8 @@ were done first:
 
 ## Next, in this order
 
-**0.2.0 is out** (published by the owner on 2026-11-07). Rounds 001 and 003–012 are
-Complete; 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
+**0.2.0 is out** (published by the owner on 2026-11-07). Rounds 001 and 003–013 are
+Complete (013 closed by the owner on 2026-11-08); 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
 những việc kế tiếp"), in this order:
 
 1. **0.2.1: fixes found after 0.2.0** (items 7b, 4b, 8b; S each):

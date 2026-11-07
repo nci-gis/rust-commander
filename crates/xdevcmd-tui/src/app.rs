@@ -1108,6 +1108,13 @@ impl App {
     }
 
     /// One turn of the event loop without input: lets a running job report in.
+    /// A job is working and not waiting on a question: a screenshot (the tests) waits
+    /// for it before the last frame, rather than ending the process under it.
+    pub fn job_working(&self) -> bool {
+        let working = |j: &Job| j.done.is_none() && j.question.is_none();
+        matches!(&self.modal, Some(Modal::Job(j)) if working(j)) || self.jobs.iter().any(working)
+    }
+
     pub fn tick(&mut self) {
         self.pump_job();
         self.reap_terminals();

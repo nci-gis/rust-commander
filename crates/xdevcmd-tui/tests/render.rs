@@ -245,6 +245,9 @@ fn f8_goes_to_the_trash_and_shift_f8_says_it_cannot_be_undone() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Linux only: there the trash is the sandbox's own (XDG_DATA_HOME); on macOS and
+/// Windows it would be the real Trash or Recycle Bin of whoever runs the tests.
+#[cfg(target_os = "linux")]
 #[test]
 fn ctrl_z_puts_back_what_went_to_the_trash() {
     let (a, b) = fixture();

@@ -386,6 +386,14 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
         app.tick();
         terminal.draw(|f| app.draw(f))?;
     }
+    // A job the last key started finishes before the frame is taken (a slow machine
+    // took longer than the pause above), unless it waits on a question to show.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while app.job_working() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+        app.tick();
+    }
+    terminal.draw(|f| app.draw(f))?;
 
     let buf = terminal.backend().buffer();
     let mut out = String::new();

@@ -119,12 +119,16 @@ jobs:
           path: dist
       - name: checksums
         run: cd dist && sha256sum xdevcmd-* > SHA256SUMS && cat SHA256SUMS
-      # Notes: this version's section of CHANGELOG.md.
+      # Notes: this version's section of CHANGELOG.md. A release page, unlike a file,
+      # keeps every line break, so each wrapped list item is joined back into one line.
       - name: notes
         run: |
           awk -v v="${GITHUB_REF_NAME#v}" '
             /^## / { on = index($0, "[" v "]") > 0; next }
-            on' CHANGELOG.md > notes.md
+            on' CHANGELOG.md |
+            awk '/^  [^ ]/ && n { sub(/^ +/, ""); line = line " " $0; next }
+                 { if (n) print line; line = $0; n = 1 }
+                 END { if (n) print line }' > notes.md
           test -s notes.md || echo "See CHANGELOG.md." > notes.md
       - name: draft
         env:

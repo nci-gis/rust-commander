@@ -35,12 +35,24 @@ review, PR #11), so the final review covers both.
 
 - The boundary between the panes and the terminal panel is a boundary like any
   other: a double-click shares it evenly too (half the height each).
+- The final review found the path click counted characters, not cells (CJK names,
+  macOS's decomposed accents): it now measures with `unicode-width`. It also found
+  that directories given relative on the command line stayed relative, which broke
+  the title and Backspace: they are made absolute at start.
+- The final security review's fixes landed on this branch too: Alt+F5 under `--root`,
+  an archive linked from outside the root, Shift+F4 on a link out, the allowlist even
+  with `[commands] opener` set, a shorter allowlist (no web pages, SVG, XML, old office
+  or OpenDocument files), more types that ask "Run it?", quick view opened without
+  blocking and checked on the handle, batch files found as the pty library finds them,
+  the temp directory tied to its identity and refreshed every 30 s, Windows device
+  names refused as theme names, a dangling linked config written through.
 
 ## Check
 
 - [x] Unit and render tests above; the whole suite, clippy and fmt pass locally.
 - [ ] The owner, by hand, in a real terminal.
-- [ ] A last docs and security review over this round and the review branch.
+- [x] A last docs and security review over this round and the review branch; what it
+      found is fixed here, with tests, except what the memory file lists as open.
 
 Record what you could **not** verify as explicitly as what you could.
 

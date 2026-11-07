@@ -18,90 +18,84 @@ that heading and starts a new, empty one here. -->
   `%APPDATA%\xdevcmd\` and `%LOCALAPPDATA%\xdevcmd\` on Windows) and the environment
   variables (`XDEVCMD_CONFIG`, `XDEVCMD_STATE`, `XDEVCMD_COLORS`). Nothing is read from
   the old names. The repository stays `nci-gis/rust-commander`.
-- About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
 - **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
-  extension, else the system's program; programs, scripts and installers ask "Run
-  it?" first, and a type that is not a known document asks "Open it?". Over SSH,
-  without a desktop or in read-only mode it views the file and says why.
-  `[files] enter = "view"` keeps the old Enter. A double-click does what Enter does.
-- About: the credit sits at the bottom right, beside the close button.
+  extension, else the system's program. Programs, scripts and installers ask "Run it?"
+  first, and a type that is not a known document asks "Open it?". Where there is no
+  screen to open it on (over SSH, without a desktop) and no `[commands] opener` is set,
+  or in read-only mode, it views the file and says why. `[files] enter = "view"` makes
+  Enter view. A double-click does what Enter does.
+- `o` asks "Run it?" for many more kinds of file that the system runs rather than
+  shows: installers and disk images, Java, Python and PowerShell files and office
+  files with macros on Windows; AppImages, packages and Windows programs (through Wine)
+  on Linux; `.command`, `.pkg` and profiles on macOS.
 - Two actions given the same key in `[keys]` are now an error that names both; before,
   the one written later silently took it.
-- The config documentation lists every file xdevcmd keeps, and where.
+- About shows xdevcmd's logo beside its text, drawn as sharp pixel art; the credit sits
+  at the bottom right, beside the close button.
 
 ### Added
-- Click a directory's name in a pane's path, at the top, to go there.
-- Double-click a border to share it evenly between the two panes on either side of it;
-  with three or more, the others keep their size. The same between shells in a
-  terminal tab.
-- Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
-  start with the same key form a group. Resizing repeats: **Alt+R, then arrows** resizes
+- **File → Settings…**: tabs for General, Files, Theme and Terminal, and a Keys tab
+  that says how to rebind; ←/→ to change, Enter to save, or the mouse: click a tab, a
+  check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are
+  rewritten, comments kept, and the result is read back before it is written; a
+  `config.toml` that is a link is written where it points. Rows say which apply at the
+  next start. In read-only and restricted mode it shows the settings but saves nothing.
+- Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
+  `[theme] name`, or a file of your own in `themes/` beside the config in use, which
+  starts from one of them. **View → Theme…** switches while xdevcmd runs.
+- **Ctrl+Z** undoes the last rename, rename-many, move, new directory or new file,
+  after asking, and only while the disk still matches: nothing is overwritten or lost.
+  After a copy or a delete it says those cannot be undone.
+- `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
+  window or a terminal tab, for some systems only, or only where there is a screen.
+- **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
+- "Run it?" can run a program in a terminal tab, where its output stays after it ends;
+  Alt+C and the user menu never type into it. On Windows, a batch file is refused there
+  when a file name holds a character `cmd.exe` would act on (`&`, `%`, `^`, `,`…), so a
+  name like `a&calc.txt` cannot start a second command, or when its path has a space.
+- Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that start
+  with the same key form a group. Resizing repeats: **Alt+R, then arrows** resizes
   panes until Enter, Esc or another key, on every system (macOS Terminal.app drops the
   modifiers from Alt+Shift+arrows). Any other action runs once and the group closes.
   While a group is open, a badge at the left of the status line says so (`RESIZE`).
 - **Alt+1**…**Alt+9** go to tab N. Ctrl+PageUp / PageDown cannot be typed on a laptop
   (Ctrl+Fn+↑ loses Ctrl), and the terminal or desktop takes Ctrl+Tab.
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
-- `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
-  window or a terminal tab, for some systems only, or only where there is a screen.
-- **File → Settings…**: tabs for General, Files, Theme and Terminal, and a Keys tab
-  that says how to rebind; ←/→ to change, Enter to save, or the mouse: click a tab, a
-  check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are
-  rewritten, comments kept; the result is read back before it is written. Rows say
-  which apply at the next start. In read-only and restricted mode it shows the
-  settings but saves nothing.
-- Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
-  `[theme] name`, or a file of your own in `themes/` that starts from one of them.
-  **View → Theme…** switches while xdevcmd runs.
-- **Ctrl+Z** undoes the last rename, rename-many, move, new directory or new file,
-  after asking, and only while the disk still matches: nothing is overwritten or lost.
-  After a copy or a delete it says those cannot be undone.
-- **Shift+O**, Open with…: the rules for the file, the system's program, View, Edit.
-- "Run it?" can run a program in a terminal tab, where its output stays after it ends.
-  On Windows, a batch file is refused there when a file name holds a character
-  `cmd.exe` would act on (`&`, `%`, `^`…), so a name like `a&calc.txt` cannot start a
-  second command.
-- [Troubleshooting](docs/troubleshooting.md): known problems on each system and what
-  to do; F1 links to it.
 - Alt+B and Alt+F also go up and into a directory, because macOS Terminal.app sends
   Option+← and Option+→ as those, even with Option as Meta.
-- `xdevcmd --show-keys` prints each key, click and scroll as xdevcmd receives it, and what
-  it would do.
+- Click a directory's name in a pane's path, at the top, to go there.
+- Double-click a border to share it evenly between the two panes on either side of it;
+  with three or more, the others keep their size. The same for the terminal's top edge
+  and between shells in a terminal tab.
+- `xdevcmd --show-keys` prints each key, click and scroll as xdevcmd receives it, and
+  what it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
+- [Troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md):
+  known problems on each system and what to do; F1 links to it.
 
 ### Security
-- Alt+C and the user menu no longer type into a program run in a terminal tab; such a
-  tab has no shell, and it was taken for one at its prompt.
-- With `--root`, Open with… (Shift+O), F4 and F7 respect the root as Enter and F3 do;
-  F7 refuses a name that climbs out with `..`.
+- With `--root`, F4, F7 and Alt+F5 (pack) stay inside the root as Enter and F3 do: F4
+  no longer edits a link that points outside it, and F7 and Alt+F5 refuse a name that
+  climbs out with `..`. An archive reached through a link from inside the root to
+  outside it is not opened or unpacked.
 - Quick view of a picture refuses anything that is not a regular file: a FIFO named
   like a picture froze xdevcmd, and a link to `/dev/zero` read until memory ran out.
-- Undo removes a new directory tree bottom up, each directory only while empty, so a
-  file that appears meanwhile is never deleted with it.
-- Saving Settings is refused in read-only and restricted mode by the save itself, not
-  only by the dialog; a `config.toml` that is a link is written where it points.
-- A theme name with `:` is refused (on Windows `C:name` left the theme directory).
-- The temporary directory's "still running" marker is refreshed by a thread, so a long
-  editor session no longer lets a second xdevcmd remove files in use; a run directory
-  that has gone is never re-created under the same name.
 
 ### Fixed
-- `xdevcmd --screenshot … | head`, and any long output cut short by its reader, ended in
-  a panic; it now ends quietly, as `cat` does.
-- xdevcmd keeps its temporary files in one directory per run, removes it on exit, and at
-  start removes what a crashed or killed run left behind.
-- Theme files are looked for beside the config in use, including one given with
-  `--config`.
-- `o` over SSH into a Mac or a Windows machine opened the file on that machine's own
-  screen; now it says there is no screen here, as it did on Linux.
-- A file viewed from inside an archive is no longer left in the temporary directory
-  when xdevcmd ends with the viewer still open.
 - Colours on terminals without 24-bit colour. macOS Terminal.app before macOS 26 showed
   green and red backgrounds and hard-to-read text, because it reads 24-bit colour codes
-  as other attributes. xdevcmd now sends 24-bit colour only where the terminal is known to
-  take it and the 256-colour palette everywhere else; the Linux console gets a
-  16-colour theme. `[theme] colors` (`auto`, `truecolor`, `256`, `16`) or `XDEVCMD_COLORS`
-  sets it by hand.
+  as other attributes. xdevcmd now sends 24-bit colour only where the terminal is known
+  to take it and the 256-colour palette everywhere else; the Linux console gets a
+  16-colour theme. `[theme] colors` (`auto`, `truecolor`, `256`, `16`) or
+  `XDEVCMD_COLORS` sets it by hand.
+- `o` over SSH into a Mac or a Windows machine opened the file on that machine's own
+  screen; now it says there is no screen here, as it did on Linux.
+- xdevcmd keeps its temporary files in one directory per run, removes it on exit, and
+  at start removes what a crashed or killed run left behind, never one still in use.
+- Directories named relative to where xdevcmd was started are made absolute, so the
+  title and Backspace work from them.
+- `xdevcmd --screenshot … | head`, and any long output cut short by its reader, ended
+  in a panic; it now ends quietly, as `cat` does.
 
 ## [0.1.0] - 2026-11-06
 

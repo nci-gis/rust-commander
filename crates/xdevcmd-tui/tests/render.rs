@@ -1838,6 +1838,35 @@ fn the_root_holds_against_dotdot_backspace_and_symlinks() {
             assert!(!s.contains("Open with"), "{keys}: no menu for it\n{s}");
         }
     }
+    #[cfg(unix)]
+    {
+        // An archive reached through a link out of the root is not opened or unpacked,
+        // and Shift+F4 on a name that is a link out does not edit its target.
+        let outside = a.parent().unwrap().join("outside.zip");
+        fs::copy(a.join("keep.txt"), &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, a.join("inner/out.zip")).unwrap();
+        let s = shot_flags(&flags, "Enter,End,Enter", &a, &b);
+        assert!(s.contains("outside the root"), "entering it\n{s}");
+        let s = shot_flags(&flags, "Enter,End,A-F9", &a, &b);
+        assert!(s.contains("outside the root"), "unpacking it\n{s}");
+        let s = shot_flags(
+            &flags,
+            "Enter,S-F4,BS,BS,BS,BS,BS,BS,BS,BS,l,e,a,k,.,t,x,t,Enter",
+            &a,
+            &b,
+        );
+        assert!(
+            s.contains("outside the root"),
+            "Shift+F4 on a link out\n{s}"
+        );
+    }
+    // Alt+F5 packs only inside the root.
+    let s = shot_flags(&flags, "Down,A-F5,C-u,.,.,/,o,u,t,.,z,i,p,Enter", &a, &b);
+    assert!(s.contains("outside the root"), "packing out\n{s}");
+    assert!(
+        !a.parent().unwrap().join("out.zip").exists(),
+        "packed outside"
+    );
     for name in ["../made-outside", "inner/../../made-outside"] {
         let keys = format!(
             "F7,{},Enter",
@@ -2229,6 +2258,14 @@ fn enter_opens_only_known_documents_without_asking() {
     );
     let s = shot_keys("110x24", "Down,Down,Down,Enter", &a, &b);
     assert!(s.contains("Run it?"), "c.exe runs something\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_configured_opener_still_asks_for_a_type_it_does_not_know() {
+    let (a, b) = files(&["b.zzz"]);
+    let s = shot_cfg_env("[commands]\nopener = \"less\"\n", &[], "Down,Enter", &a, &b);
+    assert!(s.contains("Open it?"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

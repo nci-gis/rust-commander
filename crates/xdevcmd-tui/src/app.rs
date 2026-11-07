@@ -563,6 +563,15 @@ impl App {
                 }
             }
             if let Some(path) = self.pending_edit.take() {
+                // Every way to the editor comes here — F4, Shift+F4 on a name that
+                // exists, Open with… — so the root is checked here once. The list of
+                // names for renaming many lives in xdevcmd's own temporary directory.
+                let own = crate::tempfiles::dir().is_some_and(|d| path.starts_with(&d));
+                if !own && !xdevcmd_core::policy::get().allows(&path) {
+                    self.status = "that file is outside the root xdevcmd is confined to".into();
+                    self.pending_batch = None;
+                    continue;
+                }
                 self.edit_externally(terminal, &path)?;
                 if let Some((files, list)) = self.pending_batch.take() {
                     self.finish_batch(files, &list);
@@ -2169,7 +2178,19 @@ impl App {
                 self.bookmarks.retain(|b| *b != p);
                 self.save_bookmarks(format!("removed the bookmark for {}", tidy(&p)));
             }
+            // Checked again here: a link can be pointed elsewhere between the menu that
+            // offered this and the choice.
+            Cmd::OpenFile(p) if !xdevcmd_core::policy::get().allows(&p) => {
+                self.status = "that file is outside the root xdevcmd is confined to".into();
+            }
             Cmd::OpenFile(p) => self.launch(&p),
+            Cmd::RunInTerminal { argv, .. }
+                if argv
+                    .first()
+                    .is_some_and(|p| !xdevcmd_core::policy::get().allows(Path::new(p))) =>
+            {
+                self.status = "that file is outside the root xdevcmd is confined to".into();
+            }
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
             Cmd::ThemeMenu => self.theme_menu(),
             Cmd::Settings => self.open_settings(),
@@ -2819,7 +2840,12 @@ impl App {
                 }
                 self.reload_all();
                 self.with_files(|f| f.select_path(&target));
-                self.pending_edit = Some(target);
+                if xdevcmd_core::policy::get().allows(&target) {
+                    self.pending_edit = Some(target);
+                } else {
+                    // A name that exists as a link out of the root.
+                    self.status = "that file is outside the root xdevcmd is confined to".into();
+                }
             }
             InputKind::CopyAs { from } => {
                 let name = text.trim();
@@ -2878,6 +2904,18 @@ impl App {
                 let mut dest = expand_tilde(typed);
                 if dest.is_relative() {
                     dest = i.dir.join(dest);
+                }
+                // Under --root, as F7: no `..`, and the directory it goes in must be
+                // inside, links resolved.
+                let climbs = Path::new(typed)
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir));
+                let inside = dest
+                    .parent()
+                    .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
+                if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+                    self.status = "outside the root xdevcmd is confined to".into();
+                    return;
                 }
                 if xdevcmd_core::archive::format_of(&dest).is_none() {
                     self.modal = Some(Modal::Input(Input {
@@ -3533,9 +3571,9 @@ impl App {
         if let (Some(why), false) = (screen, configured) {
             return self.view_instead(&why);
         }
-        // A type it does not know as a document: what the system does with it is the
-        // system's choice, and some types run code. Asked, not done.
-        if !opener::document(&path) && !configured {
+        // A type it does not know as a document: what the system (or the configured
+        // opener) does with it is its choice, and some types run code. Asked, not done.
+        if !opener::document(&path) {
             return self.ask_to_open(path);
         }
         self.launch(&path);
@@ -4441,6 +4479,10 @@ impl App {
                 "Alt+F9 unpacks a .zip, .tar or .tar.gz \u{2014} the cursor is not on one".into();
             return;
         };
+        if !xdevcmd_core::policy::get().allows(&file) {
+            self.status = "that archive is outside the root xdevcmd is confined to".into();
+            return;
+        }
         // The whole archive, named by the empty path: listing it to find its top level
         // would be the freeze this avoids.
         let top = vec![String::new()];
@@ -4900,7 +4942,16 @@ impl App {
         };
         // A config.toml that is a link (dotfiles managed with stow, chezmoi) is
         // written where it points, so the link stays a link.
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let path = std::fs::canonicalize(&path)
+            .or_else(|_| {
+                // A link whose target does not exist yet (stow before the first save):
+                // write the target, so the link stays.
+                std::fs::read_link(&path).map(|t| match path.parent() {
+                    Some(dir) if t.is_relative() => dir.join(t),
+                    _ => t,
+                })
+            })
+            .unwrap_or(path);
         let before = match std::fs::read(&path) {
             Ok(b) => match String::from_utf8(b) {
                 Ok(t) => t,

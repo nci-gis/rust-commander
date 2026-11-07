@@ -13,16 +13,19 @@ your permissions. It was tested against attacks on all three before release.
   it claims is stopped.
 - **Huge images.** A picture claiming billions of pixels is refused before it is
   decoded.
-- **Running programs by accident.** Opening a program, a script, a launcher or an
-  installer with **Enter** or **o** asks "Run it?" first, and Cancel is the default.
-  Enter opens without asking only known document types (pictures, sound, video, PDF,
-  office files without macros, text); for any other type it asks "Open it?", since
-  what the system does with an unknown type is its choice, and some types run code.
+- **Running programs by accident.** Opening a program, a script, a launcher, an
+  installer or a disk image with **Enter** or **o** asks "Run it?" first, and Cancel
+  is the default. Enter opens without asking only known document types (pictures,
+  sound, video, PDF, text, and office files that cannot hold macros) or what your
+  `[[open]]` rules name; for any other type it asks "Open it?", since what the system
+  does with an unknown type is its choice, and some types run code. **o** is the
+  explicit "open with the system": it asks only for what runs.
 - **File names that a command line would misread.** Programs are started with their
   arguments as a list, never through a shell. On Windows, a batch file (`.bat`, `.cmd`)
   started in a terminal tab is refused when a file name holds a character `cmd.exe`
-  acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when the batch file's own folder has a
-  space in its name.
+  acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when there is a space anywhere in the
+  batch file's path (as in `C:\Program Files\nodejs\npm.cmd`), which `cmd.exe` can
+  misread.
 - **Typing into the wrong program.** Alt+C and the user menu type a line into the
   terminal only when a shell is at its prompt there, never into a program that owns
   it — an editor, a password prompt, a program run in a terminal tab.
@@ -38,7 +41,7 @@ licences (`cargo deny`) on every change and weekly.
 |---|---|---|---|
 | copy, move, delete, rename, edit | yes | no | no |
 | saves anything (session, bookmarks, File → Settings…) | yes | no | no |
-| open files in other programs, run programs | yes | no | no |
+| open files in other programs, run a file as a program | yes | no | no |
 | view and browse | yes | yes | yes |
 | terminal, clipboard | yes | yes | no |
 
@@ -57,11 +60,11 @@ sandboxing.
 
 ## The config file is trusted
 
-xdevcmd trusts its config file the way your shell trusts `.bashrc`: it names programs xdevcmd
-runs (the shell, the editor, the opener, your `[[open]]` and `[[menu]]` commands). Keep it yours. xdevcmd
-refuses one that every user can write (on Unix), and never reads a config from the
-directory you are browsing — but do not point `--config` or `XDEVCMD_CONFIG` at a file
-someone else can change.
+xdevcmd trusts its config file the way your shell trusts `.bashrc`: it names programs
+xdevcmd runs (the shell, the editor, the opener, your `[[open]]` and `[[menu]]`
+commands). Keep it yours. xdevcmd refuses one that every user can write (on Unix), and
+never reads a config from the directory you are browsing — but do not point `--config`
+or `XDEVCMD_CONFIG` at a file someone else can change.
 
 ## Opt-in features that run programs
 

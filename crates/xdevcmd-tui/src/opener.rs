@@ -127,19 +127,21 @@ pub fn runs_something(path: &Path) -> bool {
 }
 
 /// Whether `path` is a document that the system opens in a viewer or an editor, and so
-/// Enter opens without asking: pictures, sound, video, PDF, office files without
-/// macros, text. Anything else asks first, since what "open" does with an unknown type
-/// is the system's choice, and on every system some types run code.
+/// Enter opens without asking: pictures, sound, video, PDF, text, and office files of
+/// the kinds that cannot hold macros. Anything else asks first, since what "open" does
+/// with an unknown type is the system's choice, and on every system some types run
+/// code. Left out on purpose: web pages and SVG (scripts in the browser, and requests
+/// that tell someone the file was opened), XML (Windows hands some to Office), the
+/// older .doc/.xls/.ppt and OpenDocument files (macros).
 pub fn document(path: &Path) -> bool {
     const DOCS: &[&str] = &[
         // text and data
-        "txt", "md", "markdown", "rst", "log", "csv", "tsv", "json", "yaml", "yml", "toml", "xml",
-        "ini", "cfg", "conf", // pages
-        "pdf", "epub", "djvu", "html", "htm", "rtf", // office, without macros
-        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "odg", "pages",
-        "numbers", "key", // pictures
-        "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tif", "tiff", "ico", "heic", "heif",
-        "avif", "psd", "xcf", "raw", "cr2", "nef", "dng", // sound and video
+        "txt", "md", "markdown", "rst", "log", "csv", "tsv", "json", "yaml", "yml", "toml", "ini",
+        "cfg", "conf", // pages
+        "pdf", "epub", "djvu", "rtf", // office files that cannot hold macros
+        "docx", "xlsx", "pptx", "pages", "numbers", "key", // pictures
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "ico", "heic", "heif", "avif",
+        "psd", "xcf", "raw", "cr2", "nef", "dng", // sound and video
         "mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "mid", "midi", "mp4",
         "m4v", "mkv", "webm", "mov", "avi", "wmv", "mpg", "mpeg", "3gp", "flv", // fonts
         "ttf", "otf", "woff", "woff2",

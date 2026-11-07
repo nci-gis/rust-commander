@@ -250,6 +250,11 @@ impl FilePane {
     /// Browse `file` as a directory: at once if it is small, else from a thread, with a
     /// notice meanwhile.
     pub fn enter_archive(&mut self, file: &Path) {
+        // A link inside the root to an archive outside it: its contents are outside.
+        if !xdevcmd_core::policy::get().allows(file) {
+            self.notice = Some("that archive is outside the root xdevcmd is confined to".into());
+            return;
+        }
         let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
         if size < LIST_AT_ONCE {
             let listed = archive::list(file);
@@ -1245,12 +1250,16 @@ impl FilePane {
 }
 
 /// Where each directory of `cwd` lands in its title, drawn from `x0` as `full` elided
-/// to `room` cells: one rectangle per name, for the directories above `cwd`. A name
-/// hidden in the elided middle gets none; one cut by it is clickable on what shows.
+/// to `room` characters: one rectangle per name, for the directories above `cwd`. A
+/// name hidden in the elided middle gets none; one cut by it is clickable on what
+/// shows. Measured in cells, as the terminal draws: a CJK character takes two, a
+/// combining accent (as in macOS's decomposed file names) none.
 fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, PathBuf)> {
+    use unicode_width::UnicodeWidthChar;
     let n = full.chars().count();
-    // Where character `i` of `full` is drawn, as elide_middle lays it out.
-    let col = |i: usize| -> Option<usize> {
+    // Which character of the drawn text character `i` of `full` became, as
+    // elide_middle lays it out.
+    let at = |i: usize| -> Option<usize> {
         if n <= room {
             return Some(i);
         }
@@ -1265,6 +1274,15 @@ fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, Pa
             None
         }
     };
+    // The cell each drawn character starts at, and how wide it is.
+    let mut cells = Vec::new();
+    let mut x = 0usize;
+    for c in elide_middle(full, room).chars() {
+        let w = c.width().unwrap_or(0);
+        cells.push((x, w));
+        x += w;
+    }
+    let cell = |k: usize| cells.get(k).copied();
     let mut out = Vec::new();
     let mut prev: Option<usize> = None;
     let mut dirs: Vec<&Path> = cwd.ancestors().collect();
@@ -1292,10 +1310,10 @@ fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, Pa
         if d == cwd || start >= end {
             continue;
         }
-        let shown: Vec<usize> = (start..end).filter_map(col).collect();
+        let shown: Vec<(usize, usize)> = (start..end).filter_map(at).filter_map(cell).collect();
         if let (Some(a), Some(b)) = (shown.first(), shown.last()) {
-            let w = (b - a + 1) as u16;
-            out.push((Rect::new(x0 + *a as u16, y, w, 1), d.to_path_buf()));
+            let w = (b.0 + b.1).saturating_sub(a.0).max(1) as u16;
+            out.push((Rect::new(x0 + a.0 as u16, y, w, 1), d.to_path_buf()));
         }
     }
     out
@@ -1323,6 +1341,11 @@ mod tests {
             .map(|(r, d)| (r.x, r.width, d.to_str().unwrap()))
             .collect();
         assert_eq!(got, [(0, 1, "/"), (1, 3, "/home")]);
+        // Wide characters take two cells each: "日本" is four cells, and "src" after it
+        // starts at cell 6.
+        let c = crumbs(Path::new("/日本/src/x"), "/日本/src/x", 40, 0, 0);
+        let got: Vec<(u16, u16)> = c.iter().map(|(r, _)| (r.x, r.width)).collect();
+        assert_eq!(got, [(0, 1), (1, 4), (6, 3)]);
     }
     use std::io::Read as _;
 

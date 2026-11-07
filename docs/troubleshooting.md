@@ -71,10 +71,10 @@ arrive:
 → Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
 function keys**.
 
-**Green or red backgrounds, hard-to-read text** (0.1.0, then called rcmd, in
-Terminal.app before macOS 26). Terminal.app there cannot show 24-bit colour and misreads it. Fixed after
-0.1.0: xdevcmd now sends it 256 colours, so upgrading is the fix. With 0.1.0 itself,
-setting every `[theme]` colour to a palette number (`"0"`–`"255"`) avoids it.
+**Green or red backgrounds, hard-to-read text** in Terminal.app before macOS 26.
+Terminal.app there cannot show 24-bit colour and misreads it, so xdevcmd sends it 256
+colours. If you see this, `[theme] colors` or `XDEVCMD_COLORS` is probably set to
+`truecolor`: set it back to `auto`, or to `256`.
 
 **The mouse does nothing.** Check View → **Allow Mouse Reporting** (⌘R) is ticked; with
 it, clicks, the wheel, drags and double-clicks all reach xdevcmd. The pointer stays the

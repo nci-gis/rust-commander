@@ -1,9 +1,9 @@
 # Round 008: The logo in the app
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 7
 **Date started**: 2026-11-07
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
 
 ## Goal
 
@@ -35,9 +35,14 @@ or 16 colours the logo is fitted like every other cell (Round 001).
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** the colours were not seen by an
+agent; the owner saw the logo, found 24 px blocky, and `feat/polish` now draws the
+largest of 24, 32, 48 and 64 px the window has room for.
+
 **Learnings**:
 
--
+- **In half blocks a pixel is half a cell**: a sharper logo is a larger one, so the
+  size follows the window rather than being fixed.
 
 **Promotions**:
 

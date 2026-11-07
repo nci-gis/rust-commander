@@ -1,9 +1,9 @@
 # Round 006: Themes as files
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 4
 **Date started**: 2026-11-07
-**Date completed**:
+**Date completed**: 2026-11-07 (closed by the owner: "các round đã okay nhé, bro flip to Complete")
 
 ## Goal
 
@@ -53,10 +53,16 @@ CI once).
 
 ## Act
 
+**Unticked checks, and why the round closes anyway:** how the five themes look in a
+real terminal was not checked by an agent (`--screenshot` is text only); the owner has
+used the build and closed the round.
+
 **Learnings**:
 
--
+- **Testing the documentation's examples finds real bugs**: the docs' theme example
+  failed, which showed theme files were looked for beside the default config even when
+  `--config` named another.
 
-**Promotions**:
+**Promotions** (proposed; waiting on the owner):
 
 - [ ] → `reference/config.md`: theme files and where they are looked for

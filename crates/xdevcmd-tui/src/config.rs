@@ -621,7 +621,8 @@ pub fn named_theme(name: &str) -> Result<Theme, String> {
     if let Some(t) = crate::theme::built_in(name) {
         return Ok(t);
     }
-    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+    // `:` too: on Windows `C:name` would make the join leave the theme directory.
+    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') {
         return Err(format!("[theme] name = \"{name}\": not a theme name"));
     }
     let Some(path) = theme_dirs()

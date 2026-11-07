@@ -12,6 +12,7 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - [The terminal](#the-terminal)
 - [Mouse](#mouse)
 - [Menus and help](#menus-and-help)
+- [Keys a terminal does not send](#keys-a-terminal-does-not-send)
 
 ## Panes and tabs
 
@@ -48,8 +49,8 @@ xdevcmd for yours, or see [keys.md](keys.md).
 | Key | Does |
 |---|---|
 | **F3** | view (text or hex, with search) |
-| **F4** | edit in your editor (`$EDITOR`) |
-| **Enter** | open with its program: your `[[open]]` rule, else the system's (as Total Commander) |
+| **F4** | edit in your editor (`[commands] editor`, else `$VISUAL` or `$EDITOR`) |
+| **Enter** | open with its program: your `[[open]]` rule, else the system's (as Total Commander does); a type that is not a known document asks first |
 | **o** | open with the system's application |
 | **Shift+O** | open with…: your rules for this file, the system's program, view, edit |
 | **F5** / **F6** | copy / move to the other pane |
@@ -61,12 +62,15 @@ xdevcmd for yours, or see [keys.md](keys.md).
 | **Ctrl+Shift+F5** | make a link in the other pane |
 | **Alt+P** / **Alt+H** | permissions / SHA-256 checksum |
 
+- **In the viewer** (F3): **/** searches, **n** / **N** next / previous, **h** switches
+  text and hex, **w** wraps lines, **y** copies the selected lines (or the top one),
+  **Y** the screen, **q** or **Esc** closes.
 - **Enter on a program or script** asks "Run it?" (Cancel first). **Run in a terminal
   tab** shows its output and keeps it after the program ends; Enter or Esc closes the
   tab.
 - Where nothing can be opened on a screen — over SSH, without a desktop, in read-only
   mode — Enter views the file instead and says why. `enter = "view"` under `[files]`
-  makes Enter always view, as in xdevcmd 0.1.0.
+  makes Enter always view, as in 0.1.0.
 - **Ctrl+Z** undoes the last rename (one file or many), move, new directory or new
   file, after showing what it will do. It checks the disk first: a file renamed since,
   or a new directory with something in it now, is left alone. Copies and deletes are not
@@ -124,7 +128,8 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 
 ## Mouse
 
-- Click to select, double-click to open. **Ctrl+click** marks.
+- Click to select; double-click does what Enter does (into a directory, or open the
+  file). **Ctrl+click** marks.
 - Drag down a pane to mark a range. Drag files onto the other pane to copy or move.
 - Drag a border to resize. Right-click for a menu. The wheel scrolls.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.

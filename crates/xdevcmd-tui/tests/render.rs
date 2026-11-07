@@ -1784,6 +1784,27 @@ fn the_root_holds_against_dotdot_backspace_and_symlinks() {
             !read.contains("root:x:0:0"),
             "and nothing of it is shown\n{read}"
         );
+        // Open with…, F4 and F7 hold too, not only Enter and F3.
+        for keys in ["Enter,Down,Down,O", "Enter,Down,Down,F4"] {
+            let s = shot_flags(&flags, keys, &a, &b);
+            assert!(s.contains("outside the root"), "{keys}\n{s}");
+            assert!(!s.contains("Open with"), "{keys}: no menu for it\n{s}");
+        }
+    }
+    for name in ["../made-outside", "inner/../../made-outside"] {
+        let keys = format!(
+            "F7,{},Enter",
+            name.chars()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let s = shot_flags(&flags, &keys, &a, &b);
+        assert!(s.contains("outside the root"), "F7 {name}\n{s}");
+        assert!(
+            !a.parent().unwrap().join("made-outside").exists(),
+            "F7 {name} made it"
+        );
     }
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
@@ -2148,6 +2169,36 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
 }
 
 #[test]
+fn enter_opens_only_known_documents_without_asking() {
+    // A picture opens; a type it does not know asks first; an .exe runs, so "Run it?"
+    // everywhere (Wine on Linux and macOS).
+    let (a, b) = files(&["a.png", "b.zzz", "c.exe"]);
+    let s = shot_keys("110x24", "Down,Enter", &a, &b);
+    assert!(s.contains("would open"), "a.png opens\n{s}");
+    let s = shot_keys("110x24", "Down,Down,Enter", &a, &b);
+    assert!(
+        s.contains("Open it?") && s.contains("Cancel"),
+        "b.zzz asks\n{s}"
+    );
+    let s = shot_keys("110x24", "Down,Down,Down,Enter", &a, &b);
+    assert!(s.contains("Run it?"), "c.exe runs something\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn a_double_click_on_a_file_does_what_enter_does() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "", &a, &b);
+    let (x, y) = locate(&s, "victim");
+    let enter = shot_keys("110x24", &format!("click:{x}:{y},Enter"), &a, &b);
+    let double = shot_keys("110x24", &format!("click:{x}:{y},click:{x}:{y}"), &a, &b);
+    let status = |s: &str| s.lines().rev().nth(1).unwrap_or_default().to_string();
+    assert!(status(&enter).contains("would open"), "{enter}");
+    assert_eq!(status(&double), status(&enter), "{double}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn settings_works_with_the_mouse() {
     let (a, b) = fixture();
     let dir = a.parent().unwrap().join("settings-mouse");
@@ -2209,6 +2260,30 @@ fn settings_works_with_the_mouse() {
     let (dx, dy) = locate(&s0, "Ask before copy and move");
     let s = shot_with(&cfg, &format!("{open},wheel:{dx}:{dy}:1"), &a, &b);
     assert!(s.contains("Shift+F8 always deletes for good"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn settings_writes_through_a_linked_config_and_keeps_the_link() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("settings-link");
+    fs::create_dir_all(dir.join("dotfiles")).unwrap();
+    let real = write_config(&dir.join("dotfiles"), "[general]\nmenu_bar = true\n");
+    let link = dir.join("config.toml");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let s = shot_with(&link, "F9,Up,Up,Enter,Down,Space,Enter", &a, &b);
+    assert!(s.contains("settings saved"), "{s}");
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "still a link"
+    );
+    assert!(fs::read_to_string(&real)
+        .unwrap()
+        .contains("delete_to_trash = false"));
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

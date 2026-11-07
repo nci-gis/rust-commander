@@ -1001,7 +1001,6 @@ impl App {
 
     /// One turn of the event loop without input: lets a running job report in.
     pub fn tick(&mut self) {
-        crate::tempfiles::touch();
         self.pump_job();
         self.reap_terminals();
         self.background();
@@ -1698,8 +1697,9 @@ impl App {
                 }
                 f.go_to(i);
                 if double {
+                    // What Enter does: into a directory, or open the file.
                     if f.activate().is_some() {
-                        self.begin_view();
+                        self.enter_file();
                     }
                     return;
                 }
@@ -2708,6 +2708,18 @@ impl App {
                     return;
                 }
                 let first = xdevcmd_core::undo::first_missing(&target);
+                // Under --root: no `..` (create_dir_all would follow it out), and the
+                // directory it is made in must be inside, links resolved.
+                let climbs = Path::new(name)
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir));
+                let inside = first
+                    .parent()
+                    .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
+                if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+                    self.status = "outside the root xdevcmd is confined to".into();
+                    return;
+                }
                 let existed = target.exists();
                 match std::fs::create_dir_all(&target) {
                     Ok(()) => {
@@ -2935,6 +2947,9 @@ impl App {
 
     fn begin_edit(&mut self) {
         match self.current_file() {
+            Some(p) if !xdevcmd_core::policy::get().allows(&p) => {
+                self.status = "that file is outside the root xdevcmd is confined to".into();
+            }
             Some(p) => self.pending_edit = Some(p),
             None => self.status = "F4 edits a file, not a directory".into(),
         }
@@ -3431,6 +3446,10 @@ impl App {
     /// "Run it?" for a program, a script or a launcher: Cancel first, then, for a
     /// console program, a terminal tab (its output stays on screen), then the system.
     fn ask_to_run(&mut self, path: PathBuf) {
+        if !xdevcmd_core::policy::get().allows(&path) {
+            self.status = "that file is outside the root xdevcmd is confined to".into();
+            return;
+        }
         let name = Self::describe(std::slice::from_ref(&path));
         let mut items = vec![Item::cancel("Cancel", "Esc")];
         if opener::console_program(&path) {
@@ -3495,7 +3514,39 @@ impl App {
         if let (Some(why), false) = (screen, configured) {
             return self.view_instead(&why);
         }
+        // A type it does not know as a document: what the system does with it is the
+        // system's choice, and some types run code. Asked, not done.
+        if !opener::document(&path) && !configured {
+            return self.ask_to_open(path);
+        }
         self.launch(&path);
+    }
+
+    /// "Open it?" for a file whose type is not a known document: Cancel first, then the
+    /// system's program, then the viewer.
+    fn ask_to_open(&mut self, path: PathBuf) {
+        let name = Self::describe(std::slice::from_ref(&path));
+        let items = vec![
+            Item::cancel("Cancel", "Esc"),
+            Item::cmd(
+                format!("Open {name} with the system's program"),
+                "",
+                Cmd::OpenFile(path),
+                true,
+            ),
+            Item::act(
+                "View it",
+                self.footer_key(Action::View).unwrap_or_default(),
+                Action::View,
+                true,
+            ),
+        ];
+        self.status = format!("{name}: not a type xdevcmd knows as a document \u{2014} open it?");
+        self.modal = Some(Modal::Menu(Menu::new(
+            Some("Open it?".into()),
+            items,
+            self.pane_anchor(),
+        )));
     }
 
     /// Enter could not open the file: view it, and say why where it will be seen — in
@@ -3511,6 +3562,11 @@ impl App {
 
     /// Rule `i` of `[[open]]` on `path`.
     fn apply_rule(&mut self, i: usize, path: PathBuf) {
+        // Checked here as well as on Enter: Open with… and the mouse reach this too.
+        if !xdevcmd_core::policy::get().allows(&path) {
+            self.status = "that file is outside the root xdevcmd is confined to".into();
+            return;
+        }
         let Some(rule) = self.settings.config.open.get(i).cloned() else {
             return;
         };
@@ -3585,6 +3641,10 @@ impl App {
             self.status = "Open with\u{2026} is for a file".into();
             return;
         };
+        if !xdevcmd_core::policy::get().allows(&path) {
+            self.status = "that file is outside the root xdevcmd is confined to".into();
+            return;
+        }
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
@@ -4807,10 +4867,21 @@ impl App {
             self.status = "settings: nothing changed".into();
             return;
         }
+        // The dialog offers no Save in these modes; refused here too, not on its word.
+        if self.settings.mode.read_only() {
+            self.status = format!(
+                "{} mode \u{2014} xdevcmd writes nothing, settings included",
+                self.settings.mode.label()
+            );
+            return;
+        }
         let Some(path) = crate::config::path_in_use() else {
             self.status = "nowhere to save: no config location (HOME is not set)".into();
             return;
         };
+        // A config.toml that is a link (dotfiles managed with stow, chezmoi) is
+        // written where it points, so the link stays a link.
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
         let before = match std::fs::read(&path) {
             Ok(b) => match String::from_utf8(b) {
                 Ok(t) => t,

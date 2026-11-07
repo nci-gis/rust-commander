@@ -18,6 +18,16 @@ that heading and starts a new, empty one here. -->
   `%APPDATA%\xdevcmd\` and `%LOCALAPPDATA%\xdevcmd\` on Windows) and the environment
   variables (`XDEVCMD_CONFIG`, `XDEVCMD_STATE`, `XDEVCMD_COLORS`). Nothing is read from
   the old names. The repository stays `nci-gis/rust-commander`.
+- About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
+- **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
+  extension, else the system's program; programs, scripts and installers ask "Run
+  it?" first, and a type that is not a known document asks "Open it?". Over SSH,
+  without a desktop or in read-only mode it views the file and says why.
+  `[files] enter = "view"` keeps the old Enter. A double-click does what Enter does.
+- About: the credit sits at the bottom right, beside the close button.
+- Two actions given the same key in `[keys]` are now an error that names both; before,
+  the one written later silently took it.
+- The config documentation lists every file xdevcmd keeps, and where.
 
 ### Added
 - Two-key bindings: `"Alt+r Left"` in `[keys]` is Alt+R, then Left. Bindings that
@@ -30,10 +40,12 @@ that heading and starts a new, empty one here. -->
 - **Alt+J** also opens the directory history; a Mac cannot type Alt+↓.
 - `[[open]]` rules: by extension, view, edit, or a program (as a list, no shell), in a
   window or a terminal tab, for some systems only, or only where there is a screen.
-- **File → Settings…**: tabs for General, Files, Theme and Terminal; ←/→ to change,
-  Enter to save, or the mouse: click a tab, a check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are rewritten, comments kept;
-  the result is read back before it is written. Rows say which apply at the next start.
-  Not in read-only or restricted mode.
+- **File → Settings…**: tabs for General, Files, Theme and Terminal, and a Keys tab
+  that says how to rebind; ←/→ to change, Enter to save, or the mouse: click a tab, a
+  check box, a value's ‹ or ›, or a button. Only the changed lines of `config.toml` are
+  rewritten, comments kept; the result is read back before it is written. Rows say
+  which apply at the next start. In read-only and restricted mode it shows the
+  settings but saves nothing.
 - Themes: built-in `dark`, `light`, `ansi`, `blue` and `high-contrast`, chosen with
   `[theme] name`, or a file of your own in `themes/` that starts from one of them.
   **View → Theme…** switches while xdevcmd runs.
@@ -53,16 +65,21 @@ that heading and starts a new, empty one here. -->
   it would do.
 - On macOS, a character typed with Option in a file pane says once how to get Alt.
 
-### Changed
-- About shows xdevcmd's logo beside its text, drawn in the terminal as sharp pixel art.
-- **Enter on a file opens it**, as in Total Commander: with an `[[open]]` rule for its
-  extension, else the system's program; programs still ask "Run it?" first. Over SSH,
-  without a desktop or in read-only mode it views the file and says why.
-  `[files] enter = "view"` keeps the old Enter.
-- About: the credit sits at the bottom right, beside the close button.
-- Two actions given the same key in `[keys]` are now an error that names both; before,
-  the one written later silently took it.
-- The config documentation lists every file xdevcmd keeps, and where.
+### Security
+- Alt+C and the user menu no longer type into a program run in a terminal tab; such a
+  tab has no shell, and it was taken for one at its prompt.
+- With `--root`, Open with… (Shift+O), F4 and F7 respect the root as Enter and F3 do;
+  F7 refuses a name that climbs out with `..`.
+- Quick view of a picture refuses anything that is not a regular file: a FIFO named
+  like a picture froze xdevcmd, and a link to `/dev/zero` read until memory ran out.
+- Undo removes a new directory tree bottom up, each directory only while empty, so a
+  file that appears meanwhile is never deleted with it.
+- Saving Settings is refused in read-only and restricted mode by the save itself, not
+  only by the dialog; a `config.toml` that is a link is written where it points.
+- A theme name with `:` is refused (on Windows `C:name` left the theme directory).
+- The temporary directory's "still running" marker is refreshed by a thread, so a long
+  editor session no longer lets a second xdevcmd remove files in use; a run directory
+  that has gone is never re-created under the same name.
 
 ### Fixed
 - `xdevcmd --screenshot … | head`, and any long output cut short by its reader, ended in

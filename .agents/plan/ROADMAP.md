@@ -43,7 +43,7 @@ were done first:
 
 Rounds 001 and 003–009 are Complete (004–009 closed by the owner on 2026-11-07).
 [Round 010](cycles/Round_010.md), the mouse in Settings, is Complete (merged in #7);
-[Round 011](cycles/Round_011.md), the rename to xdevcmd, is in Review (merged in #8).
+[Round 011](cycles/Round_011.md), the rename to xdevcmd, is Complete (merged in #8).
 What is left, in order:
 
 1. ~~Land Rounds 010 and 011 in `dev`~~: done, #7 and #8.

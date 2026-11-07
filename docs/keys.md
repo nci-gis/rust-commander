@@ -26,7 +26,7 @@ These are the defaults. Press **F1** in xdevcmd to see your own, after any chang
 | `PageDown` | Page down |
 | `Home` | First entry |
 | `End` | Last entry |
-| `Enter` | Enter a directory, or view a file |
+| `Enter` | Enter a directory, or open a file with its program |
 | `Alt+Right` `Alt+f` | Enter the directory under the cursor |
 | `Alt+Left` `Alt+b` `Backspace` | Go up one directory |
 | `~` | Go to your home directory |

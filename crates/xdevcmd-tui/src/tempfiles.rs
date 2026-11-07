@@ -3,15 +3,16 @@
 //! Everything xdevcmd writes to the system's temporary directory — a file viewed from
 //! inside an archive, the list of names for renaming many in an editor — goes in one
 //! directory for the run, `xdevcmd-run-<pid>`, readable by the user only. While xdevcmd runs
-//! it refreshes a marker file there every few minutes; when xdevcmd ends it removes the
+//! a thread of its own refreshes a marker file there every few minutes — a thread, so
+//! the marker stays fresh while an editor has the terminal for hours; when xdevcmd ends it removes the
 //! directory; and when xdevcmd starts it removes the directories of runs that ended
 //! without doing so (killed, crashed, the power cut), recognised by a marker not
 //! refreshed for an hour. Only directories carrying the marker are ever removed, so
 //! nothing of anyone else's is touched.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime};
 
 const RUN_PREFIX: &str = "xdevcmd-run-";
 const MARKER: &str = ".xdevcmd-alive";
@@ -21,16 +22,33 @@ const STALE: Duration = Duration::from_secs(60 * 60);
 const TOUCH_EVERY: Duration = Duration::from_secs(5 * 60);
 
 static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
-static TOUCHED: Mutex<Option<Instant>> = Mutex::new(None);
 
-/// This run's directory, made on first use. `None` if it cannot be made.
+/// This run's directory, made on first use, with the thread that keeps its marker
+/// fresh. `None` if it cannot be made.
 pub fn dir() -> Option<PathBuf> {
-    DIR.get_or_init(|| make_in(&std::env::temp_dir())).clone()
+    DIR.get_or_init(|| {
+        let d = make_in(&std::env::temp_dir())?;
+        let marker = d.join(MARKER);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(TOUCH_EVERY);
+            // Rewritten only while it is there: never re-creates a removed directory.
+            if marker.exists() {
+                let _ = std::fs::write(&marker, b"");
+            }
+        });
+        Some(d)
+    })
+    .clone()
 }
 
-/// A path for `name` in this run's directory.
+/// A path for `name` in this run's directory — only while that directory is still
+/// the one this run made: a real directory, not a link. If it has gone, nothing is
+/// written in its place, so a directory someone else made under the same name is
+/// never used.
 pub fn file(name: &str) -> Option<PathBuf> {
-    dir().map(|d| d.join(name))
+    let d = dir()?;
+    let ok = std::fs::symlink_metadata(&d).is_ok_and(|m| m.is_dir());
+    ok.then(|| d.join(name))
 }
 
 /// Make a fresh run directory under `base`. `create` fails on anything already there,
@@ -61,21 +79,6 @@ fn make_in(base: &Path) -> Option<PathBuf> {
         }
     }
     None
-}
-
-/// Refresh the marker, at most every `TOUCH_EVERY`; called from the event loop.
-pub fn touch() {
-    let Some(Some(d)) = DIR.get() else {
-        return;
-    };
-    let Ok(mut last) = TOUCHED.lock() else {
-        return;
-    };
-    if last.is_some_and(|t| t.elapsed() < TOUCH_EVERY) {
-        return;
-    }
-    *last = Some(Instant::now());
-    let _ = std::fs::write(d.join(MARKER), b"");
 }
 
 /// Remove this run's directory: xdevcmd is ending.

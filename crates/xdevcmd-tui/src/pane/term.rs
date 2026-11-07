@@ -295,7 +295,14 @@ impl TermPane {
     /// The program that owns the terminal when it is not the shell — an editor, a
     /// pager, a password prompt. Anything typed into the terminal goes to it, not to
     /// the shell. `None` at a prompt, and wherever the system cannot say.
+    ///
+    /// A tab started for one program (`keeps`) has no shell at all: its process *is*
+    /// the program, so the shell-versus-foreground test would call it idle. It is
+    /// always busy, with that program, and nothing is typed into it.
     pub fn foreground_program(&self) -> Option<String> {
+        if self.keep {
+            return Some(self.label.clone());
+        }
         let pid = self.pid.load(Ordering::Relaxed);
         (pid != 0).then(|| foreground_of(pid)).flatten()
     }
@@ -604,8 +611,11 @@ mod tests {
 
 /// What `cmd.exe` acts on in a command line: command separators, redirection, its
 /// escape, variable expansion (`%`, and `!` where delayed expansion is on), grouping,
-/// quotes, and line ends.
-const CMD_SPECIAL: &[char] = &['&', '|', '<', '>', '^', '%', '!', '"', '(', ')', '\r', '\n'];
+/// quotes, line ends, and the characters it splits arguments at besides spaces (`,`
+/// `;` `=`), which the pty library does not quote.
+const CMD_SPECIAL: &[char] = &[
+    '&', '|', '<', '>', '^', '%', '!', '"', '(', ')', ',', ';', '=', '\r', '\n',
+];
 
 fn is_batch(p: &Path) -> bool {
     p.extension()
@@ -613,21 +623,19 @@ fn is_batch(p: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"))
 }
 
-/// Whether `program` will start a batch file, found as portable-pty finds it on
-/// Windows: the name as given in each `PATH` directory, then with each `PATHEXT`
+/// The batch file `program` will start, if it is one, found as portable-pty finds it
+/// on Windows: the name as given in each `PATH` directory, then with each `PATHEXT`
 /// extension — so a rule's `npm` is `npm.cmd`.
 fn resolves_to_batch(
     program: &std::ffi::OsStr,
     path: Option<&std::ffi::OsStr>,
     pathext: Option<&std::ffi::OsStr>,
-) -> bool {
+) -> Option<std::path::PathBuf> {
     let program = Path::new(program);
     if is_batch(program) {
-        return true;
+        return Some(program.to_path_buf());
     }
-    let Some(path) = path else {
-        return false;
-    };
+    let path = path?;
     let exts: Vec<String> = pathext
         .map(|e| {
             std::env::split_paths(e)
@@ -638,16 +646,16 @@ fn resolves_to_batch(
     for dir in std::env::split_paths(path) {
         let exact = dir.join(program);
         if exact.exists() {
-            return is_batch(&exact);
+            return is_batch(&exact).then_some(exact);
         }
         for ext in &exts {
             let c = dir.join(program).with_extension(ext);
             if c.exists() {
-                return is_batch(&c);
+                return is_batch(&c).then_some(c);
             }
         }
     }
-    false
+    None
 }
 
 /// Why `argv` may not run in a terminal tab, if it may not. On Windows a batch file is
@@ -663,8 +671,19 @@ pub fn batch_refusal(
     pathext: Option<&std::ffi::OsStr>,
 ) -> Option<String> {
     let program = argv.first()?;
-    if !windows || !resolves_to_batch(program, path, pathext) {
+    if !windows {
         return None;
+    }
+    let batch = resolves_to_batch(program, path, pathext)?;
+    // Windows runs a batch file as `cmd /c <the command line>`, and when that line
+    // starts with a quote — the program's path held a space, so it was quoted — cmd
+    // may strip the first and the last quote and run `C:\Program`.
+    if batch.to_string_lossy().chars().any(char::is_whitespace) {
+        return Some(format!(
+            "{} is a batch file in a folder whose name has a space, which cmd.exe can \
+             misread \u{2014} run it from the shell yourself",
+            batch.display()
+        ));
     }
     argv.iter().find_map(|a| {
         let a = a.to_string_lossy();
@@ -700,6 +719,9 @@ mod batch_tests {
         );
         for name in [
             "50%.txt",
+            "a,b",
+            "a;b",
+            "a=b",
             "x|y",
             "a^b",
             "q\"uote",
@@ -721,6 +743,10 @@ mod batch_tests {
             batch_refusal(&argv(&["tool.exe", "a&calc.txt"]), true, None, None),
             None
         );
+        // A batch file in a folder with a space: its quoted path is what cmd misreads.
+        let spaced = argv(&["C:\\Program Files\\x\\npm.cmd", "a.txt"]);
+        let why = batch_refusal(&spaced, true, None, None);
+        assert!(why.is_some_and(|w| w.contains("space")));
         // Only Windows runs batch files through cmd.exe.
         assert_eq!(batch_refusal(&run, false, None, None), None);
     }

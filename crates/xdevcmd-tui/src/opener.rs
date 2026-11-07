@@ -13,35 +13,141 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 
-/// Whether opening `path` runs it: a program, a script, a shortcut. Opening one of
-/// these is "run it", and that is asked before it happens.
+/// Whether opening `path` runs it: a program, a script, a shortcut, an installer, a
+/// disk image. Opening one of these is "run it", and that is asked before it happens.
+/// The lists are of what each system's own "open" turns into running something; they
+/// cannot be complete, which is why Enter opens without asking only
+/// [`document`]s.
 pub fn runs_something(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
     #[cfg(windows)]
     {
         const RUN: &[&str] = &[
-            "exe", "com", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi",
-            "msc", "lnk", "scr", "pif", "cpl", "hta", "reg", "url",
+            "exe",
+            "com",
+            "bat",
+            "cmd",
+            "ps1",
+            "psm1",
+            "psd1",
+            "ps1xml",
+            "psc1",
+            "vbs",
+            "vbe",
+            "js",
+            "jse",
+            "wsf",
+            "wsh",
+            "ws",
+            "wsc",
+            "sct",
+            "msi",
+            "msp",
+            "msc",
+            "lnk",
+            "scr",
+            "pif",
+            "cpl",
+            "hta",
+            "reg",
+            "url",
+            "inf",
+            "py",
+            "pyw",
+            "pyz",
+            "pyzw",
+            "jar",
+            "jnlp",
+            "appref-ms",
+            "application",
+            "xbap",
+            "chm",
+            "settingcontent-ms",
+            "library-ms",
+            "search-ms",
+            "diagcab",
+            "appx",
+            "appxbundle",
+            "msix",
+            "msixbundle",
+            "appinstaller",
+            "iso",
+            "img",
+            "vhd",
+            "vhdx",
+            "website",
+            "scf",
+            "gadget",
+            "xll",
         ];
-        path.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| RUN.contains(&e.to_ascii_lowercase().as_str()))
+        RUN.contains(&ext.as_str())
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let exec = std::fs::metadata(path)
             .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
-        // A .desktop file is a launcher: xdg-open runs the command inside it.
-        let desktop = path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("desktop"));
-        exec || desktop
+        // Launchers and what a desktop hands to an interpreter it may have: a .desktop
+        // file's command, `java -jar`, Wine for Windows programs, an AppImage; on macOS
+        // a .terminal file's command, a .command script, an Automator workflow.
+        const RUN: &[&str] = &[
+            "desktop",
+            "jar",
+            "jnlp",
+            "exe",
+            "msi",
+            "com",
+            "bat",
+            "appimage",
+            "run",
+            "terminal",
+            "command",
+            "tool",
+            "workflow",
+            "action",
+            "fileloc",
+            "inetloc",
+            "scpt",
+            "scptd",
+            "applescript",
+            "pkg",
+            "mpkg",
+        ];
+        exec || RUN.contains(&ext.as_str())
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = path;
+        let _ = (path, ext);
         true
     }
+}
+
+/// Whether `path` is a document that the system opens in a viewer or an editor, and so
+/// Enter opens without asking: pictures, sound, video, PDF, office files without
+/// macros, text. Anything else asks first, since what "open" does with an unknown type
+/// is the system's choice, and on every system some types run code.
+pub fn document(path: &Path) -> bool {
+    const DOCS: &[&str] = &[
+        // text and data
+        "txt", "md", "markdown", "rst", "log", "csv", "tsv", "json", "yaml", "yml", "toml", "xml",
+        "ini", "cfg", "conf", // pages
+        "pdf", "epub", "djvu", "html", "htm", "rtf", // office, without macros
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "odg", "pages",
+        "numbers", "key", // pictures
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tif", "tiff", "ico", "heic", "heif",
+        "avif", "psd", "xcf", "raw", "cr2", "nef", "dng", // sound and video
+        "mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "mid", "midi", "mp4",
+        "m4v", "mkv", "webm", "mov", "avi", "wmv", "mpg", "mpeg", "3gp", "flv", // fonts
+        "ttf", "otf", "woff", "woff2",
+    ];
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| DOCS.contains(&e.to_ascii_lowercase().as_str()))
+        && !runs_something(path)
 }
 
 /// Why the system's program cannot open anything from here; `None` when it can. The

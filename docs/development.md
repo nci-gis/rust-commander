@@ -13,7 +13,7 @@ Needs Rust 1.88 or newer (`rustup`). Nothing needs root.
 ## Check before you push
 
 ```bash
-cargo test                                         # about 300 tests, ~15 s
+cargo test                                         # about 400 tests, ~30 s
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 cargo fmt --check
@@ -61,6 +61,9 @@ cargo install --locked resvg   # once
 scripts/icons.sh
 ```
 
+`scripts/icons.sh` also needs `python3`. `scripts/logo_pixels.py` redraws icon.svg's
+shapes on whole pixels by hand, so change it too when the picture changes.
+
 On Windows, `build.rs` puts the icon and the version details into `xdevcmd.exe`. It needs
 the Windows SDK's `rc.exe` (or MinGW's `windres`); without one it warns and builds
 without the icon, unless `XDEVCMD_REQUIRE_ICON=1`, which CI and releases set.
@@ -83,8 +86,7 @@ gh workflow run ci --ref feat/topic
 ```
 
 The binaries are under that run's **Artifacts** (the macOS one runs on Intel and Apple
-Silicon). GitHub offers this only once the workflow with `workflow_dispatch` is on
-`main`; before that, a draft pull request into `dev` gets the same builds.
+Silicon). A draft pull request into `dev` gets the same builds.
 
 ## Releasing
 
@@ -113,7 +115,8 @@ newest heading of `CHANGELOG.md`, in the same commit. A release then takes four 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
    dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (glibc
    and static musl), macOS (ARM and Intel) and Windows, and opens a **draft** release with
-   the archives, `SHA256SUMS`, `THIRD-PARTY.md` and that CHANGELOG section as its notes.
+   the archives (each holding `LICENSE`, `README.md` and `THIRD-PARTY.md`),
+   `SHA256SUMS`, and that CHANGELOG section as its notes.
    Read it, then Publish.
 
 CI runs on pushes to `dev` and `main` and on pull requests into them; the `release`

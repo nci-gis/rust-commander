@@ -1,9 +1,9 @@
 # Round 011: One name — rcmd becomes xdevcmd
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 8
 **Date started**: 2026-11-07 (owner: "okay, xdevcmd. đổi tên trước nhé rồi mới release")
-**Date completed**:
+**Date completed**: 2026-11-07 (owner tested the builds: "okay rồi nhé"; merged in #8)
 
 ## Goal
 
@@ -69,9 +69,20 @@ Record what you could **not** verify as explicitly as what you could.
 
 ## Act
 
+**Unticked check, and why the round closes anyway:** the release workflow's new file
+names run only with the tag; they were read, and the tag is next.
+
 **Learnings**:
 
-- ...
+- **Check a name everywhere before choosing it**: crates.io, Homebrew formulae *and*
+  casks, AUR, scoop, winget, distribution packages, GitHub. Both old names were taken
+  where it mattered, one by a competitor in the same category.
+- **A rename with no users is a mechanical replace plus a hand-drawn wordmark**; the
+  history files (rounds, memory, logs, the released CHANGELOG section) keep the old
+  name, so the record stays true.
+- The About logo went through two rounds of owner feedback on this branch's heels
+  (#10): smoothing blurs at two pixels a cell, so it is pixel art; and the owner wants it
+  as tall as the text, so it is one 14 px logo.
 
 **Promotions**:
 

@@ -43,26 +43,42 @@ Then, either way:
 
 Added by the owner before the next release (2026-11-08), not started:
 
-- [ ] **Quit while the terminal has focus.** Today F10, q and Ctrl+Q go to the shell
-      there (they must: htop quits on F10, nano and others use Ctrl+Q), so the way out is
-      F12 back to the panes, then F10. Proposed: F10 quits xdevcmd when the shell sits
-      idle at its prompt (the test Alt+C already uses), and goes to the program when one
-      is running; File → Quit with the mouse works anywhere.
-- [ ] **Save on every way out.** Already: F10, q and Ctrl+Q save the session after the
-      loop, and it is autosaved every 5 s (`[general] autosave_secs`) for the ways that
-      kill xdevcmd. To add: the signal ways below save too.
-- [ ] **A terminal closed under a running job.** Today nothing catches it: SIGHUP (or
-      Windows' close event) kills xdevcmd at once. A file being *replaced* is safe (its
-      temporary copy is left beside it, hidden); a *new* file being written is left
-      truncated **under its real name**, looking complete; the session loses up to 5 s.
-      Proposed: (1) every copy writes under a temporary name and renames at the end, so
-      even a kill leaves no truncated file under a real name; (2) catch SIGHUP, SIGTERM
-      and Windows' close event (`ctrlc` with its termination feature, or `signal-hook`),
-      then cancel jobs (workers remove their temporary files), save the session, exit;
-      (3) remember unfinished temporary files in the state directory and remove the
-      ones still there at the next start.
+- ~~Quit while the terminal has focus~~ — dropped by the owner: "behavior ko consistent
+  thì dễ confuse hơn là hữu ích". F12, then F10, stays the way out.
+- [ ] **Running jobs at the end, two cases kept apart** (owner: "Phân biệt … thoát app
+      properly … tắt terminal"). The debate, and the proposal:
 
-## Do
+  **What can be done with a file being written when xdevcmd stops**
+
+  | | Way | A kill (`kill -9`, power cut) leaves | Litter | Used by |
+  |---|---|---|---|---|
+  | A | write under the real name (today, for a new file) | a truncated file **under its real name**, looking complete | none | Total Commander, `cp` |
+  | B | write under a temporary name beside it, rename at the end (today, for a replacement and for extraction) | a hidden `.name.xdevcmd-part-PID-N`; the real name absent or untouched | a hidden file per interrupted copy | rsync, FreeFileSync (`.ffs_tmp`) |
+  | C | write under the real name with an impossible date until done | a truncated file under its real name, with a 1980 date | none | robocopy (and `/Z` to resume) |
+  | D | catch the signal and clean up | — only for what can be caught: SIGHUP (terminal closed, SSH lost), SIGTERM, Windows' close event (5 s to finish); never `kill -9` or a power cut | — | most daemons |
+
+  Proposed: **B for every copy, plus a journal, plus D**. B is the only way a wrong file
+  never sits under a real name, whatever kills xdevcmd; its litter is handled by a
+  journal: each temporary name (and rename-many's temporary names, which are the
+  user's own files under another name) is noted in the state directory before it is
+  made and crossed out once renamed or removed; at the next start, entries whose
+  process is gone are cleaned — a part file removed, a rename-many name put back. D
+  makes the usual cases tidy at once.
+
+  **Quitting properly (F10, q, Ctrl+Q) with jobs running** — today: "Quit? … cancel
+  them and quit"; then up to 5 s for the workers to remove their part files, and xdevcmd
+  quits even if one is still stuck (a hung network drive). Proposed: keep the question;
+  then "stopping…" until every worker has really finished cleaning; after 5 s, ask
+  again ("still stopping: quit anyway?"), and what is left goes to the journal. The
+  session is saved.
+
+  **The terminal closed under a job** — nobody to ask, the screen gone. Proposed: cancel
+  every job, let workers remove their part files (at most 2 s; Windows allows 5), save
+  the session, exit without touching the terminal. Not "finish in the background"
+  (nobody could answer an overwrite question, and nobody would know it is still
+  running); perhaps later as a setting for long copies over SSH.
+
+## Do## Do
 
 - 2026-11-08, the owner's terms for this round: "nhánh này chỉ làm test local, ko ci
   và chưa có plan release next version" and "dùng 1-2 weeks đã" — work and tests stay

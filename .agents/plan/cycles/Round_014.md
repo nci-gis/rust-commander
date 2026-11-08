@@ -78,6 +78,37 @@ Added by the owner before the next release (2026-11-08), not started:
   (nobody could answer an overwrite question, and nobody would know it is still
   running); perhaps later as a setting for long copies over SSH.
 
+- [ ] **Safe operations, the owner's shape** (2026-11-08: "thêm 1 settings … Safe
+      Operation … nếu bật thì mới dùng đề xuất … ngược lại dùng như hiện tại"; Help says
+      which functions it covers; the docs say how it works, its limits, and force kill;
+      and perhaps "session state … lần khởi động tiếp theo có thể báo, hỏi người dùng
+      tiếp tục"). Proposed refinement, waiting on the owner:
+  - `[general] safe_operations = true` (Settings → General). **On**: every copy writes a
+    temporary name and renames at the end; a journal in the state directory notes each
+    temporary name and each interrupted job; the next start cleans what a dead run left
+    and offers to resume. **Off**: as 0.2.1.
+  - Kept **always**, setting or not, because turning them off would bring a data loss
+    back, at no gain: a replacement written under a temporary name (0.2.1's fix: a
+    cancel used to lose old and new), extraction the same, the Linux trash's record
+    first, renames that never replace. And catching SIGHUP, SIGTERM and Windows' close
+    event to cancel, clean and save the session: it only tidies up.
+  - Covered, said in Help (F1) and the docs: F5 copy, F6 move (across drives: copy then
+    delete per file), Shift+F5 copy as, Alt+Y sync, F5/Alt+F9 extract, Alt+F5 pack,
+    Shift+F2 rename many (its temporary names are the user's files: put back, never
+    removed). Not coverable: Shift+F8 (nothing to keep), F4 (the editor writes).
+  - **Resume** looks feasible thanks to item 18: the journal keeps the job (kind,
+    sources, destination); at the next start "A copy of 120 files to … was interrupted.
+    Continue / Discard"; Continue runs the same job with "replace only if older", so
+    what was done is skipped in a moment and the file cut short starts again. A move
+    resumes on the sources still there; a delete on what is left. Not resumed: a file
+    from its middle (whole files only), extraction and packing (started again).
+  - Docs (a "Safe operations" section in docs/security.md, a line in the guide): how it
+    works; what force kill (`kill -9`, power cut) leaves and how the next start cleans
+    it; limits — space for a replacement until it is renamed, file systems where a
+    rename into place is not allowed or not atomic (some network and FUSE ones), part
+    files not hidden on Windows (a leading dot hides nothing there), a run that never
+    starts again on that machine leaves its part files.
+
 ## Do## Do
 
 - 2026-11-08, the owner's terms for this round: "nhánh này chỉ làm test local, ko ci

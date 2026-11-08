@@ -1829,9 +1829,16 @@ impl App {
                 Pane::Term(t) => self.term_shown && t.bar_button_at(x, y),
                 Pane::Files(f) => f.bar_button_at(x, y),
             });
+            // Nor a directory's name in a pane's title: a pane split off below (Alt+D)
+            // has its title on the boundary's row, and a click there means that directory
+            // (0.2.1 took it for a drag). The rest of the row still moves the boundary.
+            let shown: Vec<PaneId> = self.rects.iter().map(|(id, _)| *id).collect();
+            let on_crumb = self.panes.iter().any(|(id, p)| {
+                shown.contains(id) && p.as_files().is_some_and(|f| f.crumb_at(x, y).is_some())
+            });
             let mut dividers = Vec::new();
             // Zoomed, the layout's borders are not on screen, so none can be grabbed.
-            if !on_tab_button && self.zoom.is_none() {
+            if !on_tab_button && !on_crumb && self.zoom.is_none() {
                 self.tree.dividers(self.main, &mut dividers);
             }
             // A double-click on a boundary shares it evenly between the two panes on

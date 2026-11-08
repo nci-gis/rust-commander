@@ -131,6 +131,14 @@ branch until the owner has used 0.2.1 for a week or two; not started:
 
 ## Do## Do
 
+- 2026-11-08, a bug the owner found in 0.2.1 while using it: in a pane split off below
+  (Alt+D), clicking a directory in the title's path did nothing. That title sits on the
+  boundary's row, and dividers are hit-tested before panes ("both border rows grab
+  it"), so the click started a drag. A click on a crumb of a shown pane now wins, as the
+  tab bar's buttons already did; the rest of the row still drags. Test:
+  `a_click_on_the_title_of_a_pane_split_off_below_goes_there_too` (fails without the
+  fix).
+
 - 2026-11-08, **paused** at the owner's word: "hoạt động tốt trên macOS rồi nhé … tạm dừng
   develop ở đây, mình trải nghiệm v0.2.1 1-2 tuần sau đó get back". The owner confirmed
   on macOS the Alt+X keys and the terminal's name. Where it stands: everything is on

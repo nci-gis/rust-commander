@@ -430,6 +430,33 @@ fn a_click_on_a_directory_in_the_title_goes_there() {
 }
 
 #[test]
+fn a_click_on_the_title_of_a_pane_split_off_below_goes_there_too() {
+    // Alt+D puts the new pane's title on the boundary's row, which a click used to take
+    // for the start of a drag (0.2.1).
+    let (a, b) = fixture();
+    let parent = a.parent().unwrap();
+    let name = parent.file_name().unwrap().to_string_lossy().into_owned();
+    let needle = format!("{name}{}", std::path::MAIN_SEPARATOR);
+    let s = shot_keys("110x30", "Alt+d", &a, &b);
+    // The second title on the left holding the path: the pane below.
+    let (y, line) = s
+        .lines()
+        .enumerate()
+        .skip(2)
+        .find(|(_, l)| l.contains(&needle) && l.contains('\u{250c}'))
+        .expect("the lower pane's title");
+    let byte = line.find(&needle).unwrap();
+    let x = line[..byte].chars().count() + 1;
+    let s = shot_keys("110x30", &format!("Alt+d,click:{x}:{y}"), &a, &b);
+    let title = s.lines().nth(y).unwrap();
+    assert!(
+        title.contains(&format!("{name} ")),
+        "the lower pane shows the parent\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn a_double_click_on_a_border_shares_it_evenly() {
     let (a, b) = fixture();
     let border = |s: &str| {

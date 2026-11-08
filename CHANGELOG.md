@@ -41,6 +41,11 @@ that heading and starts a new, empty one here. -->
 - **F10 with jobs running waits until they have cleaned up**, and asks again if one is
   stuck after five seconds, instead of quitting under it.
 
+### Fixed
+- **A click on a directory in the title of a pane split off below (Alt+D) did nothing**:
+  that title sits on the boundary between the panes, and the click started a drag of
+  the boundary instead. The names now take the click; the rest of the row still drags.
+
 ## [0.2.1] - 2026-11-07
 
 ### Added

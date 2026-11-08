@@ -386,7 +386,8 @@ impl App {
             quick_image: None,
             decoding: None,
             graphics: crate::graphics::Protocol::Blocks,
-            cell_px: (8, 16),
+            // VT340's cell, which Windows Terminal and xterm also use for sixel.
+            cell_px: (10, 20),
             probe: crate::graphics::Probe::default(),
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             graphic_want: None,
@@ -4959,12 +4960,22 @@ impl App {
         // The terminal's own pictures are decoded at its resolution, a cell's pixels each;
         // half blocks at two pixels a cell.
         let own = self.graphics != crate::graphics::Protocol::Blocks && self.interactive;
-        let (cw, ch) = self.cell_px;
+        // Sixel is drawn pixel for pixel, so at the cell's own size. Kitty and iTerm2 fit
+        // the picture to its cells themselves: sent at twice the density, it stays sharp
+        // on a high-density screen and where the cell's size could only be guessed.
+        let density = if self.graphics == crate::graphics::Protocol::Sixel {
+            1
+        } else {
+            2
+        };
+        let (cw, ch) = (self.cell_px.0 * density, self.cell_px.1 * density);
         let size = if own {
-            (
-                inner.width.saturating_mul(cw),
-                inner.height.saturating_mul(ch),
-            )
+            // At most 2048 pixels a side: what goes through SSH stays reasonable.
+            let (w, h) = (
+                inner.width.saturating_mul(cw).min(2048),
+                inner.height.saturating_mul(ch).min(2048),
+            );
+            (w, h)
         } else {
             (inner.width, inner.height)
         };

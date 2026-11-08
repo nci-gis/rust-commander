@@ -111,6 +111,14 @@ Added by the owner before the next release (2026-11-08), not started:
 
 ## Do## Do
 
+- 2026-11-08, the owner over SSH: pictures shown, but smaller and blurry ("size ảnh và
+  resolution bị giảm, nên ảnh rất mờ"). With no answer to the cell-size question the
+  guess was 8×16, smaller than real cells; Kitty and iTerm2 then scaled a small picture
+  up. Now Kitty and iTerm2 get the picture at twice the cell density (at most 2048 px a
+  side) and scale it down themselves; Kitty is sent as PNG (`f=100`), a fraction of raw
+  RGB's bytes over SSH; sixel, drawn pixel for pixel, guesses VT340's 10×20 cell, which
+  Windows Terminal and xterm use. Not seen on a real screen yet.
+
 - 2026-11-08, safe operations built (owner: "On by default nếu ko ảnh hưởng nặng … ngược
   lại off"). SIGHUP/SIGTERM through `signal-hook` (in the tree via crossterm): cancel,
   two seconds to clean up, save, end; a second signal ends at once (Unix; Windows' close

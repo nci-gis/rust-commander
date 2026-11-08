@@ -455,10 +455,10 @@ fn quick_view_draws_a_kitty_picture_once_and_removes_it_under_a_dialog() {
     x.wait_for("a ");
     x.send(DOWN);
     x.send(b"\x1bq"); // Alt+Q: quick view in the other pane
-    wait_bytes(&x, "\x1b_Ga=T,f=24,", 1);
+    wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
     // Drawn once: frames that change nothing do not send it again.
     std::thread::sleep(Duration::from_millis(1500));
-    wait_bytes(&x, "\x1b_Ga=T,f=24,", 1);
+    wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
     let sent = String::from_utf8_lossy(&x.raw.lock().unwrap())
         .matches("\x1b_Ga=T,")
         .count();
@@ -468,7 +468,7 @@ fn quick_view_draws_a_kitty_picture_once_and_removes_it_under_a_dialog() {
     wait_bytes(&x, "\x1b_Ga=d,d=I,", 1);
     // ...and comes back when the dialog closes.
     x.send(b"\x1b");
-    wait_bytes(&x, "\x1b_Ga=T,f=24,", 2);
+    wait_bytes(&x, "\x1b_Ga=T,f=100,", 2);
     x.quit();
 }
 

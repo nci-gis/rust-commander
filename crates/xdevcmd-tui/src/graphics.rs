@@ -163,22 +163,21 @@ pub fn kitty_delete(id: u32) -> Vec<u8> {
     format!("\x1b_Ga=d,d=I,i={id},q=2\x1b\\").into_bytes()
 }
 
-/// Kitty: raw RGB, base64, in chunks of 4096 (the protocol's limit), scaled by the
-/// terminal to the cells given; C=1 keeps the cursor where it is.
+/// Kitty: the picture as PNG (f=100), base64, in chunks of 4096 (the protocol's limit),
+/// fitted by the terminal to the cells given; C=1 keeps the cursor where it is. PNG
+/// rather than raw RGB: a fraction of the bytes, which matters over SSH.
 fn kitty(pic: &Picture, cols: u16, rows: u16, id: u32) -> Vec<u8> {
-    let raw: Vec<u8> = pic.rgb.iter().flatten().copied().collect();
-    let data = base64(&raw);
+    let Ok(png) = xdevcmd_core::image::to_png(pic) else {
+        return Vec::new();
+    };
+    let data = base64(&png);
     let mut out = Vec::with_capacity(data.len() + 256);
     let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
     for (i, chunk) in chunks.iter().enumerate() {
         let more = u8::from(i + 1 < chunks.len());
         if i == 0 {
             out.extend_from_slice(
-                format!(
-                    "\x1b_Ga=T,f=24,s={},v={},c={cols},r={rows},i={id},q=2,C=1,m={more};",
-                    pic.width, pic.height
-                )
-                .as_bytes(),
+                format!("\x1b_Ga=T,f=100,c={cols},r={rows},i={id},q=2,C=1,m={more};").as_bytes(),
             );
         } else {
             out.extend_from_slice(format!("\x1b_Gm={more};").as_bytes());
@@ -363,16 +362,20 @@ mod tests {
     }
 
     #[test]
-    fn kitty_sends_raw_rgb_in_chunks_and_can_remove_it() {
-        let p = pic(64, 64); // 12,288 bytes, base64 16,384: four chunks
+    fn kitty_sends_a_png_in_chunks_and_can_remove_it() {
+        // Noise, so the PNG does not shrink to one chunk.
+        let mut p = pic(96, 96);
+        for (i, px) in p.rgb.iter_mut().enumerate() {
+            *px = [(i * 7) as u8, (i * 13) as u8, (i * 31) as u8];
+        }
         let s = String::from_utf8(encode(Protocol::Kitty, &p, 10, 5, 7)).unwrap();
         assert!(
-            s.starts_with("\x1b_Ga=T,f=24,s=64,v=64,c=10,r=5,i=7,q=2,C=1,m=1;"),
+            s.starts_with("\x1b_Ga=T,f=100,c=10,r=5,i=7,q=2,C=1,m=1;iVBORw0KGgo"),
             "{}",
             &s[..60]
         );
-        assert_eq!(s.matches("\x1b_G").count(), 4);
-        assert!(s.ends_with("\x1b_Gm=0;".to_string().as_str()) || s.contains("\x1b_Gm=0;"));
+        assert!(s.matches("\x1b_G").count() > 1, "in chunks");
+        assert!(s.contains("\x1b_Gm=0;"));
         assert!(s.ends_with("\x1b\\"));
         assert_eq!(
             String::from_utf8(kitty_delete(7)).unwrap(),

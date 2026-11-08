@@ -484,8 +484,23 @@ impl Worker {
             return Answer::Abort;
         }
         // The UI has gone away if this fails, and continuing to touch the filesystem
-        // without anyone able to stop us is the one thing we must not do.
-        self.answers.recv().unwrap_or(Answer::Abort)
+        // without anyone able to stop us is the one thing we must not do. While it
+        // waits, the journal keeps showing the job is alive (on Windows a journal left
+        // untouched for two minutes counts as a dead run's).
+        loop {
+            match self
+                .answers
+                .recv_timeout(std::time::Duration::from_secs(10))
+            {
+                Ok(a) => return a,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(j) = self.journal.as_mut() {
+                        j.touch();
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Answer::Abort,
+            }
+        }
     }
 
     fn note_error(&mut self, path: &Path, e: &io::Error) {

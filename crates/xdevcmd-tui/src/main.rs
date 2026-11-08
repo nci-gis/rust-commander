@@ -344,8 +344,11 @@ fn main() -> Result<()> {
     // What the terminal can draw, asked before anything reads its replies; over SSH the
     // environment rarely says. Not inside tmux, which answers for itself.
     #[cfg(unix)]
-    if std::env::var_os("TMUX").is_none() && app.settings_images_auto() {
-        app.probe = graphics::probe(Duration::from_millis(300));
+    if std::env::var_os("TMUX").is_none() && app.settings_images_probe() {
+        // Ends as soon as the device attributes come, which every terminal answers;
+        // long enough that a slow SSH link's replies are not left for crossterm to read
+        // as keys.
+        app.probe = graphics::probe(Duration::from_millis(1500));
     }
     let mut terminal = ratatui::Terminal::new(
         quiet::Quiet::new(ratatui::backend::CrosstermBackend::new(stdout())).with_depth(depth),

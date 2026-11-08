@@ -279,6 +279,9 @@ pub struct App {
     /// The picture this frame wants drawn by the terminal, and the one it shows now.
     graphic_want: Option<Graphic>,
     graphic_shown: Option<Graphic>,
+    /// What the last frame has in the cells the shown picture covers, to write back
+    /// when an iTerm2 or sixel picture (which is cells) is taken away.
+    under_graphic: Vec<(u16, u16, ratatui::buffer::Cell)>,
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
@@ -392,6 +395,7 @@ impl App {
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             graphic_want: None,
             graphic_shown: None,
+            under_graphic: Vec::new(),
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
             pending_view: None,
@@ -641,9 +645,10 @@ impl App {
             let _ = signal_hook::flag::register_conditional_default(sig, self.hangup.clone());
             let _ = signal_hook::flag::register(sig, self.hangup.clone());
         }
-        if self.settings.config.general.safe_operations {
-            self.recover_interrupted();
-        }
+        // Whatever the setting is now: what a killed run left (rename many's files under
+        // temporary names above all) is put right even if safe operations were turned
+        // off since. Without journals this finds nothing.
+        self.recover_interrupted();
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
@@ -1173,11 +1178,12 @@ impl App {
         self.on_mouse(m);
     }
 
-    /// One turn of the event loop without input: lets a running job report in.
-    /// Pictures are left to the terminal's own choice ("auto"): worth asking it.
+    /// Pictures may be drawn by the terminal itself: worth asking it, at start-up, what
+    /// it draws and how big its cells are (also when a protocol is chosen by hand, for
+    /// the cell size).
     #[cfg(unix)]
-    pub fn settings_images_auto(&self) -> bool {
-        self.settings.config.viewer.images == "auto"
+    pub fn settings_images_probe(&self) -> bool {
+        self.settings.config.viewer.images != "blocks"
     }
 
     /// A job is working and not waiting on a question: a screenshot (the tests) waits
@@ -1187,6 +1193,7 @@ impl App {
         matches!(&self.modal, Some(Modal::Job(j)) if working(j)) || self.jobs.iter().any(working)
     }
 
+    /// One turn of the event loop without input: lets a running job report in.
     pub fn tick(&mut self) {
         self.pump_job();
         self.reap_terminals();
@@ -5041,8 +5048,8 @@ impl App {
         };
         if own {
             // The terminal draws it, after this frame (sync_graphics); not under a dialog,
-            // where it would be drawn over the dialog.
-            if self.modal.is_none() {
+            // where it would be drawn over the dialog, nor in a box too small to hold it.
+            if self.modal.is_none() && inner.width > 0 && inner.height > 0 {
                 let cols = (pic.width as u16).div_ceil(cw.max(1)).clamp(1, inner.width);
                 let rows = (pic.height as u16)
                     .div_ceil(ch.max(1))
@@ -5226,8 +5233,15 @@ impl App {
                 tidy(orig)
             ));
         }
+        // A permanent delete is not offered again: it would go on with one Enter, where
+        // Shift+F8 itself takes only Y.
         let resumable = found.into_iter().find(|i| {
-            matches!(i.kind.as_str(), "copy" | "move" | "delete") && !i.sources.is_empty()
+            let kind_ok = match i.kind.as_str() {
+                "copy" | "move" => true,
+                "delete" => i.to_trash,
+                _ => false,
+            };
+            kind_ok && !i.sources.is_empty()
         });
         let yes = resumable.map(|it| {
             let what = match it.kind.as_str() {
@@ -5277,7 +5291,7 @@ impl App {
         let mut req = match (it.kind.as_str(), it.dest) {
             ("copy", Some(d)) => Request::copy(still, d),
             ("move", Some(d)) => Request::mv(still, d),
-            ("delete", _) => Request::delete(still, it.to_trash),
+            ("delete", _) if it.to_trash => Request::delete(still, true),
             _ => return,
         };
         req.existing = ops::Existing::Update;
@@ -5346,11 +5360,14 @@ impl App {
             if self.graphics == Protocol::Kitty {
                 terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
             } else {
-                let _ = terminal.backend_mut().clear_region(ClearType::All);
-                terminal.backend_mut().forget();
-                terminal.swap_buffers();
-                terminal.swap_buffers();
-                terminal.draw(|f| self.draw(f))?;
+                // An iTerm2 or sixel picture is cells: write again, through the backend,
+                // what this frame has in the cells it covered (draw() kept them), which
+                // ratatui's diff thinks are already on screen.
+                use ratatui::backend::Backend;
+                let under = std::mem::take(&mut self.under_graphic);
+                terminal
+                    .backend_mut()
+                    .draw(under.iter().map(|(x, y, c)| (*x, *y, c)))?;
             }
         }
         let Some(want) = self.graphic_want.clone() else {
@@ -5759,6 +5776,22 @@ impl App {
     // ── drawing ────────────────────────────────────────────────────────────────────
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        self.draw_frame(frame);
+        // The cells under the picture the terminal shows, as this frame has them.
+        self.under_graphic.clear();
+        if let Some(r) = self.graphic_shown.as_ref().map(|g| g.rect) {
+            let buf = frame.buffer_mut();
+            for y in r.y..r.y + r.height {
+                for x in r.x..r.x + r.width {
+                    if let Some(c) = buf.cell(ratatui::layout::Position::new(x, y)) {
+                        self.under_graphic.push((x, y, c.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    fn draw_frame(&mut self, frame: &mut Frame) {
         self.graphic_want = None;
         let area = frame.area();
         self.screen = area;
@@ -6121,8 +6154,9 @@ fn complete_path(i: &mut Input) {
     });
 }
 
-/// Standard base64, for OSC 52. Thirty lines rather than a dependency.
-fn base64(data: &[u8]) -> String {
+/// Standard base64, for OSC 52 and the terminal's own pictures (graphics.rs). Thirty
+/// lines rather than a dependency.
+pub(crate) fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {

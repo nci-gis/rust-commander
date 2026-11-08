@@ -627,6 +627,29 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.quit();
 }
 
+/// An interrupted permanent delete is cleaned up after but never offered again: one
+/// Enter would go on, where Shift+F8 itself takes only Y.
+#[cfg(unix)]
+#[test]
+fn an_interrupted_permanent_delete_is_not_offered_again() {
+    let s = Scratch::new("resume-del");
+    let victim = s.file("left/keep.txt", "k");
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!("kind delete\nsrc {}\n", hex(&victim)),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    assert!(!x.screen().contains("Continue it?"), "{}", x.screen());
+    x.send(ENTER);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(victim.exists(), "Enter deleted nothing");
+    x.quit();
+}
+
 #[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");

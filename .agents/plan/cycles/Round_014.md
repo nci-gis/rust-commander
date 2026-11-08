@@ -111,6 +111,18 @@ Added by the owner before the next release (2026-11-08), not started:
 
 ## Do## Do
 
+- 2026-11-08, a review of the whole branch (owner: "review code kỹ để tránh gây ra
+  issue"), nine findings, all fixed: a panic (`clamp(1, 0)`) when quick view's box is
+  0 cells wide or high; the start-up probe now waits up to 1.5 s (ending on the device
+  attributes reply), since a slow SSH link's late replies would reach crossterm as keys;
+  an interrupted *permanent* delete is cleaned up after but never offered again (one
+  Enter would have gone on); recovery runs whatever the setting is now, so rename many's
+  files are put back even after Safe operations is turned off; a worker waiting on a
+  question keeps its journal fresh (Windows judges by age); taking an iTerm2 or sixel
+  picture away writes back only the cells it covered, as the frame has them, instead of
+  repainting the screen; the probe also runs when a protocol is chosen by hand (for the
+  cell size); one base64 (app.rs's) for both uses; a misplaced doc comment.
+
 - 2026-11-08, the owner over SSH: pictures shown, but smaller and blurry ("size ảnh và
   resolution bị giảm, nên ảnh rất mờ"). With no answer to the cell-size question the
   guess was 8×16, smaller than real cells; Kitty and iTerm2 then scaled a small picture

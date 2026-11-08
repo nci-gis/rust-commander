@@ -310,6 +310,18 @@ fn shift_f10_opens_the_right_click_menu_at_the_cursor_row() {
 }
 
 #[test]
+fn terminal_apps_f13_to_f20_work_as_shift_f5_to_f12() {
+    let (a, b) = fixture();
+    // Terminal.app sends Shift+F10 as F18 and Shift+F8 as F16.
+    let s = shot_keys("110x24", "Down,F18", &a, &b);
+    assert!(s.contains("Delete permanently"), "F18 opens the context menu\n{s}");
+    let s = shot_keys("110x24", "Down,Insert,F16", &a, &b);
+    assert!(s.contains("cannot be undone"), "F16 asks to delete permanently\n{s}");
+    assert!(a.join("victim.txt").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_never_confirms_a_permanent_delete() {
     let (a, b) = fixture();
     // Enter, out of habit: nothing goes, and the dialog says what does.

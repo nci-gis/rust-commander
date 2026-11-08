@@ -23,6 +23,9 @@ that heading and starts a new, empty one here. -->
 
 - **Shift+F10** (and the Menu key, where the terminal reports it) opens the right-click
   menu for the row under the cursor, at that row.
+- **Shift+F5–F12 work in macOS Terminal.app**, which sends them as F13–F20 (an F13–F20
+  you have not bound is taken as the Shift+F key it stands for). Shift+F1–F4 it does
+  not send at all: troubleshooting.md says how to map them.
 - **A crash log**: if xdevcmd crashes it writes what happened to its state directory and
   says where, to attach to an issue; nothing is sent.
 - **`--print-completions bash|zsh|fish|powershell` and `--print-man`**: tab completion

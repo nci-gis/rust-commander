@@ -71,6 +71,19 @@ arrive:
 → Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
 function keys**.
 
+**Shift+F1, Shift+F2, Shift+F4 do nothing in Terminal.app.** Terminal.app sends nothing
+for Shift+F1–F4 (and sends Shift+F5–F12 as F13–F20, which xdevcmd understands as
+meant). To give them back: Terminal → Settings → Profiles → Keyboard, **+**, pick the
+key with Shift, Action "Send Text", and type the sequence below (press Esc for the
+`\033`). iTerm2, Ghostty and kitty send them as they are.
+
+| Key | Send Text | In xdevcmd |
+|---|---|---|
+| Shift+F1 | `\033[1;2P` | what xdevcmd is using |
+| Shift+F2 | `\033[1;2Q` | rename many |
+| Shift+F3 | `\033[1;2R` | — |
+| Shift+F4 | `\033[1;2S` | new file |
+
 **Green or red backgrounds, hard-to-read text** in Terminal.app before macOS 26.
 Terminal.app there cannot show 24-bit colour and misreads it, so xdevcmd sends it 256
 colours. If you see this, `[theme] colors` or `XDEVCMD_COLORS` is probably set to

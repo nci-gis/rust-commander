@@ -580,7 +580,10 @@ fn show_keys(keymap: &keys::Keymap, depth: xdevcmd_core::color::Depth) -> Result
             .find(|b| b.action == a)
             .map_or("?", |b| b.name)
     };
-    let does = |k: KeyEvent| keymap.action_for(k).map_or("-", name_of);
+    let does = |k: KeyEvent| {
+        let k = keyfix::shifted_f(k, |x| keymap.action_for(x).is_some());
+        keymap.action_for(k).map_or("-", name_of)
+    };
 
     terminal::enable_raw_mode()?;
     execute!(stdout(), EnableMouseCapture)?;

@@ -131,6 +131,14 @@ branch until the owner has used 0.2.1 for a week or two; not started:
 
 ## Do## Do
 
+- 2026-11-08, the owner on macOS: fn+Shift+F10 arrived as "F15"; measured with
+  `--show-keys`, Terminal.app sends fn+Shift+F5…F12 as F13…F20 and nothing for
+  Shift+F1…F4. `keyfix::shifted_f` takes an F13…F20 nothing is bound to as
+  Shift+F5…F12 (not in a shell, which gets what the terminal sent); it also works over
+  SSH, where Terminal.app cannot be recognised. Shift+F1…F4: troubleshooting.md gives
+  Terminal.app key mappings that send xterm's sequences. (The first report, F15 for
+  Shift+F10, does not fit the measured table, which gives F18; the table is followed.)
+
 - 2026-11-08, 0.3.0's small additions (owner: "yes, all of them … push nhánh lên github",
   no pull request): Shift+F10 and the Menu key open the right-click menu at the cursor's
   row (`Menu.row`: below it, or above when the bottom has no room); `crash.rs` writes

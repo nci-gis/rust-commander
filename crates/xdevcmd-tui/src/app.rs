@@ -1326,6 +1326,14 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
+        // Terminal.app's Shift+F5…F12 arrive as F13…F20: what they mean, except in a
+        // shell, which gets the key as the terminal sent it.
+        let k = if self.focus_is_term() && self.modal.is_none() {
+            k
+        } else {
+            let keymap = &self.settings.keymap;
+            crate::keyfix::shifted_f(k, |x| keymap.action_for(x).is_some())
+        };
         if self.modal.is_some() {
             return self.on_modal_key(k);
         }

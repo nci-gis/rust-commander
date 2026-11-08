@@ -21,6 +21,14 @@ that heading and starts a new, empty one here. -->
   short under its real name, whatever ends xdevcmd; a journal lets the next start clean
   up after a killed run, put rename many's files back, and offer to continue the job.
 
+- **Shift+F10** (and the Menu key, where the terminal reports it) opens the right-click
+  menu for the row under the cursor, at that row.
+- **A crash log**: if xdevcmd crashes it writes what happened to its state directory and
+  says where, to attach to an issue; nothing is sent.
+- **`--print-completions bash|zsh|fish|powershell` and `--print-man`**: tab completion
+  and a manual page, for packages to install.
+- About shows where new versions are (xdevcmd never looks for updates itself).
+
 ### Changed
 - **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and
   clean up, and the session is saved. Before, xdevcmd was killed on the spot.

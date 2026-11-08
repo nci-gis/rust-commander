@@ -36,3 +36,18 @@ The bash version is tested. The fish and PowerShell versions have not been run y
   program is running there (an editor, a password prompt) or if the name has control
   characters in it.
 - **F12** moves between the panes and the terminal.
+
+## Tab completion and the manual page
+
+xdevcmd prints its own completions and manual page; packages install them for you.
+
+```bash
+xdevcmd --print-completions bash > ~/.local/share/bash-completion/completions/xdevcmd
+xdevcmd --print-completions zsh  > ~/.zfunc/_xdevcmd        # a directory on $fpath
+xdevcmd --print-completions fish > ~/.config/fish/completions/xdevcmd.fish
+xdevcmd --print-man | man -l -                               # read it once
+```
+
+PowerShell: `xdevcmd --print-completions powershell | Out-String | Invoke-Expression`, or
+dot-source its output from your `$PROFILE`. The bash script is tested; zsh, fish and
+PowerShell are generated from the same list of options but not yet run.

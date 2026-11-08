@@ -92,6 +92,7 @@ pub enum Action {
     SyncDirs,
     MenuBar,
     Usage,
+    ContextMenu,
 }
 
 /// One binding: its config name, where the help screen lists it, what it does, and its
@@ -693,6 +694,13 @@ pub const BINDINGS: &[Binding] = &[
         keys: &["F9"],
     },
     Binding {
+        action: Action::ContextMenu,
+        name: "context_menu",
+        group: "General",
+        about: "The right-click menu, for the row under the cursor",
+        keys: &["Shift+F10", "Menu"],
+    },
+    Binding {
         action: Action::Usage,
         name: "usage",
         group: "General",
@@ -1063,6 +1071,9 @@ pub fn parse_key(s: &str) -> Result<Chord, String> {
         "backspace" => KeyCode::Backspace,
         "delete" | "del" => KeyCode::Delete,
         "insert" | "ins" => KeyCode::Insert,
+        // The key between AltGr and Ctrl on PC keyboards; terminals report it only with
+        // the keyboard enhancement protocol, so Shift+F10 stands beside it.
+        "menu" | "apps" => KeyCode::Menu,
         "home" => KeyCode::Home,
         "end" => KeyCode::End,
         "pageup" | "pgup" => KeyCode::PageUp,
@@ -1229,6 +1240,7 @@ mod tests {
             Action::SyncDirs,
             Action::MenuBar,
             Action::Usage,
+            Action::ContextMenu,
         ];
         for a in all {
             assert_eq!(

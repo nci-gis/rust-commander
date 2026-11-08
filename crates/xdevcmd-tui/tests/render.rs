@@ -295,6 +295,21 @@ fn f5_can_replace_only_older_files() {
 }
 
 #[test]
+fn shift_f10_opens_the_right_click_menu_at_the_cursor_row() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,S-F10", &a, &b);
+    assert!(s.contains("Delete permanently"), "the menu\n{s}");
+    // Its title is the file under the cursor, on the row below it.
+    let (_, row) = locate(&s, "victim");
+    let (_, menu_top) = locate(&s, "Delete permanently");
+    assert!(menu_top > row, "below the cursor's row\n{s}");
+    // Enter runs what is selected; Esc closes it.
+    let s = shot_keys("110x24", "Down,S-F10,Esc", &a, &b);
+    assert!(!s.contains("Delete permanently"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn enter_never_confirms_a_permanent_delete() {
     let (a, b) = fixture();
     // Enter, out of habit: nothing goes, and the dialog says what does.

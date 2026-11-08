@@ -137,6 +137,9 @@ pub struct Menu {
     top: usize,
     /// Set for a menu opened from the menu bar: which one it is.
     pub bar: Option<usize>,
+    /// Opened from the keyboard for this screen row: below it when there is room, else
+    /// above it, never over it. A menu opened by the mouse has none.
+    pub row: Option<u16>,
 }
 
 impl Menu {
@@ -151,6 +154,7 @@ impl Menu {
             rows: Vec::new(),
             top: 0,
             bar: None,
+            row: None,
         }
     }
 
@@ -269,9 +273,15 @@ impl Menu {
         let w = (inner_w + 2).min(screen.width);
         let h = (self.items.len() as u16 + 2).min(screen.height);
 
-        // Open at the pointer, but pull back inside the screen near its edges.
+        // Open at the pointer, but pull back inside the screen near its edges. From the
+        // keyboard, below its row, or above it where the bottom has no room.
         let x = self.at.0.min(screen.x + screen.width.saturating_sub(w));
-        let y = self.at.1.min(screen.y + screen.height.saturating_sub(h));
+        let bottom = screen.y + screen.height;
+        let y = match self.row {
+            Some(row) if row + 1 + h > bottom && row >= screen.y + h => row - h,
+            Some(row) => (row + 1).min(bottom.saturating_sub(h)),
+            None => self.at.1.min(bottom.saturating_sub(h)),
+        };
         let r = Rect::new(x, y, w, h);
         self.frame = r;
 

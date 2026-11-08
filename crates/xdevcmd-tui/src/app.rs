@@ -1551,6 +1551,7 @@ impl App {
             Action::Pack => self.begin_pack(),
             Action::MenuBar => self.open_bar(0),
             Action::Usage => self.modal = Some(Modal::Usage),
+            Action::ContextMenu => self.context_menu_at_cursor(),
             Action::CompareDirs => self.compare_panes(),
             Action::SyncDirs => self.begin_sync(),
             Action::Unpack => self.begin_unpack(),
@@ -2160,6 +2161,24 @@ impl App {
         )));
     }
 
+    /// Shift+F10: the right-click menu for the row under the cursor, opened at that
+    /// row, beside the name, as a file manager opens it for the selected item.
+    fn context_menu_at_cursor(&mut self) {
+        let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
+            return;
+        };
+        let r = f.rows_rect;
+        if r.height == 0 {
+            return;
+        }
+        let shown = f.cursor.saturating_sub(f.offset).min(r.height as usize - 1) as u16;
+        let (row, x, y) = (f.cursor, r.x + 2, r.y + shown);
+        self.open_context_menu(Some(row), x, y);
+        if let Some(Modal::Menu(m)) = self.modal.as_mut() {
+            m.row = Some(y);
+        }
+    }
+
     fn open_context_menu(&mut self, row: Option<usize>, x: u16, y: u16) {
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return;
@@ -2401,6 +2420,8 @@ impl App {
                         env!("CARGO_PKG_REPOSITORY").into(),
                         String::new(),
                         "No network, no telemetry.".into(),
+                        // xdevcmd never looks for updates itself (no network): where to.
+                        format!("New versions: {}/releases", env!("CARGO_PKG_REPOSITORY")),
                     ],
                     danger: false,
                     yes: None,

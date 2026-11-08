@@ -6,8 +6,10 @@
 
 mod app;
 mod bookmarks;
+mod cli_docs;
 mod config;
 mod config_edit;
+mod crash;
 mod find_dialog;
 mod git;
 mod graphics;
@@ -52,7 +54,7 @@ use crate::config::{Mode, Outcome};
 use xdevcmd_core::policy::{self, Policy};
 
 /// Below the first line of --help, which comes from Cargo.toml.
-const USAGE: &str = "\
+pub(crate) const USAGE: &str = "\
 Usage:
   xdevcmd [LEFT] [RIGHT]       start with these directories in the two panes
   xdevcmd --no-restore         start fresh instead of reopening the last session
@@ -66,6 +68,8 @@ Usage:
   xdevcmd --print-config       print every setting at its default, ready to save
   xdevcmd --print-theme NAME   print a built-in theme as a file, to start your own
   xdevcmd --print-keys         print every key as Markdown (as configured)
+  xdevcmd --print-completions SHELL   completions for bash, zsh, fish or powershell
+  xdevcmd --print-man          print the manual page (roff): xdevcmd --print-man | man -l -
   xdevcmd --check-config       validate the config file; exit 1 if it is wrong
   xdevcmd --show-keys          print each key, click and scroll as xdevcmd receives it, and
                                what it would do (for a key that does nothing)
@@ -99,6 +103,8 @@ struct Cli {
     keys: String,
     print_config: bool,
     print_theme: Option<String>,
+    print_completions: Option<String>,
+    print_man: bool,
     print_keys: bool,
     show_keys: bool,
     check_config: bool,
@@ -119,6 +125,16 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "-h" | "--help" => cli.help = true,
             "-V" | "--version" => cli.version = true,
             "--print-config" => cli.print_config = true,
+            "--print-man" => cli.print_man = true,
+            "--print-completions" => {
+                cli.print_completions =
+                    Some(args.next().ok_or(
+                        "--print-completions needs a shell: bash, zsh, fish or powershell",
+                    )?);
+            }
+            s if s.starts_with("--print-completions=") => {
+                cli.print_completions = Some(s["--print-completions=".len()..].to_string());
+            }
             "--print-theme" => {
                 cli.print_theme = Some(args.next().ok_or("--print-theme needs a theme name")?);
             }
@@ -190,6 +206,20 @@ fn main() -> Result<()> {
     }
     if cli.print_config {
         emit(&config::render_default());
+        return Ok(());
+    }
+    if cli.print_man {
+        emit(&cli_docs::man());
+        return Ok(());
+    }
+    if let Some(shell) = &cli.print_completions {
+        match cli_docs::completions(shell) {
+            Ok(text) => emit(&text),
+            Err(e) => {
+                eprintln!("xdevcmd: {e}");
+                std::process::exit(2);
+            }
+        }
         return Ok(());
     }
     if let Some(name) = &cli.print_theme {
@@ -361,7 +391,10 @@ fn main() -> Result<()> {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(stdout(), DisableMouseCapture);
+        let log = crash::write(info);
         previous(info);
+        // After the previous hook: the terminal is itself again, so this can be read.
+        crash::tell(log.as_deref());
     }));
 
     let result = app.run(&mut terminal);

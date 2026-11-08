@@ -123,3 +123,11 @@ example a terminal viewer), or use F3.
 
 [Open an issue](https://github.com/nci-gis/rust-commander/issues) with your system,
 terminal and the `xdevcmd --show-keys` output.
+
+## xdevcmd crashed
+
+It writes what happened to a `crash-….log` file in its state directory
+(`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows) and
+says where, after the terminal is restored; it keeps the five newest. Please
+[open an issue](https://github.com/nci-gis/rust-commander/issues) and attach it — read it
+first: it may hold file names. Nothing is ever sent by xdevcmd itself.

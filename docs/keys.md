@@ -14,6 +14,7 @@ These are the defaults. Press **F1** in xdevcmd to see your own, after any chang
 | `Q` | Quit, leaving the shell where it was (with --cwd-file) |
 | `Shift+F9` | Your commands from [[menu]], run in the terminal |
 | `F9` | The menu bar: File, View, Help |
+| `Menu` `Shift+F10` | The right-click menu, for the row under the cursor |
 | `Shift+F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
 
 ## Navigate

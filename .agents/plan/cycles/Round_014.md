@@ -112,24 +112,36 @@ Added by the owner before the next release (2026-11-08), not started:
 Added for 0.3.0 by the owner ("đồng ý với đề xuất", 2026-11-08), kept on this local
 branch until the owner has used 0.2.1 for a week or two; not started:
 
-- [ ] **A crash log**: on a panic, write what happened (message, place, version, system)
+- [x] **A crash log**: on a panic, write what happened (message, place, version, system)
       to the state directory and say where it is and how to report it. No network.
-- [ ] **Shell completions and a man page**: `xdevcmd --print-completions
+- [x] **Shell completions and a man page**: `xdevcmd --print-completions
       bash|zsh|fish|powershell` and `--print-man`, ready for the packages to install.
-- [ ] **Windows' console close event** for safe operations' tidy end, if a safe way
+- [x] **Windows' console close event** — not done: no safe way (see Do) for safe operations' tidy end, if a safe way
       exists (the crates forbid `unsafe`); otherwise left as documented (the next start
       cleans up).
-- [ ] **About: version and the releases page link** (no update check: no network;
+- [x] **About: version and the releases page link** (no update check: no network;
       package managers update).
 - Deferred, as decided: pinning to the taskbar or Dock (item 14), checking for updates
   (needs the network, which xdevcmd never uses).
-- [ ] *Proposed, owner undecided:* **the context menu from the keyboard** — Shift+F10
+- [x] **The context menu from the keyboard** (owner: "yes, all of them") — Shift+F10
       (Windows' key for it, free here) and the Menu key where the terminal reports it;
       opened at the cursor's row in the focused pane, beside the name, as Explorer
       does for the selected item, above the row when there is no room below. Files
       panes only: in the terminal panel the key belongs to the program.
 
 ## Do## Do
+
+- 2026-11-08, 0.3.0's small additions (owner: "yes, all of them … push nhánh lên github",
+  no pull request): Shift+F10 and the Menu key open the right-click menu at the cursor's
+  row (`Menu.row`: below it, or above when the bottom has no room); `crash.rs` writes
+  `crash-<secs>-<pid>.log` to the state directory from the panic hook, keeps five, and
+  says where once the terminal is restored; `cli_docs.rs` holds the option list behind
+  `--print-completions` (bash checked with `bash -n` and a completion run; zsh, fish and
+  PowerShell not run: no such shells here) and `--print-man` (rendered with `man -l`);
+  About links the releases page. **Windows' close event: not done.** Its 5 seconds are
+  only there while the handler has not returned, so it must block until clean-up ends;
+  `ctrlc` returns at once, and a blocking `SetConsoleCtrlHandler` needs `unsafe`, which
+  both crates forbid. The journal's clean-up at the next start stays the answer there.
 
 - 2026-11-08, a review of the whole branch (owner: "review code kỹ để tránh gây ra
   issue"), nine findings, all fixed: a panic (`clamp(1, 0)`) when quick view's box is

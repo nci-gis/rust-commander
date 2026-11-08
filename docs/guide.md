@@ -156,7 +156,9 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - Click a directory's name in a pane's path, at the top, to go there.
 - Drag a border to resize; double-click it to share it evenly between the two panes on
   either side (any others keep their size): two file panes, the file area and the
-  terminal, or two shells. Right-click for a menu. The wheel scrolls.
+  terminal, or two shells. Right-click for a menu, or **Shift+F10** (the Menu key too,
+  where the terminal reports it) for the same menu at the cursor's row. The wheel
+  scrolls.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).

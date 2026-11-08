@@ -94,7 +94,10 @@ những việc kế tiếp"), in this order:
    changes (these protocols do not fit ratatui's cell diffing), nothing drawn under an
    open dialog or over the terminal panel, resizing, detection over SSH and inside tmux,
    and a setting to turn it off. Opened as [Round 014](cycles/Round_014.md) on
-   `feat/image-preview` (2026-11-08), after 0.2.1 was published.
+   `feat/image-preview` (2026-11-08), after 0.2.1 was published. The owner added items
+   23–25 (quitting from the terminal, saving on every way out, a terminal closed under
+   a running job) to do before the next release, likely **0.3.0** since it adds
+   features.
 3. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
    - ~~Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds~~: done
@@ -188,6 +191,9 @@ Rounds 001 and 003–009; the read-only finding in
 | 20 | Sharp image previews: Kitty, iTerm2, sixel, half blocks as fallback | M | [014](cycles/Round_014.md) | In progress, our own code (owner's choice); local only, no release planned yet |
 | 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
 | 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
+| 23 | Quit from the terminal panel: F10 when the shell is idle at its prompt | S | [014](cycles/Round_014.md) | owner, before the next release |
+| 24 | Save the session on every way out, signals included | S | [014](cycles/Round_014.md) | owner, before the next release |
+| 25 | A terminal closed under a job: temp-then-rename for every copy, catch SIGHUP/SIGTERM/close, clean leftovers | M | [014](cycles/Round_014.md) | owner, before the next release |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

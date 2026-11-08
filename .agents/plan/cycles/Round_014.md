@@ -41,6 +41,27 @@ Then, either way:
 - [ ] By hand, by the owner: iTerm2 or Ghostty on macOS, Windows Terminal, and
       Terminal.app (blocks, as now).
 
+Added by the owner before the next release (2026-11-08), not started:
+
+- [ ] **Quit while the terminal has focus.** Today F10, q and Ctrl+Q go to the shell
+      there (they must: htop quits on F10, nano and others use Ctrl+Q), so the way out is
+      F12 back to the panes, then F10. Proposed: F10 quits xdevcmd when the shell sits
+      idle at its prompt (the test Alt+C already uses), and goes to the program when one
+      is running; File → Quit with the mouse works anywhere.
+- [ ] **Save on every way out.** Already: F10, q and Ctrl+Q save the session after the
+      loop, and it is autosaved every 5 s (`[general] autosave_secs`) for the ways that
+      kill xdevcmd. To add: the signal ways below save too.
+- [ ] **A terminal closed under a running job.** Today nothing catches it: SIGHUP (or
+      Windows' close event) kills xdevcmd at once. A file being *replaced* is safe (its
+      temporary copy is left beside it, hidden); a *new* file being written is left
+      truncated **under its real name**, looking complete; the session loses up to 5 s.
+      Proposed: (1) every copy writes under a temporary name and renames at the end, so
+      even a kill leaves no truncated file under a real name; (2) catch SIGHUP, SIGTERM
+      and Windows' close event (`ctrlc` with its termination feature, or `signal-hook`),
+      then cancel jobs (workers remove their temporary files), save the session, exit;
+      (3) remember unfinished temporary files in the state directory and remove the
+      ones still there at the next start.
+
 ## Do
 
 - 2026-11-08, the owner's terms for this round: "nhánh này chỉ làm test local, ko ci

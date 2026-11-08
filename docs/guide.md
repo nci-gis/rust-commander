@@ -84,7 +84,10 @@ xdevcmd for yours, or see [keys.md](keys.md).
   skip the same ones (like robocopy); leave them all; or replace them all. At an
   overwrite question, **U** applies the "only if newer" rule to the rest of the job.
 - A file being replaced stays as it was until its new copy is complete: cancelling
-  part-way leaves the old one.
+  part-way leaves the old one. With **Safe operations** (Settings → General, on by
+  default) a new file is written the same way, and if xdevcmd is killed in the middle of
+  a job, the next start cleans up and offers to continue it. Closing the terminal stops
+  jobs tidily and saves the session. Details in [security.md](security.md#safe-operations).
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
   Pictures are sharp where the terminal can draw them itself (kitty, Ghostty, iTerm2,

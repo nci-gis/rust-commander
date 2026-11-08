@@ -192,8 +192,8 @@ Rounds 001 and 003–009; the read-only finding in
 | 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
 | 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
 | ~~23~~ | ~~Quit from the terminal panel~~ | — | — | dropped by the owner: inconsistent keys confuse more than they help |
-| 24 | Save the session on every way out, signals included | S | [014](cycles/Round_014.md) | owner, before the next release |
-| 25 | Jobs at the end: temp-then-rename for every copy with a journal of temporary names; proper quit waits for clean-up; a closed terminal cancels, cleans, saves | M | [014](cycles/Round_014.md) | proposed, waiting on the owner's OK |
+| 24 | Save the session on every way out, signals included | S | [014](cycles/Round_014.md) | done on `feat/image-preview` (local) |
+| 25 | Safe operations (a setting, on): temp-then-rename for every copy, a journal, clean-up and resume at the next start; proper quit waits; a closed terminal cancels, cleans, saves | M | [014](cycles/Round_014.md) | done on `feat/image-preview` (local) |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

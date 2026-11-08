@@ -577,6 +577,56 @@ fn a_closed_terminal_saves_the_session_and_ends() {
     assert!(saved.contains("sub"), "{saved}");
 }
 
+/// A path as the journal writes it: hex of its bytes.
+#[cfg(unix)]
+fn hex(p: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    p.as_os_str()
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// A run killed in the middle of a copy left its journal and a temporary file: the next
+/// start removes the file, says so, and offers to continue; Enter does.
+#[cfg(unix)]
+#[test]
+fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
+    let s = Scratch::new("resume");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "a").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    // a.txt was copied; b.txt was cut short, under its temporary name.
+    std::fs::write(dst.join("a.txt"), "a").unwrap();
+    let part = dst.join(".b.txt.xdevcmd-part-2147483646-0");
+    std::fs::write(&part, "half").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "kind copy\nsrc {}\nsrc {}\ndest {}\npart {}\n",
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst),
+            hex(&part)
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("unfinished temporary file removed");
+    assert!(!part.exists(), "the temporary file is gone");
+    x.send(ENTER); // continue
+    wait_file(&dst.join("b.txt"), "copied", |c| c.as_deref() == Some("b"));
+    assert!(
+        std::fs::read_dir(&journal).unwrap().next().is_none(),
+        "the journal is gone"
+    );
+    x.quit();
+}
+
 #[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");

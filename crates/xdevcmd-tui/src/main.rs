@@ -277,6 +277,14 @@ fn main() -> Result<()> {
     }
     let files = &settings.config.files;
     crate::pane::files::set_fuzzy(files.filter == "fuzzy");
+    xdevcmd_core::ops::set_safe(settings.config.general.safe_operations);
+    // Safe operations' journal sits beside the session, in the state directory.
+    if let Some(dir) = session::default_path()
+        .as_deref()
+        .and_then(std::path::Path::parent)
+    {
+        xdevcmd_core::journal::init(dir.join("journal"));
+    }
     look::init(look::Look {
         ls: files
             .ls_colors

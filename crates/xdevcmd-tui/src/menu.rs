@@ -51,6 +51,10 @@ pub enum Cmd {
     Sync(Vec<(PathBuf, PathBuf)>),
     /// Quit even though jobs are still running: they are cancelled first.
     QuitAnyway,
+    /// Quit now, though cancelled jobs have not finished stopping (a hung drive).
+    QuitNow,
+    /// Run an interrupted job again (safe operations' journal), "replace only if older".
+    Resume(xdevcmd_core::journal::Interrupted),
     /// Help → About.
     About,
     /// View → Theme…: the list of themes.

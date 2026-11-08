@@ -111,6 +111,22 @@ Added by the owner before the next release (2026-11-08), not started:
 
 ## Do## Do
 
+- 2026-11-08, safe operations built (owner: "On by default nếu ko ảnh hưởng nặng … ngược
+  lại off"). SIGHUP/SIGTERM through `signal-hook` (in the tree via crossterm): cancel,
+  two seconds to clean up, save, end; a second signal ends at once (Unix; Windows' close
+  event not yet). `ops::set_safe`: a new file through `part_name` and
+  `rename_noreplace`. `journal.rs` in the core: one file per job, written before acting,
+  removed on drop; first a line per temporary file, then — measured — a line per
+  directory, since the names carry the pid and a later start finds them there. Rename
+  many journals its temporary names and the next start renames them back. Start-up
+  recovery (Unix asks whether the pid lives; elsewhere a journal untouched for two
+  minutes is dead), a summary dialog, and "continue" runs the job again with "replace
+  only if older". F10 with jobs: after five seconds still stopping, asks again.
+  **Measured** (release, Linux, ext4, page cache): 10,000 × 1 KiB, 175 → 265 ms (the
+  rename, ~9 µs a file; the journal at first added another ~4 µs, gone with a line per
+  directory); 300 MiB, no difference; memory nothing measurable. Not heavy: on by
+  default.
+
 - 2026-11-08, the owner's terms for this round: "nhánh này chỉ làm test local, ko ci
   và chưa có plan release next version" and "dùng 1-2 weeks đã" — work and tests stay
   on this machine, no CI runs, nothing pushed until the owner asks; no next release is

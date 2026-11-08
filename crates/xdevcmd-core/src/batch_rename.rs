@@ -100,10 +100,20 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
         return out;
     }
     let tag = std::process::id();
+    // Safe operations: between the two steps the files are under temporary names; a run
+    // killed there has them put back at the next start.
+    let mut journal = if crate::ops::safe() {
+        crate::journal::Journal::begin("rename", &[], None, false)
+    } else {
+        None
+    };
     let mut parked: Vec<(PathBuf, &PathBuf, &PathBuf)> = Vec::new();
     for (i, (from, to)) in moves.iter().enumerate() {
         let dir = from.parent().unwrap_or(Path::new("."));
         let tmp = dir.join(format!(".xdevcmd-rename-{tag}-{i}"));
+        if let Some(j) = journal.as_mut() {
+            j.renamed(&tmp, from);
+        }
         if let Err(e) = crate::noreplace::rename_noreplace(from, &tmp) {
             out.errors.push(format!("{}: {e}", show(from)));
             // Put back what had already moved: half a batch is worse than none.
@@ -115,6 +125,8 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
         parked.push((tmp, from, to));
     }
     for (tmp, from, to) in parked {
+        // Crossed out of the journal once this step is over, however it went.
+        let _crossed = Unrename(journal.as_mut(), &tmp);
         // The system refuses a name that is taken in the same step as the rename, so a
         // file that appeared since the plan was made is never overwritten.
         match crate::noreplace::rename_noreplace(&tmp, to) {
@@ -142,6 +154,18 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
         }
     }
     out
+}
+
+/// Crosses a temporary name out of the journal when its step is over: renamed on, put
+/// back, or left (and reported).
+struct Unrename<'a>(Option<&'a mut crate::journal::Journal>, &'a Path);
+
+impl Drop for Unrename<'_> {
+    fn drop(&mut self) {
+        if let Some(j) = self.0.as_mut() {
+            j.unrenamed(self.1);
+        }
+    }
 }
 
 #[cfg(test)]

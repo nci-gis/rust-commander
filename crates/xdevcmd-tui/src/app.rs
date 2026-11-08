@@ -640,6 +640,9 @@ impl App {
             let _ = signal_hook::flag::register_conditional_default(sig, self.hangup.clone());
             let _ = signal_hook::flag::register(sig, self.hangup.clone());
         }
+        if self.settings.config.general.safe_operations {
+            self.recover_interrupted();
+        }
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
@@ -2427,9 +2430,41 @@ impl App {
                     self.jobs.retain(|j| j.done.is_none());
                     std::thread::sleep(Duration::from_millis(10));
                 }
+                if self.jobs.is_empty() {
+                    self.quit = true;
+                    self.quit_cd = true;
+                } else {
+                    // A worker stuck in a write (a hung network drive): do not walk away
+                    // from it unasked.
+                    let n = self.jobs.len();
+                    let safe = self.settings.config.general.safe_operations;
+                    self.modal = Some(Modal::Ask(modal::Ask {
+                        title: "Still stopping".into(),
+                        body: vec![
+                            format!(
+                                "{n} job{} has not stopped after 5 seconds.",
+                                if n == 1 { "" } else { "s" }
+                            ),
+                            if safe {
+                                "Quitting now leaves its temporary file; the next start removes it."
+                            } else {
+                                "Quitting now may leave a file half written."
+                            }
+                            .into(),
+                        ],
+                        danger: true,
+                        yes: Some(("quit anyway".into(), Cmd::QuitNow)),
+                        buttons: Vec::new(),
+                        footnote: None,
+                        pictures: Vec::new(),
+                    }));
+                }
+            }
+            Cmd::QuitNow => {
                 self.quit = true;
                 self.quit_cd = true;
             }
+            Cmd::Resume(it) => self.resume(it),
             Cmd::Sync(pairs) => {
                 let req = Request::sync(pairs);
                 self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot("a synchronisation".into()));
@@ -5146,6 +5181,100 @@ impl App {
         });
     }
 
+    /// At start-up: tidy up after a run that was killed (safe operations' journal), say
+    /// what was done, and offer to resume a job it was in the middle of.
+    fn recover_interrupted(&mut self) {
+        if self.settings.mode.read_only() {
+            return;
+        }
+        let found = xdevcmd_core::journal::recover();
+        if found.is_empty() {
+            return;
+        }
+        let cleaned: usize = found.iter().map(|i| i.cleaned).sum();
+        let restored: usize = found.iter().map(|i| i.restored).sum();
+        let stranded: Vec<_> = found.iter().flat_map(|i| i.stranded.clone()).collect();
+        let mut body = vec!["The last run of xdevcmd ended in the middle of a job.".to_string()];
+        if cleaned > 0 {
+            body.push(format!(
+                "{cleaned} unfinished temporary file{} removed.",
+                plural(cleaned)
+            ));
+        }
+        if restored > 0 {
+            body.push(format!(
+                "{restored} file{} put back under {} own name (rename many).",
+                plural(restored),
+                if restored == 1 { "its" } else { "their" }
+            ));
+        }
+        for (tmp, orig) in stranded.iter().take(3) {
+            body.push(format!(
+                "Could not put back {} as {} (the name is taken).",
+                tidy(tmp),
+                tidy(orig)
+            ));
+        }
+        let resumable = found.into_iter().find(|i| {
+            matches!(i.kind.as_str(), "copy" | "move" | "delete") && !i.sources.is_empty()
+        });
+        let yes = resumable.map(|it| {
+            let what = match it.kind.as_str() {
+                "copy" => "a copy",
+                "move" => "a move",
+                _ => "a delete",
+            };
+            let to = it
+                .dest
+                .as_deref()
+                .map(|d| format!(" to {}", tidy(d)))
+                .unwrap_or_default();
+            body.push(String::new());
+            body.push(format!(
+                "It was {what} of {}{to}.",
+                Self::describe(&it.sources)
+            ));
+            body.push(
+                "Continue it? What was done is skipped; a file cut short starts again.".into(),
+            );
+            ("continue".to_string(), Cmd::Resume(it))
+        });
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Interrupted".into(),
+            body,
+            danger: false,
+            yes,
+            buttons: Vec::new(),
+            footnote: None,
+            pictures: Vec::new(),
+        }));
+    }
+
+    /// Run an interrupted job again: a copy or move with "replace only if older", so
+    /// what it finished is skipped; a move or delete on the sources still there.
+    fn resume(&mut self, it: xdevcmd_core::journal::Interrupted) {
+        let still: Vec<PathBuf> = it
+            .sources
+            .iter()
+            .filter(|p| std::fs::symlink_metadata(p).is_ok())
+            .cloned()
+            .collect();
+        if still.is_empty() {
+            self.status = "nothing left to do: every source has gone".into();
+            return;
+        }
+        let mut req = match (it.kind.as_str(), it.dest) {
+            ("copy", Some(d)) => Request::copy(still, d),
+            ("move", Some(d)) => Request::mv(still, d),
+            ("delete", _) => Request::delete(still, it.to_trash),
+            _ => return,
+        };
+        req.existing = ops::Existing::Update;
+        let kind = req.kind;
+        self.remember_job(&req);
+        self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));
+    }
+
     /// The terminal is gone (or a SIGTERM came): nobody to ask and nothing to draw on.
     /// Cancel every job, give the workers up to two seconds to stop and remove what they
     /// were writing, and save the session; the caller ends the loop.
@@ -5497,6 +5626,7 @@ impl App {
         s.root = self.settings.root.clone();
         s.depth = self.settings.depth;
         crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
+        xdevcmd_core::ops::set_safe(s.config.general.safe_operations);
         if self.interactive {
             self.graphics = crate::graphics::detect(
                 &s.config.viewer.images,
@@ -6005,6 +6135,15 @@ fn base64(data: &[u8]) -> String {
         });
     }
     out
+}
+
+/// "s" for a count other than one.
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
 }
 
 #[cfg(test)]

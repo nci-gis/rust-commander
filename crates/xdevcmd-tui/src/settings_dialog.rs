@@ -99,6 +99,15 @@ const FIELDS: &[Field] = &[
     f(
         0,
         "general",
+        "safe_operations",
+        "Safe operations",
+        "copies via a temporary name; a killed run is cleaned up and offered again",
+        Kind::Bool,
+        true,
+    ),
+    f(
+        0,
+        "general",
         "menu_bar",
         "Menu bar",
         "File, View, Help on the top row; F9 opens it either way",
@@ -277,6 +286,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("general", "restore_session") => c.general.restore_session.to_string(),
         ("general", "autosave_secs") => c.general.autosave_secs.to_string(),
         ("general", "menu_bar") => c.general.menu_bar.to_string(),
+        ("general", "safe_operations") => c.general.safe_operations.to_string(),
         ("files", "enter") => c.files.enter.clone(),
         ("files", "filter") => c.files.filter.clone(),
         ("files", "show_hidden") => c.files.show_hidden.to_string(),
@@ -311,6 +321,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
             c.general.autosave_secs = n().unwrap_or(c.general.autosave_secs)
         }
         ("general", "menu_bar") => c.general.menu_bar = b,
+        ("general", "safe_operations") => c.general.safe_operations = b,
         ("files", "enter") => c.files.enter = v.to_string(),
         ("files", "filter") => c.files.filter = v.to_string(),
         ("files", "show_hidden") => c.files.show_hidden = b,

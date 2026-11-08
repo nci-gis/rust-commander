@@ -294,6 +294,7 @@ pub fn start(req: Request) -> Handle {
             sum: Summary::default(),
             moving: false,
             approved: None,
+            journal: None,
         };
         w.run(req);
     });
@@ -330,6 +331,9 @@ struct Worker {
     /// A destination the user already agreed to replace, so the copy a cross-device
     /// move falls back to does not ask about it a second time.
     approved: Option<PathBuf>,
+    /// Safe operations: what this job is in the middle of, for the next start if it is
+    /// killed. Removed when the job ends.
+    journal: Option<crate::journal::Journal>,
 }
 
 impl Worker {
@@ -340,6 +344,23 @@ impl Worker {
             self.sum.errors.push(e.to_string());
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
+        }
+        if safe() {
+            let kind = match req.kind {
+                Kind::Copy if !req.pairs.is_empty() => "sync",
+                Kind::Copy => "copy",
+                Kind::Move => "move",
+                Kind::Delete => "delete",
+                Kind::Extract => "extract",
+                Kind::Pack => "pack",
+            };
+            let sources: Vec<PathBuf> = if req.pairs.is_empty() {
+                req.sources.clone()
+            } else {
+                req.pairs.iter().map(|(s, _)| s.clone()).collect()
+            };
+            self.journal =
+                crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash);
         }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
@@ -709,16 +730,23 @@ impl Worker {
     ///
     /// Replacing writes beside `dst` under a temporary name and renames it over `dst`
     /// only once complete: a cancel or an error part-way leaves the old file as it
-    /// was, rather than both old and new gone. Whatever was written and not kept is
-    /// removed here.
+    /// was, rather than both old and new gone. With safe operations a new file goes the
+    /// same way, so not even a killed run leaves a short file under a real name.
+    /// Whatever was written and not kept is removed here.
     fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
-        let target = if new_only {
+        let in_place = new_only && !safe();
+        let target = if in_place {
             dst.to_path_buf()
         } else {
             part_name(dst)
         };
+        if !in_place {
+            if let Some(j) = self.journal.as_mut() {
+                j.part(&target);
+            }
+        }
         let mut w = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -733,8 +761,12 @@ impl Worker {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
                 drop(w);
-                if new_only {
+                if in_place {
                     Ok(true)
+                } else if new_only {
+                    // Taken only if still free: a file that appeared meanwhile is asked
+                    // about (the caller goes round again on AlreadyExists).
+                    crate::noreplace::rename_noreplace(&target, dst).map(|()| true)
                 } else {
                     fs::rename(&target, dst).map(|()| true)
                 }
@@ -743,6 +775,11 @@ impl Worker {
         };
         if !matches!(kept, Ok(true)) {
             let _ = fs::remove_file(&target);
+        }
+        if !in_place {
+            if let Some(j) = self.journal.as_mut() {
+                j.gone(&target);
+            }
         }
         kept
     }
@@ -760,6 +797,9 @@ impl Worker {
             }
             w.write_all(&buf[..n])?;
             self.advance(n as u64);
+            if let Some(j) = self.journal.as_mut() {
+                j.touch();
+            }
         }
         w.flush()?;
         Ok(true)
@@ -910,6 +950,15 @@ impl crate::archive::Hooks for Worker {
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
         self.resolve_conflict(None, dst, incoming)
     }
+    fn part(&mut self, p: &Path, made: bool) {
+        if let Some(j) = self.journal.as_mut() {
+            if made {
+                j.part(p);
+            } else {
+                j.gone(p);
+            }
+        }
+    }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
     }
@@ -1008,6 +1057,20 @@ pub fn remove_tree(p: &Path) -> io::Result<()> {
     } else {
         fs::remove_file(p)
     }
+}
+
+/// `[general] safe_operations`: every copy writes under a temporary name and renames at
+/// the end, and jobs keep a journal (journal.rs) so a run killed outright is tidied up
+/// at the next start. Off, a new file is written under its own name, as before; a
+/// replacement goes through a temporary name either way.
+static SAFE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_safe(on: bool) {
+    SAFE.store(on, Ordering::Relaxed);
+}
+
+pub fn safe() -> bool {
+    SAFE.load(Ordering::Relaxed)
 }
 
 /// A temporary name beside `dst` to write a replacement under: hidden, and unique to
@@ -1698,6 +1761,35 @@ mod tests {
             "older there: replaced"
         );
         assert_eq!((s.done, s.skipped), (1, 1));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn with_safe_operations_a_cancelled_new_copy_leaves_nothing_under_any_name() {
+        let root = tmp("safe-cancel");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("big"), vec![1u8; 8 << 20]).unwrap();
+        set_safe(true);
+        let h = start(Request::copy(vec![root.join("big")], dst.clone()));
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                // Stop it as soon as it starts writing.
+                Event::Progress { .. } => h.cancel(),
+                Event::Done(_) => break,
+                _ => {}
+            }
+        }
+        set_safe(false);
+        let left: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(
+            left.is_empty(),
+            "nothing under the real name or a temporary one: {left:?}"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

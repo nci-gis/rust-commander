@@ -30,6 +30,7 @@ confirm_transfer = true   # ask before copy and move start (delete always asks)
 delete_to_trash = true    # F8 uses the trash; Shift+F8 always deletes for good
 restore_session = true    # reopen last time's panes and tabs
 autosave_secs = 5         # save them this often when they change: 5-3600, or 0 = on quit
+safe_operations = true    # copies via a temporary name; a killed run is cleaned up (security.md)
 menu_bar = true           # the File | View | Help bar
 
 [files]
@@ -235,7 +236,8 @@ you name with `--cwd-file`, written on quit, it writes these and nothing more:
 
 | File | Where | What |
 |---|---|---|
-| `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
+| `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit, every `autosave_secs`, and when the terminal closes. Readable by you only. |
+| `journal/` | beside `session.toml` | Safe operations: one small file per running job, removed when it ends; what a killed run leaves is cleaned up at the next start. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside xdevcmd (Ctrl+D). Bookmarks in this config are not copied there. |
 | `xdevcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when xdevcmd ends; one left by a crash is removed at the next start, an hour on. |
 

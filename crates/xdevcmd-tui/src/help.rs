@@ -294,6 +294,36 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
             ],
         ),
         (
+            "Safe operations (Settings \u{2192} General; on by default)",
+            &[
+                (
+                    "Covered",
+                    "F5 copy, F6 move, Shift+F5 copy as, Alt+Y sync, extract, Alt+F5 pack",
+                ),
+                (
+                    "",
+                    "and Shift+F2 rename many (its files put back if a run is killed)",
+                ),
+                (
+                    "How",
+                    "A file is written under a hidden temporary name, renamed when complete",
+                ),
+                (
+                    "If killed",
+                    "The next start removes what was left and offers to continue the job",
+                ),
+                (
+                    "Always",
+                    "A replaced file stays whole until its copy is done; closing the terminal",
+                ),
+                ("", "stops jobs, cleans up and saves the session"),
+                (
+                    "Not covered",
+                    "Shift+F8 (nothing to keep), F4 (the editor writes)",
+                ),
+            ],
+        ),
+        (
             "Two-key bindings, and keys that do nothing",
             &[
                 (

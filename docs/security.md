@@ -49,6 +49,52 @@ your permissions. It was tested against attacks on all three before release.
 No network access, no telemetry. Dependencies are checked for known vulnerabilities and
 licences (`cargo deny`) on every change and weekly.
 
+## Safe operations
+
+**What it is.** A setting, `[general] safe_operations` (Settings → General), on by
+default. With it, every copy writes the new file under a hidden temporary name beside
+its destination, `.name.xdevcmd-part-<pid>-<n>`, and renames it into place only when it
+is complete. Each job also keeps a small journal in xdevcmd's state directory (beside
+`session.toml`, in `journal/`): what the job is, and which directories it makes
+temporary files in. A job that ends while xdevcmd runs, finished, cancelled or failed,
+removes its journal.
+
+**What it covers.** F5 copy, F6 move (within a drive a move is a rename; across drives
+it is a copy, then the source removed once its copy is complete), Shift+F5 copy as,
+Alt+Y sync, extracting (F5 inside an archive, Alt+F9), Alt+F5 pack, and Shift+F2 rename
+many, whose files spend a moment under temporary names. Not covered, because nothing
+can be: Shift+F8 (there is nothing to keep), and F4 (your editor writes the file).
+
+**What it guarantees.** However xdevcmd ends — a crash, `kill -9`, a power cut — no file
+is ever left cut short under its real name: the real name holds either the old file
+or the complete new one. The next start finds the journal of the run that ended, removes
+its temporary files, puts rename many's files back under their names, and offers to
+continue the job: "replace only if older", so what was done is skipped and the file
+that was cut short starts again. A move continues with the sources still there, a
+delete with what is left.
+
+**What happens whatever the setting.** A file being *replaced* is always written under
+a temporary name first, so cancelling never loses the old one. Closing the terminal or
+losing SSH (SIGHUP), or SIGTERM, makes xdevcmd cancel its jobs, let them remove their
+temporary files (up to two seconds), save the session and end; a second signal ends it
+at once. F10 with jobs running asks first, cancels them and waits until they have
+cleaned up; if one is stuck after five seconds (a hung network drive) it asks again.
+
+**Limits.**
+- Nothing is resumed from the middle of a file: a file cut short starts again.
+  Extracting and packing are not resumed; they are started again.
+- A replacement needs room for the new file until it is renamed over the old one.
+- Some network and FUSE file systems do not allow a rename into place, or do not make it
+  atomic.
+- On Windows a leading dot hides nothing: temporary files show until cleaned up, and the
+  terminal's close button is not caught yet (the next start cleans up instead).
+- Temporary files are cleaned up by the next start of xdevcmd on that machine and
+  account; a run that never starts again leaves them.
+- Off, a new file is written under its own name, as before: fastest, but a killed run
+  can leave it short.
+- Measured on Linux (2026-11-08): copying 10,000 files of 1 KiB took about 9 µs more
+  per file (the rename); one large file, no difference.
+
 ## Safe modes
 
 | | normal | read-only | restricted |

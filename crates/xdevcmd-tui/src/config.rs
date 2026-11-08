@@ -128,6 +128,11 @@ pub struct General {
     /// window instead of quitting keeps it. 0 turns it off (it is still saved on
     /// quit); otherwise 5 to 3600.
     pub autosave_secs: u64,
+    /// Safe operations: every copy (F5, F6 across drives, sync, extract, pack) writes
+    /// under a temporary name and renames at the end, and a journal of each job lets the
+    /// next start clean up after a run that was killed and offer to resume it. Off, a
+    /// new file is written under its own name. See docs/security.md.
+    pub safe_operations: bool,
 }
 
 impl Default for General {
@@ -138,6 +143,7 @@ impl Default for General {
             restore_session: true,
             menu_bar: true,
             autosave_secs: 5,
+            safe_operations: true,
         }
     }
 }

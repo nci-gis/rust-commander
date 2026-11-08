@@ -16,6 +16,16 @@ that heading and starts a new, empty one here. -->
   (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and
   tmux included. `[viewer] images` (also in Settings) chooses: auto, kitty, iterm2,
   sixel or blocks.
+- **Safe operations** (`[general] safe_operations`, on by default): every copy writes
+  under a hidden temporary name and renames when complete, so no file is ever left cut
+  short under its real name, whatever ends xdevcmd; a journal lets the next start clean
+  up after a killed run, put rename many's files back, and offer to continue the job.
+
+### Changed
+- **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and
+  clean up, and the session is saved. Before, xdevcmd was killed on the spot.
+- **F10 with jobs running waits until they have cleaned up**, and asks again if one is
+  stuck after five seconds, instead of quitting under it.
 
 ## [0.2.1] - 2026-11-07
 

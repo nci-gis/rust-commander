@@ -274,6 +274,8 @@ pub struct App {
     cell_px: (u16, u16),
     /// What the terminal answered at start-up about pictures (main.rs asks).
     pub probe: crate::graphics::Probe,
+    /// Set by SIGHUP or SIGTERM: the terminal is gone, or someone asked us to end.
+    hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The picture this frame wants drawn by the terminal, and the one it shows now.
     graphic_want: Option<Graphic>,
     graphic_shown: Option<Graphic>,
@@ -386,6 +388,7 @@ impl App {
             graphics: crate::graphics::Protocol::Blocks,
             cell_px: (8, 16),
             probe: crate::graphics::Probe::default(),
+            hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             graphic_want: None,
             graphic_shown: None,
             bar_hits: Vec::new(),
@@ -630,6 +633,13 @@ impl App {
             self.cell_px = (w, h);
         }
         self.measure_cells(terminal);
+        // The terminal closed (SIGHUP) or a polite kill (SIGTERM): the loop sees the flag
+        // and ends tidily. A second signal ends xdevcmd at once, as the default would.
+        #[cfg(unix)]
+        for sig in [signal_hook::consts::SIGHUP, signal_hook::consts::SIGTERM] {
+            let _ = signal_hook::flag::register_conditional_default(sig, self.hangup.clone());
+            let _ = signal_hook::flag::register(sig, self.hangup.clone());
+        }
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
 
@@ -638,6 +648,10 @@ impl App {
         let mut dirty = true;
         let mut drawn = Instant::now();
         while !self.quit {
+            if self.hangup.load(std::sync::atomic::Ordering::Relaxed) {
+                self.end_on_signal();
+                break;
+            }
             self.pump_job();
             dirty |= self.reap_terminals();
             dirty |= self.background();
@@ -5130,6 +5144,42 @@ impl App {
             ops::Kind::Extract => Undo::Cannot("an extraction".into()),
             ops::Kind::Pack => Undo::Cannot("packing".into()),
         });
+    }
+
+    /// The terminal is gone (or a SIGTERM came): nobody to ask and nothing to draw on.
+    /// Cancel every job, give the workers up to two seconds to stop and remove what they
+    /// were writing, and save the session; the caller ends the loop.
+    fn end_on_signal(&mut self) {
+        if let Some(Modal::Job(j)) = &self.modal {
+            j.handle.cancel();
+        }
+        for j in &self.jobs {
+            j.handle.cancel();
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while self.job_running_at_all() && Instant::now() < deadline {
+            if let Some(Modal::Job(j)) = self.modal.as_mut() {
+                j.pump();
+                if j.question.take().is_some() {
+                    j.answer(xdevcmd_core::Answer::Abort);
+                }
+            }
+            for j in &mut self.jobs {
+                j.pump();
+                if j.question.take().is_some() {
+                    j.answer(xdevcmd_core::Answer::Abort);
+                }
+            }
+            self.jobs.retain(|j| j.done.is_none());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.quit = true;
+    }
+
+    /// Any job not finished yet, waiting on a question or not.
+    fn job_running_at_all(&self) -> bool {
+        matches!(&self.modal, Some(Modal::Job(j)) if j.done.is_none())
+            || self.jobs.iter().any(|j| j.done.is_none())
     }
 
     /// A cell's size in pixels, from the terminal, for decoding pictures at its own

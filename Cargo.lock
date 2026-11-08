@@ -2538,6 +2538,7 @@ dependencies = [
  "ratatui",
  "rustix",
  "serde",
+ "signal-hook",
  "tar",
  "toml",
  "tui-term",

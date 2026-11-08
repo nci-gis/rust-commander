@@ -544,6 +544,39 @@ fn a_terminal_that_answers_sixel_gets_sixel_with_nothing_in_the_environment() {
     x.quit();
 }
 
+/// The terminal closed (SIGHUP): xdevcmd ends by itself and saves the session first,
+/// with autosave off so only that save can have written it.
+#[cfg(unix)]
+#[test]
+fn a_closed_terminal_saves_the_session_and_ends() {
+    let s = Scratch::new("hangup");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let cfg = s.file("hup.toml", "[general]\nautosave_secs = 0\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.send(DOWN);
+    x.send(ENTER); // into sub
+    x.wait_for("/left/sub");
+    let pid = x.child.process_id().expect("a pid").to_string();
+    let killed = std::process::Command::new("kill")
+        .args(["-HUP", &pid])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let start = Instant::now();
+    while x.child.try_wait().unwrap().is_none() {
+        assert!(start.elapsed() < PATIENCE, "still running after SIGHUP");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let saved = std::fs::read_to_string(s.0.join("session.toml")).expect("the session was saved");
+    assert!(saved.contains("sub"), "{saved}");
+}
+
 #[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");

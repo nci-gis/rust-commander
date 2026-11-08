@@ -2452,7 +2452,7 @@ impl App {
                             format!("Running in {}", self.usage.terminal)
                         },
                         // xdevcmd never looks for updates itself (no network): where to.
-                        format!("New versions: {}/releases", env!("CARGO_PKG_REPOSITORY")),
+                        format!("Releases: {}/releases", env!("CARGO_PKG_REPOSITORY")),
                     ],
                     danger: false,
                     yes: None,

@@ -33,7 +33,7 @@ that heading and starts a new, empty one here. -->
   says where, to attach to an issue; nothing is sent.
 - **`--print-completions bash|zsh|fish|powershell` and `--print-man`**: tab completion
   and a manual page, for packages to install.
-- About shows where new versions are (xdevcmd never looks for updates itself).
+- About links the Releases page (xdevcmd never looks for updates itself).
 
 ### Changed
 - **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and

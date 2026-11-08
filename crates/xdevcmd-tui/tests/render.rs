@@ -310,13 +310,22 @@ fn shift_f10_opens_the_right_click_menu_at_the_cursor_row() {
 }
 
 #[test]
-fn terminal_apps_f13_to_f20_work_as_shift_f5_to_f12() {
+fn alt_x_then_an_f_key_does_what_shift_and_that_key_does() {
+    // For terminals that send no Shift+F key (macOS Terminal.app sends none for F1-F4
+    // and others as F13-F20): Alt+X, then the F key.
     let (a, b) = fixture();
-    // Terminal.app sends Shift+F10 as F18 and Shift+F8 as F16.
-    let s = shot_keys("110x24", "Down,F18", &a, &b);
-    assert!(s.contains("Delete permanently"), "F18 opens the context menu\n{s}");
-    let s = shot_keys("110x24", "Down,Insert,F16", &a, &b);
-    assert!(s.contains("cannot be undone"), "F16 asks to delete permanently\n{s}");
+    let s = shot_keys("110x24", "Down,Alt+x", &a, &b);
+    assert!(s.contains("ALT+X"), "a badge shows the group waiting\n{s}");
+    let s = shot_keys("110x24", "Down,Alt+x,F10", &a, &b);
+    assert!(
+        s.contains("Delete permanently"),
+        "Alt+X F10: the context menu\n{s}"
+    );
+    let s = shot_keys("110x24", "Down,Insert,Alt+x,F8", &a, &b);
+    assert!(
+        s.contains("cannot be undone"),
+        "Alt+X F8: delete permanently, asked\n{s}"
+    );
     assert!(a.join("victim.txt").exists());
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

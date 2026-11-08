@@ -276,6 +276,8 @@ pub struct App {
     pub probe: crate::graphics::Probe,
     /// Set by SIGHUP or SIGTERM: the terminal is gone, or someone asked us to end.
     hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The "running in …" note shown at start, cleared by the first key or click.
+    boot_note: Option<String>,
     /// The picture this frame wants drawn by the terminal, and the one it shows now.
     graphic_want: Option<Graphic>,
     graphic_shown: Option<Graphic>,
@@ -393,6 +395,7 @@ impl App {
             cell_px: (10, 20),
             probe: crate::graphics::Probe::default(),
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            boot_note: None,
             graphic_want: None,
             graphic_shown: None,
             under_graphic: Vec::new(),
@@ -632,12 +635,20 @@ impl App {
         self.graphics = crate::graphics::detect(
             &self.settings.config.viewer.images,
             |k| std::env::var(k).ok(),
-            self.probe,
+            &self.probe,
         );
         if let Some((h, w)) = self.probe.cell {
             self.cell_px = (w, h);
         }
         self.measure_cells(terminal);
+        let pictures = match self.graphics {
+            crate::graphics::Protocol::Kitty => "Kitty",
+            crate::graphics::Protocol::Iterm2 => "iTerm2",
+            crate::graphics::Protocol::Sixel => "sixel",
+            crate::graphics::Protocol::Blocks => "half blocks",
+        };
+        let name = crate::graphics::terminal_name(|k| std::env::var(k).ok(), &self.probe);
+        self.usage.terminal = format!("{name} \u{b7} pictures: {pictures}");
         // The terminal closed (SIGHUP) or a polite kill (SIGTERM): the loop sees the flag
         // and ends tidily. A second signal ends xdevcmd at once, as the default would.
         #[cfg(unix)]
@@ -651,6 +662,12 @@ impl App {
         self.recover_interrupted();
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
+        // Said once, unless start-up had something to say: where xdevcmd is running. It
+        // gives way at the first key or click to the line it covers (the pane's own).
+        if self.status.is_empty() && self.modal.is_none() {
+            self.status = format!("running in {}", self.usage.terminal);
+            self.boot_note = Some(self.status.clone());
+        }
 
         // Drawn only when something changed: input, a shell's output, background work
         // reporting in, a job's progress; or after HEARTBEAT, whatever happened.
@@ -678,7 +695,15 @@ impl App {
             if event::poll(TICK)? {
                 // Any event, a resize or a focus change included, may change the screen.
                 dirty = true;
-                match event::read()? {
+                let event = event::read()?;
+                if matches!(event, Event::Key(_) | Event::Mouse(_)) {
+                    if let Some(note) = self.boot_note.take() {
+                        if self.status == note {
+                            self.status.clear();
+                        }
+                    }
+                }
+                match event {
                     Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
                     Event::Mouse(m) => self.on_mouse(m),
                     // A resize clears the screen: whatever picture was there is gone, and
@@ -1326,14 +1351,6 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
-        // Terminal.app's Shift+F5…F12 arrive as F13…F20: what they mean, except in a
-        // shell, which gets the key as the terminal sent it.
-        let k = if self.focus_is_term() && self.modal.is_none() {
-            k
-        } else {
-            let keymap = &self.settings.keymap;
-            crate::keyfix::shifted_f(k, |x| keymap.action_for(x).is_some())
-        };
         if self.modal.is_some() {
             return self.on_modal_key(k);
         }
@@ -2428,6 +2445,12 @@ impl App {
                         env!("CARGO_PKG_REPOSITORY").into(),
                         String::new(),
                         "No network, no telemetry.".into(),
+                        // Empty in screenshots: no terminal was asked.
+                        if self.usage.terminal.is_empty() {
+                            String::new()
+                        } else {
+                            format!("Running in {}", self.usage.terminal)
+                        },
                         // xdevcmd never looks for updates itself (no network): where to.
                         format!("New versions: {}/releases", env!("CARGO_PKG_REPOSITORY")),
                     ],
@@ -5688,7 +5711,7 @@ impl App {
             self.graphics = crate::graphics::detect(
                 &s.config.viewer.images,
                 |k| std::env::var(k).ok(),
-                self.probe,
+                &self.probe,
             );
         }
         self.settings = s;

@@ -293,7 +293,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "rename",
         group: "Files",
         about: "Rename the entry under the cursor",
-        keys: &["Shift+F6", "F2"],
+        keys: &["Shift+F6", "F2", "Alt+x F6"],
     },
     Binding {
         action: Action::MkDir,
@@ -314,7 +314,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "delete_permanent",
         group: "Files",
         about: "Delete permanently",
-        keys: &["Shift+F8"],
+        keys: &["Shift+F8", "Alt+x F8"],
     },
     Binding {
         action: Action::SortName,
@@ -607,7 +607,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "bulk_rename",
         group: "Files",
         about: "Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR",
-        keys: &["Shift+F2"],
+        keys: &["Shift+F2", "Alt+x F2"],
     },
     Binding {
         action: Action::QuickView,
@@ -621,14 +621,14 @@ pub const BINDINGS: &[Binding] = &[
         name: "new_file",
         group: "Files",
         about: "Create a file and open it in the editor",
-        keys: &["Shift+F4"],
+        keys: &["Shift+F4", "Alt+x F4"],
     },
     Binding {
         action: Action::CopyAs,
         name: "copy_as",
         group: "Files",
         about: "Copy beside itself under another name",
-        keys: &["Shift+F5"],
+        keys: &["Shift+F5", "Alt+x F5"],
     },
     Binding {
         action: Action::Symlink,
@@ -656,7 +656,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "user_menu",
         group: "General",
         about: "Your commands from [[menu]], run in the terminal",
-        keys: &["Shift+F9"],
+        keys: &["Shift+F9", "Alt+x F9"],
     },
     Binding {
         action: Action::Pack,
@@ -698,14 +698,14 @@ pub const BINDINGS: &[Binding] = &[
         name: "context_menu",
         group: "General",
         about: "The right-click menu, for the row under the cursor",
-        keys: &["Shift+F10", "Menu"],
+        keys: &["Shift+F10", "Menu", "Alt+x F10"],
     },
     Binding {
         action: Action::Usage,
         name: "usage",
         group: "General",
         about: "What xdevcmd is using: memory and its trend, CPU, threads, draw time",
-        keys: &["Shift+F1"],
+        keys: &["Shift+F1", "Alt+x F1"],
     },
 ];
 
@@ -998,19 +998,23 @@ impl Keymap {
 
     /// The keys currently bound to `action`, as they would be written in the config.
     pub fn keys_for(&self, action: Action) -> Vec<String> {
+        // Single keys first, then two-key bindings: a menu or the key bar shows the first,
+        // and Shift+F2 says more than Alt+X F2, which is there for terminals that lack it.
         let mut keys: Vec<String> = self
             .map
             .iter()
             .filter(|(_, a)| **a == action)
             .map(|(c, _)| binding_name(Keys::One(*c)))
-            .chain(
-                self.seqs
-                    .iter()
-                    .filter(|(_, a)| **a == action)
-                    .map(|((p, c), _)| binding_name(Keys::Two(*p, *c))),
-            )
             .collect();
         keys.sort();
+        let mut seqs: Vec<String> = self
+            .seqs
+            .iter()
+            .filter(|(_, a)| **a == action)
+            .map(|((p, c), _)| binding_name(Keys::Two(*p, *c)))
+            .collect();
+        seqs.sort();
+        keys.extend(seqs);
         keys
     }
 }

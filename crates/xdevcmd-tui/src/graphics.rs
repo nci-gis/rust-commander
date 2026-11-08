@@ -24,11 +24,15 @@ pub enum Protocol {
 /// What the terminal said when asked at start-up ([`probe`]): whether it draws Kitty
 /// pictures or sixel, and a cell's size in pixels (height, width). Asking works over
 /// SSH, where the environment variables that name the terminal mostly do not arrive.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Probe {
     pub kitty: bool,
     pub sixel: bool,
     pub cell: Option<(u16, u16)>,
+    /// Its name and version, if it says (XTVERSION): "kitty(0.32.2)", "iTerm2 3.5.5".
+    pub version: Option<String>,
+    /// Its secondary device attributes (DA2): its kind and version numbers.
+    pub da2: Option<(u32, u32)>,
 }
 
 /// Ask the terminal, before anything else reads its replies: a Kitty graphics query,
@@ -40,7 +44,9 @@ pub fn probe(wait: std::time::Duration) -> Probe {
     use std::io::Write;
     use std::time::Instant;
     let mut out = std::io::stdout();
-    let ask = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[16t\x1b[c";
+    // Kitty graphics, cell size, name and version, kind (DA2), then DA1 last: every
+    // terminal answers DA1, so its reply marks the end of the others.
+    let ask = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[16t\x1b[>0q\x1b[>c\x1b[c";
     if out.write_all(ask).and_then(|()| out.flush()).is_err() {
         return Probe::default();
     }
@@ -97,12 +103,78 @@ pub fn parse_probe(bytes: &[u8]) -> Probe {
         rest.find('c')
             .is_some_and(|end| rest[..end].split(';').any(|p| p == "4"))
     });
-    Probe { kitty, sixel, cell }
+    // XTVERSION: DCS > | name-and-version ST
+    let version = s.find("\x1bP>|").and_then(|i| {
+        let rest = &s[i + 4..];
+        let end = rest.find("\x1b\\")?;
+        let v: String = rest[..end].chars().filter(|c| !c.is_control()).collect();
+        (!v.trim().is_empty()).then(|| v.trim().to_string())
+    });
+    // DA2: CSI > kind ; version ; … c
+    let da2 = s.find("\x1b[>").and_then(|i| {
+        let rest = &s[i + 3..];
+        let end = rest.find('c')?;
+        let mut it = rest[..end].split(';').map(|n| n.parse::<u32>().ok());
+        Some((it.next()??, it.next()??))
+    });
+    Probe {
+        kitty,
+        sixel,
+        cell,
+        version,
+        da2,
+    }
+}
+
+/// The terminal xdevcmd runs in, for the status line, Usage and About: what the
+/// environment says, else what the terminal answered, else "unknown".
+pub fn terminal_name(var: impl Fn(&str) -> Option<String>, probe: &Probe) -> String {
+    let get = |k: &str| var(k).filter(|v| !v.is_empty());
+    let term = get("TERM").unwrap_or_default();
+    let named = match get("TERM_PROGRAM").as_deref() {
+        Some("Apple_Terminal") => Some("Terminal.app".to_string()),
+        Some("iTerm.app") => Some("iTerm2".to_string()),
+        Some("vscode") => Some("VS Code".to_string()),
+        Some("ghostty") => Some("Ghostty".to_string()),
+        Some(other) => Some(other.to_string()),
+        None => None,
+    }
+    .map(|n| match get("TERM_PROGRAM_VERSION") {
+        Some(v) => format!("{n} {v}"),
+        None => n,
+    })
+    .or_else(|| get("WT_SESSION").map(|_| "Windows Terminal".to_string()))
+    .or_else(|| {
+        (get("KITTY_WINDOW_ID").is_some() || term.contains("kitty")).then(|| "kitty".to_string())
+    })
+    .or_else(|| get("KONSOLE_VERSION").map(|v| format!("Konsole {v}")))
+    .or_else(|| term.starts_with("foot").then(|| "foot".to_string()))
+    .or_else(|| probe.version.clone())
+    .or_else(|| match probe.da2 {
+        Some((41, v)) => Some(format!("xterm {v}")),
+        Some((65, _)) => Some("a VTE terminal (GNOME Terminal and others)".to_string()),
+        Some((77, _)) => Some("mintty".to_string()),
+        Some((83, _)) => Some("screen".to_string()),
+        Some((84, _)) => Some("tmux".to_string()),
+        _ => None,
+    })
+    .or_else(|| {
+        get("VTE_VERSION").map(|_| "a VTE terminal (GNOME Terminal and others)".to_string())
+    });
+    let name = named.unwrap_or_else(|| match term.as_str() {
+        "" => "an unknown terminal".to_string(),
+        t => format!("an unknown terminal (TERM={t})"),
+    });
+    if get("SSH_CONNECTION").is_some() || get("SSH_TTY").is_some() {
+        format!("{name}, over SSH")
+    } else {
+        name
+    }
 }
 
 /// The protocol for `setting` (`[viewer] images`): a name chooses it; "auto" asks the
 /// environment, `var`, then what the terminal answered, `probe`.
-pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>, probe: Probe) -> Protocol {
+pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>, probe: &Probe) -> Protocol {
     match setting {
         "kitty" => return Protocol::Kitty,
         "iterm2" => return Protocol::Iterm2,
@@ -230,7 +302,7 @@ mod tests {
     }
 
     fn detect_env(setting: &str, var: impl Fn(&str) -> Option<String>) -> Protocol {
-        detect(setting, var, Probe::default())
+        detect(setting, var, &Probe::default())
     }
 
     #[test]
@@ -242,20 +314,22 @@ mod tests {
             Probe {
                 kitty: false,
                 sixel: true,
-                cell: Some((20, 10))
+                cell: Some((20, 10)),
+                version: None,
+                da2: None,
             }
         );
-        assert_eq!(detect("auto", |_| None, wt), Protocol::Sixel);
+        assert_eq!(detect("auto", |_| None, &wt), Protocol::Sixel);
         // kitty or Ghostty: the graphics query answered OK.
         let k = parse_probe(b"\x1b_Gi=31;OK\x1b\\\x1b[6;34;16t\x1b[?62;22c");
         assert!(k.kitty && !k.sixel);
-        assert_eq!(detect("auto", |_| None, k), Protocol::Kitty);
+        assert_eq!(detect("auto", |_| None, &k), Protocol::Kitty);
         // A terminal with neither: half blocks.
         let plain = parse_probe(b"\x1b[?1;2c");
-        assert_eq!(detect("auto", |_| None, plain), Protocol::Blocks);
+        assert_eq!(detect("auto", |_| None, &plain), Protocol::Blocks);
         // tmux answers for itself: never trusted.
         assert_eq!(
-            detect("auto", |k| (k == "TMUX").then(|| "x".into()), wt),
+            detect("auto", |k| (k == "TMUX").then(|| "x".into()), &wt),
             Protocol::Blocks
         );
         assert!(answered(b"\x1b[?62;4c") && !answered(b"\x1b[6;20;10t"));
@@ -369,5 +443,46 @@ mod tests {
         assert!(s.starts_with("\x1bP"), "{s:?}");
         assert!(s.ends_with("\x1b\\"), "{s:?}");
         assert!(encode(Protocol::Blocks, &pic(2, 2), 1, 1, 0).is_empty());
+    }
+
+    #[test]
+    fn the_terminal_is_named_from_the_environment_or_its_answers() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        let none = Probe::default();
+        assert_eq!(
+            terminal_name(
+                env(&[
+                    ("TERM_PROGRAM", "Apple_Terminal"),
+                    ("TERM_PROGRAM_VERSION", "455")
+                ]),
+                &none
+            ),
+            "Terminal.app 455"
+        );
+        assert_eq!(
+            terminal_name(env(&[("WT_SESSION", "x")]), &none),
+            "Windows Terminal"
+        );
+        // Over SSH, from its answers.
+        let p = parse_probe(b"\x1bP>|WezTerm 20240203\x1b\\\x1b[>1;277;0c\x1b[?62;4c");
+        assert_eq!(p.version.as_deref(), Some("WezTerm 20240203"));
+        assert_eq!(p.da2, Some((1, 277)));
+        assert_eq!(
+            terminal_name(env(&[("SSH_CONNECTION", "1 2 3 4")]), &p),
+            "WezTerm 20240203, over SSH"
+        );
+        let x = parse_probe(b"\x1b[>41;390;0c\x1b[?65;4c");
+        assert_eq!(terminal_name(env(&[]), &x), "xterm 390");
+        assert_eq!(
+            terminal_name(env(&[("TERM", "xterm-256color")]), &none),
+            "an unknown terminal (TERM=xterm-256color)"
+        );
     }
 }

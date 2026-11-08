@@ -54,6 +54,8 @@ pub struct Usage {
     latest: Option<Proc>,
     draws: VecDeque<Duration>,
     frames: u64,
+    /// The terminal it runs in and how it draws pictures, for a bug report.
+    pub terminal: String,
 }
 
 impl Default for Usage {
@@ -65,6 +67,7 @@ impl Default for Usage {
             latest: None,
             draws: VecDeque::new(),
             frames: 0,
+            terminal: String::new(),
         }
     }
 }
@@ -343,6 +346,9 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         ),
         plain,
     ));
+    if !u.terminal.is_empty() {
+        lines.push((format!("terminal   {}", u.terminal), plain));
+    }
     let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
     lines.push((
         format!(

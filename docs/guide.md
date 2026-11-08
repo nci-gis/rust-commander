@@ -159,6 +159,8 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
   terminal, or two shells. Right-click for a menu, or **Shift+F10** (the Menu key too,
   where the terminal reports it) for the same menu at the cursor's row. The wheel
   scrolls.
+- **Alt+X, then an F key** does what Shift and that key do (Alt+X F8 is Shift+F8), for
+  terminals that do not send Shift+F keys, like macOS Terminal.app.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).

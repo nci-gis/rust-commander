@@ -71,18 +71,14 @@ arrive:
 → Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
 function keys**.
 
-**Shift+F1, Shift+F2, Shift+F4 do nothing in Terminal.app.** Terminal.app sends nothing
-for Shift+F1–F4 (and sends Shift+F5–F12 as F13–F20, which xdevcmd understands as
-meant). To give them back: Terminal → Settings → Profiles → Keyboard, **+**, pick the
-key with Shift, Action "Send Text", and type the sequence below (press Esc for the
-`\033`). iTerm2, Ghostty and kitty send them as they are.
-
-| Key | Send Text | In xdevcmd |
-|---|---|---|
-| Shift+F1 | `\033[1;2P` | what xdevcmd is using |
-| Shift+F2 | `\033[1;2Q` | rename many |
-| Shift+F3 | `\033[1;2R` | — |
-| Shift+F4 | `\033[1;2S` | new file |
+**Shift+F keys do nothing in Terminal.app** (Shift+F8, Shift+F10, Shift+F2…).
+Terminal.app sends Shift+F5–F12 as other keys (F13–F20) and nothing at all for
+Shift+F1–F4. Use **Alt+X, then the F key** instead: Alt+X F8 is Shift+F8, Alt+X F10 the
+right-click menu, and so on for every Shift+F key; a badge shows Alt+X waiting. (Alt
+needs "Use Option as Meta key", above.) iTerm2, Ghostty and kitty send Shift+F keys as
+they are. To make Terminal.app send them itself: Settings → Profiles → Keyboard, **+**,
+the key with Shift, "Send Text": `\033[1;2P` `\033[1;2Q` `\033[1;2R` `\033[1;2S` for
+Shift+F1–F4.
 
 **Green or red backgrounds, hard-to-read text** in Terminal.app before macOS 26.
 Terminal.app there cannot show 24-bit colour and misreads it, so xdevcmd sends it 256

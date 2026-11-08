@@ -12,10 +12,10 @@ These are the defaults. Press **F1** in xdevcmd to see your own, after any chang
 | `Ctrl+r` | Re-read the active pane |
 | `Ctrl+h` | Show or hide hidden files |
 | `Q` | Quit, leaving the shell where it was (with --cwd-file) |
-| `Shift+F9` | Your commands from [[menu]], run in the terminal |
+| `Shift+F9` `Alt+x F9` | Your commands from [[menu]], run in the terminal |
 | `F9` | The menu bar: File, View, Help |
-| `Menu` `Shift+F10` | The right-click menu, for the row under the cursor |
-| `Shift+F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
+| `Menu` `Shift+F10` `Alt+x F10` | The right-click menu, for the row under the cursor |
+| `Shift+F1` `Alt+x F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
 
 ## Navigate
 
@@ -60,18 +60,18 @@ These are the defaults. Press **F1** in xdevcmd to see your own, after any chang
 | `F4` | Edit the file in your editor |
 | `F5` | Copy to the other pane |
 | `F6` | Move to the other pane |
-| `F2` `Shift+F6` | Rename the entry under the cursor |
+| `F2` `Shift+F6` `Alt+x F6` | Rename the entry under the cursor |
 | `F7` | Create a directory |
 | `F8` | Delete (to the trash, by default) |
-| `Shift+F8` | Delete permanently |
+| `Shift+F8` `Alt+x F8` | Delete permanently |
 | `o` | Open with the system's default application |
 | `O` | Open with…: your [[open]] rules, the system's program, view, edit |
 | `Ctrl+z` | Undo the last rename, move, new directory or new file (asks first) |
 | `Ctrl+Space` | Work out the size of every directory shown |
 | `Alt+F7` | Find files by name and content; results open in a new tab |
-| `Shift+F2` | Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR |
-| `Shift+F4` | Create a file and open it in the editor |
-| `Shift+F5` | Copy beside itself under another name |
+| `Shift+F2` `Alt+x F2` | Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR |
+| `Shift+F4` `Alt+x F4` | Create a file and open it in the editor |
+| `Shift+F5` `Alt+x F5` | Copy beside itself under another name |
 | `Ctrl+Shift+F5` | Link to this in the other pane's directory |
 | `Alt+p` | Permissions: an octal mode, or read-only on Windows |
 | `Alt+h` | SHA-256 of the file, checked against a .sha256 beside it |

@@ -131,6 +131,14 @@ branch until the owner has used 0.2.1 for a week or two; not started:
 
 ## Do## Do
 
+- 2026-11-08, **paused** at the owner's word: "hoạt động tốt trên macOS rồi nhé … tạm dừng
+  develop ở đây, mình trải nghiệm v0.2.1 1-2 tuần sau đó get back". The owner confirmed
+  on macOS the Alt+X keys and the terminal's name. Where it stands: everything is on
+  `feat/image-preview`, pushed, no pull request, CI never run on it. When work resumes:
+  run CI once (macOS, Windows, ARM), the owner tests (pictures on Windows Terminal and
+  iTerm2 or WezTerm; a killed copy resumed; Safe operations), close the round, then the
+  usual way to 0.3.0 (PR into dev, `cargo release minor`, PR into main, tag, draft).
+
 - 2026-11-08, the owner on the F13–F20 conversion ("đây có phải cách xử lý đúng???"):
   it was not — +8 is Terminal.app's alone; urxvt and the Linux console add 10, so
   Shift+F6 there would have run Shift+F8's action. Reverted. Instead (owner's idea):

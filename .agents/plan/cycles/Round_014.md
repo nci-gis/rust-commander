@@ -164,7 +164,8 @@ The owner's notes on the terminal panel (2026-11-09), to weigh; not started:
   carry `XDEVCMD_PANEL=<pid>`; a start that finds it, with that process alive (Unix asks
   the system; Windows takes the variable at its word), says "already running … F12 goes
   back to it" and exits 1. A shell that outlived its xdevcmd (tmux started in the panel)
-  is not refused; `unset XDEVCMD_PANEL` overrides. `--screenshot` and the print options
+  is not refused; `unset XDEVCMD_PANEL` overrides (not said in the message, at the
+  owner's word). `--screenshot` and the print options
   are not refused. Test: `xdevcmd_will_not_start_inside_its_own_terminal_panel`.
 
 - 2026-11-08, a bug the owner found in 0.2.1 while using it: in a pane split off below

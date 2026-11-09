@@ -374,8 +374,7 @@ fn main() -> Result<()> {
     if let Some(pid) = inside_own_panel() {
         eprintln!(
             "xdevcmd is already running (process {pid}) and this is its terminal panel: \
-             F12 goes back to it. (To start one anyway: unset {})",
-            PANEL_VAR
+             F12 goes back to it."
         );
         std::process::exit(1);
     }

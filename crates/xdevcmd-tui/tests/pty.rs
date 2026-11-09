@@ -2041,6 +2041,48 @@ fn shift_f12_over_a_full_screen_program_says_it_is_that_screen_only() {
     xdevcmd.quit();
 }
 
+/// The history view is held in memory: with HOME and TMPDIR inside the scratch
+/// directory, so that nothing xdevcmd could write lands anywhere unchecked, no file
+/// holds the shell's output after Shift+F12 and Esc, nor after quitting.
+#[test]
+fn history_is_never_written_outside_the_shell() {
+    let s = Scratch::new("history-nowhere");
+    let home = s.0.join("home");
+    let tmp = s.0.join("tmp");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&tmp).unwrap();
+    let (h, t) = (home.to_string_lossy(), tmp.to_string_lossy());
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("HOME", h.as_ref()), ("TMPDIR", t.as_ref())],
+    );
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    // Only the output holds MARK_42 and seq's run of lines; the command line does not.
+    xdevcmd.send(b"echo MARK_$((6*7)); seq 1 300\r");
+    xdevcmd.wait_for("300");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    let holds = |p: &PathBuf| {
+        std::fs::read(p).is_ok_and(|b| {
+            b.windows(7).any(|w| w == b"MARK_42") || b.windows(8).any(|w| w == b"299\n300\n")
+        })
+    };
+    let written: Vec<_> = walk(&s.0).into_iter().filter(holds).collect();
+    assert!(written.is_empty(), "history on disk: {written:?}");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+    let written: Vec<_> = walk(&s.0).into_iter().filter(holds).collect();
+    assert!(
+        written.is_empty(),
+        "history on disk after quitting: {written:?}"
+    );
+}
+
 const F2: &[u8] = b"\x1bOQ";
 
 /// F2 in the history view: offered as xdevcmd-history-<date>-<time>.txt in the shell's
@@ -2297,6 +2339,43 @@ fn save_history_from_the_tab_menu_leaves_no_viewer() {
         "{}",
         xdevcmd.screen()
     );
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Save history as… from a tab's menu saves that tab's text, not the focused tab's.
+#[test]
+fn tab_menu_save_history_uses_clicked_tab() {
+    let s = Scratch::new("tab-save-clicked");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"echo ONE_$((0+1))\r");
+    xdevcmd.wait_for("ONE_1");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_N);
+    xdevcmd.wait_for("terminal 2/2");
+    xdevcmd.send(b"echo TWO_$((1+1))\r");
+    xdevcmd.wait_for("TWO_2");
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    xdevcmd.wait_for("Terminal 1");
+    let (sx, sy) = xdevcmd.locate("Save history as");
+    xdevcmd.click(sx, sy, 0);
+    xdevcmd.wait_for("Save as");
+    let dest = s.right().join("first.txt");
+    xdevcmd.send(b"\x15");
+    xdevcmd.send(dest.to_string_lossy().as_bytes());
+    xdevcmd.send(ENTER);
+    wait_file(&dest, "tab 1's history", |t| {
+        t.is_some_and(|t| t.contains("ONE_1"))
+    });
+    let text = std::fs::read_to_string(&dest).unwrap();
+    assert!(
+        !text.contains("TWO_2"),
+        "the clicked tab's, not the focused one's: {text:?}"
+    );
+    xdevcmd.wait_gone("Save as");
     xdevcmd.send(F12);
     xdevcmd.quit();
 }

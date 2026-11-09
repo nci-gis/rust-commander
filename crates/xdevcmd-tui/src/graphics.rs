@@ -250,10 +250,22 @@ pub fn encode(p: Protocol, pic: &Picture, cols: u16, rows: u16, id: u32) -> Vec<
     }
 }
 
-/// Removes a Kitty picture. iTerm2 and sixel pictures are cells, gone when the cells
-/// are drawn over.
+/// Removes a Kitty picture and frees what the terminal holds of it. iTerm2 and sixel
+/// pictures are cells, gone when the cells are drawn over.
 pub fn kitty_delete(id: u32) -> Vec<u8> {
     format!("\x1b_Ga=d,d=I,i={id},q=2\x1b\\").into_bytes()
+}
+
+/// Takes a Kitty picture off the screen, the terminal keeping it (under a dialog).
+pub fn kitty_unplace(id: u32) -> Vec<u8> {
+    format!("\x1b_Ga=d,d=i,i={id},q=2\x1b\\").into_bytes()
+}
+
+/// Shows again, at the cursor over `cols` x `rows` cells, a Kitty picture the terminal
+/// holds: a few bytes where a transmission is the whole picture. Placement 1, as when
+/// it was sent, so it replaces rather than adds.
+pub fn kitty_place(id: u32, cols: u16, rows: u16) -> Vec<u8> {
+    format!("\x1b_Ga=p,i={id},p=1,c={cols},r={rows},q=2,C=1\x1b\\").into_bytes()
 }
 
 /// Kitty: the picture as PNG (f=100), base64, in chunks of 4096 (the protocol's limit),
@@ -270,7 +282,8 @@ fn kitty(pic: &Picture, cols: u16, rows: u16, id: u32) -> Vec<u8> {
         let more = u8::from(i + 1 < chunks.len());
         if i == 0 {
             out.extend_from_slice(
-                format!("\x1b_Ga=T,f=100,c={cols},r={rows},i={id},q=2,C=1,m={more};").as_bytes(),
+                format!("\x1b_Ga=T,f=100,c={cols},r={rows},i={id},p=1,q=2,C=1,m={more};")
+                    .as_bytes(),
             );
         } else {
             out.extend_from_slice(format!("\x1b_Gm={more};").as_bytes());
@@ -444,7 +457,7 @@ mod tests {
         }
         let s = String::from_utf8(encode(Protocol::Kitty, &p, 10, 5, 7)).unwrap();
         assert!(
-            s.starts_with("\x1b_Ga=T,f=100,c=10,r=5,i=7,q=2,C=1,m=1;iVBORw0KGgo"),
+            s.starts_with("\x1b_Ga=T,f=100,c=10,r=5,i=7,p=1,q=2,C=1,m=1;iVBORw0KGgo"),
             "{}",
             &s[..60]
         );
@@ -454,6 +467,15 @@ mod tests {
         assert_eq!(
             String::from_utf8(kitty_delete(7)).unwrap(),
             "\x1b_Ga=d,d=I,i=7,q=2\x1b\\"
+        );
+        // Under a dialog: off the screen, kept; then placed again, a few bytes.
+        assert_eq!(
+            String::from_utf8(kitty_unplace(7)).unwrap(),
+            "\x1b_Ga=d,d=i,i=7,q=2\x1b\\"
+        );
+        assert_eq!(
+            String::from_utf8(kitty_place(7, 10, 5)).unwrap(),
+            "\x1b_Ga=p,i=7,p=1,c=10,r=5,q=2,C=1\x1b\\"
         );
     }
 

@@ -485,12 +485,61 @@ fn quick_view_draws_a_kitty_picture_once_and_removes_it_under_a_dialog() {
         .matches("\x1b_Ga=T,")
         .count();
     assert_eq!(sent, 1, "sent again with nothing changed");
-    // A dialog over it: the picture goes (it would be drawn over the dialog)...
+    // A dialog over it: the picture goes off the screen (it would be drawn over the
+    // dialog), the terminal keeping it...
     x.send(b"\x1bOP"); // F1, help
-    wait_bytes(&x, "\x1b_Ga=d,d=I,", 1);
-    // ...and comes back when the dialog closes.
+    wait_bytes(&x, "\x1b_Ga=d,d=i,", 1);
+    // ...and is placed again when the dialog closes, not sent again.
     x.send(b"\x1b");
+    wait_bytes(&x, "\x1b_Ga=p,", 1);
+    let raw = String::from_utf8_lossy(&x.raw.lock().unwrap()).into_owned();
+    assert_eq!(raw.matches("\x1b_Ga=T,").count(), 1, "sent once");
+    assert!(!raw.contains("\x1b_Ga=d,d=I,"), "never freed meanwhile");
+    x.quit();
+}
+
+#[test]
+fn going_quickly_past_pictures_sends_only_the_one_stopped_on() {
+    let s = Scratch::new("kitty-run");
+    for (i, name) in ["a", "b", "c", "d", "e", "f"].iter().enumerate() {
+        let pic = xdevcmd_core::image::Picture {
+            width: 8,
+            height: 8,
+            source: (8, 8),
+            rgb: vec![[40 * i as u8, 30, 30]; 64],
+        };
+        std::fs::write(
+            s.left().join(format!("{name}.png")),
+            xdevcmd_core::image::to_png(&pic).unwrap(),
+        )
+        .unwrap();
+    }
+    let cfg = s.file("kitty.toml", "[viewer]\nimages = \"kitty\"\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("f ");
+    x.send(DOWN);
+    x.send(b"\x1bq"); // quick view on a.png
+    wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
+    // Five Downs a key-repeat apart (60 ms, under the 120 ms a picture must be stayed
+    // on): past b, c, d, e to f. Without the wait each was decoded and sent.
+    for _ in 0..5 {
+        x.send(DOWN);
+    }
+    x.wait_for("f.png");
     wait_bytes(&x, "\x1b_Ga=T,f=100,", 2);
+    std::thread::sleep(Duration::from_millis(500));
+    let raw = String::from_utf8_lossy(&x.raw.lock().unwrap()).into_owned();
+    assert_eq!(
+        raw.matches("\x1b_Ga=T,").count(),
+        2,
+        "a.png, then only f.png"
+    );
     x.quit();
 }
 

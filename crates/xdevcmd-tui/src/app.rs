@@ -93,10 +93,52 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 #[derive(Debug, Clone, PartialEq)]
 struct Graphic {
     rect: Rect,
+    key: PicKey,
+}
+
+/// What a decoded picture was made for: the file as it was, the pixels it was shrunk
+/// to, the box it fits and the protocol its bytes are in. Any change, another decode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PicKey {
     path: PathBuf,
     px: (u16, u16),
     mtime: Option<std::time::SystemTime>,
+    inner: (u16, u16),
+    protocol: crate::graphics::Protocol,
 }
+
+/// A picture ready to show, made off the drawing thread: decoded, and for the
+/// terminal's own protocols encoded for its box, so a frame only writes bytes.
+struct Prepared {
+    pic: Result<xdevcmd_core::image::Picture, String>,
+    /// The cells the encoded picture covers.
+    cells: (u16, u16),
+    /// The picture in the terminal's protocol (Kitty: the transmission); empty for half
+    /// blocks.
+    bytes: Vec<u8>,
+}
+
+/// Decode the picture `key` names at `w` x `h` pixels and, for the terminal's own
+/// protocols, encode it for its box: on a thread, never the drawing one. `cell`: a
+/// cell's pixels at the density decoded for.
+fn prepare(key: &PicKey, w: usize, h: usize, bg: [u8; 3], cell: (u16, u16)) -> Prepared {
+    let pic = xdevcmd_core::image::load(&key.path, w, h, bg).map_err(|e| e.to_string());
+    let (bw, bh) = key.inner;
+    let (cells, bytes) = match &pic {
+        Ok(p) if key.protocol != crate::graphics::Protocol::Blocks && bw > 0 && bh > 0 => {
+            let cols = (p.width as u16).div_ceil(cell.0.max(1)).clamp(1, bw);
+            let rows = (p.height as u16).div_ceil(cell.1.max(1)).clamp(1, bh);
+            let bytes = crate::graphics::encode(key.protocol, p, cols, rows, KITTY_ID);
+            ((cols, rows), bytes)
+        }
+        _ => ((0, 0), Vec::new()),
+    };
+    Prepared { pic, cells, bytes }
+}
+
+/// How long the cursor stays on a picture before it is decoded: going down a directory
+/// of photos decodes and sends only the one stopped on.
+const SETTLE: Duration = Duration::from_millis(120);
 
 /// The id of quick view's picture in the Kitty protocol, so it can be removed.
 const KITTY_ID: u32 = 0x7864;
@@ -123,20 +165,10 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 /// A picture quick view has decoded: the file, the cell size it was shrunk for, the
 /// file's modification time then (a changed file is decoded again), and the picture or
 /// why there is none.
-type Shrunk = (
-    PathBuf,
-    (u16, u16),
-    Option<std::time::SystemTime>,
-    Result<xdevcmd_core::image::Picture, String>,
-);
+type Shrunk = (PicKey, Prepared);
 
 /// A picture being decoded on a thread: what it is for, and where the result comes.
-type Decoding = (
-    PathBuf,
-    (u16, u16),
-    Option<std::time::SystemTime>,
-    Receiver<Result<xdevcmd_core::image::Picture, String>>,
-);
+type Decoding = (PicKey, Receiver<Prepared>);
 
 /// Where a confirmation's count goes until the count has been made.
 const COUNTING: &str = "counting\u{2026}";
@@ -268,6 +300,13 @@ pub struct App {
     quick_image: Option<Shrunk>,
     /// A big photo takes a moment to decode: never on the drawing thread.
     decoding: Option<Decoding>,
+    /// The picture the cursor is on, and since when, until [`SETTLE`] has passed.
+    settle: Option<(PathBuf, Instant)>,
+    /// A frame left a picture waiting to settle: the loop keeps drawing at TICK.
+    settling: bool,
+    /// The Kitty picture the terminal holds (transmitted once, under [`KITTY_ID`]):
+    /// placed again after a dialog rather than sent again.
+    kitty_held: Option<PicKey>,
     /// How quick view draws pictures: the terminal's own protocol, or half blocks.
     /// [`crate::graphics::effective`] of what was found, `graphics_found`.
     graphics: crate::graphics::Protocol,
@@ -394,6 +433,9 @@ impl App {
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
+            settle: None,
+            settling: false,
+            kitty_held: None,
             graphics: crate::graphics::Protocol::Blocks,
             graphics_found: crate::graphics::Protocol::Blocks,
             cell_known: false,
@@ -730,8 +772,10 @@ impl App {
         *dirty |= self.reap_terminals();
         *dirty |= self.background();
         *dirty |= crate::pane::term::take_output();
-        // A job's progress moves on its own, with no message to say so.
+        // A job's progress moves on its own, with no message to say so; a picture
+        // waiting for the cursor to settle starts decoding on a later frame.
         *dirty |= matches!(self.modal, Some(Modal::Job(_))) || !self.jobs.is_empty();
+        *dirty |= self.settling;
         if *dirty || drawn.elapsed() >= HEARTBEAT {
             let t0 = Instant::now();
             terminal.draw(|f| self.draw(f))?;
@@ -758,6 +802,8 @@ impl App {
                 // the cells may be a different size now.
                 Event::Resize(..) => {
                     self.graphic_shown = None;
+                    // Sent again, whole: a new transmission replaces the old one.
+                    self.kitty_held = None;
                     self.measure_cells(terminal);
                 }
                 _ => {}
@@ -901,9 +947,9 @@ impl App {
             }
         }
         changed |= self.poll_comparing();
-        if let Some((p, sz, m, rx)) = &self.decoding {
-            if let Ok(pic) = rx.try_recv() {
-                self.quick_image = Some((p.clone(), *sz, *m, pic));
+        if let Some((key, rx)) = &self.decoding {
+            if let Ok(prepared) = rx.try_recv() {
+                self.quick_image = Some((key.clone(), prepared));
                 self.decoding = None;
                 changed = true;
             }
@@ -3412,6 +3458,7 @@ impl App {
         terminal.swap_buffers();
         // And with it any picture the terminal drew.
         self.graphic_shown = None;
+        self.kitty_held = None;
 
         self.status = match outcome {
             Ok(s) if s.success() => format!("{program} closed"),
@@ -5091,13 +5138,18 @@ impl App {
             (inner.width, inner.height)
         };
         let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-        let fresh = |p: &Path, s: (u16, u16), m: Option<std::time::SystemTime>| {
-            p == path && s == size && m == mtime
+        let key = PicKey {
+            path: path.to_path_buf(),
+            px: size,
+            mtime,
+            inner: (inner.width, inner.height),
+            protocol: if own {
+                self.graphics
+            } else {
+                crate::graphics::Protocol::Blocks
+            },
         };
-        let stale = self
-            .quick_image
-            .as_ref()
-            .is_none_or(|(p, s, m, _)| !fresh(p, *s, *m));
+        let stale = self.quick_image.as_ref().is_none_or(|(k, _)| *k != key);
         if stale {
             let (w, h) = if own {
                 (size.0 as usize, size.1 as usize)
@@ -5107,27 +5159,39 @@ impl App {
             if !self.interactive {
                 // A screenshot has no later frame for the picture to arrive in.
                 let pic = xdevcmd_core::image::load(path, w, h, bg).map_err(|e| e.to_string());
-                self.quick_image = Some((path.to_path_buf(), size, mtime, pic));
-            } else if !self
-                .decoding
-                .as_ref()
-                .is_some_and(|(p, s, m, _)| fresh(p, *s, *m))
-            {
-                let (tx, rx) = std::sync::mpsc::channel();
-                let file = path.to_path_buf();
-                std::thread::spawn(move || {
-                    let _ = tx.send(
-                        xdevcmd_core::image::load(&file, w, h, bg).map_err(|e| e.to_string()),
-                    );
-                });
-                self.decoding = Some((path.to_path_buf(), size, mtime, rx));
+                let prepared = Prepared {
+                    pic,
+                    cells: (0, 0),
+                    bytes: Vec::new(),
+                };
+                self.quick_image = Some((key.clone(), prepared));
+            } else if !self.decoding.as_ref().is_some_and(|(k, _)| *k == key) {
+                // Only once the cursor has stayed: a quick run down a directory of
+                // photos decodes and sends none of those passed over.
+                let since = match &self.settle {
+                    Some((p, t)) if p == path => *t,
+                    _ => {
+                        let now = Instant::now();
+                        self.settle = Some((path.to_path_buf(), now));
+                        now
+                    }
+                };
+                if since.elapsed() < SETTLE {
+                    self.settling = true;
+                } else {
+                    self.settle = None;
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let job = key.clone();
+                    let cell = (cw, ch);
+                    std::thread::spawn(move || {
+                        let _ = tx.send(prepare(&job, w, h, bg, cell));
+                    });
+                    self.decoding = Some((key.clone(), rx));
+                }
             }
         }
-        let current = self
-            .quick_image
-            .as_ref()
-            .filter(|(p, s, m, _)| fresh(p, *s, *m));
-        let Some((_, _, _, pic)) = current else {
+        let current = self.quick_image.as_ref().filter(|(k, _)| *k == key);
+        let Some((_, Prepared { pic, cells, .. })) = current else {
             let inner = modal::frame_box(frame, area, "image", th.accent);
             modal::put(
                 frame,
@@ -5138,6 +5202,7 @@ impl App {
             );
             return;
         };
+        let cells = *cells;
         let title = match pic {
             Ok(p) => format!("image {}\u{d7}{}", p.source.0, p.source.1),
             Err(_) => "image".into(),
@@ -5153,11 +5218,13 @@ impl App {
         if own {
             // The terminal draws it, after this frame (sync_graphics); not under a dialog,
             // where it would be drawn over the dialog, nor in a box too small to hold it.
-            if self.modal.is_none() && inner.width > 0 && inner.height > 0 {
-                let cols = (pic.width as u16).div_ceil(cw.max(1)).clamp(1, inner.width);
-                let rows = (pic.height as u16)
-                    .div_ceil(ch.max(1))
-                    .clamp(1, inner.height);
+            let (cols, rows) = cells;
+            if self.modal.is_none()
+                && cols > 0
+                && rows > 0
+                && cols <= inner.width
+                && rows <= inner.height
+            {
                 self.graphic_want = Some(Graphic {
                     rect: Rect::new(
                         inner.x + (inner.width - cols) / 2,
@@ -5165,9 +5232,7 @@ impl App {
                         cols,
                         rows,
                     ),
-                    path: path.to_path_buf(),
-                    px: size,
-                    mtime,
+                    key,
                 });
             }
             return;
@@ -5455,16 +5520,26 @@ impl App {
     }
 
     /// After a frame: put the picture it wants on screen in the terminal's own protocol,
-    /// once, and take an old one away. A Kitty picture is removed by its id; an iTerm2
-    /// or sixel picture is cells, so the screen is repainted over it.
+    /// once, and take an old one away. The bytes were made with the decode
+    /// ([`prepare`]): a frame only writes them. A Kitty picture is sent once and kept by
+    /// the terminal: under a dialog only its placement goes, and it is placed again
+    /// after; it is freed when another picture or none replaces it. An iTerm2 or sixel
+    /// picture is cells: the screen is repainted over it, and it is written again.
     fn sync_graphics(&mut self, terminal: &mut Term) -> Result<()> {
-        use crate::graphics::{encode, kitty_delete, Protocol};
+        use crate::graphics::{kitty_delete, kitty_place, kitty_unplace, Protocol};
         if self.graphic_want == self.graphic_shown {
             return Ok(());
         }
-        if self.graphic_shown.take().is_some() {
+        if let Some(old) = self.graphic_shown.take() {
             if self.graphics == Protocol::Kitty {
-                terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
+                // Kept while a dialog covers it, or when only its place changes.
+                let same = self.graphic_want.as_ref().is_some_and(|w| w.key == old.key);
+                if same || (self.graphic_want.is_none() && self.modal.is_some()) {
+                    terminal.backend_mut().raw(&kitty_unplace(KITTY_ID))?;
+                } else {
+                    terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
+                    self.kitty_held = None;
+                }
             } else {
                 // An iTerm2 or sixel picture is cells: write again, through the backend,
                 // what this frame has in the cells it covered (draw() kept them), which
@@ -5479,16 +5554,23 @@ impl App {
         let Some(want) = self.graphic_want.clone() else {
             return Ok(());
         };
-        let Some((_, _, _, Ok(pic))) = self
+        let Some((_, prepared)) = self
             .quick_image
             .as_ref()
-            .filter(|(p, s, m, _)| *p == want.path && *s == want.px && *m == want.mtime)
+            .filter(|(k, p)| *k == want.key && p.pic.is_ok() && !p.bytes.is_empty())
         else {
             return Ok(());
         };
         let r = want.rect;
         let mut bytes = format!("\x1b7\x1b[{};{}H", r.y + 1, r.x + 1).into_bytes();
-        bytes.extend(encode(self.graphics, pic, r.width, r.height, KITTY_ID));
+        if self.graphics == Protocol::Kitty && self.kitty_held.as_ref() == Some(&want.key) {
+            bytes.extend(kitty_place(KITTY_ID, r.width, r.height));
+        } else {
+            bytes.extend_from_slice(&prepared.bytes);
+            if self.graphics == Protocol::Kitty {
+                self.kitty_held = Some(want.key.clone());
+            }
+        }
         bytes.extend_from_slice(b"\x1b8");
         terminal.backend_mut().raw(&bytes)?;
         self.graphic_shown = Some(want);
@@ -5900,6 +5982,7 @@ impl App {
 
     fn draw_frame(&mut self, frame: &mut Frame) {
         self.graphic_want = None;
+        self.settling = false;
         let area = frame.area();
         self.screen = area;
         self.note_focus();

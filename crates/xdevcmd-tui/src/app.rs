@@ -453,6 +453,10 @@ pub struct App {
     /// shell" in the question before typing): that shell, the text, bracketed paste
     /// allowed, what it is, and since when.
     pending_type: Option<PendingType>,
+    /// `[terminal] follow`: the shell last looked at, its report count (where reports
+    /// are what there is), and the directory it was last seen idle in. The pane moves
+    /// only when that directory changes for the same shell: an edge, not a level.
+    follow_seen: Option<(ShellKey, u64, Option<PathBuf>)>,
     /// Copy, move, delete, extract and pack jobs sent to the background (B in the
     /// progress box). One that asks a question comes back to the front.
     jobs: Vec<Job>,
@@ -596,6 +600,7 @@ impl App {
             save_only: false,
             history_dir: None,
             pending_type: None,
+            follow_seen: None,
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
@@ -1036,6 +1041,7 @@ impl App {
     /// any of it changed what is on screen.
     fn background(&mut self) -> bool {
         let mut changed = self.pump_pending_type();
+        changed |= self.follow_shell();
         // A thread other than this one panicked: xdevcmd goes on, and says where the
         // details went.
         if let Some(log) = crate::crash::take_background() {
@@ -1933,6 +1939,67 @@ impl App {
         true
     }
 
+    /// `[terminal] follow`: when the focused shell's directory changes while it is at
+    /// its prompt, the file pane used last goes there. Edge-triggered: the pane going
+    /// somewhere else (Backspace) changes nothing until the shell's next `cd`. Never
+    /// the other way. Waits while a dialog or a quick search is open; while the pane
+    /// shows an archive or find results the change is let pass, not kept for later.
+    /// True when it moved a pane.
+    fn follow_shell(&mut self) -> bool {
+        if !self.settings.config.terminal.follow {
+            self.follow_seen = None;
+            return false;
+        }
+        if self.modal.is_some() || self.drag.is_some() || self.search.is_some() {
+            return false;
+        }
+        let seen = self.follow_seen.take();
+        let Some(panel) = self.panel_ref() else {
+            return false;
+        };
+        let Some(key) = panel.focused_key() else {
+            return false;
+        };
+        let Some(shell) = panel.shell(key) else {
+            return false;
+        };
+        let (mut seq, last) = match seen {
+            Some((k, seq, last)) if k == key => (seq, Some(last)),
+            // Another shell (a tab switched, a new one): only learn where it is.
+            _ => (0, None),
+        };
+        let now = shell.idle_dir(&mut seq);
+        let Some(dir) = now else {
+            self.follow_seen = Some((key, seq, last.flatten()));
+            return false;
+        };
+        self.follow_seen = Some((key, seq, Some(dir.clone())));
+        match last {
+            Some(Some(was)) if was != dir => {}
+            _ => return false,
+        }
+        if !dir.is_dir() {
+            return false;
+        }
+        let canonical = xdevcmd_core::paths::canonical(&dir).unwrap_or_else(|_| dir.clone());
+        if !xdevcmd_core::policy::get().allows(&canonical) {
+            return false;
+        }
+        let Some(f) = self
+            .last_files_id()
+            .and_then(|id| self.panes.get_mut(&id))
+            .and_then(Pane::as_files_mut)
+        else {
+            return false;
+        };
+        if f.archive.is_some() || f.results.is_some() || f.cwd == canonical {
+            return false;
+        }
+        f.set_cwd(&canonical);
+        self.status = format!("following the shell: {}", tidy(&canonical));
+        true
+    }
+
     /// The terminal panel, to read from.
     fn panel_ref(&self) -> Option<&TermPanel> {
         match self.panes.get(&self.term_id?) {
@@ -1941,12 +2008,15 @@ impl App {
         }
     }
 
-    /// The file pane used last: the focused one, else the one focused before.
+    /// The file pane used last: the focused one, else the one focused before, else
+    /// the first (focus starting in the files and going straight to the shell leaves
+    /// no file pane in `mru`).
     fn last_files_id(&self) -> Option<PaneId> {
         let files = self.file_panes();
         std::iter::once(self.focus)
             .chain(self.mru.iter().copied())
             .find(|id| files.contains(id))
+            .or_else(|| files.first().copied())
     }
 
     /// Alt+G: the file pane goes to the shell's directory, the reverse of Alt+C. It only

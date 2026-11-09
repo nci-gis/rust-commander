@@ -213,6 +213,9 @@ pub struct Terminal {
     /// Alt+C and typing names (Alt+Enter) send to the shell without asking when it is
     /// surely at its prompt; false asks every time (owner, 2026-11-09: default true).
     pub send_when_idle: bool,
+    /// The file pane used last goes to the shell's directory when the shell's `cd`
+    /// changes it, at the prompt only; never the other way. Off by default.
+    pub follow: bool,
 }
 
 /// The range `[terminal] scrollback` takes.
@@ -227,6 +230,7 @@ impl Default for Terminal {
             max_terminals: 3,
             scrollback: 5000,
             send_when_idle: true,
+            follow: false,
         }
     }
 }
@@ -1264,6 +1268,19 @@ mod tests {
         let s = parse("[terminal]\nsend_when_idle = false\n").unwrap();
         assert!(!s.config.terminal.send_when_idle);
         assert!(render_default().contains("send_when_idle = true"));
+    }
+
+    #[test]
+    fn following_the_shell_is_off_by_default() {
+        assert!(!parse("").unwrap().config.terminal.follow);
+        assert!(
+            parse("[terminal]\nfollow = true\n")
+                .unwrap()
+                .config
+                .terminal
+                .follow
+        );
+        assert!(render_default().contains("follow = false"));
     }
 
     #[test]

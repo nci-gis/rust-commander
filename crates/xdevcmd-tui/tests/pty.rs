@@ -1483,6 +1483,77 @@ fn alt_g_refuses_while_a_program_runs_and_when_the_directory_is_gone() {
     xdevcmd.quit();
 }
 
+/// `[terminal] follow`, Linux: the pane follows the shell's `cd`, read from /proc.
+/// macOS and Windows need the shell's OSC 7 report (docs/shell.md), not set up here.
+#[cfg(target_os = "linux")]
+#[test]
+fn with_follow_on_the_pane_follows_the_shells_cd_and_only_when_it_changes() {
+    let s = Scratch::new("follow");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    std::fs::create_dir(s.left().join("other")).unwrap();
+    s.file("left/sub/inside-sub.txt", "x");
+    s.file("left/other/inside-other.txt", "x");
+    s.file("left/at-left.txt", "x");
+    let cfg = s.file("config.toml", "[terminal]\nfollow = true\n");
+    let cfg = cfg.to_str().unwrap().to_string();
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    // Where the shell starts is learnt first (the /proc read is twice a second).
+    std::thread::sleep(Duration::from_millis(700));
+    xdevcmd.send(b"cd sub\r");
+    xdevcmd.wait_for("inside-sub");
+    xdevcmd.wait_for("following the shell:");
+    assert!(!xdevcmd.screen().contains("at-left"));
+    // The pane goes elsewhere: the shell has not moved, so nothing follows.
+    xdevcmd.send(F12);
+    xdevcmd.send(b"\x7f"); // Backspace
+    xdevcmd.wait_for("at-left");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        !xdevcmd.screen().contains("inside-sub"),
+        "the pane went back to the shell's unchanged directory"
+    );
+    // Not while a program runs: `cd` then sleep; the pane moves once the prompt is back.
+    xdevcmd.send(F12);
+    xdevcmd.send(b"cd ../other && sleep 2\r");
+    std::thread::sleep(Duration::from_millis(1000));
+    assert!(
+        !xdevcmd.screen().contains("inside-other"),
+        "followed while a program had the terminal"
+    );
+    xdevcmd.wait_for("inside-other");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn follow_is_off_by_default_and_nothing_moves() {
+    let s = Scratch::new("nofollow");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    s.file("left/sub/inside-sub.txt", "x");
+    s.file("left/at-left.txt", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"cd sub && touch done-cd\r");
+    wait_file(&s.left().join("sub").join("done-cd"), "the cd ran", |t| {
+        t.is_some()
+    });
+    std::thread::sleep(Duration::from_millis(1500));
+    let screen = xdevcmd.screen();
+    assert!(screen.contains("at-left"), "{screen}");
+    assert!(!screen.contains("inside-sub"), "{screen}");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 const ALT_ENTER: &[u8] = b"\x1b\r";
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

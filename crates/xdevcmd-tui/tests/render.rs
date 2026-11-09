@@ -2621,6 +2621,39 @@ fn settings_shows_what_a_full_history_costs() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Settings → Terminal: following the shell's cd, off, each label in its column.
+#[test]
+fn settings_offers_following_the_shell_off() {
+    let (a, b) = fixture();
+    let s = shot_keys(
+        "122x34",
+        "F9,Up,Up,Enter,Tab,Tab,Tab,Down,Down,Down,Down,Down,Down",
+        &a,
+        &b,
+    );
+    let row = |label: &str| {
+        s.lines()
+            .find(|l| l.contains(label))
+            .unwrap_or_else(|| panic!("{label}: {s}"))
+            .to_string()
+    };
+    let follow = row("Files follow the shell's cd");
+    let idle = row("Type into an idle shell at once");
+    let history = row("History lines per shell");
+    // The values line up under the history row's.
+    let col = |l: &str, v: &str| l.find(v).map(|i| l[..i].chars().count());
+    assert_eq!(col(&follow, "[ ]"), col(&history, "\u{2039}"), "{s}");
+    assert_eq!(col(&idle, "[x]"), col(&history, "\u{2039}"), "{s}");
+    // Elsewhere than Linux it needs the shell to report its directory, and says so.
+    let help = if cfg!(target_os = "linux") {
+        "the pane going elsewhere never moves the shell"
+    } else {
+        "Needs the shell to report its directory"
+    };
+    assert!(s.contains(help), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
     let (a, b) = fixture();

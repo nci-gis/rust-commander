@@ -57,7 +57,9 @@ pub struct TermPane {
     pid: Arc<AtomicU32>,
     /// What the shell is doing, re-read at most twice a second rather than on every
     /// frame: a few /proc reads per tab per frame add up across tabs and splits.
-    activity: RefCell<(Option<Instant>, Option<String>)>,
+    /// When it was read, the tab's label, and (Linux) the shell's directory when no
+    /// program had the terminal — what `[terminal] follow` reads ([`TermPane::idle_dir`]).
+    activity: RefCell<(Option<Instant>, Option<String>, Option<std::path::PathBuf>)>,
     /// Started for one program ("Run it?" → in a terminal tab), not a shell: the pane
     /// stays when it ends, so its output can still be read.
     keep: bool,
@@ -417,7 +419,7 @@ impl TermPane {
             exited,
             label,
             pid,
-            activity: RefCell::new((None, None)),
+            activity: RefCell::new((None, None, None)),
             keep,
             ended,
             last_output,
@@ -439,18 +441,57 @@ impl TermPane {
     /// cannot be told apart. `None` where the system does not say (anything but Linux),
     /// and the caller falls back to the shell's name.
     pub fn activity(&self) -> Option<String> {
+        self.read_activity();
+        self.activity.borrow().1.clone()
+    }
+
+    /// Re-read what the shell is doing if the last read is older than 500 ms.
+    fn read_activity(&self) {
         let mut cache = self.activity.borrow_mut();
         let fresh = cache
             .0
             .is_some_and(|t| t.elapsed() < Duration::from_millis(500));
         if !fresh {
             let pid = self.pid.load(Ordering::Relaxed);
-            *cache = (
-                Some(Instant::now()),
-                (pid != 0).then(|| activity_of(pid)).flatten(),
-            );
+            *cache = if pid == 0 {
+                // Not started yet: asked again next time, not in 500 ms.
+                (None, None, None)
+            } else {
+                let (label, dir) = activity_of(pid);
+                (Some(Instant::now()), label, dir)
+            };
         }
-        cache.1.clone()
+    }
+
+    /// For `[terminal] follow`: the shell's directory while it is at its prompt, read
+    /// as cheaply as this system allows; `None` when there is nothing to say.
+    ///
+    /// - Linux: from the same 500 ms `/proc` read the tab's label comes from (no
+    ///   extra reads), and only when no program has the terminal and the last prompt
+    ///   mark is not C. `seen` is not used.
+    /// - Elsewhere: the directory the shell last reported (OSC 7 / 9;9), only when a
+    ///   report has arrived since `seen` (a report count, updated here); the shell's
+    ///   state is asked then, once, and the directory given only when it is idle.
+    pub fn idle_dir(&self, seen: &mut u64) -> Option<std::path::PathBuf> {
+        if self.keep || self.has_exited() {
+            return None;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = seen;
+            self.read_activity();
+            let dir = self.activity.borrow().2.clone()?;
+            (self.reported().2 != Some(Mark::Running)).then_some(dir)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let (dir, seq, _) = self.reported();
+            if seq == *seen {
+                return None;
+            }
+            *seen = seq;
+            (self.state() == ShellState::Idle).then_some(dir).flatten()
+        }
     }
 
     /// The shell's working directory, cheaply: `/proc` on Linux, elsewhere the last
@@ -796,13 +837,17 @@ impl TermPane {
 
 /// Linux keeps the answer in /proc: the terminal's foreground process group in the
 /// shell's `stat`, and the shell's working directory as a symlink.
+///
+/// The label, and the directory when no program has the terminal.
 #[cfg(target_os = "linux")]
-fn activity_of(pid: u32) -> Option<String> {
+fn activity_of(pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
     if let Some(program) = foreground_of(pid) {
-        return Some(program);
+        return (Some(program), None);
     }
-    let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
-    Some(short_dir(&cwd))
+    match std::fs::read_link(format!("/proc/{pid}/cwd")) {
+        Ok(cwd) => (Some(short_dir(&cwd)), Some(cwd)),
+        Err(_) => (None, None),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -851,16 +896,16 @@ fn foreground_of(pid: u32) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn activity_of(pid: u32) -> Option<String> {
-    foreground_of(pid)
+fn activity_of(pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
+    (foreground_of(pid), None)
 }
 
 /// Windows: the console's foreground process is not something std or a small crate
 /// exposes. Tabs keep the shell's name, and Alt+C cannot tell a busy shell from an
 /// idle one — it still refuses control characters and quotes per shell.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn activity_of(_pid: u32) -> Option<String> {
-    None
+fn activity_of(_pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
+    (None, None)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

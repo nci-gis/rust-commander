@@ -39,6 +39,14 @@ pub struct Field {
     now: bool,
 }
 
+/// The follow row's help: Linux reads the directory itself; elsewhere the shell must
+/// report it (docs/shell.md).
+const FOLLOW_HELP: &str = if cfg!(target_os = "linux") {
+    "At the prompt only; the pane going elsewhere never moves the shell"
+} else {
+    "Needs the shell to report its directory (docs/shell.md); at the prompt only"
+};
+
 const fn f(
     tab: usize,
     section: &'static str,
@@ -290,8 +298,17 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "send_when_idle",
-        "Send to the shell without asking when it is surely idle",
-        "For cd here and typing names; when off, or unsure, it asks first",
+        "Type into an idle shell at once",
+        "Alt+C and typed names, when the shell is surely at its prompt; off asks first",
+        Kind::Bool,
+        true,
+    ),
+    f(
+        3,
+        "terminal",
+        "follow",
+        "Files follow the shell's cd",
+        FOLLOW_HELP,
         Kind::Bool,
         true,
     ),
@@ -337,6 +354,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("terminal", "max_terminals") => c.terminal.max_terminals.to_string(),
         ("terminal", "scrollback") => c.terminal.scrollback.to_string(),
         ("terminal", "send_when_idle") => c.terminal.send_when_idle.to_string(),
+        ("terminal", "follow") => c.terminal.follow.to_string(),
         _ => String::new(),
     }
 }
@@ -384,6 +402,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
             c.terminal.scrollback = n().map_or(c.terminal.scrollback, |x| x as usize)
         }
         ("terminal", "send_when_idle") => c.terminal.send_when_idle = b,
+        ("terminal", "follow") => c.terminal.follow = b,
         _ => {}
     }
 }

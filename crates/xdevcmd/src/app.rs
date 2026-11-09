@@ -253,16 +253,35 @@ fn terminal_alive(watch: bool) -> Result<()> {
     Ok(())
 }
 
-/// Whether the terminal at `fd` is hung up: asking for its settings fails with EIO
-/// (Linux, the BSDs) or ENXIO (macOS, a pty whose other side closed). Not `poll`:
-/// macOS's poll does not support devices and may answer POLLNVAL for a live terminal.
+/// Whether the terminal at `fd` is hung up. Two signs, either enough:
+///
+/// - asking for its settings fails with EIO (Linux, the BSDs) or ENXIO;
+/// - `poll`, not waiting, answers POLLHUP. macOS needs this one: there `tcgetattr` on
+///   a pty whose other side has closed still succeeds (seen on the CI's macOS runner).
+///
+/// Only POLLHUP counts. macOS's poll does not support some devices (`/dev/tty`) and
+/// answers POLLNVAL for them, live or not: taken for a hang-up, it would end xdevcmd
+/// under a working terminal. Where poll cannot tell, the next draw's failed write
+/// still does. The caller asks only of a terminal (a pipe whose writer closed would
+/// say POLLHUP too).
 #[cfg(unix)]
 fn tty_gone(fd: impl std::os::fd::AsFd) -> bool {
+    use rustix::event::{poll, PollFd, PollFlags, Timespec};
     use rustix::io::Errno;
-    matches!(
+    let fd = fd.as_fd();
+    if matches!(
         rustix::termios::tcgetattr(fd),
         Err(Errno::IO) | Err(Errno::NXIO)
-    )
+    ) {
+        return true;
+    }
+    let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+    let now = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    matches!(poll(&mut fds, Some(&now)), Ok(n) if n > 0)
+        && fds[0].revents().contains(PollFlags::HUP)
 }
 
 /// Windows: crossterm's console reader reports a closed console as an error itself.

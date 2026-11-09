@@ -13,11 +13,11 @@
 //! as it runs, and the system lets go of it when the process ends, however it ends: a
 //! journal another start can lock is a dead run's. Unix: `flock`. Windows: the journal
 //! is open without sharing write access, so another start's attempt to open it for
-//! writing, sharing nothing, fails while the job runs. A date or a bare pid would not do:
-//! a job blocked on a slow drive stops touching its file, and a pid is reused. Where the
-//! file system has no locks (some network ones), the pid is asked, and only for a
-//! journal written on this machine. A journal from another host (a home directory shared
-//! over NFS) is always left alone: its job may be running there.
+//! writing (sharing only deletion) fails while the job runs. A date or a bare pid would
+//! not do: a job blocked on a slow drive stops touching its file, and a pid is reused.
+//! Where the file system has no locks (some network ones), the pid is asked, and only
+//! for a journal written on this machine. A journal from another host (a home directory
+//! shared over NFS) is always left alone: its job may be running there.
 //!
 //! **The run** is `<pid>x<start time, hex>`: it names the journal, the part files and
 //! rename many's temporary names, so a later process given the same pid never matches a
@@ -107,6 +107,10 @@ fn try_lock(file: &File) -> Lock {
 }
 
 /// Open a journal so that, while it is open, nobody else can open it for writing.
+///
+/// Windows: not `FILE_FLAG_DELETE_ON_CLOSE`. The system would remove the journal when
+/// the process ends however it ends, a killed one included, and a killed run's journal
+/// is exactly the one that must stay for the next start to tidy up after.
 fn open_held(path: &Path) -> std::io::Result<File> {
     let mut o = OpenOptions::new();
     o.read(true).write(true).create_new(true);
@@ -128,9 +132,15 @@ fn open_probe(path: &Path) -> Option<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        // Writing, sharing nothing: refused (a sharing violation) while the job that
-        // wrote it has it open, granted once that process is gone.
-        o.write(true).share_mode(0);
+        // Writing, sharing only deletion: refused (a sharing violation) while the job
+        // that wrote it has it open (it shares no writing), and while another start's
+        // probe has it (that shares no writing either); granted once both are gone.
+        // FILE_SHARE_DELETE (0x4) is what lets this start remove the journal while it
+        // still holds the probe: `remove_file` opens the file for deletion, which a
+        // handle sharing nothing refuses, so the journal would never go. Removed while
+        // held, the name is gone (or delete-pending, which no open is granted) before
+        // the probe closes, so no other start ever gets it in between.
+        o.write(true).share_mode(0x4);
     }
     o.open(path).ok()
 }

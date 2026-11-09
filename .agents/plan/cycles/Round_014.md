@@ -153,6 +153,76 @@ The owner's notes on the terminal panel (2026-11-09), to weigh; not started:
 - Copy all / save the history to a file from a menu on the panel; a PuTTY-like log of
   everything a shell prints (low priority, the owner said).
 
+### Plan for the terminal panel (2026-11-09, agreed in outline; not started)
+
+The owner's frame: these are the limits of a terminal inside a terminal, as over SSH —
+xdevcmd has only what the outer terminal gives it. tmux meets the same limits with the
+same answers (`history-limit`, copy mode, `pipe-pane` logging), which is a check on the
+direction. Owner's decisions: history at most **9999** lines; the menu **on the tab
+only**, never in the shell's area (the user should not have to know when a right-click
+belongs to the program and when to xdevcmd); the menu holds **only what matters**.
+
+**Step 1 — History view (copy mode).** The biggest gain; reuses the F3 viewer.
+- **Alt+V** in the panel (free: not bound, and readline leaves M-v alone) opens the
+  focused shell's history and screen as plain text in the viewer, at the bottom (where
+  you were). There: drag selects lines, `y` copies, `Y` the screen, `/` `n` `N` search,
+  Esc back to the shell. The program keeps the mouse the rest of the time.
+- Text from vt100 page by page: scrollback offset from the top down to 0, the visible
+  rows of each, joined where `row_wrapped` says the line went on. Trailing blanks cut.
+- **In memory, not a temporary file**: a shell's output can hold tokens and customer
+  data, and nothing of it should touch the disk unless the user saves it. So
+  `Document` (core) gets a second source, bytes in memory, beside the file; its line
+  index and search work on either.
+- One viewer, not a second one (owner agreed): selection, search, scrollbar and keys
+  are already there and tested.
+- Tests: pty — `seq 1 300`, Alt+V, the viewer shows `1` at the top after Home and
+  `300` at the bottom; `y` after a drag sends OSC 52 with the lines; Esc returns with
+  the shell still typing.
+
+**Step 2 — Save as… and Go to line in the viewer.** For every document, not only history.
+- **Save as…** (F2 in the viewer; free there): asks for a path, prefilled with
+  `<shell's directory>/xdevcmd-history-<date>-<time>.txt` for history and the file's own
+  name for a file. Refuses to overwrite without asking (the same question as copy);
+  written `0600` for history. Read-only and restricted mode: refused, as other writes.
+  This also covers the owner's "export / copy all", and is the way out where OSC 52 is
+  missing (macOS Terminal.app over SSH).
+- **Go to line**: `:` (as less and vim) and Ctrl+G (as Ctrl+G goes to a path in the
+  panes). Takes a line number or a percentage (`50%`); out of range goes to the end and
+  says so. In hex view, an offset.
+- Tests: render — `:` 40 Enter puts line 40 at the top; `50%`; pty — F2 writes the file,
+  a second F2 to the same name asks first.
+
+**Step 3 — `[terminal] scrollback`.** Default stays 5000; 100 to **9999** (owner). In
+Settings with the memory it can take when full, worked out from the panel's width
+(vt100 keeps 32 bytes a cell: 9999 lines × 120 columns ≈ 38 MB per shell). Applies to
+shells started after the change (vt100 cannot resize its history in place); Settings
+says so. Test: config parse bounds; a shell started with 200 keeps 200 lines.
+
+**Step 4 — The menu on a terminal tab.** Right-click a tab (the bar is xdevcmd's, so no
+guessing who gets the click). Only what matters:
+- View history (Alt+V)
+- Save history as…
+- Close tab
+Not in it: New tab and split (the + button and Alt+N/S/D already); Paste (xdevcmd
+cannot read the clipboard over SSH, and the terminal's own paste, Ctrl+Shift+V or Cmd+V,
+already works); Clear history (destructive, rarely wanted; `clear` in the shell). Each
+item shows its key, so the menu also teaches the keys. Test: render — right-click a tab
+shows the three items; Close tab closes that tab, not the focused one.
+
+**Step 5 — Logging (later, off by default; weighed, not decided).**
+- "Write only what overflows" cannot be done reliably: vt100 does not say when a line
+  leaves its history, so it would be guesswork, with lines lost or doubled. The sound
+  version writes **everything the shell prints**, escapes stripped, as PuTTY's log
+  does; the file then holds the whole history, which is what the owner wants from it.
+  Full-screen programs (Claude Code, htop) redraw constantly and log as noise.
+- Where: not the current directory (logs scattered through projects, committed by
+  mistake, and they can hold secrets): xdevcmd's state directory, `logs/`, files `0600`,
+  a setting to choose another directory. Name: `<date>-<time>-tab<N>-<pid>.log`, never
+  the same twice. A size cap per file and deletion after N days.
+- Its own decision when the owner is ready; a menu item "Log this tab" would join step 4.
+
+Order: 1, 2, 3, 4 (each its own commit with its tests), 5 only on the owner's word.
+
 ## Do
 
 - 2026-11-09, three of the owner's finds in the terminal panel. (1) The wheel did nothing

@@ -807,6 +807,32 @@ fn go_to_line_in_the_viewer_takes_a_number_a_share_or_an_offset() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// The edges of Go to line: a number longer than any count is past the end, not "not a
+/// line"; 0 is line 1 and says so; and the hex refusal reads "not an offset".
+#[test]
+fn go_to_line_past_any_number_at_zero_and_not_an_offset() {
+    let body: String = (1..=300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    let huge = "9".repeat(45);
+    let typed: Vec<String> = huge.chars().map(String::from).collect();
+    let keys = format!("Down,F3,:,{},Enter", typed.join(","));
+    let s = shot_keys("100x16", &keys, &a, &b);
+    assert!(
+        viewer_top(&s).contains("300 \u{2502}line 300"),
+        "the end\n{s}"
+    );
+    assert!(s.contains("is past the end"), "and says so\n{s}");
+    let s = shot_keys("100x16", "Down,F3,PageDown,:,0,Enter", &a, &b);
+    assert!(viewer_top(&s).contains("  1 \u{2502}line 1"), "line 1\n{s}");
+    assert!(s.contains("lines start at 1"), "{s}");
+    let s = shot_keys("100x16", "Down,F3,h,:,z,z,Enter", &a, &b);
+    assert!(s.contains("not an offset: zz"), "{s}");
+    let keys = format!("Down,F3,h,:,{},Enter", typed.join(","));
+    let s = shot_keys("100x16", &keys, &a, &b);
+    assert!(s.contains("is past the end"), "hex too\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// Ctrl+G reached the viewer as 'g' with Ctrl held, and the arm for `g` (to the top)
 /// took it whatever the modifiers. Now it asks where to go, and the view stays put.
 #[test]

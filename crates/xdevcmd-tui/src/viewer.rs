@@ -224,27 +224,22 @@ impl Viewer {
         let last = self.last();
         let rows = last + 1;
         let unit = match self.mode {
-            Mode::Text => "line",
-            Mode::Hex => "offset",
+            Mode::Text => "a line",
+            Mode::Hex => "an offset",
         };
         let target: Option<u64> = if let Some(p) = t.strip_suffix('%') {
-            p.trim()
-                .parse::<u64>()
-                .ok()
-                .map(|p| (rows as u64 * p.min(100) / 100).saturating_sub(1))
+            number(p.trim(), 10).map(|p| (rows as u64 * p.min(100) / 100).saturating_sub(1))
         } else if self.mode == Mode::Hex {
             let (digits, radix) = match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
                 Some(h) => (h, 16),
                 None => (t, 10),
             };
-            u64::from_str_radix(digits, radix)
-                .ok()
-                .map(|off| off / HEX_COLS)
+            number(digits, radix).map(|off| off / HEX_COLS)
         } else {
-            t.parse::<u64>().ok().map(|n| n.saturating_sub(1))
+            number(t, 10).map(|n| n.saturating_sub(1))
         };
         let Some(row) = target else {
-            self.message = format!("not a {unit}: {t} \u{2014} a number, or 50%");
+            self.message = format!("not {unit}: {t} \u{2014} a number, or 50%");
             return;
         };
         self.selection = None;
@@ -260,6 +255,10 @@ impl Viewer {
         } else {
             self.top = row as usize;
             self.message.clear();
+            // Lines count from 1; 0 goes to the first and says why it is not line 0.
+            if self.mode == Mode::Text && number(t, 10) == Some(0) {
+                self.message = "lines start at 1 \u{2014} this is line 1".into();
+            }
         }
     }
 
@@ -668,4 +667,13 @@ impl Viewer {
             .buffer_mut()
             .set_line(area.x, area.y, &Line::from(spans), area.width);
     }
+}
+
+/// Digits in `radix` as a number; more than a `u64` holds is the largest one, which is
+/// past the end of anything, rather than "not a number".
+fn number(digits: &str, radix: u32) -> Option<u64> {
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    Some(u64::from_str_radix(digits, radix).unwrap_or(u64::MAX))
 }

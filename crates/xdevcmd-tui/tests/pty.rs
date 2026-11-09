@@ -906,6 +906,45 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.quit();
 }
 
+/// Continuing an interrupted copy never replaces a file the user kept in the first run:
+/// a destination that differs from its (newer) source is asked about, and Skip keeps
+/// it. With the old rule (update) the newer source replaced it unasked.
+#[cfg(unix)]
+#[test]
+fn resume_from_app_does_not_replace_a_kept_newer_source_file() {
+    let s = Scratch::new("resume-kept");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "the source, newer").unwrap();
+    std::fs::write(dst.join("a.txt"), "kept").unwrap();
+    let hour_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(hour_ago)
+        .unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\ndest {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&dst),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.send(ENTER); // continue
+    x.wait_for("overwrite all");
+    x.send(b"s");
+    x.wait_for("1 skipped");
+    assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "kept");
+    x.quit();
+}
+
 /// An interrupted permanent delete is cleaned up after but never offered again: one
 /// Enter would go on, where Shift+F8 itself takes only Y.
 #[cfg(unix)]

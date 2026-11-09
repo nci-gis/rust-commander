@@ -1,6 +1,6 @@
 # Round 015: The terminal's history in the viewer
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 26; Steps 1–4 of "Plan for the terminal
 panel" in [Round 014](Round_014.md)
 **Date started**: 2026-11-10
@@ -78,7 +78,7 @@ as agreed on 2026-11-09; Step 5 (logging) stays out.
       not the focused one. Not in it: new tab/split, Paste, Clear history. Tests: render,
       `rclick` on the second of two tabs shows three items; Close tab closes that tab and
       leaves the focused one; View history opens the second tab's text.
-- [ ] **5. Docs and hand-over.** docs/keys.md regenerated (`--print-keys`), docs/config.md,
+- [x] **5. Docs and hand-over.** docs/keys.md regenerated (`--print-keys`), docs/config.md,
       the guide, CHANGELOG Unreleased. Status → Review; set aside; Round 016 starts from it.
 
 **Risks**
@@ -259,17 +259,48 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   their keys and mouse") would want that too; it belongs with the drag-select item the
   plan keeps out.
 
+- 2026-11-10, **step 5, docs and hand-over.** docs/keys.md regenerated with
+  `xdevcmd --print-keys` after the last key change; docs/config.md (`scrollback`), the
+  guide (keymap A, Shift+F12, the viewer's `:`/Ctrl+G/F2, the tab menu), docs/shell.md
+  and CHANGELOG Unreleased were updated in the step each belongs to. Checks in Check.
+  Commits on `feat/terminal-history`, local, not pushed: `0133be6` plan, `11bb56e` (0),
+  `e72b2fb` (1), `d7935a1` (2), `71d2a9d` (3), `a1bc229` (4), and this one (5).
+- 2026-11-10, **set aside for the owner's hand tests; Round 016 starts from it.**
+
 ## Check
 
-- [ ] fmt, clippy, `cargo test --workspace`, `cargo deny check`.
-- [ ] 300 lines out exactly as 300 in; a wrapped line comes back whole.
-- [ ] Nothing of the history written anywhere until Save as….
-- [ ] Save as… refuses in read-only/restricted, asks before replacing, writes 0600.
-- [ ] `:`/Ctrl+G, with Ctrl+G not taken as `g`.
-- [ ] Scrollback bounds and the memory figure in Settings.
-- [ ] The tab menu acts on the tab clicked.
+- [x] fmt (`--check` clean); clippy `--workspace --all-targets -D warnings` on Linux;
+      `cargo test --workspace` twice (2026-11-10): core 168 + 1, tui 153 unit (1
+      ignored, the timing) + 156 render + 61 pty (1 ignored, the soak), all pass both
+      times; the pty suite 3 more times, 61/61 each. No flake seen. `cargo deny check`
+      **not run**: cargo-deny is not installed here and the proxy blocks installing it;
+      no dependency was added this round (`vt100::Cell` and `chrono` were already in).
+- [x] 300 lines out exactly as 300 in; every page remainder 1…45 exact; a wrapped line
+      comes back whole, also cut by a page (each check fails with its guard removed).
+- [x] Nothing of the history written anywhere until Save as… (pty: no file under the
+      scratch directory holds the output while the viewer shows it).
+- [x] Save as… refuses in read-only (render, pty, and core's own wall in
+      `tests/read_only.rs`); asks before replacing and Esc keeps the file; writes 0600
+      (pty and core, also over a 0644 file). Restricted mode is read-only too and goes
+      through the same `refused`; no test of its own.
+- [x] `:`/Ctrl+G, with Ctrl+G not taken as `g` (fails with the arms swapped).
+- [x] Scrollback bounds (99, 10000 refused; 100, 9999 taken) and the memory figure in
+      Settings; a shell started with 200 keeps 200.
+- [x] The tab menu acts on the tab clicked (fails with the focused tab used).
+- [x] Keymap A: every Alt+letter but X, Alt+1…9, Ctrl+A…Z and F1–F11 reach the program
+      byte for byte, none acts (fails with the old global set).
+- [x] docs/keys.md regenerated with `xdevcmd --print-keys` (the test that compares them
+      passes).
+- [ ] Not compiled for Windows or macOS (targets cannot be installed through the proxy).
+      `#[cfg]` code added: `save_bytes`'s Unix `OpenOptionsExt::mode` and a
+      `#[cfg(not(unix))] let _ = private;`, by reading only.
 - [ ] By hand, owner: Shift+F12 with Claude Code/htop in the panel; OSC 52 copy in Windows
-      Terminal and iTerm2; Save as… where OSC 52 is missing.
+      Terminal and iTerm2; Save as… where OSC 52 is missing; Terminal.app's Shift+F12
+      (`ESC [34~`) and Alt+X F12 on a Mac; mc's F-keys in the panel; readline's Alt+D,
+      Alt+C, Alt+T, Alt+N in bash inside the panel.
+- [ ] `reference/ui.md` still lists the old global keys ("Layout and terminal actions
+      … work from inside the shell pane too", "`go_tab`, global"); read-only to agents,
+      for the owner to change.
 
 Record what you could **not** verify as explicitly as what you could.
 

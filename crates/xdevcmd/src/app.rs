@@ -7414,7 +7414,7 @@ fn bare_names_dir(d: Option<crate::pane::term::ShellDir>) -> Option<PathBuf> {
 
 /// `paths` as words for `shell`: bare names when all are in `dir`, else full paths.
 fn name_words(shell: &str, paths: &[PathBuf], dir: Option<&Path>) -> Result<String, String> {
-    let bare = dir.is_some_and(|d| paths.iter().all(|p| p.parent() == Some(d)));
+    let bare = dir.is_some_and(|d| all_in(paths, d));
     let mut names = Vec::with_capacity(paths.len());
     for p in paths {
         let shown = if bare {
@@ -7430,6 +7430,25 @@ fn name_words(shell: &str, paths: &[PathBuf], dir: Option<&Path>) -> Result<Stri
         );
     }
     crate::safety::words(shell, &names)
+}
+
+/// Whether every one of `paths` is directly in `dir`, the same directory by another
+/// name included. The shell's directory is the system's answer, with every link
+/// resolved; a pane's path keeps the links the user went through. On macOS the
+/// temporary directory itself is one (`/var` is `/private/var`), so a pane in it and
+/// a shell started there name the same directory differently, and comparing the text
+/// alone typed full paths at a shell already there.
+fn all_in(paths: &[PathBuf], dir: &Path) -> bool {
+    let mut parents = paths.iter().map(|p| p.parent());
+    let Some(Some(first)) = parents.next() else {
+        return false;
+    };
+    if !parents.all(|q| q == Some(first)) {
+        return false;
+    }
+    first == dir
+        || xdevcmd_core::paths::canonical(first)
+            .is_ok_and(|f| xdevcmd_core::paths::canonical(dir).is_ok_and(|d| f == d))
 }
 
 /// Shift, Alt and Ctrl as a mouse report carries them: 4, 8 and 16 added to the button.
@@ -7491,6 +7510,29 @@ mod tests {
         let full = words(Some(reported));
         assert!(full.contains("xdevcmd-bare-names"), "{full}");
         assert_eq!(full, words(None));
+    }
+
+    /// A pane reached through a link and a shell in the same directory (which the system
+    /// names with the link resolved, as macOS does for its temporary directory) get
+    /// bare names; another directory still gets full paths.
+    #[cfg(unix)]
+    #[test]
+    fn typed_names_are_bare_in_the_same_directory_by_another_name() {
+        let top = std::env::temp_dir().join(format!("xdevcmd-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let real = top.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = top.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let shell_dir = xdevcmd_core::paths::canonical(&real).unwrap();
+        let paths = vec![link.join("a b")];
+        assert_eq!(
+            name_words("bash", &paths, Some(&shell_dir)).unwrap(),
+            "'a b' "
+        );
+        let elsewhere = name_words("bash", &paths, Some(&top)).unwrap();
+        assert!(elsewhere.contains("link"), "{elsewhere}");
+        let _ = std::fs::remove_dir_all(&top);
     }
 
     /// A live terminal is not taken for a lost one, and a hung-up one is seen: the check

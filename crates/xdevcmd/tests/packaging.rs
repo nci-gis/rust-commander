@@ -103,7 +103,11 @@ fn the_winget_installer_points_at_the_archive_release_yml_makes() {
         return;
     };
     let dir = top().join("packaging/winget");
-    let installer = fs::read_to_string(dir.join("XDevTeam.xdevcmd.installer.yaml")).unwrap();
+    // Checked out on Windows, git may give the file CRLF line ends (core.autocrlf, as
+    // on the CI's runner); winget reads either, so compare the lines, not the ends.
+    let installer = fs::read_to_string(dir.join("XDevTeam.xdevcmd.installer.yaml"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let url = download("v<VERSION>", &format!("{folder}.zip"));
     assert!(
         installer.contains(&format!("InstallerUrl: {url}\n")),
@@ -112,7 +116,9 @@ fn the_winget_installer_points_at_the_archive_release_yml_makes() {
     let exe = format!("RelativeFilePath: {folder}\\xdevcmd.exe\n");
     assert!(installer.contains(&exe), "want {exe}\n{installer}");
     for f in ["", ".installer", ".locale.en-US"] {
-        let text = fs::read_to_string(dir.join(format!("XDevTeam.xdevcmd{f}.yaml"))).unwrap();
+        let text = fs::read_to_string(dir.join(format!("XDevTeam.xdevcmd{f}.yaml")))
+            .unwrap()
+            .replace("\r\n", "\n");
         assert!(
             text.contains("PackageIdentifier: XDevTeam.xdevcmd\n"),
             "{f}"

@@ -871,6 +871,9 @@ fn f2_in_the_viewer_offers_the_files_own_name_and_is_refused_read_only() {
 
 /// Save as… is prefilled with the file's own name, which someone else chose: one with a
 /// control character in it (Ctrl+U, which once ran a command through Alt+C) is refused.
+// Not on Windows: there the file system itself refuses a control character in a name,
+// so the file this starts from cannot be made, and no such name ever reaches Save as.
+#[cfg(unix)]
 #[test]
 fn save_as_refuses_a_name_with_a_control_character() {
     let (a, b) = with_file("bad\u{15}x.txt", b"one\ntwo\n");

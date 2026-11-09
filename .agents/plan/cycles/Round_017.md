@@ -139,6 +139,55 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
   otherwise have published from `dev`; publishing added as step 5 (`cargo release publish`,
   owner, from `main` at the tag), Scoop/winget as step 6.
 - 8: see Check.
+- **CI on Windows and macOS, 2026-11-10** (known red from run 42712465398 on
+  `feat/shell-bridge`). Iterated on a scratch branch `ci/scratch` whose only change was
+  `cargo test --all --no-fail-fast` (so one failing test binary hid none behind it),
+  deleted afterwards; ci.yml on this branch is unchanged.
+  - **Windows, journal** (`a_dead_runs_parts_are_removed_and_renames_put_back`,
+    `a_journal_held_by_a_running_job_is_left_alone_whatever_pid_it_names`). Cause: the
+    probe opened the journal for writing with `share_mode(0)`, and Round 014 rightly holds
+    it until after `remove_file`; `remove_file` must itself open the file for DELETE, which
+    a handle sharing nothing refuses — so a dead run's journal was never removed (the
+    sharing rules are per handle, the same within one process as across processes). Fix
+    (`2bbb6f0`): the probe shares `FILE_SHARE_DELETE` only (0x4). It still asks for
+    write, so it is refused while the job holds the journal (`FILE_SHARE_READ |
+    FILE_SHARE_DELETE`, no write sharing) and while another start's probe holds it (no
+    write sharing either): two starts still offer a job once. Removed while held, the name
+    is gone (POSIX delete) or delete-pending (no open is granted), so nobody gets it in
+    between. `FILE_FLAG_DELETE_ON_CLOSE` on the held journal was rejected: the system
+    would delete a *killed* run's journal too, which is exactly the one that must survive.
+    No `unsafe`, no `File::lock`.
+  - **macOS, `a_terminal_is_gone_only_once_its_other_side_closes`** ("its other side
+    closed"). Cause: on macOS `tcgetattr` on a pty slave whose master closed still
+    succeeds. Fix (`2bbb6f0`): `tty_gone` = `tcgetattr` EIO/ENXIO **or** a zero-timeout
+    `rustix::event::poll` answering **POLLHUP**. Only POLLHUP counts: POLLNVAL (macOS's
+    answer for devices its poll does not support, e.g. `/dev/tty`, live or not) is never
+    taken for a hang-up; there the next draw's failed write still ends xdevcmd. Linux
+    behaviour unchanged (tcgetattr already said EIO). The test is unchanged and passes on
+    macOS, Linux x86_64 and ARM.
+  - **macOS, pty**: `alt_enter_types_the_marked_names_quoted_without_running_them`,
+    `alt_enter_types_nothing_into_a_running_program`,
+    `typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it` (found once
+    `--no-fail-fast` ran past the first binary, run 42718674366). Cause: a **product bug**,
+    not a runner quirk. The shell's directory is the system's (links resolved,
+    `/private/var/folders/…`), the pane's keeps the user's links (`/var/folders/…`; on
+    macOS `/var` → `/private/var`); `name_words` compared the text, so it typed full
+    paths at a shell already in that directory. Fix (`e672c90`): `all_in` compares the
+    paths' one parent with the shell's directory, then their canonical forms (one
+    canonicalize per side, not per name). Reproduced on Linux with `TMPDIR` pointing at a
+    symlink (both alt_enter tests fail without the fix, pass with it); unit test
+    `typed_names_are_bare_in_the_same_directory_by_another_name`. Untrusted (OSC-reported)
+    directories still get full paths.
+  - **Windows, `the_winget_installer_points_at_the_archive_release_yml_makes`**: the test
+    was wrong for Windows — git on the runner checks out with CRLF (`core.autocrlf`), and
+    it looked for `…\n`. Fix (`e672c90`): compare with CRLF made LF (winget reads either).
+  - **Windows, `save_as_refuses_a_name_with_a_control_character`**: its fixture
+    `bad\u{15}x.txt` cannot be created on Windows (error 123, invalid name), so the
+    scenario cannot arise there: `#[cfg(unix)]`, with the reason in a comment. The refusal
+    code itself is untouched.
+  - Runs: 42718674366 (scratch, after `2bbb6f0`: journal and tty fixed; the five above
+    found), 42719848686 (scratch, after `e672c90`: **all green**, ubuntu x86_64 + ARM,
+    windows, macos, cross-check, cargo-deny), 42721141031 (this branch at `e672c90`, real CI flags: **all green**).
 
 ## Check
 

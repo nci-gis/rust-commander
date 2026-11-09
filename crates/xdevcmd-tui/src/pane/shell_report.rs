@@ -49,7 +49,9 @@ pub fn osc7(params: &[&[u8]], ours: &str, windows: bool) -> Option<PathBuf> {
         return None;
     }
     let path = percent_decode(&after[slash..])?;
-    if path.contains(&0) {
+    // `%0A` and the like decode to control characters: no directory name has them
+    // honestly, and they would reach the status line. Refused, as 9;9 refuses them.
+    if path.iter().any(|&b| b < 0x20 || b == 0x7f) {
         return None;
     }
     if windows {
@@ -122,6 +124,7 @@ fn hex(b: u8) -> Option<u8> {
 }
 
 /// `%2F` and friends back to bytes; a `%` not followed by two hex digits is garbage.
+/// Control characters it produces are refused by the caller ([`osc7`]).
 fn percent_decode(s: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(s.len());
     let mut i = 0;
@@ -162,6 +165,10 @@ pub struct ShellReports {
     pub dir_seq: u64,
     /// The last prompt mark.
     pub mark: Option<Mark>,
+    /// A prompt mark (A, B or D) has come: the shell sends marks. Until then a `C` is
+    /// ignored — printed by `cat` of a file in a shell that sends none, it would make
+    /// the shell look busy until it ended.
+    pub prompted: bool,
 }
 
 impl ShellReports {
@@ -176,6 +183,11 @@ impl ShellReports {
     /// One OSC, as vt100 split it.
     pub fn osc(&mut self, params: &[&[u8]]) {
         if let Some(m) = osc133(params) {
+            match m {
+                Mark::Prompt => self.prompted = true,
+                Mark::Running if !self.prompted => return,
+                Mark::Running => {}
+            }
             self.mark = Some(m);
         } else if let Some(d) =
             osc7(params, &self.host, self.windows).or_else(|| osc9_9(params, self.windows))
@@ -327,6 +339,7 @@ mod tests {
         p.process(b"b\x07ok");
         assert_eq!(p.callbacks().dir, Some("/tmp/a b".into()));
         assert_eq!(p.callbacks().dir_seq, 1);
+        p.process(b"\x1b]133;A\x07");
         p.process(b"\x1b]133;C\x1b\\");
         assert_eq!(p.callbacks().mark, Some(Mark::Running));
         p.process(b"\x1b]133;D;0\x07\x1b]7;file:///other\x1b\\");
@@ -335,6 +348,25 @@ mod tests {
         assert_eq!(p.callbacks().dir_seq, 2);
         // The screen is drawn as before: the OSCs are not text.
         assert!(p.screen().contents().starts_with("$ ok"));
+    }
+
+    #[test]
+    fn a_running_mark_counts_only_from_a_shell_that_sends_prompt_marks() {
+        let mut r = ShellReports::new("box".into(), false);
+        r.osc(&split(b"133;C"));
+        assert_eq!(r.mark, None, "a C before any prompt mark");
+        r.osc(&split(b"133;D;0"));
+        r.osc(&split(b"133;C"));
+        assert_eq!(r.mark, Some(Mark::Running));
+    }
+
+    #[test]
+    fn a_control_character_in_a_reported_path_refuses_it() {
+        assert_eq!(o7("7;file:///tmp/a%0Ab", false), None);
+        assert_eq!(o7("7;file:///tmp/a%1Bb", false), None);
+        assert_eq!(o7("7;file:///tmp/a%7Fb", false), None);
+        assert_eq!(o7("7;file:///tmp/a%09b", false), None);
+        assert_eq!(o7("7;file:///tmp/a%20b", false), Some("/tmp/a b".into()));
     }
 
     /// The bytes docs/shell.md's bash snippet printed in bash 5.2 (recorded): after a

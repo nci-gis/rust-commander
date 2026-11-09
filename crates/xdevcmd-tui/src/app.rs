@@ -1574,6 +1574,19 @@ impl App {
         if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
             return refuse(self, i, "outside the root xdevcmd is confined to".into());
         }
+        // The prefill comes from a file's name or the shell's directory, which someone
+        // else may have chosen: a control character in it is refused, as everywhere a
+        // name could later be typed into a shell or pasted.
+        if let Some(c) = crate::safety::control_char(typed) {
+            return refuse(
+                self,
+                i,
+                format!(
+                    "the name contains a control character (U+{:04X}) \u{2014} not saved",
+                    c as u32
+                ),
+            );
+        }
         if dest.is_dir() {
             return refuse(
                 self,

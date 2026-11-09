@@ -869,6 +869,25 @@ fn f2_in_the_viewer_offers_the_files_own_name_and_is_refused_read_only() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Save as… is prefilled with the file's own name, which someone else chose: one with a
+/// control character in it (Ctrl+U, which once ran a command through Alt+C) is refused.
+#[test]
+fn save_as_refuses_a_name_with_a_control_character() {
+    let (a, b) = with_file("bad\u{15}x.txt", b"one\ntwo\n");
+    let s = shot_keys("110x20", "Down,F3,F2,Enter", &a, &b);
+    assert!(
+        s.contains("control character (U+0015)") && s.contains("not saved"),
+        "{s}"
+    );
+    let names: Vec<_> = fs::read_dir(&a)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(names.len(), 2, "nothing written: {names:?}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn tabs_are_expanded_rather_than_sent_to_the_terminal() {
     let (a, b) = with_file("doc.txt", b"ab\tc\n");

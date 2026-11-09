@@ -129,6 +129,27 @@ branch until the owner has used 0.2.1 for a week or two; not started:
       does for the selected item, above the row when there is no room below. Files
       panes only: in the terminal panel the key belongs to the program.
 
+The owner's notes on the terminal panel (2026-11-09), to weigh; not started:
+
+- Scrolling: the wheel over a shell scrolls its history (tested,
+  `the_wheel_scrolls_back_through_shell_history`), 3 lines a notch; there is no key for
+  it (PgUp goes to the shell), and a full-screen program (less, vim, htop) has no
+  history, so the wheel does nothing there. Proposed: Shift+PgUp/PgDn/Home/End scroll
+  the history; in a full-screen program the wheel sends arrow keys (what terminals call
+  alternate scroll), or mouse reports when the program asks for them.
+- Copying: no selection in the panel at all, and xdevcmd holding the mouse keeps the
+  outer terminal's own selection away (Shift-drag gets it in Windows Terminal, GNOME,
+  kitty; Option-drag in iTerm2 — but across both panes, not just the shell). Proposed:
+  drag to select in the shell, copy on release through OSC 52, as the viewer does.
+  OSC 52 depends on the outer terminal: Windows Terminal, kitty, WezTerm, iTerm2 (with
+  its clipboard setting) take it; Terminal.app and VTE terminals do not — saving to a
+  file is the way there.
+- History length: 5000 lines, fixed in code. Proposed: `[terminal] scrollback`, in
+  Settings. vt100 keeps 32 bytes a cell: 10,000 lines of 120 columns is ~38 MB per shell
+  when full, 200 columns ~64 MB.
+- Copy all / save the history to a file from a menu on the panel; a PuTTY-like log of
+  everything a shell prints (low priority, the owner said).
+
 ## Do## Do
 
 - 2026-11-08, a bug the owner found in 0.2.1 while using it: in a pane split off below

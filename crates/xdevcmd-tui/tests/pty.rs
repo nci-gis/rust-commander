@@ -585,6 +585,15 @@ fn a_closed_terminal_saves_the_session_and_ends() {
     assert!(saved.contains("sub"), "{saved}");
 }
 
+/// The journal's first line, as a run on this machine writes it.
+#[cfg(unix)]
+fn host_line() -> String {
+    format!(
+        "host {}\n",
+        hex(Path::new(&xdevcmd_core::journal::hostname()))
+    )
+}
+
 /// A path as the journal writes it: hex of its bytes.
 #[cfg(unix)]
 fn hex(p: &Path) -> String {
@@ -608,7 +617,10 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     // a.txt was copied (a copy keeps the date, and identical is what is skipped
     // unasked); b.txt was cut short, under its temporary name.
     std::fs::write(dst.join("a.txt"), "a").unwrap();
-    let date = std::fs::metadata(src.join("a.txt")).unwrap().modified().unwrap();
+    let date = std::fs::metadata(src.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
     std::fs::File::options()
         .write(true)
         .open(dst.join("a.txt"))
@@ -622,7 +634,8 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     std::fs::write(
         journal.join("2147483646-0.journal"),
         format!(
-            "kind copy\nsrc {}\nsrc {}\ndest {}\npart {}\n",
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\npart {}\n",
+            host_line(),
             hex(&src.join("a.txt")),
             hex(&src.join("b.txt")),
             hex(&dst),
@@ -654,7 +667,7 @@ fn an_interrupted_permanent_delete_is_not_offered_again() {
     std::fs::create_dir_all(&journal).unwrap();
     std::fs::write(
         journal.join("2147483646-0.journal"),
-        format!("kind delete\nsrc {}\n", hex(&victim)),
+        format!("{}kind delete\nsrc {}\n", host_line(), hex(&victim)),
     )
     .unwrap();
     let mut x = Session::start(&s, None);

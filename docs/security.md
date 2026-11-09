@@ -53,11 +53,22 @@ licences (`cargo deny`) on every change and weekly.
 
 **What it is.** A setting, `[general] safe_operations` (Settings → General), on by
 default. With it, every copy writes the new file under a hidden temporary name beside
-its destination, `.name.xdevcmd-part-<pid>-<n>`, and renames it into place only when it
-is complete. Each job also keeps a small journal in xdevcmd's state directory (beside
-`session.toml`, in `journal/`): what the job is, and which directories it makes
-temporary files in. A job that ends while xdevcmd runs, finished, cancelled or failed,
-removes its journal.
+its destination, `.name.xdevcmd-part-<run>-<n>`, and renames it into place only when it
+is complete; `<run>` is the process id and its start time, so a later process given
+the same id never takes another run's files for its own. Each job also keeps a small
+journal in xdevcmd's state directory (beside `session.toml`, in `journal/`): the
+machine, what the job is, and which directories it makes temporary files in. A job
+that ends while xdevcmd runs, finished, cancelled or failed, removes its journal.
+
+**How a dead run is told from a live one.** A job holds a lock on its journal for as
+long as it runs (on Windows, the journal is open with nobody else allowed to write to
+it), and the system lets go of it when the process ends, however it ends. At start-up
+xdevcmd tries each journal's lock: one it can take belongs to a run that is gone, and is
+tidied up; one it cannot is a job still running (another xdevcmd window) and is left
+alone. Where the file system has no locks (some network ones), the process id is
+asked instead. A journal written on another machine is always left alone: with a home
+directory shared over NFS, its job may be running there, and only that machine can
+tidy up after it.
 
 **What it covers.** F5 copy, F6 move (within a drive a move is a rename; across drives
 it is a copy, then the source removed once its copy is complete), Shift+F5 copy as,
@@ -93,7 +104,8 @@ cleaned up; if one is stuck after five seconds (a hung network drive) it asks ag
 - On Windows a leading dot hides nothing: temporary files show until cleaned up, and the
   terminal's close button is not caught yet (the next start cleans up instead).
 - Temporary files are cleaned up by the next start of xdevcmd on that machine and
-  account; a run that never starts again leaves them.
+  account; a run that never starts again leaves them. With a home directory shared
+  between machines, each machine tidies up only after its own runs.
 - Off, a new file is written under its own name, as before: fastest, but a killed run
   can leave it short.
 - Measured on Linux (2026-11-08): copying 10,000 files of 1 KiB took about 9 µs more

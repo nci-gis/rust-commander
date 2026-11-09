@@ -517,23 +517,8 @@ impl Worker {
             return Answer::Abort;
         }
         // The UI has gone away if this fails, and continuing to touch the filesystem
-        // without anyone able to stop us is the one thing we must not do. While it
-        // waits, the journal keeps showing the job is alive (on Windows a journal left
-        // untouched for two minutes counts as a dead run's).
-        loop {
-            match self
-                .answers
-                .recv_timeout(std::time::Duration::from_secs(10))
-            {
-                Ok(a) => return a,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(j) = self.journal.as_mut() {
-                        j.touch();
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Answer::Abort,
-            }
-        }
+        // without anyone able to stop us is the one thing we must not do.
+        self.answers.recv().unwrap_or(Answer::Abort)
     }
 
     fn note_error(&mut self, path: &Path, e: &io::Error) {
@@ -835,11 +820,6 @@ impl Worker {
         if !matches!(kept, Ok(true)) {
             let _ = fs::remove_file(&target);
         }
-        if !in_place {
-            if let Some(j) = self.journal.as_mut() {
-                j.gone(&target);
-            }
-        }
         kept
     }
 
@@ -856,9 +836,6 @@ impl Worker {
             }
             w.write_all(&buf[..n])?;
             self.advance(n as u64);
-            if let Some(j) = self.journal.as_mut() {
-                j.touch();
-            }
         }
         w.flush()?;
         Ok(true)
@@ -1013,12 +990,10 @@ impl crate::archive::Hooks for Worker {
         self.resolve_conflict(None, dst, incoming)
     }
     fn part(&mut self, p: &Path, made: bool) {
-        if let Some(j) = self.journal.as_mut() {
-            if made {
-                j.part(p);
-            } else {
-                j.gone(p);
-            }
+        // Only what is made is written down: a later start removes only what is
+        // still there.
+        if let Some(j) = self.journal.as_mut().filter(|_| made) {
+            j.part(p);
         }
     }
     fn wrote(&mut self, bytes: u64) {
@@ -1180,7 +1155,8 @@ pub fn safe() -> bool {
 }
 
 /// A temporary name beside `dst` to write a replacement under: hidden, and unique to
-/// this process and call, so two jobs never share one.
+/// this run (pid and start time, [`crate::journal::run_tag`]) and call, so two jobs
+/// never share one and a later process given the same pid never takes it for its own.
 pub(crate) fn part_name(dst: &Path) -> PathBuf {
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed);
@@ -1189,7 +1165,10 @@ pub(crate) fn part_name(dst: &Path) -> PathBuf {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let dir = dst.parent().unwrap_or(Path::new("."));
-    dir.join(format!(".{name}.xdevcmd-part-{}-{n}", std::process::id()))
+    dir.join(format!(
+        ".{name}.xdevcmd-part-{}-{n}",
+        crate::journal::run_tag()
+    ))
 }
 
 /// Tests put a path here to have a file appear at it between the check that found the

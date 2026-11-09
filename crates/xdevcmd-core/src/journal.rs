@@ -2,22 +2,35 @@
 //! so that a run ended without warning (`kill -9`, a power cut) can be tidied up and
 //! offered again at the next start.
 //!
-//! One small file per job in the state directory, `<pid>-<n>.journal`, one line per
-//! fact: the job (its kind, sources, destination), each directory it makes temporary
-//! files in (`dir`, once per directory: their names carry the pid, so a later start finds
-//! them there without a line per file), and rename many's temporary names (`ren`, the
-//! user's own files under another name) until they are renamed on (`unren`). A job that ends, however it ends while xdevcmd runs,
-//! removes its file. A file whose process is gone is what an interrupted run left.
+//! One small file per job in the state directory, `<run>-<n>.journal`, one line per
+//! fact: the host, the job (its kind, sources, destination), each directory it makes
+//! temporary files in (`dir`, once per directory: their names carry the run, so a later
+//! start finds them there without a line per file), and rename many's temporary names
+//! (`ren`, the user's own files under another name) until they are renamed on (`unren`).
+//! A job that ends, however it ends while xdevcmd runs, removes its file.
+//!
+//! **Telling a dead run from a live one.** A job holds a lock on its journal for as long
+//! as it runs, and the system lets go of it when the process ends, however it ends: a
+//! journal another start can lock is a dead run's. Unix: `flock`. Windows: the journal
+//! is open without sharing write access, so another start's attempt to open it for
+//! writing, sharing nothing, fails while the job runs. A date or a bare pid would not do:
+//! a job blocked on a slow drive stops touching its file, and a pid is reused. Where the
+//! file system has no locks (some network ones), the pid is asked, and only for a
+//! journal written on this machine. A journal from another host (a home directory shared
+//! over NFS) is always left alone: its job may be running there.
+//!
+//! **The run** is `<pid>x<start time, hex>`: it names the journal, the part files and
+//! rename many's temporary names, so a later process given the same pid never matches a
+//! dead run's files, nor a dead run's journal a live process's files.
 //!
 //! Lines are written and flushed, not synced: losing the last lines in a power cut
 //! leaves a part file unknown to the journal, never a wrong action on the user's files.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant, SystemTime};
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -27,21 +40,112 @@ pub fn init(dir: PathBuf) {
     let _ = DIR.set(dir);
 }
 
+/// This process's run: `<pid>x<start time in nanoseconds, hex>`. In every temporary
+/// name xdevcmd makes, so that only this run's files are ever taken for this run's.
+pub fn run_tag() -> &'static str {
+    static RUN: OnceLock<String> = OnceLock::new();
+    RUN.get_or_init(|| {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        format!("{}x{t:x}", std::process::id())
+    })
+}
+
+/// This machine's name, to tell its journals from another's in a shared home directory.
+/// Empty when the system will not say.
+pub fn hostname() -> String {
+    #[cfg(unix)]
+    {
+        rustix::system::uname()
+            .nodename()
+            .to_string_lossy()
+            .into_owned()
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::var("COMPUTERNAME").unwrap_or_default()
+    }
+}
+
 /// A job's journal. Removed when dropped: a job that ends while xdevcmd runs, finished,
 /// cancelled or failed, leaves nothing; only a killed process leaves its file.
 pub struct Journal {
     path: PathBuf,
+    /// Open, and locked, for the life of the job: the lock is what says it is alive.
     file: File,
-    touched: Instant,
     /// Directories already written down.
     dirs: std::collections::HashSet<PathBuf>,
 }
 
-/// How often a running job shows it is alive, for systems where a process cannot be
-/// asked (Windows): a journal older than [`STALE`] belongs to a run that is gone.
-const TOUCH: Duration = Duration::from_secs(20);
-#[cfg(not(unix))]
-const STALE: Duration = Duration::from_secs(120);
+/// What trying a journal's lock found.
+#[derive(Debug, PartialEq, Eq)]
+enum Lock {
+    /// Ours now: the run that wrote it is gone.
+    Held,
+    /// Someone holds it: the run is alive.
+    Busy,
+    /// The file system has no locks. Unix only: on Windows the open is the lock.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    Unsupported,
+}
+
+/// Try to take `file`'s lock without waiting.
+#[cfg(unix)]
+fn try_lock(file: &File) -> Lock {
+    use rustix::fs::{flock, FlockOperation};
+    match flock(file, FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => Lock::Held,
+        Err(e) if e == rustix::io::Errno::WOULDBLOCK => Lock::Busy,
+        // ENOLCK, EOPNOTSUPP: a file system without locks. Anything else is no better
+        // an answer, and the fallback is the cautious one.
+        Err(_) => Lock::Unsupported,
+    }
+}
+
+/// Open a journal so that, while it is open, nobody else can open it for writing.
+fn open_held(path: &Path) -> std::io::Result<File> {
+    let mut o = OpenOptions::new();
+    o.read(true).write(true).create_new(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_SHARE_READ | FILE_SHARE_DELETE: readable, and the job can rename and
+        // remove its own journal while it holds it; never writable by another.
+        o.share_mode(0x1 | 0x4);
+    }
+    o.open(path)
+}
+
+/// Open someone's journal to see whether its run is gone; on Windows, the open itself
+/// is the test. `None`: it cannot be opened, or (Windows) its run holds it.
+fn open_probe(path: &Path) -> Option<File> {
+    let mut o = OpenOptions::new();
+    o.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Writing, sharing nothing: refused (a sharing violation) while the job that
+        // wrote it has it open, granted once that process is gone.
+        o.write(true).share_mode(0);
+    }
+    o.open(path).ok()
+}
+
+/// Whether the run behind a probe opened with [`open_probe`] is gone.
+fn probe_lock(file: &File) -> Lock {
+    #[cfg(unix)]
+    {
+        try_lock(file)
+    }
+    #[cfg(not(unix))]
+    {
+        // Opened at all, with nothing shared: nobody else has it.
+        let _ = file;
+        Lock::Held
+    }
+}
 
 impl Journal {
     /// Start a journal for a job of `kind` ("copy", "move", "delete", "extract", "pack",
@@ -65,18 +169,24 @@ impl Journal {
         static N: AtomicU64 = AtomicU64::new(0);
         fs::create_dir_all(dir).ok()?;
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let path = dir.join(format!("{}-{n}.journal", std::process::id()));
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .ok()?;
+        let name = format!("{}-{n}.journal", run_tag());
+        // Made under a hidden name and locked before it takes its real one, so no start
+        // ever sees a journal by its real name that is not yet locked.
+        let new = dir.join(format!(".{name}.new"));
+        let file = open_held(&new).ok()?;
+        #[cfg(unix)]
+        let _ = try_lock(&file);
+        let path = dir.join(name);
+        if fs::rename(&new, &path).is_err() {
+            let _ = fs::remove_file(&new);
+            return None;
+        }
         let mut j = Self {
             path,
             file,
-            touched: Instant::now(),
             dirs: std::collections::HashSet::new(),
         };
+        j.line(&format!("host {}", enc(Path::new(&hostname()))));
         j.line(&format!("kind {kind}"));
         for s in sources {
             j.line(&format!("src {}", enc(s)));
@@ -93,7 +203,6 @@ impl Journal {
     fn line(&mut self, s: &str) {
         let _ = writeln!(self.file, "{s}");
         let _ = self.file.flush();
-        self.touched = Instant::now();
     }
 
     /// About to make `p`, a temporary name: its directory is written down, once.
@@ -101,16 +210,8 @@ impl Journal {
         if let Some(dir) = p.parent() {
             if self.dirs.insert(dir.to_path_buf()) {
                 self.line(&format!("dir {}", enc(dir)));
-                return;
             }
         }
-        self.touch();
-    }
-
-    /// `p` is no longer there: renamed into place, or removed. Nothing to write: a later
-    /// start only removes what is still there.
-    pub fn gone(&mut self, _p: &Path) {
-        self.touch();
     }
 
     /// About to rename `orig` to the temporary name `tmp` (rename many).
@@ -122,19 +223,13 @@ impl Journal {
     pub fn unrenamed(&mut self, tmp: &Path) {
         self.line(&format!("unren {}", enc(tmp)));
     }
-
-    /// Show the job is alive, at most every [`TOUCH`]: for a long file with no line to
-    /// write.
-    pub fn touch(&mut self) {
-        if self.touched.elapsed() >= TOUCH {
-            let _ = self.file.set_modified(SystemTime::now());
-            self.touched = Instant::now();
-        }
-    }
 }
 
 impl Drop for Journal {
     fn drop(&mut self) {
+        // Removed while still locked (the file closes after this): a start that finds
+        // it must never get the lock of a job that ended normally while the name is
+        // still there. One that opened it just before is told by its link count.
         let _ = fs::remove_file(&self.path);
     }
 }
@@ -166,52 +261,106 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
     let Ok(entries) = fs::read_dir(dir) else {
         return out;
     };
-    let me = std::process::id();
+    let host = hostname();
     for e in entries.flatten() {
         let path = e.path();
-        let Some(pid) = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|n| n.strip_suffix(".journal"))
-            .and_then(|n| n.split('-').next())
-            .and_then(|p| p.parse::<u32>().ok())
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        // A journal still being made: `.<run>-<n>.journal.new`. Empty; removed once
+        // its run is gone, left while it lives.
+        if let Some(run) = name
+            .strip_prefix('.')
+            .and_then(|n| n.strip_suffix(".journal.new"))
+            .and_then(|n| n.rsplit_once('-'))
+            .map(|(run, _)| run)
+        {
+            if run != run_tag() && gone(&path, run, None) {
+                let _ = fs::remove_file(&path);
+            }
+            continue;
+        }
+        let Some(run) = name
+            .strip_suffix(".journal")
+            .filter(|_| !name.starts_with('.'))
+            .and_then(|n| n.rsplit_once('-'))
+            .map(|(run, _)| run.to_string())
         else {
             continue;
         };
-        if pid == me || alive(pid, &path) {
+        if run == run_tag() {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&path) else {
+        let mut text = String::new();
+        if !gone(&path, &run, Some((&mut text, &host))) {
             continue;
-        };
-        out.push(tidy(&text, pid));
+        }
+        out.push(tidy(&text, &run));
         let _ = fs::remove_file(&path);
     }
     out
 }
 
-/// Whether process `pid` still runs. Unix asks the system; elsewhere a journal touched
-/// within [`STALE`] counts as alive.
-fn alive(pid: u32, journal: &Path) -> bool {
+/// Whether the run that wrote the journal at `path` is gone, by its lock. `read`: read
+/// the journal into the string, and count it gone only if it was written on this host
+/// (named in the second); a journal with no host line is an older one of this machine.
+fn gone(path: &Path, run: &str, read: Option<(&mut String, &str)>) -> bool {
+    let Some(mut f) = open_probe(path) else {
+        return false;
+    };
+    let lock = probe_lock(&f);
+    if lock == Lock::Busy {
+        return false;
+    }
+    // Locked just as its job ended and removed it: not a dead run's.
     #[cfg(unix)]
     {
-        let _ = journal;
+        use std::os::unix::fs::MetadataExt;
+        if f.metadata().map(|m| m.nlink() == 0).unwrap_or(true) {
+            return false;
+        }
+    }
+    if let Some((text, host)) = read {
+        if f.read_to_string(text).is_err() {
+            return false;
+        }
+        let written_on = text
+            .lines()
+            .find_map(|l| l.strip_prefix("host "))
+            .and_then(dec)
+            .map(|p| p.to_string_lossy().into_owned());
+        if written_on.is_some_and(|h| h != host) {
+            return false;
+        }
+    }
+    match lock {
+        Lock::Held => true,
+        Lock::Busy => false,
+        Lock::Unsupported => !pid_alive(run),
+    }
+}
+
+/// No locks on this file system: whether the run's process still exists, which a reused
+/// pid can make look alive (cautious) but never dead. Unix only; elsewhere the lock is
+/// never unsupported.
+fn pid_alive(run: &str) -> bool {
+    let Some(pid) = run.split('x').next().and_then(|p| p.parse::<u32>().ok()) else {
+        return true;
+    };
+    #[cfg(unix)]
+    {
         rustix::process::Pid::from_raw(pid as i32)
             .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
     }
     #[cfg(not(unix))]
     {
         let _ = pid;
-        fs::metadata(journal)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age < STALE)
+        true
     }
 }
 
-/// Undo what one journal, left by process `pid`, says was left half done.
-fn tidy(text: &str, pid: u32) -> Interrupted {
+/// Undo what one journal, left by run `run`, says was left half done.
+fn tidy(text: &str, run: &str) -> Interrupted {
     let mut it = Interrupted {
         kind: String::new(),
         sources: Vec::new(),
@@ -243,8 +392,9 @@ fn tidy(text: &str, pid: u32) -> Interrupted {
             _ => {}
         }
     }
-    // The temporary files that process made: `.name.xdevcmd-part-<pid>-<n>`.
-    let mark = format!(".xdevcmd-part-{pid}-");
+    // The temporary files that run made: `.name.xdevcmd-part-<run>-<n>`. The whole
+    // run, with the dash after it: a pid alone would match another run given it later.
+    let mark = format!(".xdevcmd-part-{run}-");
     for d in dirs {
         let Ok(entries) = fs::read_dir(&d) else {
             continue;
@@ -374,7 +524,7 @@ mod tests {
         // A power cut can stop the file at any byte; the text is ASCII, so every
         // prefix is a str.
         for end in 0..=text.len() {
-            tidy(&text[..end], 2147483646);
+            tidy(&text[..end], "2147483646");
         }
         for junk in [
             "kind",
@@ -393,10 +543,91 @@ mod tests {
             "  kind copy",
             "trash extra words",
         ] {
-            tidy(junk, 2147483646);
-            tidy(&format!("{junk}\n{junk}\n"), 2147483646);
+            tidy(junk, "2147483646");
+            tidy(&format!("{junk}\n{junk}\n"), "2147483646");
         }
-        assert_eq!(tidy("kind", 1).kind, "");
+        assert_eq!(tidy("kind", "1").kind, "");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A run tag no live process has: the largest pid a 32-bit pid_t allows.
+    const DEAD: &str = "2147483646x1";
+
+    #[test]
+    fn a_journal_held_by_a_running_job_is_left_alone_whatever_pid_it_names() {
+        let d = dir("held");
+        let j = Journal::begin_in(&d, "copy", &[d.join("a")], Some(&d), false).unwrap();
+        // The same lock under a dead pid's name: a pid check would recover it.
+        let other = d.join(format!("{DEAD}-0.journal"));
+        fs::rename(&j.path, &other).unwrap();
+        assert!(recover_in(&d).is_empty(), "held: alive");
+        assert!(other.exists());
+        drop(j);
+        // Unheld now: a dead run's.
+        let got = recover_in(&d);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].kind, "copy");
+        assert!(!other.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_journal_from_another_host_is_left_alone() {
+        let d = dir("host");
+        let text = format!(
+            "host {}\nkind copy\nsrc {}\n",
+            enc(Path::new("elsewhere-не-здесь")),
+            enc(&d.join("a"))
+        );
+        let other = d.join(format!("{DEAD}-0.journal"));
+        fs::write(&other, text).unwrap();
+        assert!(recover_in(&d).is_empty(), "its job may be running there");
+        assert!(other.exists());
+        // The same, written here: recovered.
+        let text = format!(
+            "host {}\nkind copy\nsrc {}\n",
+            enc(Path::new(&hostname())),
+            enc(&d.join("a"))
+        );
+        fs::write(&other, text).unwrap();
+        assert_eq!(recover_in(&d).len(), 1);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_later_run_given_the_same_pid_keeps_its_part_files() {
+        let d = dir("same-pid");
+        let jdir = d.join("journal");
+        fs::create_dir_all(&jdir).unwrap();
+        let dead = d.join(format!(".a.xdevcmd-part-{DEAD}-0"));
+        let live = d.join(".b.xdevcmd-part-2147483646x2-0");
+        fs::write(&dead, "x").unwrap();
+        fs::write(&live, "x").unwrap();
+        fs::write(
+            jdir.join(format!("{DEAD}-0.journal")),
+            format!("kind copy\ndir {}\n", enc(&d)),
+        )
+        .unwrap();
+        let got = recover_in(&jdir);
+        assert_eq!(got[0].cleaned, 1);
+        assert!(!dead.exists(), "the dead run's part file is removed");
+        assert!(live.exists(), "same pid, another run: not touched");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_still_being_made_is_removed_only_once_its_run_is_gone() {
+        let d = dir("new");
+        let unheld = d.join(format!(".{DEAD}-0.journal.new"));
+        let held = d.join(format!(".{DEAD}-1.journal.new"));
+        fs::write(&unheld, "").unwrap();
+        let f = open_held(&held).unwrap();
+        assert_eq!(try_lock(&f), Lock::Held);
+        assert!(recover_in(&d).is_empty());
+        assert!(!unheld.exists(), "left by a run that died making it");
+        assert!(held.exists(), "its run is making it");
+        drop(f);
         let _ = fs::remove_dir_all(&d);
     }
 

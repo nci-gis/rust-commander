@@ -100,7 +100,7 @@ pub fn apply(moves: &[(PathBuf, PathBuf)], safe: bool) -> Outcome {
         out.errors.push(e.to_string());
         return out;
     }
-    let tag = std::process::id();
+    let tag = crate::journal::run_tag();
     // Safe operations: between the two steps the files are under temporary names; a run
     // killed there has them put back at the next start.
     let mut journal = if safe {

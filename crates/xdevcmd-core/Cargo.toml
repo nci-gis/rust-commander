@@ -23,8 +23,9 @@ zune-jpeg = "0.5.15"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 # A rename that never replaces what is there (renameat2 on Linux, renameatx_np on
-# macOS), without unsafe code here. Already in the tree through crossterm.
-rustix = { version = "1", features = ["fs", "process"] }
+# macOS), without unsafe code here. Already in the tree through crossterm. Also the
+# journal's lock (flock) and this machine's name (uname, "system").
+rustix = { version = "1", features = ["fs", "process", "system"] }
 
 # Windows' Recycle Bin and macOS' Trash are OS APIs, not a directory you can rename
 # into, so they get a crate. Linux keeps the implementation in ops.rs: it is tested

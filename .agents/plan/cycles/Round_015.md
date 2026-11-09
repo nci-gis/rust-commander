@@ -267,6 +267,63 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   `e72b2fb` (1), `d7935a1` (2), `71d2a9d` (3), `a1bc229` (4), and this one (5).
 - 2026-11-10, **set aside for the owner's hand tests; Round 016 starts from it.**
 
+- 2026-11-10, **review and QA findings fixed**, one commit each, each with a test that
+  failed with the fix taken out (checked by reverting the source, test kept):
+  1. *Tab menu by position* (`b0c49f4`): `reap()` runs every turn, also under the menu,
+     so an earlier tab ending moved the clicked tab's index. Tabs carry a `TabId`
+     (`TermPanel::tab_id` / `tab_index`); `Cmd::Tab*` hold it and resolve it when run,
+     "that terminal tab is gone" if it went. Pty
+     `the_tab_menu_follows_its_tab_when_an_earlier_one_ends` (three tabs, tab 1 exits
+     while tab 2's menu is open; View history showed tab 3 before).
+  2. *Full-screen program* (`06b6647`): `TermPane::history_text` also returns
+     `screen().alternate_screen()`; the note is then "a full-screen program is running —
+     its screen only". `TermPanel::history` returns a `History` struct. Pty test with
+     `ESC [?1049h`. Guide says it.
+  3. *`[keys]` and keymap A* (`c323a27`): `Keymap::apply` refuses, for the `is_global`
+     actions, any key outside `keys::F12_FAMILY` (F12, Shift+F12, Alt+x F12,
+     Alt+x Shift+F12), naming the action, the key and the rule. docs/config.md. The render
+     test that rebound `focus_terminal` to F11 now rebinds it to Shift+F12. `Alt+X F12`
+     (capital X) is refused too: parsed, it is Alt+Shift+x.
+  4. *Alt+X Enter* (`5804b3e`): inside the shell only Esc cancels the prefix. Enter is
+     forwarded like any other key xdevcmd does not use after Alt+X: the program gets
+     `ESC x` then `CR`. Chosen because that is what every other non-matching key already
+     does, so the rule is one sentence ("anything else after Alt+X, Enter too, goes to
+     the program with it; Esc cancels"); swallowing Enter would make Alt+X Enter the one
+     key combination that silently vanishes. Pty test reads `z ESC x CR` with `dd`.
+     From the file panes Enter still closes a group, as before.
+  5. *Go to line* (`a3d1a3e`): digits beyond `u64` are `u64::MAX`, so past the end and
+     said so (no u128: a longer string would overflow that too); `+5` and other
+     non-digits are now "not a line"; `0` goes to line 1 with "lines start at 1 — this is
+     line 1" (text only; hex offset 0 is real); "not an offset". Render test. QA pty
+     tests (`4e6464e`): `history_is_never_written_outside_the_shell` (HOME and TMPDIR in
+     the scratch directory, checked after Esc and after quitting) and
+     `tab_menu_save_history_uses_clicked_tab`; both shown to fail with a leak to
+     `temp_dir()` and with the focused tab put back.
+  6. *Control characters* (`84e6a24`): Save as refuses a typed or prefilled name with a
+     control character through `safety::control_char` (render test: a viewed file named
+     `bad<U+0015>x.txt`, F2 Enter). **Not widened:** MkDir and Rename do not use that
+     check; core `rename::validate_name` refuses `/` and NUL (and on Windows control
+     characters), not control characters on Unix. Making them refuse would be a short
+     change in `validate_name`, but it changes what can be renamed, so it is left for the
+     owner.
+  7. *Missing folder* (`03d6aee`): Save as checks the destination's directory first and
+     says "that folder does not exist" (before: the copy job's "No such file or directory
+     (os error 2)"). Covers memory and file documents. Render test.
+  8. *Nits* (`f5b81bf`, `2155c34`): a shell directory that is not UTF-8 is not offered
+     as text (it would come back mangled); the pane's directory is (pty test, `odd\377`;
+     on a filesystem refusing such names the test passes without exercising it).
+     `next_split` reads "Next split, of the file panes or the terminal"; the keymap A
+     sentence adds "Enter too … Esc cancels"; docs/keys.md regenerated. F1's row for an
+     `acts_on_shell` action whose keys include a two-key form now names the single key
+     that works after Alt+X ("in the shell: Alt+x Alt+Shift+Left" for resize, since
+     Alt+X Alt+R is not a group in a group); render test. docs/troubleshooting.md says
+     Terminal.app's Shift+F12 (bare F17/F20) is understood as Shift+F12.
+
+  **Owner backlog (not now):** mouse clicks inside the shell are not passed to a
+  program that asked for the mouse (the wheel is) — proposed for Round 016, with the
+  drag-select item; Shift on modified arrows is dropped by `key_bytes` (predates this
+  round).
+
 ## Check
 
 - [x] fmt (`--check` clean); clippy `--workspace --all-targets -D warnings` on Linux;
@@ -275,6 +332,13 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
       times; the pty suite 3 more times, 61/61 each. No flake seen. `cargo deny check`
       **not run**: cargo-deny is not installed here and the proxy blocks installing it;
       no dependency was added this round (`vt100::Cell` and `chrono` were already in).
+- [x] After the review fixes (2026-11-10): fmt `--check` clean; clippy `--workspace
+      --all-targets -D warnings` clean; `cargo test --workspace` twice: core 168 + 1,
+      tui 154 unit (1 ignored) + 159 render + 67 pty (1 ignored), all pass both times;
+      the pty suite 3 more times, 67/67 each. Render takes ~200 s here (a loaded box).
+- [x] Review findings 1–8 each have a test shown to fail with the fix reverted (Do).
+- [ ] MkDir and Rename do not refuse control characters on Unix (Do, item 6); owner's
+      call.
 - [x] 300 lines out exactly as 300 in; every page remainder 1…45 exact; a wrapped line
       comes back whole, also cut by a page (each check fails with its guard removed).
 - [x] Nothing of the history written anywhere until Save as… (pty: no file under the

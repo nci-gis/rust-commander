@@ -84,7 +84,9 @@ pub struct Journal {
 enum Lock {
     /// Ours now: the run that wrote it is gone.
     Held,
-    /// Someone holds it: the run is alive.
+    /// Someone holds it: the run is alive. Unix only: on Windows a held journal does
+    /// not open at all.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Busy,
     /// The file system has no locks. Unix only: on Windows the open is the lock.
     #[cfg_attr(not(unix), allow(dead_code))]

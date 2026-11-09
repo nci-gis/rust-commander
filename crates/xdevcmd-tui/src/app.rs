@@ -459,7 +459,7 @@ pub struct App {
     follow_seen: Option<(ShellKey, u64, Option<PathBuf>)>,
     /// A press inside a shell went to the program there (it asked for the mouse): the
     /// drag and the release that follow go to it too, not to xdevcmd.
-    mouse_to_shell: bool,
+    mouse_to_shell: Option<(ShellKey, Rect)>,
     /// Copy, move, delete, extract and pack jobs sent to the background (B in the
     /// progress box). One that asks a question comes back to the front.
     jobs: Vec<Job>,
@@ -604,7 +604,7 @@ impl App {
             history_dir: None,
             pending_type: None,
             follow_seen: None,
-            mouse_to_shell: false,
+            mouse_to_shell: None,
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
@@ -1986,11 +1986,10 @@ impl App {
 
     /// A press inside a shell, reported to the program there when it asked for the
     /// mouse (vim, htop, Claude Code); its drag and release then follow it there.
-    fn press_into_shell(&mut self, x: u16, y: u16, button: u32) {
+    fn press_into_shell(&mut self, x: u16, y: u16, button: u32, mods: KeyModifiers) {
         use crate::pane::term::MouseEv;
-        self.mouse_to_shell = self
-            .panel_ref()
-            .is_some_and(|p| p.mouse_at(x, y, MouseEv::Press(button)));
+        let ev = MouseEv::Press(button | mouse_mods(mods));
+        self.mouse_to_shell = self.panel_ref().and_then(|p| p.mouse_at(x, y, ev));
     }
 
     /// The terminal panel, to read from.
@@ -2713,23 +2712,24 @@ impl App {
         let p = Position::new(x, y);
 
         // A press the program in a shell took: the rest of that gesture is its too.
-        if self.mouse_to_shell {
+        if let Some((key, r)) = self.mouse_to_shell {
             use crate::pane::term::MouseEv;
+            let mods = mouse_mods(m.modifiers);
             let ev = match m.kind {
-                MouseEventKind::Drag(b) => Some(MouseEv::Drag(button_number(b))),
+                MouseEventKind::Drag(b) => Some(MouseEv::Drag(button_number(b) | mods)),
                 MouseEventKind::Up(b) => {
-                    self.mouse_to_shell = false;
-                    Some(MouseEv::Release(button_number(b)))
+                    self.mouse_to_shell = None;
+                    Some(MouseEv::Release(button_number(b) | mods))
                 }
                 MouseEventKind::Down(_) => {
-                    self.mouse_to_shell = false;
+                    self.mouse_to_shell = None;
                     None
                 }
                 _ => None,
             };
             if let Some(ev) = ev {
                 if let Some(panel) = self.panel_ref() {
-                    panel.mouse_at(x, y, ev);
+                    panel.mouse_to(key, r, x, y, ev);
                 }
                 return;
             }
@@ -2843,7 +2843,7 @@ impl App {
                         }
                     }
                     // Inside a shell: the program's, when it asked for the mouse.
-                    Some(TermClick::Selected) => self.press_into_shell(x, y, 0),
+                    Some(TermClick::Selected) => self.press_into_shell(x, y, 0, m.modifiers),
                     _ => {}
                 }
             }
@@ -2859,7 +2859,7 @@ impl App {
                         self.open_tab_menu(i, x, y);
                     }
                 } else {
-                    self.press_into_shell(x, y, button_number(b));
+                    self.press_into_shell(x, y, button_number(b), m.modifiers);
                 }
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if Some(id) == self.term_id => {
@@ -7395,6 +7395,21 @@ fn name_words(shell: &str, paths: &[PathBuf], dir: Option<&Path>) -> Result<Stri
         );
     }
     crate::safety::words(shell, &names)
+}
+
+/// Shift, Alt and Ctrl as a mouse report carries them: 4, 8 and 16 added to the button.
+fn mouse_mods(m: KeyModifiers) -> u32 {
+    let mut b = 0;
+    if m.contains(KeyModifiers::SHIFT) {
+        b |= 4;
+    }
+    if m.contains(KeyModifiers::ALT) {
+        b |= 8;
+    }
+    if m.contains(KeyModifiers::CONTROL) {
+        b |= 16;
+    }
+    b
 }
 
 /// A mouse button as a terminal numbers it in a report.

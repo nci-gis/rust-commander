@@ -451,21 +451,47 @@ impl TermPanel {
     /// A mouse button inside a shell of the active tab (not on its border): to the
     /// program there when it asked for the mouse; true when it went. See
     /// [`TermPane::mouse`].
-    pub fn mouse_at(&self, x: u16, y: u16, ev: crate::pane::term::MouseEv) -> bool {
+    ///
+    /// When it went, that shell and its rectangle: the rest of the gesture goes there
+    /// ([`TermPanel::mouse_to`]), wherever the pointer is by then.
+    pub fn mouse_at(
+        &self,
+        x: u16,
+        y: u16,
+        ev: crate::pane::term::MouseEv,
+    ) -> Option<(ShellKey, Rect)> {
         let p = Position::new(x, y);
-        let Some((id, r)) = self.rects.iter().find(|(_, r)| r.contains(p)).copied() else {
-            return false;
-        };
+        let (id, r) = self.rects.iter().find(|(_, r)| r.contains(p)).copied()?;
         let inside = x > r.x
             && y > r.y
             && x + 1 < r.x.saturating_add(r.width)
             && y + 1 < r.y.saturating_add(r.height);
         if !inside {
+            return None;
+        }
+        let tab = self.tabs.get(self.active)?;
+        let key = (tab.id, id);
+        self.mouse_to(key, r, x, y, ev).then_some((key, r))
+    }
+
+    /// The rest of a gesture to the shell that took its press: `r` is that shell's
+    /// rectangle at the press, and the point is kept inside it (a drag out of the shell
+    /// is reported at its edge, as a terminal does), so the release always reaches the
+    /// program that saw the press. False when that shell is gone.
+    pub fn mouse_to(
+        &self,
+        key: ShellKey,
+        r: Rect,
+        x: u16,
+        y: u16,
+        ev: crate::pane::term::MouseEv,
+    ) -> bool {
+        if r.width < 3 || r.height < 3 {
             return false;
         }
-        self.tabs
-            .get(self.active)
-            .and_then(|t| t.terms.get(&id))
+        let x = x.clamp(r.x + 1, r.x + r.width - 2);
+        let y = y.clamp(r.y + 1, r.y + r.height - 2);
+        self.shell(key)
             .is_some_and(|t| t.mouse(x - r.x, y - r.y, ev))
     }
 

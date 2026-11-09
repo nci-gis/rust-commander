@@ -1293,6 +1293,40 @@ fn clicks_in_the_shell_go_to_a_program_that_asked_for_the_mouse() {
     assert!(screen.contains("F12 back to files"), "{screen}");
 }
 
+/// A drag that leaves the shell is the same program's to the end: reported at the
+/// shell's edge, and the release reaches it even over the file panes (vim would stay
+/// in a drag otherwise). A Ctrl-click carries Ctrl.
+#[test]
+fn a_drag_out_of_the_shell_still_ends_in_its_program() {
+    let s = Scratch::new("click-out");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    let cmd = "stty -echo; printf '\\033[?1002h\\033[?1006h'; printf '%s%s\\n' rea dy; \
+               read -r l; printf '\\033[?1002l\\033[?1006l'; stty echo; \
+               echo \"got:$l.\" | cat -v\r";
+    xdevcmd.send(cmd.as_bytes());
+    xdevcmd.wait_for("ready");
+    let (_, bar_y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.mouse(0, 10, bar_y + 3, false);
+    xdevcmd.mouse(32, 10, 3, false); // up over the file pane
+    xdevcmd.mouse(0, 10, 3, true);
+    xdevcmd.click(12, bar_y + 3, 16); // Ctrl+click
+    xdevcmd.send(b"\r");
+    xdevcmd.wait_for("got:");
+    let screen = xdevcmd.screen();
+    let got = screen
+        .lines()
+        .rev()
+        .find_map(|l| l.split("got:").nth(1))
+        .unwrap_or_else(|| panic!("{screen}"));
+    assert!(
+        got.starts_with("^[[<0;10;2M^[[<32;10;1M^[[<0;10;1m^[[<16;12;2M^[[<16;12;2m."),
+        "{screen}"
+    );
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 #[test]
 fn clicks_in_the_shell_go_nowhere_when_the_program_did_not_ask() {
     let screen = click_into_program("click-none", "", "");

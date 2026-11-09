@@ -12,6 +12,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = true
+# The integration tests stay in the repository: render.rs reads the top-level README,
+# which is not where a downloaded crate has it, and both need the repository's
+# fixtures and themes. 260 KB nobody installing the program uses.
+exclude = ["tests/"]
 
 # What `cargo release` does to the CHANGELOG; see release.toml at the top.
 [package.metadata.release]

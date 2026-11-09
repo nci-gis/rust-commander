@@ -233,6 +233,55 @@ Order: 1, 2, 3, 4 (each its own commit with its tests), 5 only on the owner's wo
   step 11: "Read the terminal's input on its own thread" and "Cancel tests cancel a copy
   still running". Each fix proved by putting the bug back: the test failed, then passed.
 
+  **Review and QA findings, 2026-11-10** (after the close-out; same branch). Nine
+  commits after `622d76e`:
+  - `080a4d1` `Lock::Busy` is Unix only (`cfg_attr(not(unix), allow(dead_code))`): clippy
+    on Windows failed on it. Not compiled here (no Windows target), by reading.
+  - `48d7b70` The lost terminal is told by `tcgetattr` on stdin (EIO or ENXIO), not by
+    `poll`: macOS's poll does not support devices and may answer POLLNVAL for a live
+    terminal, which would have ended xdevcmd at once. Unit test on a pty pair: live, then
+    gone once the master closes. Found doing it: on Linux the old check never fired
+    either (stdin of a hung-up pty no longer passes `is_terminal`, so it returned early);
+    what ended the loop was the next draw's EIO, which the input thread lets happen. Now
+    "is a terminal" is asked when the reader starts. Mutation: the hang-up test still
+    fails without the input thread (3/10 this time), passes 10/10 with it, and passes
+    with `terminal_alive` a no-op (the draw's EIO suffices on Linux). An input thread
+    that panics now ends xdevcmd with "the thread reading the keyboard failed — details
+    in <log>". **macOS needs a hand test**: close the window (and drop an SSH session)
+    with xdevcmd running a copy; the session must be saved and the copy's part file gone.
+  - `df8bb59` The hang-up test's source is 2 GiB, not 16 (the copy is not sparse: a
+    regression would have filled the disk). The ops cancel tests copy at most 1 GiB and
+    cancel at the first megabyte.
+  - `92ea5a9` Recovery holds the dead run's lock (`claim` returns the locked probe) until
+    the journal is removed: two starts at once offered the same job. Test: a second
+    start run in that window finds nothing; fails with the lock dropped early.
+  - `56c1ee1` A journal named by a bare pid (0.2.x, which took no lock) is a dead run's
+    only if its pid is gone too (Unix). `legacy_journal_of_a_live_pid_is_left_alone`
+    fails with the lock alone.
+  - `3726b0d` `Journal::begin`: a Busy lock (another start took the new journal for a dead
+    run's) removes it and the job runs without one. Test with a probe held between making
+    and locking; fails with the result ignored.
+  - `660672e` A job whose journal cannot be made (safe operations on) says so once, at
+    the end of its summary: "safe operations off for this job: <reason>". Core test of
+    the text; pty test with a file where the journal directory goes (fails with the error
+    dropped). Rename many still runs silently without one.
+  - `91e0bd8` A Kitty picture kept by the terminal under a dialog is freed (`d=I`) at the
+    end, and on a frame with no picture, no dialog and one kept. Pty test: SIGTERM with
+    help over the picture writes `d=I` (fails without). The quick-pictures comment now
+    says the 60 ms comes from `send`'s pause.
+  - `67e72f3` Pty `resume_from_app_does_not_replace_a_kept_newer_source_file`: fails
+    with `App::resume` wired back to `Update` (no question, file replaced).
+  - Not done: a pty test for a key sent in the same write as F4. Tried: it fails both
+    with the input thread and with the old direct crossterm read, because crossterm's
+    reader takes the whole write into its own buffer with the F4, so the following bytes
+    are xdevcmd's before any editor starts (they are handled once the editor returns).
+    That window is crossterm's buffering, not `quiet()`; no test can tell `quiet()`
+    from a no-op through it. The existing editor-keys test (a line typed while the
+    editor starts) fails with a reader that never stops.
+  - Left as a note, not changed: on macOS `uname().nodename` can change with the network
+    (Bonjour / DHCP names), so a journal could look like another host's after a network
+    change and be left alone (safe, but not offered). The owner may want a stabler name.
+
   **Found in step 11.**
   - Step 6's hang-up test failed 5 of 15 runs alone: crossterm 0.29's reader, on a
     hung-up pty, loops on the failing read and never returns the error, so the loop
@@ -297,9 +346,9 @@ Order: 1, 2, 3, 4 (each its own commit with its tests), 5 only on the owner's wo
   reading only; CI or the owner's machines must build them. Also by hand: journal
   locking on Windows (kill from Task Manager), NFS, pictures on real terminals (a Kitty
   `a=p` after a dialog in kitty and Ghostty; sixel in Windows Terminal, which rests on its
-  10x20 virtual cell), Ctrl+Space in a real shell; the input thread on Windows and
-  macOS (Windows relies on crossterm's console reader reporting a closed console as an
-  error; not tried). `cargo deny` is not installed here (no new crate; rustix gains its
+  10x20 virtual cell), Ctrl+Space in a real shell; the input thread and the hang-up on
+  Windows and macOS (Windows relies on crossterm's console reader reporting a closed
+  console as an error; macOS on `tcgetattr` answering ENXIO; neither tried). `cargo deny` is not installed here (no new crate; rustix gains its
   `system` feature, already in the tree).
 
   Recorded for the owner, not changed: global Alt keys (`is_global`) that readline also
@@ -558,6 +607,17 @@ Order: 1, 2, 3, 4 (each its own commit with its tests), 5 only on the owner's wo
       (proxy), so neither was compiled.
 - [x] Input thread: hang-up test 15/15 with it, 10/15 without; the editor-keys test
       fails with a reader that never stops.
+- [x] Review findings (2026-11-10), after all nine commits: fmt; clippy Linux
+      `-D warnings`; `cargo test --workspace` twice: core 162 + 1, tui 144 unit + 150
+      render + 51 pty (1 ignored), all pass; the pty suite 3 more times, 51/51 each. No
+      flake seen.
+- [x] Journal: two starts at once offer a job once; a 0.2.x journal of a live pid is left
+      alone; a journal Busy as it is made is given up; each fails with its fix taken out.
+- [x] A job without its journal says so; a kept Kitty picture is freed at the end;
+      continuing a copy asks about a kept newer-source file (fails with `Update`).
+- [ ] A key in the same write as F4 reaching the editor: not testable (crossterm buffers
+      it with the F4; in Do).
+- [ ] macOS by hand: the hang-up (window closed, SSH dropped) saves and cleans up.
 - [x] No `kind`-line panic: prefix test fails with `line[5..]` put back.
 - [x] Resume never replaces a kept file: core test fails with `Update` put back.
 - [x] Liveness: other-host and same-pid tests fail with the pid-only check put back (and

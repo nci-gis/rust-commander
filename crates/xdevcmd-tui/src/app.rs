@@ -38,6 +38,7 @@ use crate::menu::{Cmd, Item, Menu, Outcome as MenuOutcome};
 use crate::modal::{self, Confirm, Input, InputKind, Job, Modal};
 use crate::opener;
 use crate::pane::tabs::Click as TabClick;
+use crate::pane::term::ShellState;
 use crate::pane::terms::Click as TermClick;
 use crate::pane::{FilePane, FileTabs, Pane, TermPanel};
 use crate::rename_dialog::{self, RenameDialog};
@@ -1658,10 +1659,13 @@ impl App {
             // Typed text goes to whatever owns the terminal. Into an editor it edits;
             // into a sudo prompt it becomes the password. Only a shell at its prompt
             // should receive a cd.
-            if let Some(program) = t.busy_with() {
-                self.status =
-                    format!("{program} is running in the terminal \u{2014} not typed into it");
-                return;
+            match t.shell_state() {
+                ShellState::Busy(program) | ShellState::Remote(program) => {
+                    self.status =
+                        format!("{program} is running in the terminal \u{2014} not typed into it");
+                    return;
+                }
+                ShellState::Idle | ShellState::Unknown => {}
             }
             match crate::safety::cd_command(&t.shell_name(), &text) {
                 Ok(line) => t.send(line.into_bytes()),
@@ -5111,10 +5115,13 @@ impl App {
             }
         };
         if let Some(Pane::Term(t)) = self.panes.get(&id) {
-            if let Some(program) = t.busy_with() {
-                self.status =
-                    format!("{program} is running in the terminal \u{2014} not typed into it");
-                return;
+            match t.shell_state() {
+                ShellState::Busy(program) | ShellState::Remote(program) => {
+                    self.status =
+                        format!("{program} is running in the terminal \u{2014} not typed into it");
+                    return;
+                }
+                ShellState::Idle | ShellState::Unknown => {}
             }
             t.send(format!("{line}\r").into_bytes());
         }

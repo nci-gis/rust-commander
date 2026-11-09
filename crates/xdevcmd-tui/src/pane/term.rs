@@ -22,7 +22,7 @@ use ratatui::widgets::Block;
 use ratatui::Frame;
 use tui_term::widget::PseudoTerminal;
 
-use crate::pane::shell_report::ShellReports;
+use crate::pane::shell_report::{Mark, ShellReports};
 use crate::theme;
 
 /// The parser every shell's output goes through, keeping what the shell reports about
@@ -63,6 +63,110 @@ pub struct TermPane {
     keep: bool,
     /// How the process ended, once it has: "exit 0", "exit 2".
     ended: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+/// Whether a shell can take typed text: what every action that types into it asks
+/// first (`App::send_to_shell`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellState {
+    /// At its prompt, known for sure.
+    Idle,
+    /// A program has the terminal; typed text would go to it.
+    Busy(String),
+    /// A program that talks to another machine has the terminal (ssh): its shell, and
+    /// its directory, are over there.
+    Remote(String),
+    /// This system cannot tell (Windows without prompt marks).
+    Unknown,
+}
+
+/// Programs whose terminal is another machine's.
+pub const REMOTE: &[&str] = &["ssh", "mosh-client", "mosh", "autossh", "et", "telnet"];
+
+/// Whether this system can see the terminal's foreground program (`/proc`, `ps`).
+const SEES_FOREGROUND: bool = cfg!(any(target_os = "linux", target_os = "macos"));
+
+/// The decision behind [`TermPane::state`], pure. `keep`: a tab started for one program,
+/// always busy with it. `fg`: the foreground program the system names. `mark`: the
+/// shell's last OSC 133 mark. A running program the system sees always wins; a `C`
+/// mark with no `D` after it is busy everywhere; a prompt mark makes a shell idle only
+/// where the system cannot see the foreground (Windows): marks can be printed by
+/// anything, so they never make a shell look idle where the system says otherwise.
+pub fn state_of(
+    keep: bool,
+    label: &str,
+    fg: Option<String>,
+    mark: Option<Mark>,
+    sees_foreground: bool,
+) -> ShellState {
+    if keep {
+        return ShellState::Busy(label.to_string());
+    }
+    if let Some(name) = fg {
+        let lower = name.to_ascii_lowercase();
+        let bare = lower.strip_suffix(".exe").unwrap_or(&lower);
+        return if REMOTE.contains(&bare) {
+            ShellState::Remote(name)
+        } else {
+            ShellState::Busy(name)
+        };
+    }
+    match (mark, sees_foreground) {
+        (Some(Mark::Running), _) => ShellState::Busy("a command".into()),
+        (_, true) | (Some(Mark::Prompt), false) => ShellState::Idle,
+        (None, false) => ShellState::Unknown,
+    }
+}
+
+/// The directory in `lsof -a -p PID -d cwd -Fn` output: the `n` field after the `cwd`
+/// file descriptor (`p4242`, `fcwd`, `n/Users/me`). lsof writes a name with a
+/// non-printing character escaped (`\x0a`), which is then not a directory and is
+/// refused by the caller's check.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn lsof_cwd(out: &[u8]) -> Option<std::path::PathBuf> {
+    let mut in_cwd = false;
+    for line in out.split(|&b| b == b'\n') {
+        match line.first() {
+            Some(b'f') => in_cwd = &line[1..] == b"cwd",
+            Some(b'n') if in_cwd && line.get(1) == Some(&b'/') => {
+                return crate::pane::shell_report::path_from_bytes(line[1..].to_vec());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// macOS: ask lsof for the shell's directory, giving it two seconds (a hung network
+/// mount must not hang xdevcmd). Not run on this machine (Linux); `lsof_cwd` is tested
+/// with recorded output.
+#[cfg(target_os = "macos")]
+fn lsof_cwd_of(pid: u32) -> Option<std::path::PathBuf> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    child.stdout.take()?.read_to_end(&mut out).ok()?;
+    lsof_cwd(&out)
 }
 
 /// The cursor-position query a program sends to its terminal (DSR 6).
@@ -316,8 +420,10 @@ impl TermPane {
         cache.1.clone()
     }
 
-    /// The shell's working directory, where the system says (Linux). Saved with the
-    /// session so the next start opens the tab where it was.
+    /// The shell's working directory, cheaply: `/proc` on Linux, elsewhere the last
+    /// directory the shell reported (OSC 7 / 9;9, docs/shell.md). Saved with the
+    /// session, which is written every few seconds, so this never runs a program (on
+    /// macOS [`TermPane::shell_dir`] runs `lsof`, only when a key asks).
     pub fn cwd(&self) -> Option<std::path::PathBuf> {
         let pid = self.pid.load(Ordering::Relaxed);
         if pid == 0 {
@@ -329,8 +435,62 @@ impl TermPane {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            None
+            self.reported().0
         }
+    }
+
+    /// The shell's working directory, as well as this system can know it, for an
+    /// action someone asked for (Alt+G, typing names, the history's Save as…):
+    ///
+    /// - Linux: `/proc/<pid>/cwd`. A directory the shell reports is never used here:
+    ///   any program's output could claim one.
+    /// - macOS: `/usr/sbin/lsof` (by its full path, never through `PATH`), run now and
+    ///   given two seconds; else the directory the shell last reported (OSC 7).
+    /// - Windows: the directory the shell last reported (OSC 9;9 or 7, from the prompt
+    ///   snippets in docs/shell.md); nothing otherwise, rather than a guess.
+    ///
+    /// `None` when it is not known. The caller checks that it exists and lies inside
+    /// the policy root before a pane goes there.
+    pub fn shell_dir(&self) -> Option<std::path::PathBuf> {
+        let pid = self.pid.load(Ordering::Relaxed);
+        if pid == 0 {
+            return None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            lsof_cwd_of(pid).or_else(|| self.reported().0)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.cwd()
+        }
+    }
+
+    /// Whether something may be typed into this shell now; see [`state_of`].
+    pub fn state(&self) -> ShellState {
+        if self.has_exited() {
+            return ShellState::Busy("nothing \u{2014} the shell has ended".into());
+        }
+        state_of(
+            self.keep,
+            &self.label,
+            self.foreground_program(),
+            self.reported().2,
+            SEES_FOREGROUND,
+        )
+    }
+
+    /// What the shell last said about itself in its output: the directory (OSC 7 or
+    /// 9;9), how many directory reports came so far, and the last prompt mark (OSC 133).
+    /// Forgeable by anything printed into the terminal; see `shell_report`.
+    pub fn reported(&self) -> (Option<std::path::PathBuf>, u64, Option<Mark>) {
+        self.parser
+            .read()
+            .map(|p| {
+                let r = p.callbacks();
+                (r.dir.clone(), r.dir_seq, r.mark)
+            })
+            .unwrap_or_default()
     }
 
     /// The shell's program name, as the tab showed it before anything ran.
@@ -814,6 +974,59 @@ fn function_key_bytes(n: u8, mods: KeyModifiers) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shell_is_idle_only_when_that_is_known() {
+        use ShellState::*;
+        let s = |keep, fg: Option<&str>, mark, sees| {
+            state_of(keep, "bash", fg.map(str::to_string), mark, sees)
+        };
+        // Linux and macOS: the system sees the foreground.
+        assert_eq!(s(false, None, None, true), Idle);
+        assert_eq!(s(false, Some("vim"), None, true), Busy("vim".into()));
+        assert_eq!(s(false, Some("ssh"), None, true), Remote("ssh".into()));
+        assert_eq!(
+            s(false, Some("mosh-client"), None, true),
+            Remote("mosh-client".into())
+        );
+        assert_eq!(
+            s(false, Some("ssh.exe"), None, false),
+            Remote("ssh.exe".into())
+        );
+        // A C mark with no D after it is busy, also where the system says idle.
+        assert_eq!(
+            s(false, None, Some(Mark::Running), true),
+            Busy("a command".into())
+        );
+        // A prompt mark never overrules a program the system sees.
+        assert_eq!(
+            s(false, Some("vim"), Some(Mark::Prompt), true),
+            Busy("vim".into())
+        );
+        // Windows: marks are all there is.
+        assert_eq!(s(false, None, None, false), Unknown);
+        assert_eq!(s(false, None, Some(Mark::Prompt), false), Idle);
+        assert_eq!(
+            s(false, None, Some(Mark::Running), false),
+            Busy("a command".into())
+        );
+        // A program's own tab is always busy with it.
+        assert_eq!(s(true, None, Some(Mark::Prompt), true), Busy("bash".into()));
+    }
+
+    #[test]
+    fn lsof_output_gives_the_directory() {
+        // Recorded shape of `lsof -a -p PID -d cwd -Fn` on macOS.
+        let out = b"p4242\nfcwd\nn/Users/me/src/a b\n";
+        assert_eq!(lsof_cwd(out), Some("/Users/me/src/a b".into()));
+        assert_eq!(lsof_cwd(b"p4242\nftxt\nn/bin/zsh\n"), None, "not the cwd");
+        assert_eq!(lsof_cwd(b""), None);
+        assert_eq!(lsof_cwd(b"p1\nfcwd\nnrelative\n"), None);
+        assert_eq!(
+            lsof_cwd(b"p1\nftxt\nn/bin/zsh\nfcwd\nn/tmp\n"),
+            Some("/tmp".into())
+        );
+    }
 
     #[test]
     fn function_keys_reach_the_program_as_xterm_sends_them() {

@@ -140,13 +140,13 @@ fn percent_decode(s: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[cfg(unix)]
-fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
+pub(crate) fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStringExt;
     Some(PathBuf::from(std::ffi::OsString::from_vec(b)))
 }
 
 #[cfg(not(unix))]
-fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
+pub(crate) fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
     String::from_utf8(b).ok().map(PathBuf::from)
 }
 

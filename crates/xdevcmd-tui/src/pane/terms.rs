@@ -342,7 +342,7 @@ impl TermPanel {
         Some(History {
             title,
             text,
-            cwd: shell.cwd(),
+            cwd: shell.shell_dir(),
             full_screen,
         })
     }
@@ -357,9 +357,10 @@ impl TermPanel {
             .unwrap_or_default()
     }
 
-    /// See [`TermPane::foreground_program`].
-    pub fn busy_with(&self) -> Option<String> {
-        self.focused().and_then(TermPane::foreground_program)
+    /// The focused shell's state; see [`TermPane::state`]. `Unknown` with no shell.
+    pub fn shell_state(&self) -> crate::pane::term::ShellState {
+        self.focused()
+            .map_or(crate::pane::term::ShellState::Unknown, TermPane::state)
     }
 
     pub fn send(&self, bytes: Vec<u8>) {

@@ -453,6 +453,27 @@ impl TermPanel {
         }
     }
 
+    /// A mouse button inside a shell of the active tab (not on its border): to the
+    /// program there when it asked for the mouse; true when it went. See
+    /// [`TermPane::mouse`].
+    pub fn mouse_at(&self, x: u16, y: u16, ev: crate::pane::term::MouseEv) -> bool {
+        let p = Position::new(x, y);
+        let Some((id, r)) = self.rects.iter().find(|(_, r)| r.contains(p)).copied() else {
+            return false;
+        };
+        let inside = x > r.x
+            && y > r.y
+            && x + 1 < r.x.saturating_add(r.width)
+            && y + 1 < r.y.saturating_add(r.height);
+        if !inside {
+            return false;
+        }
+        self.tabs
+            .get(self.active)
+            .and_then(|t| t.terms.get(&id))
+            .is_some_and(|t| t.mouse(x - r.x, y - r.y, ev))
+    }
+
     /// True when the point is on a tab, a close mark or the + button. The tab bar is
     /// the panel's first row, which is also half of the strip that resizes the panel,
     /// so a button has to win over the resize or no tab could ever be clicked.

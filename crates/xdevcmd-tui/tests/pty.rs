@@ -1242,6 +1242,63 @@ fn the_wheel_is_arrow_keys_to_a_full_screen_program_without_the_mouse() {
     assert!(screen.contains("got:^[[A^[[A^[[A"), "{screen}");
 }
 
+/// Runs `setup` in the shell, clicks left then right inside it, and shows with `cat -v`
+/// what the program read. Returns the screen.
+fn click_into_program(tag: &str, setup: &str, reset: &str) -> String {
+    let s = Scratch::new(tag);
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    let cmd = format!(
+        "stty -echo; printf '{setup}'; printf '%s%s\\n' rea dy; read -r l; \
+         printf '{reset}'; stty echo; echo \"got:$l.\" | cat -v\r"
+    );
+    xdevcmd.send(cmd.as_bytes());
+    xdevcmd.wait_for("ready");
+    let (_, bar_y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(10, bar_y + 3, 0);
+    xdevcmd.click(12, bar_y + 3, 2);
+    // A drag that starts on the program is its, not a file drag.
+    xdevcmd.mouse(0, 10, bar_y + 3, false);
+    xdevcmd.mouse(32, 11, bar_y + 4, false);
+    xdevcmd.mouse(0, 11, bar_y + 4, true);
+    xdevcmd.send(b"\r");
+    xdevcmd.wait_for("got:");
+    let screen = xdevcmd.screen();
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+    screen
+}
+
+#[test]
+fn clicks_in_the_shell_go_to_a_program_that_asked_for_the_mouse() {
+    // Button presses and releases, SGR (vim's `mouse=a`, htop): every one reported.
+    let screen = click_into_program(
+        "click-mouse",
+        "\\033[?1002h\\033[?1006h",
+        "\\033[?1002l\\033[?1006l",
+    );
+    // The last line with it: the first is the command as typed.
+    let got = screen
+        .lines()
+        .rev()
+        .find_map(|l| l.split("got:").nth(1))
+        .unwrap_or_else(|| panic!("{screen}"));
+    assert!(
+        got.starts_with(
+            "^[[<0;10;2M^[[<0;10;2m^[[<2;12;2M^[[<2;12;2m^[[<0;10;2M^[[<32;11;3M^[[<0;11;3m."
+        ),
+        "{screen}"
+    );
+    // xdevcmd did nothing with them: no menu, the shell still has the keys.
+    assert!(screen.contains("F12 back to files"), "{screen}");
+}
+
+#[test]
+fn clicks_in_the_shell_go_nowhere_when_the_program_did_not_ask() {
+    let screen = click_into_program("click-none", "", "");
+    assert!(screen.contains("got:."), "{screen}");
+}
+
 #[test]
 fn xdevcmd_will_not_start_inside_its_own_terminal_panel() {
     let s = Scratch::new("nested");

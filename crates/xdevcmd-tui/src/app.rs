@@ -457,6 +457,9 @@ pub struct App {
     /// are what there is), and the directory it was last seen idle in. The pane moves
     /// only when that directory changes for the same shell: an edge, not a level.
     follow_seen: Option<(ShellKey, u64, Option<PathBuf>)>,
+    /// A press inside a shell went to the program there (it asked for the mouse): the
+    /// drag and the release that follow go to it too, not to xdevcmd.
+    mouse_to_shell: bool,
     /// Copy, move, delete, extract and pack jobs sent to the background (B in the
     /// progress box). One that asks a question comes back to the front.
     jobs: Vec<Job>,
@@ -601,6 +604,7 @@ impl App {
             history_dir: None,
             pending_type: None,
             follow_seen: None,
+            mouse_to_shell: false,
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
@@ -2000,6 +2004,15 @@ impl App {
         true
     }
 
+    /// A press inside a shell, reported to the program there when it asked for the
+    /// mouse (vim, htop, Claude Code); its drag and release then follow it there.
+    fn press_into_shell(&mut self, x: u16, y: u16, button: u32) {
+        use crate::pane::term::MouseEv;
+        self.mouse_to_shell = self
+            .panel_ref()
+            .is_some_and(|p| p.mouse_at(x, y, MouseEv::Press(button)));
+    }
+
     /// The terminal panel, to read from.
     fn panel_ref(&self) -> Option<&TermPanel> {
         match self.panes.get(&self.term_id?) {
@@ -2718,6 +2731,29 @@ impl App {
         let (x, y) = (m.column, m.row);
         let p = Position::new(x, y);
 
+        // A press the program in a shell took: the rest of that gesture is its too.
+        if self.mouse_to_shell {
+            use crate::pane::term::MouseEv;
+            let ev = match m.kind {
+                MouseEventKind::Drag(b) => Some(MouseEv::Drag(button_number(b))),
+                MouseEventKind::Up(b) => {
+                    self.mouse_to_shell = false;
+                    Some(MouseEv::Release(button_number(b)))
+                }
+                MouseEventKind::Down(_) => {
+                    self.mouse_to_shell = false;
+                    None
+                }
+                _ => None,
+            };
+            if let Some(ev) = ev {
+                if let Some(panel) = self.panel_ref() {
+                    panel.mouse_at(x, y, ev);
+                }
+                return;
+            }
+        }
+
         match m.kind {
             MouseEventKind::Drag(MouseButton::Left) => return self.on_drag(x, y),
             MouseEventKind::Up(MouseButton::Left) => return self.on_release(x, y),
@@ -2825,15 +2861,24 @@ impl App {
                             self.remove_terminal_panel();
                         }
                     }
+                    // Inside a shell: the program's, when it asked for the mouse.
+                    Some(TermClick::Selected) => self.press_into_shell(x, y, 0),
                     _ => {}
                 }
             }
             // A right-click on a terminal tab: its menu. The tab bar is xdevcmd's, so no
-            // guessing whose click it is; inside a shell a right-click is left alone.
-            MouseEventKind::Down(MouseButton::Right) if Some(id) == self.term_id => {
+            // guessing whose click it is; inside a shell a right-click is the program's
+            // when it asked for the mouse, and otherwise left alone.
+            MouseEventKind::Down(b @ (MouseButton::Right | MouseButton::Middle))
+                if Some(id) == self.term_id =>
+            {
                 self.focus = id;
                 if let Some(i) = self.panel().and_then(|p| p.tab_at(x, y)) {
-                    self.open_tab_menu(i, x, y);
+                    if b == MouseButton::Right {
+                        self.open_tab_menu(i, x, y);
+                    }
+                } else {
+                    self.press_into_shell(x, y, button_number(b));
                 }
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if Some(id) == self.term_id => {
@@ -7341,6 +7386,15 @@ pub(crate) fn base64(data: &[u8]) -> String {
 }
 
 /// "s" for a count other than one.
+/// A mouse button as a terminal numbers it in a report.
+fn button_number(b: MouseButton) -> u32 {
+    match b {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    }
+}
+
 fn plural(n: usize) -> &'static str {
     if n == 1 {
         ""

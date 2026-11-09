@@ -198,6 +198,58 @@ fn lsof_cwd_of(pid: u32) -> Option<std::path::PathBuf> {
     lsof_cwd(&out)
 }
 
+/// A mouse event for the program in a shell: the button number as a terminal reports
+/// it (0 left, 1 middle, 2 right).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseEv {
+    Press(u32),
+    Release(u32),
+    Drag(u32),
+}
+
+/// A mouse report as xterm writes it, in the encoding the program asked for. A release
+/// is `m` in SGR and button 3 in the older encodings, which cannot say which button.
+/// `None` when the position cannot be said in that encoding.
+pub fn mouse_report(
+    enc: vt100::MouseProtocolEncoding,
+    button: u32,
+    col: u16,
+    row: u16,
+    release: bool,
+) -> Option<Vec<u8>> {
+    use vt100::MouseProtocolEncoding as Enc;
+    let legacy = if release { 3 | (button & !3) } else { button };
+    Some(match enc {
+        Enc::Sgr => {
+            let end = if release { 'm' } else { 'M' };
+            format!("\x1b[<{button};{col};{row}{end}").into_bytes()
+        }
+        Enc::Utf8 => {
+            let mut out = b"\x1b[M".to_vec();
+            for v in [legacy, u32::from(col), u32::from(row)] {
+                let c = char::from_u32(32 + v)?;
+                let mut b = [0u8; 4];
+                out.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
+            }
+            out
+        }
+        Enc::Default => {
+            // One byte each: a position past 223 cannot be said.
+            if col > 223 || row > 223 {
+                return None;
+            }
+            vec![
+                0x1b,
+                b'[',
+                b'M',
+                (32 + legacy) as u8,
+                (32 + col) as u8,
+                (32 + row) as u8,
+            ]
+        }
+    })
+}
+
 /// The cursor-position query a program sends to its terminal (DSR 6).
 const CPR_QUERY: &[u8] = b"\x1b[6n";
 
@@ -636,7 +688,7 @@ impl TermPane {
     /// (Claude Code, vim, htop); as arrow keys when a full-screen program did not (less,
     /// man); otherwise back through the history.
     pub fn wheel(&self, col: u16, row: u16, up: bool) {
-        use vt100::{MouseProtocolEncoding as Enc, MouseProtocolMode as Mode};
+        use vt100::MouseProtocolMode as Mode;
         let Ok(p) = self.parser.read() else { return };
         let screen = p.screen();
         let (mode, enc) = (
@@ -648,35 +700,9 @@ impl TermPane {
         if mode != Mode::None {
             // Wheel up and down are buttons 4 and 5: 64 and 65 in the report.
             let button: u32 = if up { 64 } else { 65 };
-            let bytes = match enc {
-                Enc::Sgr => format!("\x1b[<{button};{col};{row}M").into_bytes(),
-                Enc::Utf8 => {
-                    let mut out = b"\x1b[M".to_vec();
-                    for v in [button, u32::from(col), u32::from(row)] {
-                        let Some(c) = char::from_u32(32 + v) else {
-                            return;
-                        };
-                        let mut b = [0u8; 4];
-                        out.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
-                    }
-                    out
-                }
-                Enc::Default => {
-                    // One byte each: a position past 223 cannot be said.
-                    if col > 223 || row > 223 {
-                        return;
-                    }
-                    vec![
-                        0x1b,
-                        b'[',
-                        b'M',
-                        (32 + button) as u8,
-                        (32 + col) as u8,
-                        (32 + row) as u8,
-                    ]
-                }
-            };
-            self.send(bytes);
+            if let Some(bytes) = mouse_report(enc, button, col, row, false) {
+                self.send(bytes);
+            }
         } else if alt {
             let key: &[u8] = match (up, app_cursor) {
                 (true, true) => b"\x1bOA",
@@ -688,6 +714,45 @@ impl TermPane {
         } else {
             self.scroll_by(if up { 3 } else { -3 });
         }
+    }
+
+    /// A mouse button inside this shell, `col` and `row` counted from 1 inside its
+    /// border: reported to the program when it turned mouse reporting on for that kind
+    /// of event, in the encoding it asked for (the wheel's path). False when the
+    /// program did not ask, and xdevcmd keeps the click for itself.
+    pub fn mouse(&self, col: u16, row: u16, ev: MouseEv) -> bool {
+        use vt100::MouseProtocolMode as Mode;
+        let Ok(p) = self.parser.read() else {
+            return false;
+        };
+        let screen = p.screen();
+        let (mode, enc) = (
+            screen.mouse_protocol_mode(),
+            screen.mouse_protocol_encoding(),
+        );
+        drop(p);
+        let (button, release) = match ev {
+            MouseEv::Press(b) => (b, false),
+            MouseEv::Release(b) => (b, true),
+            // A drag is the button with the motion flag.
+            MouseEv::Drag(b) => (b + 32, false),
+        };
+        let wanted = match mode {
+            Mode::None => false,
+            // X10: presses only.
+            Mode::Press => matches!(ev, MouseEv::Press(_)),
+            Mode::PressRelease => !matches!(ev, MouseEv::Drag(_)),
+            Mode::ButtonMotion | Mode::AnyMotion => true,
+        };
+        if !wanted {
+            // Still the program's: it asked for the mouse, just not for this.
+            return mode != Mode::None;
+        }
+        if let Some(bytes) = mouse_report(enc, button, col, row, release) {
+            self.scroll_by(-(self.scrolled() as isize));
+            self.send(bytes);
+        }
+        true
     }
 
     /// Look back through history; positive goes further back. vt100 clamps to what it
@@ -1144,6 +1209,38 @@ mod tests {
             assert_eq!(decide(&busy, w), AskNewShell);
             assert_eq!(decide(&remote, w), AskNewShell);
         }
+    }
+
+    #[test]
+    fn mouse_reports_are_written_as_xterm_writes_them() {
+        use vt100::MouseProtocolEncoding as Enc;
+        assert_eq!(
+            mouse_report(Enc::Sgr, 0, 5, 3, false).unwrap(),
+            b"\x1b[<0;5;3M"
+        );
+        assert_eq!(
+            mouse_report(Enc::Sgr, 2, 5, 3, true).unwrap(),
+            b"\x1b[<2;5;3m"
+        );
+        assert_eq!(
+            mouse_report(Enc::Default, 0, 5, 3, false).unwrap(),
+            [0x1b, b'[', b'M', 32, 37, 35]
+        );
+        // The older encodings cannot say which button was let go.
+        assert_eq!(
+            mouse_report(Enc::Default, 2, 5, 3, true).unwrap(),
+            [0x1b, b'[', b'M', 35, 37, 35]
+        );
+        assert_eq!(mouse_report(Enc::Default, 0, 224, 3, false), None);
+        assert_eq!(
+            mouse_report(Enc::Utf8, 32, 300, 3, false).unwrap(),
+            "\x1b[M@\u{14c}#".as_bytes()
+        );
+        // The wheel's reports are unchanged.
+        assert_eq!(
+            mouse_report(Enc::Sgr, 64, 1, 1, false).unwrap(),
+            b"\x1b[<64;1;1M"
+        );
     }
 
     #[test]

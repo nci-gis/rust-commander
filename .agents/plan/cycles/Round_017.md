@@ -142,7 +142,9 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
 - **CI on Windows and macOS, 2026-11-10** (known red from run 42712465398 on
   `feat/shell-bridge`). Iterated on a scratch branch `ci/scratch` whose only change was
   `cargo test --all --no-fail-fast` (so one failing test binary hid none behind it),
-  deleted afterwards; ci.yml on this branch is unchanged.
+  ci.yml on this branch is unchanged. **The remote `ci/scratch` is still there**: this
+  sandbox's proxy refuses deleting a branch (git push --delete and the API both 403);
+  the owner deletes it (`git push origin --delete ci/scratch`).
   - **Windows, journal** (`a_dead_runs_parts_are_removed_and_renames_put_back`,
     `a_journal_held_by_a_running_job_is_left_alone_whatever_pid_it_names`). Cause: the
     probe opened the journal for writing with `share_mode(0)`, and Round 014 rightly holds

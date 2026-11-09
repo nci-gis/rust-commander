@@ -105,7 +105,10 @@ Windows Terminal, iTerm2, WezTerm and VS Code read:
   must be empty, `localhost` or this machine's name; any other host is ignored.
 - **OSC 9;9** `ESC ] 9 ; 9 ; "C:\path" ESC \` — Windows Terminal's form.
 - **OSC 133** prompt marks — `A` a prompt starts, `C` a command starts running, `D` it
-  finished. A `C` with no `D` after it means busy, on every system.
+  finished. A `C` with no `D` after it means busy, on every system, once the shell has
+  sent a prompt mark (`A`, `B` or `D`); before that a `C` is ignored, so a file that
+  holds one cannot make a shell without the snippet look busy. A reported directory
+  with a control character in it is ignored.
 
 **Only add the marks if your shell can send `C`** when a command starts. A shell that
 prints `A` at its prompt but never `C` looks idle while a program runs, and on Windows

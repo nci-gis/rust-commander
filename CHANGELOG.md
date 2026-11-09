@@ -100,6 +100,12 @@ that heading and starts a new, empty one here. -->
   stuck after five seconds, instead of quitting under it.
 
 ### Fixed
+- **The user menu's `%f`/`%s` could pass a file named like an option** (`-rf`) to the
+  command as an option. Such a name now gets `./` in front, as typed names do, and a
+  name that is not UTF-8 stops the command instead of being typed changed.
+- **A pipeline whose first program had ended** (`git log | less` once git is done) was
+  taken for a shell at its prompt on Linux, so Alt+C typed into it. It is a running
+  program now, and a `/proc` answer that cannot be read counts as "cannot tell".
 - **Ctrl+Space (and Ctrl+@) reached a program in the terminal panel as a space**, not
   the NUL a terminal sends: emacs' and zsh's set-mark did nothing.
 - **A click on a directory in the title of a pane split off below (Alt+D) did nothing**:

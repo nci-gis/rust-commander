@@ -140,8 +140,10 @@ sandboxing.
 What xdevcmd learns about the shell, and how far it trusts each source
 ([shell.md](shell.md#telling-xdevcmd-where-the-shell-is) has the details):
 
-- **From the system** (Linux `/proc`, macOS `ps`, and `/usr/sbin/lsof` by its full path,
-  never through `PATH`, only when a key asks, given two seconds): trusted. On these
+- **From the system** (Linux `/proc`, macOS `/bin/ps`, and `/usr/sbin/lsof`, both by
+  their full paths, never through `PATH`; lsof only when a key asks, given two seconds):
+  trusted. When the system's answer cannot be read, the shell's state is unknown, never
+  idle: every send asks. On these
   systems a directory reported in the shell's output is never used where the system can
   say (Linux always; macOS when lsof answers).
 - **From the shell's output** (OSC 7, OSC 9;9, OSC 133 marks): any program printing
@@ -152,8 +154,8 @@ What xdevcmd learns about the shell, and how far it trusts each source
     to. It is never typed, run or written to: typed names are bare only when the
     system gave the shell's directory (full paths otherwise), and the history's Save
     as… does not offer it. A host other than this machine's is ignored.
-  - A mark that says "running" (`C`) is believed everywhere: it can only stop xdevcmd
-    from typing. A mark that says "at the prompt" makes a shell idle **only on Windows**,
+  - A mark that says "running" (`C`) is believed everywhere, once the shell has sent a
+    prompt mark: it can only stop xdevcmd from typing. A mark that says "at the prompt" makes a shell idle **only on Windows**,
     where the system does not say; on Linux and macOS a program the system sees always
     wins. On Windows, then, a program that prints a prompt mark can make itself look
     idle. If that matters to you there, set `[terminal] send_when_idle = false`, and

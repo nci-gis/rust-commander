@@ -199,15 +199,50 @@ Note: after Round 015's keymap A, Alt+C/Alt+G/Alt+Enter are pane keys only; none
   shell look idle on Windows). docs/security.md "The shell panel". docs/config.md,
   CHANGELOG, F1's mouse rows; docs/keys.md regenerated (`--print-keys`, unchanged since
   steps 3–4 had already written it). ROADMAP row 27 → review.
+- Review and QA findings (2026-11-10), one commit each, each test checked to fail with
+  the fix reverted:
+  - Blocker, `2c91270`: Linux `foreground_of` gave up when the foreground group's
+    leader had no `/proc/<pid>/comm` (`git log | less` after git ends; `true | sleep 5`)
+    and that read as idle — Alt+C typed into the pipeline. Now `Fg::{Shell, Program,
+    Unknown}`: a foreign group is a program ("a program" when unnamed), an unreadable
+    `stat` is Unknown, which never counts as idle where the system should say (a prompt
+    mark does not change that). macOS `ps` by `/bin/ps`. Pty + unit (`fg_from_stat`).
+  - `329de3a`: bare names only when the shell's directory came from the system
+    (`ShellDir { path, trusted }`); a reported one (OSC 7/9;9) gets full paths, and the
+    history's Save as… no longer offers it. Alt+G and follow still use it. Unit test.
+  - `f342bde`: a mouse gesture goes to the shell that took its press (its key and
+    rectangle kept), the point clamped inside it, so a release over the panes or another
+    split still reaches the program; Shift/Alt/Ctrl carried (+4/+8/+16). Pty test.
+  - `bdea51b`: a new shell is ready once it printed and went quiet when the system cannot
+    see the foreground (Windows without marks), so "Open a new shell" types the names
+    there; where the system should see, Unknown is still not ready. Unit test.
+  - `956195d`: the user menu's names go through `safety::word` (now shared with
+    `words`): `-rf` becomes `./-rf`; non-UTF-8 names (any placeholder) refuse the
+    command. Unit test.
+  - `1242e86`: over 4000 bytes, `send_to_shell` asks even at an idle prompt
+    (`decide_for`), saying some shells drop longer lines. Chosen over "bracketed paste
+    only": simpler, and holds for shells that do enable paste but read through a
+    canonical tty. Unit test.
+  - `9e6db93`, tests for surviving mutants: a forged OSC 7 printed in the shell, Alt+G
+    still goes to the `/proc` directory; follow waits while the last mark is C with the
+    shell itself in the foreground, and follows after D.
+  - Nits: `be5c242` — a C mark counts only after the shell has sent a prompt mark (a
+    `cat` of a file cannot make a shell without snippets look busy); control characters
+    in an OSC 7 path refuse it (the comment now says so). `99a79bd` — a second "Open a
+    new shell" says the earlier names were dropped (status text only; no test: the
+    timing in a pty is not reliable). Docs (shell.md, security.md, CHANGELOG Fixed)
+    follow.
 - Set aside for the owner's hand tests; Round 017 starts from it.
 
 ## Check
 
 - [x] fmt, clippy `-D warnings`, `cargo test --workspace` (twice), pty suite 3×, all green
-      on Linux (core 168 + 1, tui unit 171 + 1 ignored, render 163, pty 78 + 1 ignored); no new crate (Cargo.toml/Cargo.lock untouched since Round 015).
+      on Linux (core 168 + 1, tui unit 178 + 1 ignored, render 163, pty 82 + 1 ignored,
+      after the review fixes); no new crate (Cargo.toml/Cargo.lock untouched since Round 015).
       `cargo deny check` not run: cargo-deny is not installed here — CI runs it.
       Windows and macOS targets cannot be installed here (proxy): their `cfg` branches
-      (`lsof_cwd_of`, the non-Linux `idle_dir`, `FOLLOW_HELP`) are unbuilt — CI will say.
+      (`lsof_cwd_of`, macOS `foreground_of` with `/bin/ps`, the non-Linux `idle_dir` and
+      `shell_dir`, `FOLLOW_HELP`) are unbuilt — CI will say.
 - [x] Every guard has a test that sends nothing and shows its message (Alt+G busy/gone;
       Alt+C and Alt+Enter into `sleep`/`cat` → dialog, the program got nothing).
 - [x] Quoting tests per shell; a control character refuses the whole list.

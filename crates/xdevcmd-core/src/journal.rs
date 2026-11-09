@@ -176,8 +176,16 @@ impl Journal {
         // ever sees a journal by its real name that is not yet locked.
         let new = dir.join(format!(".{name}.new"));
         let file = open_held(&new).ok()?;
+        #[cfg(test)]
+        before_lock_in_test(&new);
+        // Busy: another start is looking at it, has taken it for a dead run's, and is
+        // removing it. Renamed unlocked, the next start would take this live job for a
+        // dead one and remove its part files: no journal is better.
         #[cfg(unix)]
-        let _ = try_lock(&file);
+        if try_lock(&file) == Lock::Busy {
+            let _ = fs::remove_file(&new);
+            return None;
+        }
         let path = dir.join(name);
         if fs::rename(&new, &path).is_err() {
             let _ = fs::remove_file(&new);
@@ -360,6 +368,22 @@ thread_local! {
     /// Run between tidying up after a journal and removing it: a second start, in tests.
     static WHILE_HELD: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+type PathHook = Option<Box<dyn FnOnce(&Path)>>;
+
+#[cfg(test)]
+thread_local! {
+    /// Run once a journal is made and before it is locked: another start, in tests.
+    static BEFORE_LOCK: std::cell::RefCell<PathHook> = std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn before_lock_in_test(p: &Path) {
+    if let Some(f) = BEFORE_LOCK.with(|h| h.borrow_mut().take()) {
+        f(p);
+    }
 }
 
 #[cfg(test)]
@@ -683,6 +707,30 @@ mod tests {
         assert_eq!(recover_in(&jdir).len(), 1);
         assert!(!dead.exists());
         assert!(part.exists(), "not the dead run's");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_another_start_holds_as_it_is_made_is_given_up() {
+        let d = dir("taken");
+        let holder = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let keep = holder.clone();
+        // Another start probes the new journal before it is locked, and holds it.
+        BEFORE_LOCK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |p: &Path| {
+                let f = open_probe(p).unwrap();
+                assert_eq!(try_lock(&f), Lock::Held);
+                *keep.borrow_mut() = Some(f);
+            }))
+        });
+        let j = Journal::begin_in(&d, "copy", &[d.join("a")], Some(&d), false);
+        assert!(
+            j.is_none(),
+            "a journal not locked by its job would look dead"
+        );
+        assert_eq!(fs::read_dir(&d).unwrap().count(), 0, "nothing left behind");
+        drop(holder);
         let _ = fs::remove_dir_all(&d);
     }
 

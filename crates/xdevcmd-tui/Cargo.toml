@@ -49,13 +49,18 @@ icy_sixel = "0.7"
 # Asking the terminal what it can draw (graphics.rs): a poll with a timeout on stdin,
 # which crossterm has not started reading yet. Already in the tree through crossterm.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["event", "process", "stdio"] }
+# Also: whether the terminal is hung up (app.rs, `tty_gone`), by `tcgetattr`.
+rustix = { version = "1", features = ["event", "process", "stdio", "termios"] }
 # SIGHUP and SIGTERM (the terminal closed, SSH lost): stop jobs, clean up, save the
 # session before going. Already in the tree through crossterm.
 signal-hook = "0.3"
 
 [dev-dependencies]
 tar = { version = "0.4.46", default-features = false }
+
+# A pty pair for `tty_gone`'s test. Tests only.
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1", features = ["pty", "fs"] }
 
 [build-dependencies]
 # The icon and version details in xdevcmd.exe. Does nothing for other targets.

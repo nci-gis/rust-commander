@@ -139,9 +139,10 @@ fn prepare(key: &PicKey, w: usize, h: usize, bg: [u8; 3], cell: (u16, u16)) -> P
 /// The terminal's input, read on a thread of its own. crossterm (0.29) must not be read
 /// from the main loop: on a hung-up terminal (its window closed, SSH lost) its reader
 /// loops forever, at full speed, on the read that fails, and nothing after it runs:
-/// not the SIGHUP flag, not the clean-up. Here the main loop waits on a channel, looks
-/// at the terminal itself meanwhile ([`terminal_alive`]), and ends tidily while the
-/// stuck thread spins until the process ends. The thread reads only when asked, so it
+/// not the SIGHUP flag, not the clean-up. Here the main loop waits on a channel, so it
+/// goes on drawing (a write to a lost terminal fails, and the loop ends tidily) and looks
+/// at the terminal itself meanwhile ([`terminal_alive`]); the stuck thread spins until
+/// the process ends. The thread reads only when asked, so it
 /// never takes keys meant for an editor run in the meantime.
 struct KeyReader {
     ask: Sender<Duration>,
@@ -150,6 +151,8 @@ struct KeyReader {
     pending: bool,
     /// An event that arrived while waiting for quiet ([`KeyReader::quiet`]).
     held: Option<Event>,
+    /// Stdin was the terminal at the start: watched for a hang-up ([`terminal_alive`]).
+    watch: bool,
 }
 
 impl KeyReader {
@@ -177,6 +180,7 @@ impl KeyReader {
             got,
             pending: false,
             held: None,
+            watch: std::io::IsTerminal::is_terminal(&std::io::stdin()),
         }
     }
 
@@ -186,9 +190,7 @@ impl KeyReader {
             return Ok(Some(e));
         }
         if !self.pending {
-            self.ask
-                .send(wait)
-                .map_err(|_| anyhow::anyhow!("the input thread is gone"))?;
+            self.ask.send(wait).map_err(|_| input_gone())?;
             self.pending = true;
         }
         // One wait, not slices of it: an idle xdevcmd wakes once a TICK, as it did when
@@ -199,12 +201,10 @@ impl KeyReader {
                 Ok(r?)
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                terminal_alive()?;
+                terminal_alive(self.watch)?;
                 Ok(None)
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                anyhow::bail!("the input thread is gone")
-            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(input_gone()),
         }
     }
 
@@ -219,43 +219,53 @@ impl KeyReader {
                         self.held = Some(e);
                     }
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => terminal_alive()?,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    anyhow::bail!("the input thread is gone")
-                }
+                Err(mpsc::RecvTimeoutError::Timeout) => terminal_alive(self.watch)?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(input_gone()),
             }
         }
         Ok(())
     }
 }
 
-/// An error if the terminal (stdin) is hung up. When stdin is not the terminal (crossterm
-/// then reads /dev/tty), nothing is known here; SIGHUP still tells.
+/// The input thread ended, which only a panic does: xdevcmd can take no more keys, so it
+/// ends (tidily, as for a lost terminal), saying where the panic's details went.
+fn input_gone() -> anyhow::Error {
+    match crate::crash::take_background().flatten() {
+        Some(log) => anyhow::anyhow!(
+            "the thread reading the keyboard failed \u{2014} details in {}",
+            log.display()
+        ),
+        None => anyhow::anyhow!("the thread reading the keyboard failed"),
+    }
+}
+
+/// An error if the terminal (stdin) is hung up. `watch`: stdin was the terminal when
+/// the reader started (asked then: a hung-up terminal no longer says it is one). When it
+/// was not (crossterm then reads /dev/tty), nothing is known here; SIGHUP and the next
+/// write still tell.
 #[cfg(unix)]
-fn terminal_alive() -> Result<()> {
-    use rustix::event::{poll, PollFd, PollFlags, Timespec};
-    use std::io::IsTerminal;
-    let stdin = std::io::stdin();
-    if !stdin.is_terminal() {
-        return Ok(());
-    }
-    let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
-    match poll(&mut fds, Some(&Timespec::default())) {
-        Ok(_) | Err(rustix::io::Errno::INTR) => {}
-        Err(e) => return Err(std::io::Error::from(e).into()),
-    }
-    if fds[0]
-        .revents()
-        .intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL)
-    {
+fn terminal_alive(watch: bool) -> Result<()> {
+    if watch && tty_gone(std::io::stdin()) {
         anyhow::bail!("the terminal is gone (hung up)");
     }
     Ok(())
 }
 
+/// Whether the terminal at `fd` is hung up: asking for its settings fails with EIO
+/// (Linux, the BSDs) or ENXIO (macOS, a pty whose other side closed). Not `poll`:
+/// macOS's poll does not support devices and may answer POLLNVAL for a live terminal.
+#[cfg(unix)]
+fn tty_gone(fd: impl std::os::fd::AsFd) -> bool {
+    use rustix::io::Errno;
+    matches!(
+        rustix::termios::tcgetattr(fd),
+        Err(Errno::IO) | Err(Errno::NXIO)
+    )
+}
+
 /// Windows: crossterm's console reader reports a closed console as an error itself.
 #[cfg(not(unix))]
-fn terminal_alive() -> Result<()> {
+fn terminal_alive(_watch: bool) -> Result<()> {
     Ok(())
 }
 
@@ -6515,6 +6525,33 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use super::base64;
     use super::*;
+
+    /// A live terminal is not taken for a lost one, and a hung-up one is seen: the check
+    /// must never end xdevcmd under a working terminal (as `poll`'s POLLNVAL might on
+    /// macOS), and must notice when the other side has closed.
+    #[cfg(unix)]
+    #[test]
+    fn a_terminal_is_gone_only_once_its_other_side_closes() {
+        use rustix::fs::{open, Mode, OFlags};
+        use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+        grantpt(&master).unwrap();
+        unlockpt(&master).unwrap();
+        let name = ptsname(&master, Vec::new()).unwrap();
+        let slave = open(
+            name.as_c_str(),
+            OFlags::RDWR | OFlags::NOCTTY,
+            Mode::empty(),
+        )
+        .unwrap();
+        assert!(!tty_gone(&slave), "a live terminal");
+        drop(master);
+        assert!(tty_gone(&slave), "its other side closed");
+        // Not a terminal at all is not "gone": the caller watches only a terminal.
+        assert!(!tty_gone(
+            std::fs::File::open(std::env::current_exe().unwrap()).unwrap()
+        ));
+    }
 
     #[test]
     fn the_logo_is_one_colour_per_cell_of_the_size_about_expects() {

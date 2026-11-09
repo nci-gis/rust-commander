@@ -66,6 +66,8 @@ signal-hook = "0.3"
 
 [dev-dependencies]
 tar = { version = "0.4.46", default-features = false }
+# Reads the Scoop manifest in packaging/ (tests/packaging.rs). Tests only.
+serde_json = "1"
 
 # A pty pair for `tty_gone`'s test. Tests only.
 [target.'cfg(unix)'.dev-dependencies]

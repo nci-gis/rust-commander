@@ -1,0 +1,26 @@
+# Default locale manifest. Fill <VERSION>; see ../README.md.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: XDevTeam.xdevcmd
+PackageVersion: <VERSION>
+PackageLocale: en-US
+Publisher: XDevTeam
+PublisherUrl: https://github.com/nci-gis
+PackageName: xdevcmd
+PackageUrl: https://github.com/nci-gis/rust-commander
+License: MIT
+LicenseUrl: https://github.com/nci-gis/rust-commander/blob/main/LICENSE
+ShortDescription: A terminal-style file commander, written in Rust.
+Description: >-
+  A two-pane (orthodox) file manager for the terminal, in the manner of Total Commander,
+  with a terminal panel below the panes. One program, no network calls, and nothing
+  destructive done without asking.
+Moniker: xdevcmd
+Tags:
+  - file-manager
+  - tui
+  - terminal
+  - commander
+  - two-pane
+ReleaseNotesUrl: https://github.com/nci-gis/rust-commander/releases/tag/v<VERSION>
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

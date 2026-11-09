@@ -1,0 +1,16 @@
+# Installer manifest. Fill <VERSION> and <SHA256> (the .zip's line in the release's
+# SHA256SUMS); see ../README.md.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: XDevTeam.xdevcmd
+PackageVersion: <VERSION>
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: xdevcmd-v<VERSION>-x86_64-pc-windows-msvc\xdevcmd.exe
+    PortableCommandAlias: xdevcmd
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/nci-gis/rust-commander/releases/download/v<VERSION>/xdevcmd-v<VERSION>-x86_64-pc-windows-msvc.zip
+    InstallerSha256: <SHA256>
+ManifestType: installer
+ManifestVersion: 1.9.0

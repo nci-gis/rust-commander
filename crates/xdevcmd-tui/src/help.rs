@@ -310,7 +310,7 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 ("key bar", "Click a key to run it"),
                 (
                     "terminal tab bar",
-                    "Pick a tab; \u{00d7} closes it, + opens one",
+                    "Pick a tab; \u{00d7} closes it, + opens one; right-click: its menu",
                 ),
                 ("wheel", "Scroll; over a shell, back through its history"),
             ],

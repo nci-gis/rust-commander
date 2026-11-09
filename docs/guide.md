@@ -155,6 +155,9 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
   with `/`, drag over lines and press `y` to copy them, **Esc** to go back. It stays in
   memory; nothing of it is written to disk. **Alt+X F12** does the same where Shift+F12
   does not arrive.
+- A **right-click on a terminal tab** opens its menu: View history, Save history as…,
+  Close tab, for that tab whichever has focus. Inside the shell a right-click is left
+  to the program.
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
 - The wheel scrolls back through a shell's history. A full-screen program gets the

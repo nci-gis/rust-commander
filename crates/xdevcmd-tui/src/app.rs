@@ -429,6 +429,9 @@ pub struct App {
     /// The viewer while F2's Save as… asks where (and perhaps whether to replace, or a
     /// copy runs): it comes back, where it was, once that dialog closes.
     save_from: Option<Box<Viewer>>,
+    /// Save as… was started from a terminal tab's menu, not the viewer: once its
+    /// dialogs close, the viewer holding the history is dropped, not shown.
+    save_only: bool,
     /// Where the history shown in the viewer came from: its shell's directory where the
     /// system says (Linux), else the file pane's. Save as… offers it.
     history_dir: Option<PathBuf>,
@@ -572,6 +575,7 @@ impl App {
             to_check: HashSet::new(),
             view_temp: None,
             save_from: None,
+            save_only: false,
             history_dir: None,
             jobs: Vec::new(),
             quick_image: None,
@@ -1435,6 +1439,37 @@ impl App {
             if lines == 1 { "" } else { "s" }
         ));
         self.modal = Some(Modal::View(Box::new(viewer)));
+    }
+
+    /// The menu on terminal tab `i` (right-click on it): only what matters (owner,
+    /// 2026-11-09), each with the key that does it, so the menu also teaches the keys.
+    /// New tab, split and paste are left out (the + button, Alt+N/S/D and the terminal's
+    /// own paste cover them), and so is clearing the history, which is destructive and
+    /// rarely wanted. Every item acts on the tab clicked, not the focused one.
+    fn open_tab_menu(&mut self, i: usize, x: u16, y: u16) {
+        let history = self.footer_key(Action::TerminalHistory).unwrap_or_default();
+        let save = if history.is_empty() {
+            String::new()
+        } else {
+            format!("{history}, F2")
+        };
+        let writes = self.refused(Action::CopyAs).is_none();
+        let items = vec![
+            Item::cmd("View history", history, Cmd::TabHistory(i), true),
+            Item::cmd(
+                "Save history as\u{2026}",
+                save,
+                Cmd::TabSaveHistory(i),
+                writes,
+            ),
+            Item::sep(),
+            Item::cmd("Close tab", "\u{00d7}", Cmd::TabClose(i), true),
+        ];
+        self.modal = Some(Modal::Menu(Menu::new(
+            Some(format!("Terminal {}", i + 1)),
+            items,
+            (x, y),
+        )));
     }
 
     /// F2 in the viewer: ask where to save what it shows. History (held in memory) is
@@ -2340,6 +2375,14 @@ impl App {
                     _ => {}
                 }
             }
+            // A right-click on a terminal tab: its menu. The tab bar is xdevcmd's, so no
+            // guessing whose click it is; inside a shell a right-click is left alone.
+            MouseEventKind::Down(MouseButton::Right) if Some(id) == self.term_id => {
+                self.focus = id;
+                if let Some(i) = self.panel().and_then(|p| p.tab_at(x, y)) {
+                    self.open_tab_menu(i, x, y);
+                }
+            }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if Some(id) == self.term_id => {
                 let up = m.kind == MouseEventKind::ScrollUp;
                 if let Some(p) = self.panel() {
@@ -2984,6 +3027,22 @@ impl App {
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             Cmd::CopyText(t) => self.copy_text(t),
+            Cmd::TabHistory(i) => self.view_history(Some(i)),
+            Cmd::TabSaveHistory(i) => {
+                // The history goes into a viewer that is never shown: Save as… holds it
+                // and lets it go when its dialogs close.
+                self.view_history(Some(i));
+                if matches!(self.modal, Some(Modal::View(_))) {
+                    self.begin_save_as();
+                    self.save_only = self.save_from.is_some();
+                }
+            }
+            Cmd::TabClose(i) => {
+                let nothing_left = self.panel().is_some_and(|p| p.close_tab(i));
+                if nothing_left {
+                    self.remove_terminal_panel();
+                }
+            }
             Cmd::SaveReplacing(dest) => {
                 let saved = self
                     .save_from
@@ -3996,6 +4055,9 @@ impl App {
             return;
         }
         if let Some(mut v) = self.save_from.take() {
+            if std::mem::take(&mut self.save_only) {
+                return;
+            }
             if !self.status.is_empty() {
                 v.note(&self.status);
             }

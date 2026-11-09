@@ -17,6 +17,9 @@ that heading and starts a new, empty one here. -->
   written to disk. Works from inside the shell, and from the files on the shell last in
   focus. Alt+X F12 where Shift+F12 does not arrive; macOS Terminal.app's Shift+F12 is
   understood as it is. Esc goes back where you were.
+- **A right-click on a terminal tab** opens a small menu for that tab: View history,
+  Save history as…, Close tab, each with its key. Inside the shell a right-click stays
+  the program's.
 - **The viewer saves and goes to a line.** F2 is Save as…: a shell's history is offered
   as `xdevcmd-history-<date>-<time>.txt` in the shell's directory and written readable
   by you only (`0600`, Unix); a file is copied under the name given. A name that exists

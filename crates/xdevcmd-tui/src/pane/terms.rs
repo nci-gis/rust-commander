@@ -380,6 +380,17 @@ impl TermPanel {
             || self.close_hits.iter().any(|(_, r)| r.contains(p))
     }
 
+    /// The tab whose label is drawn at (`x`, `y`), for the right-click menu. Only the
+    /// tab bar, which is xdevcmd's: inside a shell the click is the program's.
+    pub fn tab_at(&self, x: u16, y: u16) -> Option<usize> {
+        let p = Position::new(x, y);
+        self.tab_hits
+            .iter()
+            .chain(self.close_hits.iter())
+            .find(|(_, r)| r.contains(p))
+            .map(|(i, _)| *i)
+    }
+
     pub fn on_click(&mut self, x: u16, y: u16) -> Click {
         let p = Position::new(x, y);
         if self.new_hit.contains(p) {

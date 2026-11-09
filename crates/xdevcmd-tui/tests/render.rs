@@ -1365,6 +1365,28 @@ fn the_tab_bar_buttons_are_clickable() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A right-click on a terminal tab opens its menu: three items, each with its key.
+#[test]
+fn right_click_on_a_terminal_tab_opens_its_menu() {
+    let (a, b) = files(&["alpha.txt"]);
+    let two = shot_keys(SIZE, "F12,A-x,A-n", &a, &b);
+    let (bar, y) = tab_bar(&two);
+    let second = col(&bar, "\u{2302} 2");
+    let s = shot_keys(SIZE, &format!("F12,A-x,A-n,rclick:{second}:{y}"), &a, &b);
+    assert!(s.contains("Terminal 2"), "{s}");
+    assert!(s.contains("View history") && s.contains("Shift+F12"), "{s}");
+    assert!(s.contains("Save history as"), "{s}");
+    assert!(s.contains("Close tab"), "{s}");
+    assert!(
+        !s.contains("Paste") && !s.contains("Clear"),
+        "only what matters\n{s}"
+    );
+    // Inside a shell, a right-click opens nothing of xdevcmd's.
+    let body = shot_keys(SIZE, &format!("F12,rclick:10:{}", y + 3), &a, &b);
+    assert!(!body.contains("View history"), "{body}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn dragging_the_boundary_between_shells_resizes_them() {
     let (a, b) = files(&["alpha.txt"]);

@@ -2125,6 +2125,77 @@ fn a_shell_keeps_the_history_scrollback_says() {
     xdevcmd.quit();
 }
 
+/// The menu on a terminal tab acts on the tab clicked, not the one in focus: View history
+/// shows the first tab's output while the second has focus, and Close tab closes the
+/// first and leaves the second.
+#[test]
+fn the_tab_menu_acts_on_the_tab_clicked() {
+    let s = Scratch::new("tab-menu");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"echo ONE_$((0+1))\r");
+    xdevcmd.wait_for("ONE_1");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_N);
+    xdevcmd.wait_for("terminal 2/2");
+    xdevcmd.send(b"echo TWO_$((1+1))\r");
+    xdevcmd.wait_for("TWO_2");
+
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    xdevcmd.wait_for("Terminal 1");
+    let (hx, hy) = xdevcmd.locate("View history");
+    xdevcmd.click(hx, hy, 0);
+    xdevcmd.wait_for("history \u{b7} sh \u{b7} tab 1");
+    xdevcmd.wait_for("ONE_1");
+    assert!(!xdevcmd.screen().contains("TWO_2"), "{}", xdevcmd.screen());
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    xdevcmd.wait_for("Close tab");
+    let (cx, cy) = xdevcmd.locate("Close tab");
+    xdevcmd.click(cx, cy, 0);
+    xdevcmd.wait_for("terminal 1/1");
+    xdevcmd.wait_for("TWO_2");
+    assert!(!xdevcmd.screen().contains("ONE_1"), "{}", xdevcmd.screen());
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Save history as… from the tab menu goes straight to the question; once saved, no
+/// viewer is left behind.
+#[test]
+fn save_history_from_the_tab_menu_leaves_no_viewer() {
+    let s = Scratch::new("tab-save");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"echo KEEP_$((2+3))\r");
+    xdevcmd.wait_for("KEEP_5");
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    let (sx, sy) = xdevcmd.locate("Save history as");
+    xdevcmd.click(sx, sy, 0);
+    xdevcmd.wait_for("Save as");
+    xdevcmd.send(b"\x15");
+    xdevcmd.send(s.right().join("tab.txt").to_string_lossy().as_bytes());
+    xdevcmd.send(ENTER);
+    wait_file(&s.right().join("tab.txt"), "the saved history", |t| {
+        t.is_some_and(|t| t.contains("KEEP_5"))
+    });
+    xdevcmd.wait_gone("Save as");
+    assert!(
+        !xdevcmd.screen().contains("view history"),
+        "{}",
+        xdevcmd.screen()
+    );
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 /// Terminal.app sends Shift+F12 as `ESC [34~` (xterm's F20; crossterm numbers it F17),
 /// and Alt+X F12 stands for Shift+F12 where neither arrives: both open the history.
 #[test]

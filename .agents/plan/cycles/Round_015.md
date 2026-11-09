@@ -72,7 +72,7 @@ as agreed on 2026-11-09; Step 5 (logging) stays out.
       and `size_of::<vt100::Cell>()`; says it applies to shells started from now on. Passed to
       `TermPane::spawn`. Tests: config bounds (99, 10000 refused; 100, 9999 taken),
       `--print-config` shows it; a shell started with 200 keeps 200 lines.
-- [ ] **4. The menu on a terminal tab.** Right-click on a tab in the panel's tab bar
+- [x] **4. The menu on a terminal tab.** Right-click on a tab in the panel's tab bar
       (`tab_hits`). Inside the shell, right-click stays the program's. Three items with keys:
       **View history** (Shift+F12), **Save history as…**, **Close tab**. Act on the tab clicked,
       not the focused one. Not in it: new tab/split, Paste, Clear history. Tests: render,
@@ -238,6 +238,26 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   `scrollback = 200`, `seq 1 500` then Shift+F12 holds 200–240 lines (history and the
   screen's rows) and Home no longer reaches the command line. docs/config.md and
   CHANGELOG.
+
+- 2026-11-10, **step 4, the menu on a terminal tab.** A right-click on a tab's label or
+  its × (`TermPanel::tab_at`, from the rects the bar recorded when drawn) opens
+  "Terminal N": View history (Shift+F12), Save history as… (Shift+F12, F2; greyed out
+  where `App::refused` refuses creating files), Close tab (×). `Cmd::TabHistory(i)`,
+  `TabSaveHistory(i)`, `TabClose(i)` carry the clicked tab, never the focused one. Save
+  history as… from the menu builds the history viewer, goes straight to Save as… and
+  drops the viewer once the dialogs close (`save_only`), since the user never opened
+  it. A right-click inside a shell does nothing of xdevcmd's, as before (focus only).
+  Not in the menu, as the plan says: new tab or split, Paste, Clear history.
+  Tests: render — `rclick` on the second of two tabs shows "Terminal 2" and the three
+  items with Shift+F12, no Paste or Clear; a right-click inside the shell opens nothing.
+  Pty — with tab 2 in focus, View history from tab 1's menu shows tab 1's `ONE_1` and
+  not `TWO_2` (fails with the focused tab used instead), Close tab from tab 1's menu
+  leaves tab 2 with its output; Save history as… from the menu writes the file and
+  leaves no viewer.
+  Noted, not changed: mouse clicks are not passed to a program in the panel that asked
+  for the mouse; only the wheel is (Round 014). The owner's principle ("programs get
+  their keys and mouse") would want that too; it belongs with the drag-select item the
+  plan keeps out.
 
 ## Check
 

@@ -19,6 +19,10 @@ use crate::pane::TermPane;
 use crate::theme;
 
 struct Tab {
+    /// Stays with the tab while others open and close around it, unlike its position:
+    /// what a tab's menu holds, so a tab that ends while the menu is open cannot turn
+    /// the menu onto its neighbour.
+    id: TabId,
     tree: Node,
     terms: BTreeMap<PaneId, TermPane>,
     focus: PaneId,
@@ -50,8 +54,12 @@ pub enum Click {
     Selected,
 }
 
+/// A terminal tab's identity, never reused within a panel.
+pub type TabId = u64;
+
 pub struct TermPanel {
     tabs: Vec<Tab>,
+    next_tab: TabId,
     active: usize,
     next_id: PaneId,
     shell: String,
@@ -69,6 +77,7 @@ impl TermPanel {
     pub fn new(cwd: &Path, rows: u16, cols: u16, shell: &str, scrollback: usize) -> Result<Self> {
         let mut p = Self {
             tabs: Vec::new(),
+            next_tab: 0,
             active: 0,
             next_id: 0,
             shell: shell.to_string(),
@@ -103,13 +112,30 @@ impl TermPanel {
         self.next_id += 1;
         let mut terms = BTreeMap::new();
         terms.insert(id, t);
+        let tab_id = self.take_tab_id();
         self.tabs.push(Tab {
+            id: tab_id,
             tree: Node::Leaf(id),
             terms,
             focus: id,
         });
         self.active = self.tabs.len() - 1;
         Ok(())
+    }
+
+    fn take_tab_id(&mut self) -> TabId {
+        self.next_tab += 1;
+        self.next_tab
+    }
+
+    /// The identity of the tab at position `i`.
+    pub fn tab_id(&self, i: usize) -> Option<TabId> {
+        self.tabs.get(i).map(|t| t.id)
+    }
+
+    /// Where tab `id` is now; `None` once it has gone.
+    pub fn tab_index(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
     }
 
     /// Settings changed `[terminal] scrollback`: shells started from now on keep this
@@ -127,7 +153,9 @@ impl TermPanel {
         let (id, t) = self.spawn(cwd)?;
         let mut terms = BTreeMap::new();
         terms.insert(id, t);
+        let tab_id = self.take_tab_id();
         self.tabs.push(Tab {
+            id: tab_id,
             tree: Node::Leaf(id),
             terms,
             focus: id,

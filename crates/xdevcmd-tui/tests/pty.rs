@@ -2165,6 +2165,54 @@ fn the_tab_menu_acts_on_the_tab_clicked() {
     xdevcmd.quit();
 }
 
+/// Shells are reaped every turn, also while a tab's menu is open: when an earlier tab
+/// ends under the menu, the menu still acts on the tab it was opened on, which has moved
+/// one place to the left, not on the tab that moved into its old place.
+#[test]
+fn the_tab_menu_follows_its_tab_when_an_earlier_one_ends() {
+    let s = Scratch::new("tab-menu-reap");
+    let go = s.0.join("GO");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    // Tab 1 ends when the test says so.
+    let wait = format!(
+        "while [ ! -e '{}' ]; do sleep 0.05; done; exit\r",
+        go.display()
+    );
+    xdevcmd.send(wait.as_bytes());
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_N);
+    xdevcmd.wait_for("terminal 2/2");
+    xdevcmd.send(b"echo TWO_$((1+1))\r");
+    xdevcmd.wait_for("TWO_2");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_N);
+    xdevcmd.wait_for("terminal 3/3");
+    xdevcmd.send(b"echo THREE_$((1+2))\r");
+    xdevcmd.wait_for("THREE_3");
+
+    let (x, y) = xdevcmd.locate("\u{2302} 2");
+    xdevcmd.click(x + 1, y, 2);
+    xdevcmd.wait_for("Terminal 2");
+    std::fs::write(&go, "").unwrap();
+    // Tab 1 is gone (the menu covers the bar; the status line counts the tabs).
+    xdevcmd.wait_for("terminal 2/2");
+    let (hx, hy) = xdevcmd.locate("View history");
+    xdevcmd.click(hx, hy, 0);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.wait_for("TWO_2");
+    assert!(
+        !xdevcmd.screen().contains("THREE_3"),
+        "{}",
+        xdevcmd.screen()
+    );
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 /// Save history as… from the tab menu goes straight to the question; once saved, no
 /// viewer is left behind.
 #[test]

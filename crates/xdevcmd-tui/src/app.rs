@@ -1441,6 +1441,16 @@ impl App {
         self.modal = Some(Modal::View(Box::new(viewer)));
     }
 
+    /// Where the tab a menu was opened on is now, or a message that it has gone (its
+    /// shells ended while the menu was open).
+    fn tab_still_there(&mut self, id: crate::pane::terms::TabId) -> Option<usize> {
+        let i = self.panel().and_then(|p| p.tab_index(id));
+        if i.is_none() {
+            self.status = "that terminal tab is gone".into();
+        }
+        i
+    }
+
     /// The menu on terminal tab `i` (right-click on it): only what matters (owner,
     /// 2026-11-09), each with the key that does it, so the menu also teaches the keys.
     /// New tab, split and paste are left out (the + button, Alt+N/S/D and the terminal's
@@ -1454,16 +1464,21 @@ impl App {
             format!("{history}, F2")
         };
         let writes = self.refused(Action::CopyAs).is_none();
+        // The tab's identity, not its position: shells are reaped every turn while the
+        // menu is open, and an earlier tab ending would move this one's position.
+        let Some(id) = self.panel().and_then(|p| p.tab_id(i)) else {
+            return;
+        };
         let items = vec![
-            Item::cmd("View history", history, Cmd::TabHistory(i), true),
+            Item::cmd("View history", history, Cmd::TabHistory(id), true),
             Item::cmd(
                 "Save history as\u{2026}",
                 save,
-                Cmd::TabSaveHistory(i),
+                Cmd::TabSaveHistory(id),
                 writes,
             ),
             Item::sep(),
-            Item::cmd("Close tab", "\u{00d7}", Cmd::TabClose(i), true),
+            Item::cmd("Close tab", "\u{00d7}", Cmd::TabClose(id), true),
         ];
         self.modal = Some(Modal::Menu(Menu::new(
             Some(format!("Terminal {}", i + 1)),
@@ -3027,20 +3042,28 @@ impl App {
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             Cmd::CopyText(t) => self.copy_text(t),
-            Cmd::TabHistory(i) => self.view_history(Some(i)),
-            Cmd::TabSaveHistory(i) => {
-                // The history goes into a viewer that is never shown: Save as… holds it
-                // and lets it go when its dialogs close.
-                self.view_history(Some(i));
-                if matches!(self.modal, Some(Modal::View(_))) {
-                    self.begin_save_as();
-                    self.save_only = self.save_from.is_some();
+            Cmd::TabHistory(id) => {
+                if let Some(i) = self.tab_still_there(id) {
+                    self.view_history(Some(i));
                 }
             }
-            Cmd::TabClose(i) => {
-                let nothing_left = self.panel().is_some_and(|p| p.close_tab(i));
-                if nothing_left {
-                    self.remove_terminal_panel();
+            Cmd::TabSaveHistory(id) => {
+                // The history goes into a viewer that is never shown: Save as… holds it
+                // and lets it go when its dialogs close.
+                if let Some(i) = self.tab_still_there(id) {
+                    self.view_history(Some(i));
+                    if matches!(self.modal, Some(Modal::View(_))) {
+                        self.begin_save_as();
+                        self.save_only = self.save_from.is_some();
+                    }
+                }
+            }
+            Cmd::TabClose(id) => {
+                if let Some(i) = self.tab_still_there(id) {
+                    let nothing_left = self.panel().is_some_and(|p| p.close_tab(i));
+                    if nothing_left {
+                        self.remove_terminal_panel();
+                    }
                 }
             }
             Cmd::SaveReplacing(dest) => {

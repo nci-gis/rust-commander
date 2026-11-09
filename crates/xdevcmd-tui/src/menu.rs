@@ -49,12 +49,13 @@ pub enum Cmd {
     CopyText(String),
     /// Save as… from the viewer, onto a file that exists: the user said replace it.
     SaveReplacing(PathBuf),
-    /// The menu on terminal tab N (0-based): its history in the viewer.
-    TabHistory(usize),
-    /// The menu on terminal tab N: Save as… for its history, without the viewer.
-    TabSaveHistory(usize),
-    /// The menu on terminal tab N: close it, every shell in it.
-    TabClose(usize),
+    /// The menu on a terminal tab (its `TabId`, which outlives a neighbour closing):
+    /// its history in the viewer.
+    TabHistory(crate::pane::terms::TabId),
+    /// The menu on a terminal tab: Save as… for its history, without the viewer.
+    TabSaveHistory(crate::pane::terms::TabId),
+    /// The menu on a terminal tab: close it, every shell in it.
+    TabClose(crate::pane::terms::TabId),
     /// A confirmed synchronisation plan: each source and the directory it goes into.
     Sync(Vec<(PathBuf, PathBuf)>),
     /// Quit even though jobs are still running: they are cancelled first.

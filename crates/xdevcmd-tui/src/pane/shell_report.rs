@@ -336,4 +336,22 @@ mod tests {
         // The screen is drawn as before: the OSCs are not text.
         assert!(p.screen().contents().starts_with("$ ok"));
     }
+
+    /// The bytes docs/shell.md's bash snippet printed in bash 5.2 (recorded): after a
+    /// command, `cd "a b%c"`, then `cd é`.
+    #[cfg(unix)]
+    #[test]
+    fn the_bash_snippet_in_the_docs_is_understood() {
+        let mut p =
+            vt100::Parser::new_with_callbacks(5, 80, 0, ShellReports::new("vm".into(), false));
+        p.process(b"\x1b]133;C\x07\x1b]133;D\x07\x1b]7;file://vm/tmp/sn/a%20b%25c\x1b\\");
+        assert_eq!(p.callbacks().mark, Some(Mark::Prompt));
+        p.process(b"\x1b]133;A\x07$ cd \xc3\xa9\r\n\x1b]133;C\x07");
+        assert_eq!(p.callbacks().dir, Some("/tmp/sn/a b%c".into()));
+        assert_eq!(p.callbacks().mark, Some(Mark::Running));
+        p.process(b"\x1b]133;D\x07\x1b]7;file://vm/tmp/sn/%C3%A9\x1b\\\x1b]133;A\x07");
+        assert_eq!(p.callbacks().dir, Some("/tmp/sn/\u{e9}".into()));
+        assert_eq!(p.callbacks().mark, Some(Mark::Prompt));
+        assert_eq!(p.callbacks().dir_seq, 2);
+    }
 }

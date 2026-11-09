@@ -40,9 +40,10 @@ your permissions. It was tested against attacks on all three before release.
   by a file created a moment earlier. Copying and moving write to a name found free
   only if it is still free; a file that appeared in between gets the usual overwrite
   question. Nothing is replaced without asking.
-- **Typing into the wrong program.** Alt+C and the user menu type a line into the
-  terminal only when a shell is at its prompt there, never into a program that owns
-  it — an editor, a password prompt, a program run in a terminal tab.
+- **Typing into the wrong program.** Alt+C, typing names (Alt+Enter) and the user menu
+  type into the terminal only when a shell is at its prompt there, never into a program
+  that owns it — an editor, a password prompt, `ssh`, a program run in a terminal tab.
+  When xdevcmd cannot tell, it asks first (see [The shell panel](#the-shell-panel)).
 - **A config file others can write.** xdevcmd refuses it on Unix, because it names the
   programs xdevcmd runs.
 
@@ -133,6 +134,34 @@ flag can make the config stricter, never looser.
 These modes protect against mistakes and hostile files. They do not stop someone who
 can start xdevcmd without the flag. For a real boundary, use the operating system's own
 sandboxing.
+
+## The shell panel
+
+What xdevcmd learns about the shell, and how far it trusts each source
+([shell.md](shell.md#telling-xdevcmd-where-the-shell-is) has the details):
+
+- **From the system** (Linux `/proc`, macOS `ps`, and `/usr/sbin/lsof` by its full path,
+  never through `PATH`, only when a key asks, given two seconds): trusted. On these
+  systems a directory reported in the shell's output is never used where the system can
+  say (Linux always; macOS when lsof answers).
+- **From the shell's output** (OSC 7, OSC 9;9, OSC 133 marks): any program printing
+  into the terminal — `cat` on a hostile file, a remote host over `ssh` — can print the
+  same sequences. So:
+  - A reported directory only ever **moves a file pane** (Alt+G, `follow`), and only to
+    a directory that exists on this machine and lies inside the root xdevcmd is confined
+    to. It is never typed, run or written to. A host other than this machine's is
+    ignored.
+  - A mark that says "running" (`C`) is believed everywhere: it can only stop xdevcmd
+    from typing. A mark that says "at the prompt" makes a shell idle **only on Windows**,
+    where the system does not say; on Linux and macOS a program the system sees always
+    wins. On Windows, then, a program that prints a prompt mark can make itself look
+    idle. If that matters to you there, set `[terminal] send_when_idle = false`, and
+    every send asks.
+- **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
+  character, or one that shell cannot be given safely, is refused whole. Names are
+  wrapped in bracketed paste when the shell asked for it, so its line editor takes them
+  as text, not keys. Nothing xdevcmd types ends with Enter except `cd` (Alt+C) and the
+  user menu's commands.
 
 ## The config file is trusted
 

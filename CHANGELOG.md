@@ -11,6 +11,25 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Between the panes and the shell** (docs/shell.md). In the file panes: **Alt+G** takes
+  the pane to the shell's directory (the reverse of Alt+C); **Alt+Enter** or
+  **Ctrl+Enter** (and **Type into the shell** in the files' right-click menu) types the
+  marked names into the shell's command line, quoted for that shell, without Enter.
+  `[terminal] follow` (off by default) lets the file pane used last follow the shell's
+  `cd`, at the prompt only, never the other way.
+- **One check before anything is typed into a shell**, for Alt+C and typed names: a
+  shell surely at its prompt gets it at once (`[terminal] send_when_idle`, on by
+  default); a program running there, or `ssh`, gets nothing and xdevcmd offers **Open a
+  new shell** in the pane's directory instead; when it cannot tell (Windows without
+  prompt marks) it asks, with **Send to this shell** as well.
+- **xdevcmd reads what the shell says about itself**: OSC 7 and OSC 9;9 (its directory)
+  and OSC 133 prompt marks, from snippets for bash, zsh, fish, PowerShell and cmd in
+  docs/shell.md (only bash's has been run). Linux reads the directory from `/proc` and
+  ignores OSC 7; macOS asks `/usr/sbin/lsof` when a key needs it; Windows has only
+  what the shell reports. What is trusted, and for what: docs/security.md.
+- **Clicks and drags inside the terminal go to a program that asked for the mouse**
+  (vim with `mouse=a`, htop, Claude Code), in the encoding it asked for, as the wheel
+  already did. Otherwise a click there is as before.
 - **Shift+F12: the shell's history in the viewer** (copy mode). Everything the focused
   shell kept, and its screen, opens in the F3 viewer at its end: read, `/` search, drag
   and `y` to copy (OSC 52). It is held in memory only; nothing of a shell's output is
@@ -62,6 +81,8 @@ that heading and starts a new, empty one here. -->
   did not (less, man). In a plain shell it still scrolls the history.
 
 ### Changed
+- **Alt+C with a program running in the shell** no longer only says so on the status
+  line: it asks, offering to open a new shell in the pane's directory instead.
 - **Inside the terminal panel, xdevcmd takes only F12, Shift+F12 and Alt+X** (keymap
   A). Every other key is the program's: Alt+N, Alt+S, Alt+D, Alt+W, Alt+O, Alt+T, Alt+C,
   Alt+Z, the Alt+R group, Alt+Shift+arrows, Alt+1…9 and Ctrl+PgUp/PgDn no longer act

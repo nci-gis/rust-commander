@@ -319,6 +319,10 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                     "Pick a tab; \u{00d7} closes it, + opens one; right-click: its menu",
                 ),
                 ("wheel", "Scroll; over a shell, back through its history"),
+                (
+                    "in a shell",
+                    "Clicks, drags and wheel go to a program that asked for the mouse",
+                ),
             ],
         ),
         (

@@ -32,9 +32,6 @@ The bash version is tested. The fish and PowerShell versions have not been run y
 ## The terminal inside xdevcmd
 
 - It runs your shell (`$SHELL`, or `[terminal] shell` in the config).
-- **Alt+C** types `cd <this directory>` into it, quoted for your shell. It refuses if a
-  program is running there (an editor, a password prompt) or if the name has control
-  characters in it.
 - **F12** moves between the panes and the terminal.
 - **Shift+F12** shows the shell's history in the viewer, to read, search and copy; it is
   never written to disk.
@@ -42,6 +39,155 @@ The bash version is tested. The fish and PowerShell versions have not been run y
   is the program's. Alt+X, then a terminal key (Alt+S split, Alt+W close, Alt+N new tab,
   Alt+1…9 tab N) acts on the shell; anything else after Alt+X, Enter too, goes to the
   program with it; Esc cancels.
+- **The mouse inside the terminal** is the program's when it asked for it (vim with
+  `mouse=a`, htop, Claude Code): clicks, drags and the wheel are reported to it, as a
+  terminal would. Otherwise a click only gives the shell focus, and the wheel scrolls
+  back through the history.
+
+### Between the panes and the shell
+
+These are keys in the file panes, not in the terminal: there, Alt+C and Alt+G are the
+program's.
+
+- **Alt+C** types `cd <this directory>` into the shell, quoted for your shell.
+- **Alt+Enter** or **Ctrl+Enter** types the marked names (else the one under the cursor)
+  into the shell's command line, each quoted, a space after the last, and **no Enter**:
+  you finish the command. Bare names when the shell is in their directory, full paths
+  otherwise. The files' right-click menu has it as **Type into the shell** (many
+  terminals send Ctrl+Enter as plain Enter, and Windows Terminal keeps Alt+Enter for
+  full screen).
+- **Alt+G** takes the file pane to the shell's directory, the reverse of Alt+C. It types
+  nothing. It refuses while a program runs in the shell, when that program is `ssh`
+  (the directory that matters is on another machine), and when the directory is not
+  known, no longer there, or outside the root xdevcmd is confined to.
+- **`[terminal] follow = true`** (Settings → Terminal, off by default): the file pane you
+  used last goes where the shell's `cd` goes, at the prompt only. Moving the pane
+  yourself changes nothing until the shell's next `cd`; the pane never moves the shell.
+  It waits while a dialog is open, and leaves a pane showing an archive or find results
+  alone.
+
+### Before anything is typed into the shell
+
+xdevcmd complements the shell; it never types into a program. Alt+C and Alt+Enter go
+through the same check first:
+
+| The shell is… | What happens |
+|---|---|
+| at its prompt, surely | Typed at once (with `[terminal] send_when_idle = true`, the default). With it off, the question below with three buttons. |
+| running a program, or `ssh` | A question: **Open a new shell** (default) or **Cancel**. Nothing is typed into the program. |
+| in a state xdevcmd cannot tell | A question: **Open a new shell** (default), **Send to this shell** (S), or **Cancel**, with a pointer to this page. |
+
+**Open a new shell** starts a new terminal tab in the pane's directory. For Alt+C that
+is the whole job. For names, they are typed there once its prompt is up; if no prompt
+shows within a few seconds, the shell stays open and nothing is typed (the status line
+says so). A name with a control character, or one your shell cannot be given safely
+(`%` for cmd), is refused before any question.
+
+"Surely at its prompt" comes from the system on Linux (`/proc`) and macOS (`ps`). On
+Windows the system does not say; only the prompt marks below can tell, and without them
+every send asks.
+
+## Telling xdevcmd where the shell is
+
+| System | The shell's directory | Whether a program runs |
+|---|---|---|
+| Linux | read from `/proc`; nothing to set up | read from `/proc` |
+| macOS | asked of `/usr/sbin/lsof` when a key needs it; `follow` needs OSC 7 | `ps` |
+| Windows | only what the shell reports: OSC 9;9 or OSC 7 | only the prompt marks, OSC 133 |
+
+A shell reports by printing short escape sequences at each prompt, the same ones
+Windows Terminal, iTerm2, WezTerm and VS Code read:
+
+- **OSC 7** `ESC ] 7 ; file://HOST/PATH ESC \` — the directory, percent-encoded. HOST
+  must be empty, `localhost` or this machine's name; any other host is ignored.
+- **OSC 9;9** `ESC ] 9 ; 9 ; "C:\path" ESC \` — Windows Terminal's form.
+- **OSC 133** prompt marks — `A` a prompt starts, `C` a command starts running, `D` it
+  finished. A `C` with no `D` after it means busy, on every system.
+
+**Only add the marks if your shell can send `C`** when a command starts. A shell that
+prints `A` at its prompt but never `C` looks idle while a program runs, and on Windows
+xdevcmd would then type into that program. cmd cannot send `C`: give it only OSC 9;9.
+
+These snippets go in your shell's startup file. Only bash's has been run (bash 5.2, on
+Linux); the others are written from each shell's manual and **have not been run**. The
+rest is up to you: your prompt, your framework (starship, oh-my-zsh, oh-my-posh) may
+already send some of these, and xdevcmd reads them whoever sends them.
+
+**bash** (`~/.bashrc`; `PS0` needs bash 4.4 or later). Tested:
+
+```bash
+__xdevcmd_osc7() {
+  local LC_ALL=C p=$PWD out= c i
+  for ((i = 0; i < ${#p}; i++)); do
+    c=${p:i:1}
+    case $c in
+      [-/._~A-Za-z0-9]) out+=$c ;;
+      *) printf -v c '%%%02X' "'$c"; out+=$c ;;
+    esac
+  done
+  printf '\e]7;file://%s%s\e\\' "$HOSTNAME" "$out"
+}
+PS0=$'\e]133;C\a'
+PROMPT_COMMAND='printf "\e]133;D\a"; __xdevcmd_osc7; printf "\e]133;A\a"'"${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+```
+
+**zsh** (`~/.zshrc`). Not run:
+
+```zsh
+__xdevcmd_prompt() {
+  emulate -L zsh; setopt extendedglob; local LC_ALL=C
+  print -n '\e]133;D\a'
+  printf '\e]7;file://%s%s\e\\' "$HOST" "${PWD//(#m)[^A-Za-z0-9\/._~-]/%${(l:2::0:)$(([##16]#MATCH))}}"
+  print -n '\e]133;A\a'
+}
+__xdevcmd_exec() { print -n '\e]133;C\a'; }
+precmd_functions+=(__xdevcmd_prompt)
+preexec_functions+=(__xdevcmd_exec)
+```
+
+**fish** (`~/.config/fish/config.fish`). Not run:
+
+```fish
+function __xdevcmd_prompt --on-event fish_prompt
+    printf '\e]133;D\a\e]7;file://%s%s\e\\\e]133;A\a' (hostname) (string escape --style=url -- $PWD)
+end
+function __xdevcmd_exec --on-event fish_preexec
+    printf '\e]133;C\a'
+end
+```
+
+**PowerShell** (`$PROFILE`; PSReadLine, as PowerShell 7 and Windows PowerShell 5.1 ship).
+Not run:
+
+```powershell
+$__xdevcmdPrompt = $function:prompt
+function prompt {
+    $e = [char]27; $a = [char]7
+    $loc = $executionContext.SessionState.Path.CurrentLocation
+    $out = "$e]133;D$a"
+    if ($loc.Provider.Name -eq 'FileSystem') { $out += "$e]9;9;`"$($loc.ProviderPath)`"$e\" }
+    "$out$e]133;A$a" + (& $__xdevcmdPrompt)
+}
+Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
+    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+    [Console]::Write("$([char]27)]133;C$([char]7)")
+}
+```
+
+**cmd** (set it with `setx PROMPT` or in the `PROMPT` variable; the directory only,
+no marks, as said above). Not run:
+
+```bat
+PROMPT $e]9;9;$P$e\$P$G
+```
+
+Whether Windows' console (ConPTY) passes these sequences through to xdevcmd has not
+been checked yet. If it does not, Alt+G says the directory is not known, and every send
+asks.
+
+What a shell reports is text in its output, and any program printing into the terminal
+can print the same. [security.md](security.md#the-shell-panel) says what xdevcmd does
+and does not trust it for.
 
 ## Tab completion and the manual page
 

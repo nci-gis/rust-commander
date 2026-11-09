@@ -19,7 +19,8 @@ that heading and starts a new, empty one here. -->
 - **Safe operations** (`[general] safe_operations`, on by default): every copy writes
   under a hidden temporary name and renames when complete, so no file is ever left cut
   short under its real name, whatever ends xdevcmd; a journal lets the next start clean
-  up after a killed run, put rename many's files back, and offer to continue the job.
+  up after a killed run, put rename many's files back, and offer to continue the job:
+  what is already there and identical is skipped, anything else there is asked about.
 
 - **Shift+F10** (and the Menu key, where the terminal reports it) opens the right-click
   menu for the row under the cursor, at that row.

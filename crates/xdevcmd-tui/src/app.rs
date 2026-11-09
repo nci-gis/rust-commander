@@ -5314,9 +5314,8 @@ impl App {
                 "It was {what} of {}{to}.",
                 Self::describe(&it.sources)
             ));
-            body.push(
-                "Continue it? What was done is skipped; a file cut short starts again.".into(),
-            );
+            body.push("Continue it? What was done is skipped; a file cut short starts".into());
+            body.push("again; you are asked about any other file already there.".into());
             ("continue".to_string(), Cmd::Resume(it))
         });
         self.modal = Some(Modal::Ask(modal::Ask {
@@ -5330,8 +5329,9 @@ impl App {
         }));
     }
 
-    /// Run an interrupted job again: a copy or move with "replace only if older", so
-    /// what it finished is skipped; a move or delete on the sources still there.
+    /// Run an interrupted job again: what it finished (identical at the destination) is
+    /// skipped and anything else already there is asked about, never decided; a move or
+    /// delete on the sources still there.
     fn resume(&mut self, it: xdevcmd_core::journal::Interrupted) {
         let still: Vec<PathBuf> = it
             .sources
@@ -5349,7 +5349,7 @@ impl App {
             ("delete", _) if it.to_trash => Request::delete(still, true),
             _ => return,
         };
-        req.existing = ops::Existing::Update;
+        req.existing = ops::Existing::Resume;
         let kind = req.kind;
         self.remember_job(&req);
         self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));

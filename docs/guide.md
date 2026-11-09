@@ -86,7 +86,8 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - A file being replaced stays as it was until its new copy is complete: cancelling
   part-way leaves the old one. With **Safe operations** (Settings → General, on by
   default) a new file is written the same way, and if xdevcmd is killed in the middle of
-  a job, the next start cleans up and offers to continue it. Closing the terminal stops
+  a job, the next start cleans up and offers to continue it (what is identical is
+  skipped; you are asked about anything else already there). Closing the terminal stops
   jobs tidily and saves the session. Details in [security.md](security.md#safe-operations).
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.

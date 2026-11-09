@@ -56,6 +56,11 @@ pub enum Existing {
     Skip,
     /// Replace every existing file.
     Replace,
+    /// Continuing an interrupted job: skip a file that is already there and identical
+    /// (same size, same date within a FAT drive's two seconds), ask about any other.
+    /// Not [`Existing::Update`]: a file the user chose to keep in the first run would
+    /// be replaced if its source is newer, a decision nobody made.
+    Resume,
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +221,10 @@ pub struct Summary {
     pub errors: Vec<String>,
     /// A delete to the trash: where each item went, for undo.
     pub trashed: Vec<crate::trashed::Trashed>,
+    /// A continued move: sources left where they were, because an identical copy was
+    /// already at the destination (a move across drives killed between the copy and
+    /// the removal of its source). Never removed without a question.
+    pub left: u64,
 }
 
 impl Summary {
@@ -233,6 +242,14 @@ impl Summary {
         }
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
+        }
+        if self.left > 0 {
+            s.push_str(&format!(
+                ", {} left where {} {}: already there",
+                self.left,
+                if self.left == 1 { "it" } else { "they" },
+                if self.left == 1 { "was" } else { "were" },
+            ));
         }
         if self.cancelled {
             s.push_str(" (cancelled)");
@@ -293,6 +310,7 @@ pub fn start(req: Request) -> Handle {
             overwrite_all: false,
             skip_all: false,
             update: false,
+            resuming: false,
             cross_all: false,
             trash_all: false,
             planned: None,
@@ -325,6 +343,8 @@ struct Worker {
     skip_all: bool,
     /// Replace only what is older than its source; skip what is the same or newer.
     update: bool,
+    /// [`Existing::Resume`]: skip what is identical, ask about the rest.
+    resuming: bool,
     cross_all: bool,
     trash_all: bool,
     /// Synchronising: the destinations the confirmed plan overwrites. Only these are
@@ -386,6 +406,7 @@ impl Worker {
             Existing::Update => self.update = true,
             Existing::Skip => self.skip_all = true,
             Existing::Replace => self.overwrite_all = true,
+            Existing::Resume => self.resuming = true,
         }
         if req.overwrite_confirmed {
             self.planned = Some(
@@ -550,6 +571,13 @@ impl Worker {
         }
         if self.update {
             return Some(self.is_older(src, dst));
+        }
+        if self.resuming {
+            match identical(src, dst) {
+                Same::Dirs => return Some(true),
+                Same::Yes => return Some(false),
+                Same::No => {}
+            }
         }
         let existing = fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
         match self.ask(Question::Conflict {
@@ -716,6 +744,9 @@ impl Worker {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
+                    if self.moving && self.resuming && identical(Some(src), dst) == Same::Yes {
+                        self.sum.left += 1;
+                    }
                     self.advance(size);
                     return;
                 }
@@ -858,6 +889,9 @@ impl Worker {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
+                    if self.resuming && identical(Some(src), &dst) == Same::Yes {
+                        self.sum.left += 1;
+                    }
                     return;
                 }
                 None => return,
@@ -1005,6 +1039,49 @@ impl crate::archive::Hooks for Worker {
 }
 
 // ── free functions ─────────────────────────────────────────────────────────────────
+
+/// What [`Existing::Resume`] makes of a destination that is there.
+#[derive(Debug, PartialEq, Eq)]
+enum Same {
+    /// Two directories: they merge, as with every other rule.
+    Dirs,
+    /// The same file: what the interrupted run finished.
+    Yes,
+    /// Anything else, an unknown date included: the user is asked.
+    No,
+}
+
+/// Whether `dst` is what copying `src` would have made: the same size and date (a copy
+/// keeps the date), or a link to the same target. Without a source (an archive) or
+/// with a date the system will not give, it is not taken for the same.
+fn identical(src: Option<&Path>, dst: &Path) -> Same {
+    let (Some(src), Ok(d)) = (src, fs::symlink_metadata(dst)) else {
+        return Same::No;
+    };
+    let Ok(s) = fs::symlink_metadata(src) else {
+        return Same::No;
+    };
+    if s.is_dir() && d.is_dir() {
+        return Same::Dirs;
+    }
+    if s.file_type().is_symlink() && d.file_type().is_symlink() {
+        return match (fs::read_link(src), fs::read_link(dst)) {
+            (Ok(a), Ok(b)) if a == b => Same::Yes,
+            _ => Same::No,
+        };
+    }
+    let dated = s.modified().is_ok() && d.modified().is_ok();
+    if s.is_file()
+        && d.is_file()
+        && s.len() == d.len()
+        && dated
+        && crate::compare::newer_than(&s, &d) == std::cmp::Ordering::Equal
+    {
+        Same::Yes
+    } else {
+        Same::No
+    }
+}
 
 /// Count what the job is about to touch, so a progress bar means something.
 pub fn scan(sources: &[PathBuf]) -> (u64, u64) {
@@ -1774,6 +1851,65 @@ mod tests {
         assert_eq!(fs::read(dst.join("same")).unwrap(), b"theirs");
         assert_eq!(fs::read(dst.join("newer")).unwrap(), b"theirs");
         assert_eq!(fs::read(dst.join("fresh")).unwrap(), b"ours");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn resuming_skips_what_is_identical_and_asks_about_the_rest() {
+        let root = tmp("resume");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        // done: finished by the first run (same size, same date). kept: the user chose
+        // to keep their older, different file in the first run; Update would replace
+        // it, its source being newer. fresh: not there yet.
+        fs::write(root.join("done"), b"ours").unwrap();
+        age(&root.join("done"), 1_000_000);
+        fs::write(dst.join("done"), b"ours").unwrap();
+        age(&dst.join("done"), 1_000_001);
+        fs::write(root.join("kept"), b"new version").unwrap();
+        age(&root.join("kept"), 2_000_000);
+        fs::write(dst.join("kept"), b"theirs").unwrap();
+        age(&dst.join("kept"), 1_000_000);
+        fs::write(root.join("fresh"), b"ours").unwrap();
+        let names = ["done", "kept", "fresh"];
+        let mut req = Request::copy(names.iter().map(|n| root.join(n)).collect(), dst.clone());
+        req.existing = Existing::Resume;
+        let (s, asked) = run_with(req, Answer::Skip);
+        assert_eq!(
+            asked, 1,
+            "only kept is asked about; done is skipped silently"
+        );
+        assert_eq!(fs::read(dst.join("kept")).unwrap(), b"theirs", "kept stays");
+        assert_eq!(fs::read(dst.join("fresh")).unwrap(), b"ours");
+        assert_eq!((s.done, s.skipped, s.left), (1, 2, 0));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn resuming_a_move_leaves_a_source_whose_copy_is_already_there_and_says_so() {
+        // A move across drives killed after its copy and before removing the source.
+        let root = tmp("resume-move");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("a"), b"ours").unwrap();
+        age(&root.join("a"), 1_000_000);
+        fs::write(dst.join("a"), b"ours").unwrap();
+        age(&dst.join("a"), 1_000_000);
+        let mut req = Request::mv(vec![root.join("a")], dst.clone());
+        req.existing = Existing::Resume;
+        let (s, asked) = run_with(req, Answer::Abort);
+        assert_eq!(asked, 0);
+        assert!(
+            root.join("a").exists(),
+            "the source is never removed unasked"
+        );
+        assert_eq!(s.left, 1);
+        assert!(
+            s.describe(Kind::Move)
+                .contains("1 left where it was: already there"),
+            "{}",
+            s.describe(Kind::Move)
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

@@ -91,6 +91,8 @@ pub fn existing_label(e: ops::Existing) -> &'static str {
         ops::Existing::Update => "if a file is there: replace it only if older; skip the same  (U)",
         ops::Existing::Skip => "if a file is there: leave it  (U)",
         ops::Existing::Replace => "if a file is there: replace it  (U)",
+        // Only an interrupted job continued; never offered by U.
+        ops::Existing::Resume => "if a file is there: skip it if identical, else ask  (U)",
     }
 }
 
@@ -105,7 +107,7 @@ impl Confirm {
             Ask => Update,
             Update => Skip,
             Skip => Replace,
-            Replace => Ask,
+            Replace | Resume => Ask,
         };
         if let Some(l) = self.body.get_mut(line) {
             *l = existing_label(self.request.existing).to_string();

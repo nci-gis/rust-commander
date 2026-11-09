@@ -69,9 +69,13 @@ can be: Shift+F8 (there is nothing to keep), and F4 (your editor writes the file
 is ever left cut short under its real name: the real name holds either the old file
 or the complete new one. The next start finds the journal of the run that ended, removes
 its temporary files, puts rename many's files back under their names, and offers to
-continue the job: "replace only if older", so what was done is skipped and the file
-that was cut short starts again. A move continues with the sources still there, a
-delete with what is left.
+continue the job. Continuing skips what is already there and identical (same size and
+date: what the first run finished), starts again the file that was cut short, and asks
+about any other file already there, never deciding for you: a file you chose to keep
+the first time is asked about again, not replaced because its source is newer. A move
+continues with the sources still there; a source whose identical copy is already at the
+destination (a move across drives stopped between the copy and the removal) is left
+where it is, and the summary says so. A delete continues with what is left.
 
 **What happens whatever the setting.** A file being *replaced* is always written under
 a temporary name first, so cancelling never loses the old one. Closing the terminal or

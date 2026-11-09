@@ -605,8 +605,16 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     let (src, dst) = (s.left(), s.right());
     std::fs::write(src.join("a.txt"), "a").unwrap();
     std::fs::write(src.join("b.txt"), "b").unwrap();
-    // a.txt was copied; b.txt was cut short, under its temporary name.
+    // a.txt was copied (a copy keeps the date, and identical is what is skipped
+    // unasked); b.txt was cut short, under its temporary name.
     std::fs::write(dst.join("a.txt"), "a").unwrap();
+    let date = std::fs::metadata(src.join("a.txt")).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
     let part = dst.join(".b.txt.xdevcmd-part-2147483646-0");
     std::fs::write(&part, "half").unwrap();
     let journal = s.0.join("journal");

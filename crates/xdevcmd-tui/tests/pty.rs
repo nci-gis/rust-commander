@@ -700,9 +700,10 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
     let s = Scratch::new("eio");
     std::fs::create_dir(s.left().join("sub")).unwrap();
     // Sparse: big enough to be still copying when the terminal goes, and nothing to
-    // write here unless it is copied.
+    // write here unless it is copied. The copy is not sparse, so this bounds what a
+    // regression (a copy never cancelled) writes to the disk: 2 GiB, not more.
     let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
-    big.set_len(16 << 30).unwrap();
+    big.set_len(2 << 30).unwrap();
     drop(big);
     let cfg = s.file("eio.toml", "[general]\nautosave_secs = 0\n");
     let cfg = cfg.to_string_lossy().into_owned();

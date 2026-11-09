@@ -314,6 +314,11 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
 /// after it. Hold it until the journal is removed. `read`: read the journal into the
 /// string, and count it gone only if it was written on this host (named in the second);
 /// a journal with no host line is an older one of this machine.
+///
+/// A journal named by a bare pid (`<pid>-<n>.journal`, before the run tag: 0.2.x) was
+/// written by a version that took no lock, so the lock says nothing about it and its pid
+/// is asked as well: an older xdevcmd still running through an upgrade keeps its part
+/// files. Windows: that version kept its journal open, which the probe sees.
 fn claim(path: &Path, run: &str, read: Option<(&mut String, &str)>) -> Option<File> {
     let mut f = open_probe(path)?;
     let lock = probe_lock(&f);
@@ -341,8 +346,9 @@ fn claim(path: &Path, run: &str, read: Option<(&mut String, &str)>) -> Option<Fi
             return None;
         }
     }
+    let legacy = cfg!(unix) && !run.contains('x');
     let dead = match lock {
-        Lock::Held => true,
+        Lock::Held => !legacy || !pid_alive(run),
         Lock::Busy => false,
         Lock::Unsupported => !pid_alive(run),
     };
@@ -363,9 +369,9 @@ fn while_held_in_test() {
     }
 }
 
-/// No locks on this file system: whether the run's process still exists, which a reused
-/// pid can make look alive (cautious) but never dead. Unix only; elsewhere the lock is
-/// never unsupported.
+/// No locks on this file system, or a journal from before locks: whether the run's
+/// process still exists, which a reused pid can make look alive (cautious) but never
+/// dead. Unix only; elsewhere the open is the lock.
 fn pid_alive(run: &str) -> bool {
     let Some(pid) = run.split('x').next().and_then(|p| p.parse::<u32>().ok()) else {
         return true;
@@ -651,6 +657,32 @@ mod tests {
         assert!(!unheld.exists(), "left by a run that died making it");
         assert!(held.exists(), "its run is making it");
         drop(f);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_journal_of_a_live_pid_is_left_alone() {
+        // Written by 0.2.x, still running through an upgrade: named by a bare pid (ours
+        // stands for a live one), no host line, no lock.
+        let d = dir("legacy");
+        let jdir = d.join("journal");
+        fs::create_dir_all(&jdir).unwrap();
+        let pid = std::process::id();
+        let part = d.join(format!(".a.xdevcmd-part-{pid}-0"));
+        fs::write(&part, "half").unwrap();
+        let journal = jdir.join(format!("{pid}-0.journal"));
+        fs::write(&journal, format!("kind copy\ndir {}\n", enc(&d))).unwrap();
+        assert!(recover_in(&jdir).is_empty(), "its run is alive");
+        assert!(part.exists(), "a live run's part file is never removed");
+        assert!(journal.exists());
+        // The same from a pid no process has: recovered.
+        fs::rename(&journal, jdir.join("2147483646-0.journal")).unwrap();
+        let dead = d.join(".b.xdevcmd-part-2147483646-0");
+        fs::write(&dead, "half").unwrap();
+        assert_eq!(recover_in(&jdir).len(), 1);
+        assert!(!dead.exists());
+        assert!(part.exists(), "not the dead run's");
         let _ = fs::remove_dir_all(&d);
     }
 

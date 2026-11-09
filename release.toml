@@ -3,8 +3,10 @@
 # in docs/development.md, "Releasing". The notes themselves are written by hand.
 allow-branch = ["dev", "main"]
 # Both crates go to crates.io, xdevcmd-core first (cargo-release orders them by their
-# dependencies). Publishing is the owner's, with `cargo release minor --execute`; the
-# GitHub release itself is the one the tag starts.
+# dependencies). Publishing is step 5 of docs/development.md, "Releasing": `cargo release
+# publish`, on main at the tag, by the owner. Every other `cargo release` there passes
+# `--no-publish`: a version on crates.io can never be replaced. The GitHub release
+# itself is the one the tag starts.
 publish = true
 # xdevcmd-core and xdevcmd share [workspace.package] version; one commit, one tag.
 shared-version = true

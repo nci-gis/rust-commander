@@ -49,7 +49,8 @@ wingetcreate new https://github.com/nci-gis/rust-commander/releases/download/v0.
 ```
 
 Or, with the files here filled in: `winget validate --manifest packaging\winget`, try
-`winget install --manifest packaging\winget`, then submit the folder by pull request.
+`winget install --manifest packaging\winget` (once, first: `winget settings --enable
+LocalManifestFiles`, as an administrator), then submit the folder by pull request.
 
 Later releases, once the package exists in winget:
 

@@ -1888,8 +1888,13 @@ impl App {
         match s.new_shell {
             None => self.status = format!("a new shell in {}", tidy(&s.dir)),
             Some(text) => {
+                // One wait at a time: an earlier one still waiting is dropped, and said.
+                let dropped = match self.pending_type.take() {
+                    Some(p) => format!(" ({} for the earlier new shell: not typed)", p.what),
+                    None => String::new(),
+                };
                 self.status = format!(
-                    "a new shell in {} \u{2014} typing at its prompt",
+                    "a new shell in {} \u{2014} typing at its prompt{dropped}",
                     tidy(&s.dir)
                 );
                 self.pending_type = Some(PendingType {

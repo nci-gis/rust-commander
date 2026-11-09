@@ -82,6 +82,13 @@ that heading and starts a new, empty one here. -->
   did not (less, man). In a plain shell it still scrolls the history.
 
 ### Changed
+- **Installing**: `cargo install xdevcmd --locked`, from crates.io, from 0.3.0. The
+  package is now called `xdevcmd` (it was `xdevcmd-tui`, never published), and its engine
+  `xdevcmd-core` is published beside it, with no stable API of its own. The command is
+  still `xdevcmd`. From the repository: `cargo install --git
+  https://github.com/nci-gis/rust-commander xdevcmd --locked` (the last word was
+  `xdevcmd-tui`). Scoop and winget manifests are ready in `packaging/`, for after the
+  release.
 - **Alt+C and the user menu with a program running in the shell** no longer only say so
   on the status line: they ask, offering to open a new shell in the pane's directory
   instead. On Windows, where xdevcmd cannot tell without prompt marks, they ask too.

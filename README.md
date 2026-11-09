@@ -43,16 +43,35 @@ F5 copy, F6 move, F8 delete. Runs on Linux, macOS and Windows.
 
 ## Install
 
+With Rust 1.88 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (from 0.3.0):
+
+```bash
+cargo install xdevcmd --locked
+```
+
+On Windows, with [Scoop](https://scoop.sh) or winget (coming with 0.3.0; not available yet):
+
+```powershell
+scoop bucket add xdevcmd https://github.com/nci-gis/scoop-xdevcmd
+scoop install xdevcmd/xdevcmd
+```
+
+```powershell
+winget install XDevTeam.xdevcmd
+```
+
+Or download a ready-made build for Linux (x86_64 and ARM64), macOS or Windows from
+[Releases](https://github.com/nci-gis/rust-commander/releases): one program, nothing to
+install. They are not signed, so macOS and Windows warn the first time: see
+[troubleshooting](docs/troubleshooting.md#macos).
+
+The newest code, from the repository:
+
 ```bash
 cargo install --git https://github.com/nci-gis/rust-commander xdevcmd --locked
 ```
 
-Needs Rust 1.88 or newer. This installs the `xdevcmd` command.
-
-Or download a ready-made build for Linux (x86_64 and ARM64), macOS or Windows from
-[Releases](https://github.com/nci-gis/rust-commander/releases). They are not signed, so
-macOS and Windows warn the first time: see
-[troubleshooting](docs/troubleshooting.md#macos).
+Each way installs the `xdevcmd` command.
 
 ## Quick start
 

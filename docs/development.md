@@ -93,15 +93,18 @@ Silicon). A draft pull request into `dev` gets the same builds.
 ## Releasing
 
 Write the notes as you go: every change that a user would notice gets a line under the
-newest heading of `CHANGELOG.md`, in the same commit. A release then takes four steps.
+newest heading of `CHANGELOG.md`, in the same commit. A release then takes six steps.
 `cargo release` needs installing once: `cargo install --locked cargo-release`.
+Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it with
+`=x.y.z`; cargo-release rewrites the pin); `release.toml` says so with `publish = true`,
+so **every `cargo release` before step 5 says `--no-publish`**.
 
 1. **On `dev`**, date the notes and commit (add `minor`, `patch` or a version number to
    also raise the version; leave it out to release the version `Cargo.toml` has):
 
    ```bash
-   cargo release minor --no-tag --no-push          # look at what it would do
-   cargo release minor --no-tag --no-push --execute
+   cargo release minor --no-tag --no-push --no-publish          # look at what it would do
+   cargo release minor --no-tag --no-push --no-publish --execute
    git push origin dev
    ```
 
@@ -121,6 +124,19 @@ newest heading of `CHANGELOG.md`, in the same commit. A release then takes four 
    `THIRD-PARTY.md` and the example `themes/`),
    `SHA256SUMS`, and that CHANGELOG section as its notes.
    Read it, then Publish.
+5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a
+   crates.io token kept on the owner's machine, never in a workflow). Check first that
+   `cargo package --workspace` passes (CI does it on Linux):
+
+   ```bash
+   cargo release publish                 # look: xdevcmd-core, then xdevcmd
+   cargo release publish --execute
+   ```
+
+   A version on crates.io cannot be replaced, only yanked; publish after the GitHub
+   release is good, not before.
+6. **Scoop and winget**, from the published release's `SHA256SUMS`: see
+   [packaging/README.md](../packaging/README.md).
 
 CI runs on pushes to `dev` and `main` and on pull requests into them; the `release`
 workflow runs only for a `v*` tag on `main`. A change to the packaging

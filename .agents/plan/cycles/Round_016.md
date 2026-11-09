@@ -1,6 +1,6 @@
 # Round 016: Between the shell and the panes
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 27
 **Date started**: 2026-11-10
 **Date completed**: —
@@ -89,36 +89,36 @@ Steps:
 - [ ] **0. Windows check, by the owner, before relying on it.** Does ConPTY through
       portable-pty pass OSC 7, 9;9 and 133? Recorded as an owner hand test; if not, Windows
       refuses with the messages above, documented.
-- [ ] **1. Shell reports from the byte stream.** `pane/shell_report.rs`: pure parsers
+- [x] **1. Shell reports from the byte stream.** `pane/shell_report.rs`: pure parsers
       `osc7(params, host) -> Option<PathBuf>`, `osc9_9(params)`, `osc133(params) -> Mark`, and
       the `Callbacks` impl keeping last directory and mark. Unit tests: host empty/localhost/
       ours/other; percent escapes; `;` in a path; Windows drive form; quoted and bare 9;9; long
       path; garbage ignored without panic.
-- [ ] **2. The primitive.** `TermPane::shell_dir() -> Result<PathBuf, Why>` and
+- [x] **2. The primitive.** `TermPane::shell_dir() -> Result<PathBuf, Why>` and
       `TermPane::state() -> Idle | Busy(name) | Remote(name) | Unknown`. `lsof -Fn` output parsed
       by a pure function (unit test with recorded output). Existing `cwd()` users go through it.
-- [ ] **3. Alt+G.** `Action::GoShellDir`, a `BINDINGS` row, guards. Pane history records the
+- [x] **3. Alt+G.** `Action::GoShellDir`, a `BINDINGS` row, guards. Pane history records the
       jump. Pty (Linux): `cd sub` in the shell, F12 back, Alt+G → pane shows `sub`; with
       `sleep 30` running, refused, message, pane unchanged; directory gone, refused. Render:
       F1 lists Alt+G.
-- [ ] **4. Alt+Enter / Ctrl+Enter.** `Action::TypeNames`; `safety::words(shell, names)`.
+- [x] **4. Alt+Enter / Ctrl+Enter.** `Action::TypeNames`; `safety::words(shell, names)`.
       Unit: names with space, `'`, `$`, `!`, `%` for sh, fish, pwsh, cmd (cmd refuses `%`); a
       control char refuses the whole list. Pty: mark `it's` and `a b`, Alt+Enter → shell line
       reads `'it'\''s' 'a b' `, no command ran; with `cat` running, refused, cat got nothing.
       Bracketed paste used when bash turns it on.
-- [ ] **5. `[terminal] follow = false`.** When on, the most recently focused files pane goes to
+- [x] **5. `[terminal] follow = false`.** When on, the most recently focused files pane goes to
       the shell's directory **when it changes** (edge-triggered). Only when the shell is idle;
       on Linux folded into the existing 500 ms `/proc` read; elsewhere on OSC arrival. Not
       while showing an archive/find results or a dialog is open. Never the other way. Settings
       → Terminal; on macOS/Windows says it needs the shell to report. Pty: follow on, `cd sub`
       moves the pane; Backspace in the pane, nothing changes until the next `cd`; follow off
       (default), nothing moves.
-- [ ] **5b. Mouse clicks to a program that asked for the mouse** (owner principle, Round 015
+- [x] **5b. Mouse clicks to a program that asked for the mouse** (owner principle, Round 015
       backlog). If small and safe: clicks and drags inside the shell area go to the program
       when it has turned mouse reporting on, using the wheel forwarding's mode detection
       (SGR / UTF-8 / X10); otherwise xdevcmd keeps today's behaviour. If it turns out large or
       risky, recorded in Do for the owner instead.
-- [ ] **6. Docs and hand-over.** docs/shell.md "Telling xdevcmd where the shell is": bash
+- [x] **6. Docs and hand-over.** docs/shell.md "Telling xdevcmd where the shell is": bash
       (`PROMPT_COMMAND` OSC 7), zsh (`precmd`/`chpwd`), fish, PowerShell (OSC 9;9 + 133 marks),
       cmd (`PROMPT $e]9;9;$P$e\$P$G`); only bash tested. docs/security.md: what is trusted and
       the guards. docs/keys.md regenerated, CHANGELOG. Status → Review; Round 017 starts from it.
@@ -139,13 +139,79 @@ Note: after Round 015's keymap A, Alt+C/Alt+G/Alt+Enter are pane keys only; none
   holds (Alt+C, Alt+G, Alt+Enter/Ctrl+Enter are pane keys); every action that types into
   the shell goes through `send_to_shell` with the decision table above; `send_when_idle`
   defaults to true; unified directory history stays in v0.4; step 5b added.
+- Steps 1–4 (`aa307c3`, `4e97930`, `5ae6756`, `c24df94`, `36c7541`), committed by a coder
+  run cut off by a session restart; verified by the next run: build clean, every test
+  green, nothing in them found broken.
+  - 1: `pane/shell_report.rs`. vt100 0.16.2 (Cargo.lock) has `Callbacks::unhandled_osc`;
+    the parser is `vt100::Parser<ShellReports>` (`term::Parser`). OSC 7 host checked
+    against `journal::hostname()`; percent-decoded; `;`-split params joined back; Windows
+    drive form; 9;9 quoted or bare; 133 A/B/D = prompt, C = running.
+  - 2: `TermPane::shell_dir()` (Linux `/proc`; macOS `/usr/sbin/lsof -Fn` with a 2 s limit,
+    then OSC 7; Windows the reported directory) and `TermPane::state()` → `state_of`, pure:
+    a program the system sees always wins, a C mark is busy everywhere, a prompt mark
+    makes a shell idle only where the system cannot see (Windows). Deviation from the
+    plan's signature: `shell_dir` returns `Option`, the caller says why. The Shift+F12
+    history's Save as… goes through `shell_dir`.
+  - 3: Alt+G, `Action::GoShellDir`; refused while Busy/Remote, when the directory is
+    unknown, gone or outside the root; `set_cwd` records the jump in the pane's history.
+  - 4 + the owner's one decision: `App::send_to_shell(ShellSend)` with
+    `term::decide(state, send_when_idle)` → Send / AskWithSend / AskNewShell. **Alt+C goes
+    through it** (verified: `cd_terminal_here` builds the line, then `send_to_shell`).
+    Busy/Remote → Open a new shell (default) / Cancel; Unknown, or Idle with
+    `send_when_idle = false` → Open a new shell / Send to this shell (S) / Cancel, with the
+    docs/shell.md pointer for Unknown. `modal::Ask` gained `also` for the middle button.
+    Names: `safety::words`; bracketed paste when the shell turned it on; a new shell gets
+    the names once `prompt_ready()` (idle, printed, 250 ms quiet), else after 4 s nothing
+    typed and said. Found in verification: the user menu (Shift+F9) also types into the
+    shell but only refused Busy/Remote on the status line and sent blindly when Unknown
+    (Windows) — against "one decision for every action that types". Now through
+    `send_to_shell` too (`b097d18`; pty test fails without it; `TermPanel::send`, now
+    unused, removed). Plan deviation: "with `cat` running, refused" became the owner's
+    two-button dialog; the pty test checks cat received nothing.
+- Step 5, `[terminal] follow = false` (`3ee45f5`). `App::follow_shell` in `background()`:
+  edge-triggered on the focused shell's directory (the first sighting of a shell, or a
+  tab switch, only learns it); idle only; Linux reads it from the same 500 ms `/proc`
+  read as the tab label (`TermPane::idle_dir`, the activity cache now also keeps the
+  directory when no program has the terminal, and is not stamped while the shell has no
+  pid yet); elsewhere only when a new OSC report arrived (then `state()` once — no `ps`
+  every tick on macOS). Waits while a dialog, a quick search or a drag is open; a pane
+  showing an archive or find results lets the change pass (not kept for later: a jump
+  out of results after closing them would surprise). Never the other way. Settings →
+  Terminal "Files follow the shell's cd", help line names the OSC need off Linux. Fixed
+  on the way: `last_files_id` had no answer when focus went from the starting pane
+  straight to the shell (`mru` empty) — follow found no pane; it now falls back to the
+  first file pane. Known limit: the first directory seen is the baseline, so a `cd`
+  within half a second of a shell starting (before its first `/proc` read) is not
+  followed. The two Settings labels were too long for their column (seen in a
+  screenshot); shortened, and a render test checks they line up.
+- Step 5b, mouse (`285d49c`): small, so done. `term::mouse_report` is the wheel's encoder
+  made shared (SGR `M`/`m`; UTF-8 and X10 with release as button 3); `TermPane::mouse`
+  honours the mode (X10 presses only, 1000 press+release, 1002/1003 drags too). Left,
+  middle and right presses inside a shell's border go to the program when it asked; the
+  drag and release of a press it took follow it (`App::mouse_to_shell`), so they never
+  start a file drag. The tab bar and right-click tab menu are unchanged; with no mouse
+  mode a click only focuses, as before. Pty test fails without the change (checked).
+- Step 6, docs (`2f8f748`): docs/shell.md "Between the panes and the shell", "Before
+  anything is typed into the shell" (the table, `send_when_idle`), "Telling xdevcmd where
+  the shell is" with snippets for bash (run: bash 5.2, the bytes recorded into a unit
+  test), zsh, fish, PowerShell, cmd (not run, marked so), and the rule "add the marks only
+  if the shell can send C" (cmd gets 9;9 only: a prompt mark without C would make a busy
+  shell look idle on Windows). docs/security.md "The shell panel". docs/config.md,
+  CHANGELOG, F1's mouse rows; docs/keys.md regenerated (`--print-keys`, unchanged since
+  steps 3–4 had already written it). ROADMAP row 27 → review.
+- Set aside for the owner's hand tests; Round 017 starts from it.
 
 ## Check
 
-- [ ] fmt, clippy, `cargo test --workspace`, `cargo deny check`; no new crate.
-- [ ] Every guard has a test that sends nothing and shows its message.
-- [ ] Quoting tests per shell; a control character refuses the whole list.
-- [ ] Follow edge-triggered and off by default.
+- [x] fmt, clippy `-D warnings`, `cargo test --workspace` (twice), pty suite 3×, all green
+      on Linux (core 168 + 1, tui unit 171 + 1 ignored, render 163, pty 78 + 1 ignored); no new crate (Cargo.toml/Cargo.lock untouched since Round 015).
+      `cargo deny check` not run: cargo-deny is not installed here — CI runs it.
+      Windows and macOS targets cannot be installed here (proxy): their `cfg` branches
+      (`lsof_cwd_of`, the non-Linux `idle_dir`, `FOLLOW_HELP`) are unbuilt — CI will say.
+- [x] Every guard has a test that sends nothing and shows its message (Alt+G busy/gone;
+      Alt+C and Alt+Enter into `sleep`/`cat` → dialog, the program got nothing).
+- [x] Quoting tests per shell; a control character refuses the whole list.
+- [x] Follow edge-triggered and off by default (pty: follow on, Backspace, busy; off).
 - [ ] By hand, owner: macOS (lsof, OSC 7), Windows Terminal with PowerShell and cmd snippets,
       ConPTY pass-through (step 0), fish.
 

@@ -512,7 +512,7 @@ pub struct App {
 /// is 14 x 14 with every row twice, so each cell's two halves are equal and
 /// [`modal::paint_picture`] paints it as background colour only. Half blocks came out
 /// striped on macOS Terminal.app, which draws `▀` from the font (0.2.0).
-const LOGO: &[u8] = include_bytes!("../../../assets/about-logo.png");
+const LOGO: &[u8] = include_bytes!("../assets/about-logo.png");
 
 /// What xdevcmd made for itself goes with it. A file viewed from inside an archive is
 /// extracted to a temporary directory, removed when the viewer closes — and here, when

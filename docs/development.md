@@ -51,8 +51,10 @@ Samples go to `target/tmp/soak-rss.csv`.
 The SVGs in `assets/` are the source: `icon.svg`, `icon-16.svg` (the same picture
 redrawn on whole pixels, because a scaled-down one blurs at 16 px), and the README's
 `logo-light.svg` / `logo-dark.svg`, whose wordmark is drawn as strokes so it looks the
-same without any font. After changing an icon SVG, rebuild `assets/xdevcmd.ico` and
-`assets/about-logo.png` (the logo About draws, built into the binary, drawn by hand
+same without any font. After changing an icon SVG, rebuild
+`crates/xdevcmd/assets/xdevcmd.ico` and `crates/xdevcmd/assets/about-logo.png` (inside
+the crate because the build reads them and `cargo package` ships only the crate; the
+second is the logo About draws, built into the binary, drawn by hand
 one colour per character cell by `scripts/logo_pixels.py`, because half blocks depend
 on the terminal's font):
 

@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 fn main() {
-    let icon = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/xdevcmd.ico");
+    let icon = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/xdevcmd.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     println!("cargo:rerun-if-env-changed=XDEVCMD_REQUIRE_ICON");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {

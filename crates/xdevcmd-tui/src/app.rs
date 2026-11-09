@@ -1594,6 +1594,11 @@ impl App {
                 "that is a directory \u{2014} add a file name".into(),
             );
         }
+        // Said plainly here, before a job is started that would end in the system's
+        // own words for it.
+        if !dest.parent().is_some_and(Path::is_dir) {
+            return refuse(self, i, "that folder does not exist".into());
+        }
         let Some(v) = self.save_from.as_ref() else {
             return;
         };

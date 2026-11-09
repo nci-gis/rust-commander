@@ -888,6 +888,17 @@ fn save_as_refuses_a_name_with_a_control_character() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Save as… into a folder that is not there says so in plain words, instead of starting
+/// a copy that fails with the system's error.
+#[test]
+fn save_as_into_a_missing_folder_says_so() {
+    let (a, b) = with_file("doc.txt", b"one\ntwo\n");
+    let s = shot_keys("110x20", "Down,F3,F2,C-u,n,o,p,e,/,x,.,t,x,t,Enter", &a, &b);
+    assert!(s.contains("that folder does not exist"), "{s}");
+    assert!(!a.join("nope").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn tabs_are_expanded_rather_than_sent_to_the_terminal() {
     let (a, b) = with_file("doc.txt", b"ab\tc\n");

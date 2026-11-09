@@ -363,6 +363,11 @@ impl TermPanel {
             .map_or(crate::pane::term::ShellState::Unknown, TermPane::state)
     }
 
+    /// The focused shell's directory; see [`TermPane::shell_dir`].
+    pub fn shell_dir(&self) -> Option<std::path::PathBuf> {
+        self.focused().and_then(TermPane::shell_dir)
+    }
+
     pub fn send(&self, bytes: Vec<u8>) {
         if let Some(t) = self.focused() {
             t.send(bytes);

@@ -127,4 +127,5 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Shift+F12` `Alt+x F12` | The shell's history in the viewer: read, search, copy, save |
 | `Alt+t` | Show or hide the shell |
 | `Alt+c` | cd the shell to this pane's directory |
+| `Alt+g` | Go to the shell's directory (the reverse of cd here) |
 | `Alt+n` | Open a new terminal tab |

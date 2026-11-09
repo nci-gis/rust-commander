@@ -1383,6 +1383,59 @@ fn alt_c_does_not_type_into_a_program_that_owns_the_terminal() {
     xdevcmd.quit();
 }
 
+const ALT_G: &[u8] = b"\x1bg";
+
+/// Linux reads /proc, macOS asks lsof (not run here; enabled so CI on macOS runs it).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn alt_g_takes_the_pane_to_the_shells_directory() {
+    let s = Scratch::new("altg");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    s.file("left/sub/inside-sub.txt", "x");
+    s.file("left/at-left.txt", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"cd sub\r");
+    std::thread::sleep(Duration::from_millis(300));
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_G);
+    xdevcmd.wait_for("inside-sub");
+    xdevcmd.wait_for("the shell's directory:");
+    assert!(!xdevcmd.screen().contains("at-left"));
+    // Again: nothing to do, and said so.
+    xdevcmd.send(ALT_G);
+    xdevcmd.wait_for("already in the shell's directory");
+    xdevcmd.quit();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn alt_g_refuses_while_a_program_runs_and_when_the_directory_is_gone() {
+    let s = Scratch::new("altg-no");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    s.file("left/at-left.txt", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"cd sub && sleep 30\r");
+    xdevcmd.wait_for("\u{2302} 1 sleep");
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_G);
+    xdevcmd.wait_for("sleep is running in the shell");
+    assert!(xdevcmd.screen().contains("at-left"), "pane unchanged");
+    xdevcmd.send(F12);
+    xdevcmd.send(b"\x03"); // Ctrl+C ends sleep
+    xdevcmd.send(b"rmdir ../sub\r");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!s.left().join("sub").exists());
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_G);
+    xdevcmd.wait_for("is not there any more");
+    assert!(xdevcmd.screen().contains("at-left"), "pane unchanged");
+    xdevcmd.quit();
+}
+
 #[test]
 fn f3_on_a_fifo_says_so_instead_of_freezing() {
     let s = Scratch::new("fifo");

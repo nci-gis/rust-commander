@@ -19,6 +19,7 @@ pub enum Action {
     ToggleTerminal,
     TerminalHistory,
     CdTerminalHere,
+    GoShellDir,
     NewTerminal,
     NewTab,
     CloseTab,
@@ -437,6 +438,14 @@ pub const BINDINGS: &[Binding] = &[
         group: "Terminal",
         about: "cd the shell to this pane's directory",
         keys: &["Alt+c"],
+    },
+    Binding {
+        action: Action::GoShellDir,
+        name: "go_shell_dir",
+        group: "Terminal",
+        about: "Go to the shell's directory (the reverse of cd here)",
+        // A pane key, like Alt+C: inside the shell Alt+G is the program's.
+        keys: &["Alt+g"],
     },
     Binding {
         action: Action::NewTerminal,
@@ -1253,6 +1262,7 @@ mod tests {
             Action::ToggleTerminal,
             Action::TerminalHistory,
             Action::CdTerminalHere,
+            Action::GoShellDir,
             Action::SplitRight,
             Action::SplitDown,
             Action::ClosePane,

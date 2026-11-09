@@ -1363,6 +1363,21 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
 }
 
 #[test]
+fn f1_lists_alt_g_as_a_pane_key() {
+    let (a, b) = files(&["alpha.txt"]);
+    let help = shot_keys("150x150", "F1", &a, &b);
+    let row = help
+        .lines()
+        .find(|l| l.contains("go_shell_dir"))
+        .unwrap_or_default();
+    assert!(row.contains("Alt+g"), "{help}");
+    assert!(row.contains("Go to the shell's directory"), "{row}");
+    // A pane key: inside the shell Alt+G is the program's, and Alt+x does not reach it.
+    assert!(!row.contains("in the shell"), "{row}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn split_keys_split_the_shell_when_it_has_focus() {
     // Tall enough for a top/bottom split: a shorter panel is refused, since one-row
     // shells were what crashed vt100.

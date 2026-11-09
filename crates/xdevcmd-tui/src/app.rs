@@ -1678,6 +1678,76 @@ impl App {
         }
     }
 
+    /// The terminal panel, to read from.
+    fn panel_ref(&self) -> Option<&TermPanel> {
+        match self.panes.get(&self.term_id?) {
+            Some(Pane::Term(p)) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The file pane used last: the focused one, else the one focused before.
+    fn last_files_id(&self) -> Option<PaneId> {
+        let files = self.file_panes();
+        std::iter::once(self.focus)
+            .chain(self.mru.iter().copied())
+            .find(|id| files.contains(id))
+    }
+
+    /// Alt+G: the file pane goes to the shell's directory, the reverse of Alt+C. It only
+    /// reads, nothing is typed; still refused while a program runs in the shell (its
+    /// directory is the shell's, not the program's, and may not be what is meant) or
+    /// when that program is ssh (the shell that matters is on another machine).
+    fn go_shell_dir(&mut self) {
+        let Some(panel) = self.panel_ref() else {
+            let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
+            self.status = format!("no terminal yet \u{2014} {key}");
+            return;
+        };
+        match panel.shell_state() {
+            ShellState::Busy(p) => {
+                self.status = format!(
+                    "{p} is running in the shell \u{2014} its directory is read at the prompt"
+                );
+                return;
+            }
+            ShellState::Remote(p) => {
+                self.status = format!(
+                    "{p} is running \u{2014} the shell's directory there is on another machine"
+                );
+                return;
+            }
+            // Reading types nothing, so a shell whose state is unknown may be read.
+            ShellState::Idle | ShellState::Unknown => {}
+        }
+        let Some(dir) = panel.shell_dir() else {
+            self.status = "the shell's directory is not known \u{2014} see docs/shell.md".into();
+            return;
+        };
+        if !dir.is_dir() {
+            self.status = format!("the shell's directory {} is not there any more", tidy(&dir));
+            return;
+        }
+        let canonical = xdevcmd_core::paths::canonical(&dir).unwrap_or_else(|_| dir.clone());
+        if !xdevcmd_core::policy::get().allows(&canonical) {
+            self.status = "the shell's directory is outside the root xdevcmd is confined to".into();
+            return;
+        }
+        let Some(f) = self
+            .last_files_id()
+            .and_then(|id| self.panes.get_mut(&id))
+            .and_then(Pane::as_files_mut)
+        else {
+            return;
+        };
+        if f.cwd == canonical && f.archive.is_none() && f.results.is_none() {
+            self.status = "already in the shell's directory".into();
+            return;
+        }
+        f.set_cwd(&canonical);
+        self.status = format!("the shell's directory: {}", tidy(&canonical));
+    }
+
     // ── input ──────────────────────────────────────────────────────────────────────
 
     /// Feed a key as if it had been typed. Used by `--keys` so a dialog can be put on
@@ -2004,6 +2074,7 @@ impl App {
                         | Action::TerminalHistory
                         | Action::ToggleTerminal
                         | Action::CdTerminalHere
+                        | Action::GoShellDir
                         | Action::NewTerminal
                         | Action::UserMenu
                 ) =>
@@ -2161,6 +2232,7 @@ impl App {
             Action::TerminalHistory => self.view_history(None),
             Action::ToggleTerminal => self.toggle_term(full),
             Action::CdTerminalHere => self.cd_terminal_here(),
+            Action::GoShellDir => self.go_shell_dir(),
             Action::SplitRight => self.split_focused(Axis::Cols),
             Action::SplitDown => self.split_focused(Axis::Rows),
             Action::ClosePane => self.close_focused(),

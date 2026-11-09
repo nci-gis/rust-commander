@@ -43,6 +43,7 @@ trash = "5.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSFileManager", "NSURL", "NSError", "NSString"] }
 
-# Released with xdevcmd, never on its own; see release.toml.
+# Released and published with xdevcmd, never on its own; see release.toml. No tag of its
+# own: the one tag, v{{version}}, comes from xdevcmd.
 [package.metadata.release]
-release = false
+tag = false

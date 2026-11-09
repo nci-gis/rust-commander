@@ -2,8 +2,10 @@
 # release — the version, the CHANGELOG headings, the commit and the tag. The steps are
 # in docs/development.md, "Releasing". The notes themselves are written by hand.
 allow-branch = ["dev", "main"]
-# Not on crates.io: the release is the GitHub one that the tag starts.
-publish = false
+# Both crates go to crates.io, xdevcmd-core first (cargo-release orders them by their
+# dependencies). Publishing is the owner's, with `cargo release minor --execute`; the
+# GitHub release itself is the one the tag starts.
+publish = true
 # xdevcmd-core and xdevcmd share [workspace.package] version; one commit, one tag.
 shared-version = true
 consolidate-commits = true

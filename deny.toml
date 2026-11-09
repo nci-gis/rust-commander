@@ -45,7 +45,9 @@ allow = [
 confidence-threshold = 0.9
 
 [licenses.private]
-# xdevcmd's own crates are not published; their licence is in the workspace manifest.
+# Crates not published anywhere are skipped. Both of xdevcmd's crates are published to
+# crates.io (publish = true), so this skips nothing today: their MIT licence, from the
+# workspace manifest, is checked like any other.
 ignore = true
 
 [bans]
@@ -53,9 +55,10 @@ ignore = true
 # two bitflags with it. Not ours to fix; a warning, so a new duplicate is noticed.
 multiple-versions = "warn"
 wildcards = "deny"
-# xdevcmd depends on xdevcmd-core by path, with no version. Allowed only because
-# neither crate is published (publish = false); a published crate could not do this.
-allow-wildcard-paths = true
+# xdevcmd depends on xdevcmd-core by path *and* an exact version (=x.y.z), which is what
+# crates.io needs. A path with no version would be a wildcard; refused, so it cannot
+# come back unnoticed.
+allow-wildcard-paths = false
 
 [sources]
 unknown-registry = "deny"

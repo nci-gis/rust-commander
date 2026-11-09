@@ -230,7 +230,8 @@ fn tidy(text: &str, pid: u32) -> Interrupted {
         let a = w.next().and_then(dec);
         let b = w.next().and_then(dec);
         match (tag, a, b) {
-            ("kind", _, _) => it.kind = line[5..].to_string(),
+            // Not `line[5..]`: a journal cut short after "kind" panicked every start.
+            ("kind", _, _) => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
             ("src", Some(p), _) => it.sources.push(p),
             ("dest", Some(p), _) => it.dest = Some(p),
             ("trash", _, _) => it.to_trash = true,
@@ -353,6 +354,50 @@ mod tests {
     fn orphan(jdir: &Path, text: &str) {
         // A pid no live process has: the largest a 32-bit pid_t allows.
         fs::write(jdir.join("2147483646-0.journal"), text).unwrap();
+    }
+
+    #[test]
+    fn a_journal_cut_short_anywhere_or_full_of_garbage_never_panics() {
+        let d = dir("prefix");
+        let part = d.join(".a.txt.xdevcmd-part-2147483646-0");
+        let text = format!(
+            "kind copy\nsrc {}\ndest {}\ndir {}\npart {}\ngone {}\nren {} {}\nunren {}\ntrash\n",
+            enc(&d.join("a.txt")),
+            enc(&d),
+            enc(&d),
+            enc(&part),
+            enc(&part),
+            enc(&d.join(".xdevcmd-rename-2147483646-0")),
+            enc(&d.join("b.txt")),
+            enc(&d.join(".xdevcmd-rename-2147483646-0")),
+        );
+        // A power cut can stop the file at any byte; the text is ASCII, so every
+        // prefix is a str.
+        for end in 0..=text.len() {
+            tidy(&text[..end], 2147483646);
+        }
+        for junk in [
+            "kind",
+            "kind ",
+            "src",
+            "src zz",
+            "src 4",
+            "dir",
+            "ren 41",
+            "ren 41 zz",
+            "unren",
+            "part",
+            "gone",
+            "\u{0}",
+            " ",
+            "  kind copy",
+            "trash extra words",
+        ] {
+            tidy(junk, 2147483646);
+            tidy(&format!("{junk}\n{junk}\n"), 2147483646);
+        }
+        assert_eq!(tidy("kind", 1).kind, "");
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

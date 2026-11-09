@@ -65,6 +65,11 @@ struct Session {
     raw: Arc<Mutex<Vec<u8>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
+    /// Held for the session: dropping it (with the writer and the reader's copy) hangs
+    /// up the child, which [`Session::hang_up`] does on purpose.
+    master: Option<Box<dyn portable_pty::MasterPty + Send>>,
+    /// Tells the reader to let go of its copy of the master at its next read.
+    stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Session {
@@ -149,15 +154,17 @@ impl Session {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =
             Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         {
             let parser = parser.clone();
             let raw = raw.clone();
             let writer = writer.clone();
+            let stop = stop.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16384];
                 let mut answer = answer;
                 while let Ok(n) = reader.read(&mut buf) {
-                    if n == 0 {
+                    if n == 0 || stop.load(Ordering::Relaxed) {
                         break;
                     }
                     raw.lock().unwrap().extend_from_slice(&buf[..n]);
@@ -172,14 +179,13 @@ impl Session {
                 }
             });
         }
-        // Keep the master alive for the session: dropping it hangs up the child.
-        std::mem::forget(pair.master);
-
         let session = Self {
             parser,
             raw,
             writer,
             child,
+            master: Some(pair.master),
+            stop,
         };
         // The file panes are up once the key bar says Quit; --show-keys draws no panes,
         // only its own first line.
@@ -271,6 +277,14 @@ impl Session {
             self.mouse(32, x as u16, y as u16, false);
         }
         self.mouse(0, to.0, to.1, true);
+    }
+
+    /// Close the terminal under xdevcmd, as closing its window or losing SSH does: every
+    /// copy of the master goes, the reader's at its next read (xdevcmd draws often).
+    fn hang_up(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        *self.writer.lock().unwrap() = Box::new(std::io::sink());
+        self.master = None;
     }
 
     /// Press q and require a clean exit.
@@ -585,6 +599,54 @@ fn a_closed_terminal_saves_the_session_and_ends() {
     assert!(saved.contains("sub"), "{saved}");
 }
 
+/// The terminal lost under a running copy, the read failing (EIO) before any signal is
+/// seen: signals are swallowed here, so only the error can end the loop. The copy is
+/// cancelled and cleans up, the session is saved, and xdevcmd ends.
+#[cfg(unix)]
+#[test]
+fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
+    let s = Scratch::new("eio");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    // Sparse: big enough to be still copying when the terminal goes, and nothing to
+    // write here unless it is copied.
+    let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
+    big.set_len(16 << 30).unwrap();
+    drop(big);
+    let cfg = s.file("eio.toml", "[general]\nautosave_secs = 0\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg), ("XDEVCMD_TEST_NO_SIGNALS", "1")],
+    );
+    x.send(DOWN);
+    x.send(ENTER); // into sub
+    x.wait_for("/left/sub");
+    x.send(DOWN);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    x.wait_for("background");
+    x.hang_up();
+    let start = Instant::now();
+    while x.child.try_wait().unwrap().is_none() {
+        assert!(
+            start.elapsed() < PATIENCE,
+            "still running with its terminal gone"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let saved = std::fs::read_to_string(s.0.join("session.toml")).expect("the session was saved");
+    assert!(saved.contains("sub"), "{saved}");
+    let left: Vec<_> = std::fs::read_dir(s.right())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(left.is_empty(), "nothing left of the copy: {left:?}");
+}
+
 /// The journal's first line, as a run on this machine writes it.
 #[cfg(unix)]
 fn host_line() -> String {
@@ -648,9 +710,9 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.wait_for("unfinished temporary file removed");
     assert!(!part.exists(), "the temporary file is gone");
     x.send(ENTER); // continue
-    // The job is over once its summary is on the status line: b.txt appears earlier,
-    // at its rename, while the worker still holds the journal and the job box (which
-    // ignores q) is still up.
+                   // The job is over once its summary is on the status line: b.txt appears earlier,
+                   // at its rename, while the worker still holds the journal and the job box (which
+                   // ignores q) is still up.
     x.wait_for("1 copied");
     assert_eq!(std::fs::read_to_string(dst.join("b.txt")).unwrap(), "b");
     let start = Instant::now();

@@ -653,6 +653,14 @@ impl App {
         // and ends tidily. A second signal ends xdevcmd at once, as the default would.
         #[cfg(unix)]
         for sig in [signal_hook::consts::SIGHUP, signal_hook::consts::SIGTERM] {
+            // Tests: the signal is caught and dropped, so that only the lost terminal
+            // itself (EIO from a read or a write) can end the loop, as when the error
+            // wins the race with the flag.
+            if std::env::var_os("XDEVCMD_TEST_NO_SIGNALS").is_some() {
+                let swallowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let _ = signal_hook::flag::register(sig, swallowed);
+                continue;
+            }
             let _ = signal_hook::flag::register_conditional_default(sig, self.hangup.clone());
             let _ = signal_hook::flag::register(sig, self.hangup.clone());
         }
@@ -673,62 +681,19 @@ impl App {
         // reporting in, a job's progress; or after HEARTBEAT, whatever happened.
         let mut dirty = true;
         let mut drawn = Instant::now();
+        // The terminal failing under the loop (EIO once it is closed, often before the
+        // SIGHUP flag is seen): treated as the hang-up it is, jobs cancelled and cleaned
+        // up and the session saved, and only then returned.
+        let mut lost: Option<anyhow::Error> = None;
         while !self.quit {
             if self.hangup.load(std::sync::atomic::Ordering::Relaxed) {
                 self.end_on_signal();
                 break;
             }
-            self.pump_job();
-            dirty |= self.reap_terminals();
-            dirty |= self.background();
-            dirty |= crate::pane::term::take_output();
-            // A job's progress moves on its own, with no message to say so.
-            dirty |= matches!(self.modal, Some(Modal::Job(_))) || !self.jobs.is_empty();
-            if dirty || drawn.elapsed() >= HEARTBEAT {
-                let t0 = Instant::now();
-                terminal.draw(|f| self.draw(f))?;
-                self.sync_graphics(terminal)?;
-                self.usage.frame(t0.elapsed());
-                drawn = Instant::now();
-                dirty = false;
-            }
-            if event::poll(TICK)? {
-                // Any event, a resize or a focus change included, may change the screen.
-                dirty = true;
-                let event = event::read()?;
-                if matches!(event, Event::Key(_) | Event::Mouse(_)) {
-                    if let Some(note) = self.boot_note.take() {
-                        if self.status == note {
-                            self.status.clear();
-                        }
-                    }
-                }
-                match event {
-                    Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
-                    Event::Mouse(m) => self.on_mouse(m),
-                    // A resize clears the screen: whatever picture was there is gone, and
-                    // the cells may be a different size now.
-                    Event::Resize(..) => {
-                        self.graphic_shown = None;
-                        self.measure_cells(terminal);
-                    }
-                    _ => {}
-                }
-            }
-            if let Some(path) = self.pending_edit.take() {
-                // Every way to the editor comes here — F4, Shift+F4 on a name that
-                // exists, Open with… — so the root is checked here once. The list of
-                // names for renaming many lives in xdevcmd's own temporary directory.
-                let own = crate::tempfiles::dir().is_some_and(|d| path.starts_with(&d));
-                if !own && !xdevcmd_core::policy::get().allows(&path) {
-                    self.status = "that file is outside the root xdevcmd is confined to".into();
-                    self.pending_batch = None;
-                    continue;
-                }
-                self.edit_externally(terminal, &path)?;
-                if let Some((files, list)) = self.pending_batch.take() {
-                    self.finish_batch(files, &list);
-                }
+            if let Err(e) = self.turn(terminal, &mut dirty, &mut drawn) {
+                self.end_on_signal();
+                lost = Some(e);
+                break;
             }
         }
         if self.graphic_shown.take().is_some() && self.graphics == crate::graphics::Protocol::Kitty
@@ -738,8 +703,69 @@ impl App {
                 .raw(&crate::graphics::kitty_delete(KITTY_ID));
         }
         self.save_session();
+        if let Some(e) = lost {
+            return Err(e);
+        }
         if self.quit_cd {
             self.write_cwd_file();
+        }
+        Ok(())
+    }
+
+    /// One turn of the event loop: background work in, a frame out if anything changed,
+    /// at most one event handled. An error is the terminal failing.
+    fn turn(&mut self, terminal: &mut Term, dirty: &mut bool, drawn: &mut Instant) -> Result<()> {
+        self.pump_job();
+        *dirty |= self.reap_terminals();
+        *dirty |= self.background();
+        *dirty |= crate::pane::term::take_output();
+        // A job's progress moves on its own, with no message to say so.
+        *dirty |= matches!(self.modal, Some(Modal::Job(_))) || !self.jobs.is_empty();
+        if *dirty || drawn.elapsed() >= HEARTBEAT {
+            let t0 = Instant::now();
+            terminal.draw(|f| self.draw(f))?;
+            self.sync_graphics(terminal)?;
+            self.usage.frame(t0.elapsed());
+            *drawn = Instant::now();
+            *dirty = false;
+        }
+        if event::poll(TICK)? {
+            // Any event, a resize or a focus change included, may change the screen.
+            *dirty = true;
+            let event = event::read()?;
+            if matches!(event, Event::Key(_) | Event::Mouse(_)) {
+                if let Some(note) = self.boot_note.take() {
+                    if self.status == note {
+                        self.status.clear();
+                    }
+                }
+            }
+            match event {
+                Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
+                Event::Mouse(m) => self.on_mouse(m),
+                // A resize clears the screen: whatever picture was there is gone, and
+                // the cells may be a different size now.
+                Event::Resize(..) => {
+                    self.graphic_shown = None;
+                    self.measure_cells(terminal);
+                }
+                _ => {}
+            }
+        }
+        if let Some(path) = self.pending_edit.take() {
+            // Every way to the editor comes here — F4, Shift+F4 on a name that exists,
+            // Open with… — so the root is checked here once. The list of names for
+            // renaming many lives in xdevcmd's own temporary directory.
+            let own = crate::tempfiles::dir().is_some_and(|d| path.starts_with(&d));
+            if !own && !xdevcmd_core::policy::get().allows(&path) {
+                self.status = "that file is outside the root xdevcmd is confined to".into();
+                self.pending_batch = None;
+                return Ok(());
+            }
+            self.edit_externally(terminal, &path)?;
+            if let Some((files, list)) = self.pending_batch.take() {
+                self.finish_batch(files, &list);
+            }
         }
         Ok(())
     }

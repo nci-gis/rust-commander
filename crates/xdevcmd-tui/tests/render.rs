@@ -1002,6 +1002,10 @@ fn print_config_output_passes_check_config() {
     let (a, _) = fixture();
     let printed = xdevcmd(&["--print-config".as_ref()]);
     assert!(printed.status.success());
+    assert!(
+        String::from_utf8_lossy(&printed.stdout).contains("scrollback = 5000"),
+        "[terminal] scrollback is printed"
+    );
     let cfg = write_config(
         a.parent().unwrap(),
         &String::from_utf8_lossy(&printed.stdout),
@@ -2446,6 +2450,26 @@ fn view_theme_switches_while_running() {
     let (a, b) = fixture();
     let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Enter", &a, &b);
     assert!(s.contains("theme: light"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Settings → Terminal: the history length, with what a full one costs at this width.
+#[test]
+fn settings_shows_what_a_full_history_costs() {
+    let (a, b) = fixture();
+    let s = shot_keys(
+        "122x34",
+        "F9,Up,Up,Enter,Tab,Tab,Tab,Down,Down,Down",
+        &a,
+        &b,
+    );
+    assert!(
+        s.contains("History lines per shell") && s.contains("\u{2039} 5000 \u{203a}"),
+        "{s}"
+    );
+    // 5000 lines × 120 columns × 32 bytes a cell.
+    assert!(s.contains("Full, about 18 M a shell at 120 columns"), "{s}");
+    assert!(s.contains("from now on"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

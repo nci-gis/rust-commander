@@ -1266,7 +1266,8 @@ impl App {
                 let rows = (area.height * pct / 100).saturating_sub(2).max(1);
                 let cols = area.width.saturating_sub(2).max(1);
                 let shell = self.settings.config.terminal.shell.clone();
-                match TermPanel::new(&cwd, rows, cols, &shell) {
+                let scrollback = self.settings.config.terminal.scrollback;
+                match TermPanel::new(&cwd, rows, cols, &shell, scrollback) {
                     Ok(t) => {
                         let id = self.alloc_id();
                         self.panes.insert(id, Pane::Term(Box::new(t)));
@@ -6253,6 +6254,10 @@ impl App {
                 &self.probe,
             );
             self.graphics = crate::graphics::effective(self.graphics_found, self.cell_known);
+        }
+        let scrollback = s.config.terminal.scrollback;
+        if let Some(p) = self.panel() {
+            p.set_scrollback(scrollback);
         }
         self.settings = s;
         self.config_outcome = Outcome::Loaded(path.clone());

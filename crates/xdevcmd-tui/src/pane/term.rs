@@ -80,7 +80,8 @@ fn cursor_queries(tail: &mut Vec<u8>, chunk: &[u8]) -> usize {
 }
 
 impl TermPane {
-    pub fn spawn(cwd: &Path, rows: u16, cols: u16, shell: &str) -> Result<Self> {
+    /// A shell keeping `scrollback` lines of history (`[terminal] scrollback`).
+    pub fn spawn(cwd: &Path, rows: u16, cols: u16, shell: &str, scrollback: usize) -> Result<Self> {
         // An explicit shell may carry arguments ("bash -l", "pwsh -NoLogo").
         let mut words = shell.split_whitespace();
         let cmd = match words.next() {
@@ -110,7 +111,7 @@ impl TermPane {
                     .map(|n| n.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| "shell".to_string());
-        Self::start(cwd, rows, cols, cmd, label, false)
+        Self::start(cwd, rows, cols, cmd, label, false, scrollback)
     }
 
     /// One program, by its argv: nothing is split and no shell reads it, so a path with
@@ -120,6 +121,7 @@ impl TermPane {
         rows: u16,
         cols: u16,
         argv: &[std::ffi::OsString],
+        scrollback: usize,
     ) -> Result<Self> {
         let Some((program, args)) = argv.split_first() else {
             anyhow::bail!("nothing to run");
@@ -158,7 +160,7 @@ impl TermPane {
             || "program".to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        Self::start(cwd, rows, cols, cmd, label, true)
+        Self::start(cwd, rows, cols, cmd, label, true, scrollback)
     }
 
     fn start(
@@ -168,6 +170,7 @@ impl TermPane {
         mut cmd: CommandBuilder,
         label: String,
         keep: bool,
+        scrollback: usize,
     ) -> Result<Self> {
         let rows = rows.max(MIN_ROWS);
         let cols = cols.max(MIN_COLS);
@@ -219,7 +222,7 @@ impl TermPane {
             });
         }
 
-        let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, 5000)));
+        let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, scrollback)));
         let (tx, rx) = channel::<Vec<u8>>();
         {
             let parser = parser.clone();

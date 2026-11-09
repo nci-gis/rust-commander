@@ -55,6 +55,8 @@ pub struct TermPanel {
     active: usize,
     next_id: PaneId,
     shell: String,
+    /// Lines of history a shell started from now on keeps (`[terminal] scrollback`).
+    scrollback: usize,
     // Where things were drawn, for clicks.
     tab_hits: Vec<(usize, Rect)>,
     close_hits: Vec<(usize, Rect)>,
@@ -64,12 +66,13 @@ pub struct TermPanel {
 }
 
 impl TermPanel {
-    pub fn new(cwd: &Path, rows: u16, cols: u16, shell: &str) -> Result<Self> {
+    pub fn new(cwd: &Path, rows: u16, cols: u16, shell: &str, scrollback: usize) -> Result<Self> {
         let mut p = Self {
             tabs: Vec::new(),
             active: 0,
             next_id: 0,
             shell: shell.to_string(),
+            scrollback,
             tab_hits: Vec::new(),
             close_hits: Vec::new(),
             new_hit: Rect::ZERO,
@@ -84,7 +87,7 @@ impl TermPanel {
         // Start at the size the body last had; the first draw corrects it anyway.
         let rows = self.body.height.saturating_sub(2).max(1);
         let cols = self.body.width.saturating_sub(2).max(1);
-        let t = TermPane::spawn(cwd, rows, cols, &self.shell)?;
+        let t = TermPane::spawn(cwd, rows, cols, &self.shell, self.scrollback)?;
         let id = self.next_id;
         self.next_id += 1;
         Ok((id, t))
@@ -95,7 +98,7 @@ impl TermPanel {
     pub fn add_program_tab(&mut self, cwd: &Path, argv: &[std::ffi::OsString]) -> Result<()> {
         let rows = self.body.height.saturating_sub(2).max(1);
         let cols = self.body.width.saturating_sub(2).max(1);
-        let t = TermPane::spawn_argv(cwd, rows, cols, argv)?;
+        let t = TermPane::spawn_argv(cwd, rows, cols, argv, self.scrollback)?;
         let id = self.next_id;
         self.next_id += 1;
         let mut terms = BTreeMap::new();
@@ -107,6 +110,12 @@ impl TermPanel {
         });
         self.active = self.tabs.len() - 1;
         Ok(())
+    }
+
+    /// Settings changed `[terminal] scrollback`: shells started from now on keep this
+    /// many lines; those running keep theirs (vt100 cannot resize a history).
+    pub fn set_scrollback(&mut self, lines: usize) {
+        self.scrollback = lines;
     }
 
     /// The focused pane is a program run in a tab that has ended: Enter or Esc closes it.

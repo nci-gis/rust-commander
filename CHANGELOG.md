@@ -24,6 +24,10 @@ that heading and starts a new, empty one here. -->
   line (`40`) or a share (`50%`), and in hex to an offset (`0x1f00`); past the end goes
   to the end and says so. A message on the viewer's last row now always shows, keys
   making room for it.
+- **`[terminal] scrollback`**: how many lines of history each shell keeps, 100 to 9999
+  (5000 as before), for the wheel and Shift+F12. In Settings → Terminal with what a full
+  history costs at the window's width (vt100 keeps 32 bytes a cell: 9999 lines at 120
+  columns is about 37 MB a shell). Applies to shells started after the change.
 - **Sharp pictures in quick view** where the terminal draws them itself: the Kitty
   graphics protocol (kitty, Ghostty), iTerm2's inline images (iTerm2, WezTerm) and sixel
   (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and

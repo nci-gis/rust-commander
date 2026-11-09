@@ -205,7 +205,15 @@ pub struct Terminal {
     pub shell: String,
     /// How many shells may run at once, across every tab and split. 1-16.
     pub max_terminals: usize,
+    /// Lines of history each shell keeps, for the wheel and Shift+F12. 100-9999 (the
+    /// owner's ceiling, 2026-11-09): vt100 keeps every cell of it, so a full history
+    /// costs lines × columns × a cell's size (Settings shows the figure). Read when a
+    /// shell starts; vt100 cannot change a history's length in place.
+    pub scrollback: usize,
 }
+
+/// The range `[terminal] scrollback` takes.
+pub const SCROLLBACK: std::ops::RangeInclusive<usize> = 100..=9999;
 
 impl Default for Terminal {
     fn default() -> Self {
@@ -214,6 +222,7 @@ impl Default for Terminal {
             height_percent: 30,
             shell: String::new(),
             max_terminals: 3,
+            scrollback: 5000,
         }
     }
 }
@@ -410,6 +419,14 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         return Err(format!(
             "[terminal] max_terminals = {}: expected 1 to 16 (to start with no shell, use show = false)",
             config.terminal.max_terminals
+        ));
+    }
+    if !SCROLLBACK.contains(&config.terminal.scrollback) {
+        return Err(format!(
+            "[terminal] scrollback = {}: expected {} to {} lines",
+            config.terminal.scrollback,
+            SCROLLBACK.start(),
+            SCROLLBACK.end()
         ));
     }
     let a = config.general.autosave_secs;
@@ -1235,6 +1252,19 @@ mod tests {
         assert!(parse("[terminal]\nmax_terminals = 0\n")
             .unwrap_err()
             .contains("show = false"));
+    }
+
+    #[test]
+    fn scrollback_is_100_to_9999_lines() {
+        assert_eq!(parse("").unwrap().config.terminal.scrollback, 5000);
+        for ok in [100, 9999] {
+            let s = parse(&format!("[terminal]\nscrollback = {ok}\n")).unwrap();
+            assert_eq!(s.config.terminal.scrollback, ok);
+        }
+        for bad in [99, 10000, 0] {
+            let e = parse(&format!("[terminal]\nscrollback = {bad}\n")).unwrap_err();
+            assert!(e.contains("scrollback") && e.contains("100 to 9999"), "{e}");
+        }
     }
 
     #[test]

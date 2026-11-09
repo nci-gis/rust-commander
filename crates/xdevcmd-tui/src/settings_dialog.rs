@@ -276,7 +276,28 @@ const FIELDS: &[Field] = &[
         Kind::Pick(&["1", "2", "3", "4", "6", "8", "12", "16"]),
         true,
     ),
+    f(
+        3,
+        "terminal",
+        "scrollback",
+        "History lines per shell",
+        // Replaced when drawn by `scrollback_help`, which knows the screen's width.
+        "For the wheel and Shift+F12",
+        Kind::Pick(&["100", "1000", "2000", "5000", "9999"]),
+        true,
+    ),
 ];
+
+/// What a full history costs a shell, for the Settings row: vt100 keeps every cell of
+/// every line, so it is lines × columns × the size of its cell. `cols` is the panel's
+/// width now (the screen's, less its border); a wider window costs more.
+pub fn scrollback_help(lines: usize, cols: u16) -> String {
+    let bytes = lines as u64 * u64::from(cols) * std::mem::size_of::<vt100::Cell>() as u64;
+    format!(
+        "Full, about {} a shell at {cols} columns; for shells started from now on",
+        xdevcmd_core::format::human_size(bytes)
+    )
+}
 
 /// A setting's value, as the config file writes it.
 pub fn get(c: &Config, f: &Field) -> String {
@@ -305,6 +326,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("terminal", "show") => c.terminal.show.to_string(),
         ("terminal", "height_percent") => c.terminal.height_percent.to_string(),
         ("terminal", "max_terminals") => c.terminal.max_terminals.to_string(),
+        ("terminal", "scrollback") => c.terminal.scrollback.to_string(),
         _ => String::new(),
     }
 }
@@ -347,6 +369,9 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         }
         ("terminal", "max_terminals") => {
             c.terminal.max_terminals = n().map_or(c.terminal.max_terminals, |x| x as usize)
+        }
+        ("terminal", "scrollback") => {
+            c.terminal.scrollback = n().map_or(c.terminal.scrollback, |x| x as usize)
         }
         _ => {}
     }
@@ -639,11 +664,17 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             });
         }
         if let Some(f) = rows.get(d.row) {
+            let help = match (f.section, f.key) {
+                ("terminal", "scrollback") => {
+                    scrollback_help(d.now.terminal.scrollback, area.width.saturating_sub(2))
+                }
+                _ => f.help.to_string(),
+            };
             put(
                 frame,
                 inner,
                 inner.height.saturating_sub(3),
-                f.help,
+                &help,
                 Style::new().fg(th.fg_dim),
             );
         }
@@ -701,6 +732,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_scrollback_cost_is_lines_times_columns_times_a_cell() {
+        let cell = std::mem::size_of::<vt100::Cell>();
+        let help = scrollback_help(9999, 120);
+        let want = xdevcmd_core::format::human_size(9999 * 120 * cell as u64);
+        assert!(
+            help.contains(&want) && help.contains("120 columns"),
+            "{help}"
+        );
+        assert!(help.contains("from now on"), "{help}");
     }
 
     #[test]

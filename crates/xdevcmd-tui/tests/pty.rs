@@ -2085,6 +2085,46 @@ fn read_only_mode_refuses_saving_the_history() {
     assert!(left.is_empty(), "nothing written");
 }
 
+/// `[terminal] scrollback = 200`: a shell keeps 200 lines of history and its screen, so
+/// `seq 1 500` loses its start, which the default 5000 keeps.
+#[test]
+fn a_shell_keeps_the_history_scrollback_says() {
+    let s = Scratch::new("scrollback-200");
+    let cfg = s.file("short.toml", "[terminal]\nscrollback = 200\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", cfg.as_str())],
+    );
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"seq 1 500\r");
+    xdevcmd.wait_for("500");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("in memory only");
+    let screen = xdevcmd.screen();
+    let n: usize = screen
+        .split(" lines")
+        .next()
+        .and_then(|t| t.rsplit(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("a line count in the title:\n{screen}"));
+    // 200 of history and the screen's rows (about ten here), no more.
+    assert!((200..=240).contains(&n), "{n} lines\n{screen}");
+    xdevcmd.send(b"\x1b[H");
+    xdevcmd.wait_for("  1 \u{2502}");
+    assert!(
+        !xdevcmd.screen().contains("$ seq 1 500"),
+        "the start is gone"
+    );
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 /// Terminal.app sends Shift+F12 as `ESC [34~` (xterm's F20; crossterm numbers it F17),
 /// and Alt+X F12 stands for Shift+F12 where neither arrives: both open the history.
 #[test]

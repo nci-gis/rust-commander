@@ -67,7 +67,7 @@ as agreed on 2026-11-09; Step 5 (logging) stays out.
     offset. Pty: F2 on history writes the file (0600 checked); F2 to the same name asks, Esc
     keeps the first; read-only mode refuses F2 with the usual message. Core: `save_bytes`
     never replaces without `replace`; a cancelled replacement leaves the old file.
-- [ ] **3. `[terminal] scrollback`.** Default 5000, 100..=9999. Out of range refused with a
+- [x] **3. `[terminal] scrollback`.** Default 5000, 100..=9999. Out of range refused with a
       message naming the range. Settings → Terminal with the cost when full, from panel width
       and `size_of::<vt100::Cell>()`; says it applies to shells started from now on. Passed to
       `TermPane::spawn`. Tests: config bounds (99, 10000 refused; 100, 9999 taken),
@@ -219,6 +219,25 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   viewed file copies it and the viewer comes back.
   Not verified: Windows (`rename` over an existing file is `MoveFileExW` with replace in
   std; a new file there gets its directory's permissions, no `0600`), not compiled here.
+
+- 2026-11-10, **step 3, `[terminal] scrollback`.** `Terminal::scrollback`, default 5000,
+  `config::SCROLLBACK` 100..=9999; out of range is refused naming the range
+  ("expected 100 to 9999 lines"). Passed through `TermPanel::new` to every
+  `TermPane::spawn` / `spawn_argv`; saving Settings sets it on the running panel
+  (`set_scrollback`), so shells started after that keep the new length and running ones
+  keep theirs. Settings → Terminal, "History lines per shell" (100, 1000, 2000, 5000,
+  9999; a value written by hand stays among them, as for the other rows), takes effect
+  at once for new shells; its help line is drawn from `scrollback_help(lines, cols)`:
+  lines × the screen's width less the border × `size_of::<vt100::Cell>()`, which is
+  **32 bytes** here, so 5000 lines at 120 columns shows "about 18 M a shell", and 9999
+  at 120 is 36.6 MiB (the Round 014 plan's ≈ 38 MB was 10⁶ bytes).
+  Tests: config — 99, 10000 and 0 refused naming the range, 100 and 9999 taken, 5000 by
+  default; `--print-config` prints `scrollback = 5000` and still passes
+  `--check-config`; the cost is lines × columns × a cell (unit); render — the Settings
+  row and its "Full, about 18 M a shell at 120 columns … from now on"; pty — with
+  `scrollback = 200`, `seq 1 500` then Shift+F12 holds 200–240 lines (history and the
+  screen's rows) and Home no longer reaches the command line. docs/config.md and
+  CHANGELOG.
 
 ## Check
 

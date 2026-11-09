@@ -647,6 +647,34 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
     assert!(left.is_empty(), "nothing left of the copy: {left:?}");
 }
 
+/// A panic on a background thread is logged and xdevcmd goes on: still drawn, no
+/// "crashed" over the screen, and q still quits.
+#[test]
+fn a_background_panic_is_logged_and_xdevcmd_goes_on() {
+    let s = Scratch::new("bg-panic");
+    let x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_TEST_PANIC_THREAD", "1")],
+    );
+    x.wait_for("a background task failed");
+    let screen = x.screen();
+    assert!(screen.contains("10 Quit"), "{screen}");
+    assert!(!screen.contains("crashed"), "{screen}");
+    assert!(!screen.contains("panicked"), "{screen}");
+    let logs: Vec<_> = std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("crash-"))
+        .collect();
+    assert_eq!(logs.len(), 1, "one crash log");
+    let log = std::fs::read_to_string(logs[0].path()).unwrap();
+    assert!(log.contains("xdevcmd went on"), "{log}");
+    assert!(log.contains("thread: test-panic"), "{log}");
+    x.quit();
+}
+
 /// The journal's first line, as a run on this machine writes it.
 #[cfg(unix)]
 fn host_line() -> String {

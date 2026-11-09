@@ -31,7 +31,8 @@ that heading and starts a new, empty one here. -->
   terminal its name and kind, which works over SSH) and how it draws pictures: on the
   status line at start, in Usage (Shift+F1) and in About.
 - **A crash log**: if xdevcmd crashes it writes what happened to its state directory and
-  says where, to attach to an issue; nothing is sent.
+  says where, to attach to an issue; nothing is sent. A failure in a background task
+  is logged the same way and xdevcmd goes on, saying where the details are.
 - **`--print-completions bash|zsh|fish|powershell` and `--print-man`**: tab completion
   and a manual page, for packages to install.
 - About links the Releases page (xdevcmd never looks for updates itself).

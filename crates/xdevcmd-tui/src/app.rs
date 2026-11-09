@@ -804,6 +804,18 @@ impl App {
     /// any of it changed what is on screen.
     fn background(&mut self) -> bool {
         let mut changed = false;
+        // A thread other than this one panicked: xdevcmd goes on, and says where the
+        // details went.
+        if let Some(log) = crate::crash::take_background() {
+            self.status = match log {
+                Some(p) => format!(
+                    "a background task failed \u{2014} details in {}",
+                    p.display()
+                ),
+                None => "a background task failed (no crash log could be written)".into(),
+            };
+            changed = true;
+        }
         // Not under an open dialog or a drag: a listing that shifted while you were
         // answering "delete these?" or dragging a row is the wrong moment to move it.
         let quiet = self.modal.is_none() && self.drag.is_none();

@@ -183,6 +183,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
 }
 
 fn main() -> Result<()> {
+    crash::mark_main();
     let cli = match parse_cli() {
         Ok(c) => c,
         Err(e) => {
@@ -399,14 +400,34 @@ fn main() -> Result<()> {
     // ratatui::init() installs a hook that restores the terminal; chain onto it so a
     // panic also turns mouse reporting back off, which otherwise leaves the user's shell
     // spraying escape codes on every click.
+    // A panic on another thread leaves the terminal alone: xdevcmd goes on (crash.rs).
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableMouseCapture);
-        let log = crash::write(info);
-        previous(info);
+        let main = crash::on_main();
+        let steps = crash::on_panic(main);
+        if steps.restore {
+            let _ = execute!(stdout(), DisableMouseCapture);
+        }
+        let log = crash::write(info, main);
+        if steps.restore {
+            previous(info);
+        }
         // After the previous hook: the terminal is itself again, so this can be read.
-        crash::tell(log.as_deref());
+        if steps.tell {
+            crash::tell(log.as_deref());
+        }
+        if steps.note {
+            crash::note_background(log);
+        }
     }));
+    // Tests: a background thread that panics, to see xdevcmd go on.
+    if std::env::var_os("XDEVCMD_TEST_PANIC_THREAD").is_some() {
+        let _ = std::thread::Builder::new()
+            .name("test-panic".into())
+            .spawn(|| {
+                panic!("a background thread's panic, on purpose (XDEVCMD_TEST_PANIC_THREAD)")
+            });
+    }
 
     let result = app.run(&mut terminal);
 

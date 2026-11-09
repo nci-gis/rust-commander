@@ -1,9 +1,65 @@
 //! When xdevcmd panics: what happened, written to a file the user can attach to a bug
 //! report, since the terminal's scrollback is gone with the alternate screen. Nothing is
 //! sent anywhere.
+//!
+//! A panic on the main thread ends xdevcmd: the terminal is restored and the user told.
+//! One on another thread (a worker, a pty reader, a listing) does not end the process,
+//! so the main loop goes on drawing: restoring the terminal under it, or printing std's
+//! message over the screen, would leave it running in a broken terminal. That panic is
+//! logged and the main loop says so on the status line.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::thread::ThreadId;
+
+static MAIN: OnceLock<ThreadId> = OnceLock::new();
+
+/// Called first thing on the main thread: the hook tells it from the others.
+pub fn mark_main() {
+    let _ = MAIN.set(std::thread::current().id());
+}
+
+/// Whether this is the main thread (or nothing was marked, which errs towards ending).
+pub fn on_main() -> bool {
+    MAIN.get().is_none_or(|m| *m == std::thread::current().id())
+}
+
+/// What the panic hook does, by where the panic happened.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Steps {
+    /// Turn mouse reporting off and hand on to the previous hook (ratatui's, which
+    /// restores the terminal, then std's, which prints the message).
+    pub restore: bool,
+    /// Say on the restored terminal where the log is.
+    pub tell: bool,
+    /// Leave the log's path for the main loop to show.
+    pub note: bool,
+}
+
+/// The decision, kept apart from the hook so it can be tested.
+pub fn on_panic(main: bool) -> Steps {
+    Steps {
+        restore: main,
+        tell: main,
+        note: !main,
+    }
+}
+
+/// A background panic waiting to be shown: the log, if one could be written.
+static BACKGROUND: Mutex<Option<Option<PathBuf>>> = Mutex::new(None);
+
+/// From the hook, on a background thread.
+pub fn note_background(log: Option<PathBuf>) {
+    if let Ok(mut b) = BACKGROUND.lock() {
+        *b = Some(log);
+    }
+}
+
+/// For the main loop: a background panic since the last call, and its log.
+pub fn take_background() -> Option<Option<PathBuf>> {
+    BACKGROUND.lock().ok()?.take()
+}
 
 /// Where the issues are reported.
 pub const ISSUES: &str = "https://github.com/nci-gis/rust-commander/issues";
@@ -12,15 +68,24 @@ pub const ISSUES: &str = "https://github.com/nci-gis/rust-commander/issues";
 const KEEP: usize = 5;
 
 /// Write `info` with the version, system and a backtrace to
-/// `<state directory>/crash-<time>.log`; the path, if it could be written.
-pub fn write(info: &std::panic::PanicHookInfo<'_>) -> Option<PathBuf> {
+/// `<state directory>/crash-<time>.log`; the path, if it could be written. `main`: the
+/// panic ends xdevcmd; otherwise it was a background thread's and xdevcmd went on.
+pub fn write(info: &std::panic::PanicHookInfo<'_>, main: bool) -> Option<PathBuf> {
     let dir = crate::session::default_path()?.parent()?.to_path_buf();
-    write_in(&dir, &report(info))
+    write_in(&dir, &report(info, main))
 }
 
-fn report(info: &std::panic::PanicHookInfo<'_>) -> String {
+fn report(info: &std::panic::PanicHookInfo<'_>, main: bool) -> String {
     let mut s = String::new();
-    let _ = writeln!(s, "xdevcmd {} crashed", env!("CARGO_PKG_VERSION"));
+    if main {
+        let _ = writeln!(s, "xdevcmd {} crashed", env!("CARGO_PKG_VERSION"));
+    } else {
+        let _ = writeln!(
+            s,
+            "xdevcmd {}: a background thread panicked; xdevcmd went on",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
     let _ = writeln!(
         s,
         "system: {} {}",
@@ -93,6 +158,26 @@ pub fn tell(log: Option<&Path>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_main_thread_panic_touches_the_terminal() {
+        assert_eq!(
+            on_panic(true),
+            Steps {
+                restore: true,
+                tell: true,
+                note: false
+            }
+        );
+        assert_eq!(
+            on_panic(false),
+            Steps {
+                restore: false,
+                tell: false,
+                note: true
+            }
+        );
+    }
 
     #[test]
     fn crash_logs_are_written_and_only_the_newest_kept() {

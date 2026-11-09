@@ -277,8 +277,10 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
             .and_then(|n| n.rsplit_once('-'))
             .map(|(run, _)| run)
         {
-            if run != run_tag() && gone(&path, run, None) {
-                let _ = fs::remove_file(&path);
+            if run != run_tag() {
+                if let Some(_held) = claim(&path, run, None) {
+                    let _ = fs::remove_file(&path);
+                }
             }
             continue;
         }
@@ -294,37 +296,41 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
             continue;
         }
         let mut text = String::new();
-        if !gone(&path, &run, Some((&mut text, &host))) {
+        // Held until the journal is gone: another start at the same moment finds it
+        // locked (alive, to it), or removed, and never offers the same job again.
+        let Some(_held) = claim(&path, &run, Some((&mut text, &host))) else {
             continue;
-        }
+        };
         out.push(tidy(&text, &run));
+        #[cfg(test)]
+        while_held_in_test();
         let _ = fs::remove_file(&path);
     }
     out
 }
 
-/// Whether the run that wrote the journal at `path` is gone, by its lock. `read`: read
-/// the journal into the string, and count it gone only if it was written on this host
-/// (named in the second); a journal with no host line is an older one of this machine.
-fn gone(path: &Path, run: &str, read: Option<(&mut String, &str)>) -> bool {
-    let Some(mut f) = open_probe(path) else {
-        return false;
-    };
+/// The journal at `path`, if the run that wrote it is gone, told by its lock: returned
+/// open, its lock held (Unix), so that no other start takes it while this one tidies up
+/// after it. Hold it until the journal is removed. `read`: read the journal into the
+/// string, and count it gone only if it was written on this host (named in the second);
+/// a journal with no host line is an older one of this machine.
+fn claim(path: &Path, run: &str, read: Option<(&mut String, &str)>) -> Option<File> {
+    let mut f = open_probe(path)?;
     let lock = probe_lock(&f);
     if lock == Lock::Busy {
-        return false;
+        return None;
     }
     // Locked just as its job ended and removed it: not a dead run's.
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         if f.metadata().map(|m| m.nlink() == 0).unwrap_or(true) {
-            return false;
+            return None;
         }
     }
     if let Some((text, host)) = read {
         if f.read_to_string(text).is_err() {
-            return false;
+            return None;
         }
         let written_on = text
             .lines()
@@ -332,13 +338,28 @@ fn gone(path: &Path, run: &str, read: Option<(&mut String, &str)>) -> bool {
             .and_then(dec)
             .map(|p| p.to_string_lossy().into_owned());
         if written_on.is_some_and(|h| h != host) {
-            return false;
+            return None;
         }
     }
-    match lock {
+    let dead = match lock {
         Lock::Held => true,
         Lock::Busy => false,
         Lock::Unsupported => !pid_alive(run),
+    };
+    dead.then_some(f)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Run between tidying up after a journal and removing it: a second start, in tests.
+    static WHILE_HELD: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn while_held_in_test() {
+    if let Some(f) = WHILE_HELD.with(|h| h.borrow_mut().take()) {
+        f();
     }
 }
 
@@ -630,6 +651,26 @@ mod tests {
         assert!(!unheld.exists(), "left by a run that died making it");
         assert!(held.exists(), "its run is making it");
         drop(f);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn two_starts_at_once_offer_an_interrupted_job_once() {
+        let d = dir("twice");
+        orphan(&d, "kind copy\n");
+        let second = std::rc::Rc::new(std::cell::Cell::new(None));
+        let seen = second.clone();
+        let jdir = d.clone();
+        // Another start, while this one is between tidying up and removing the journal.
+        WHILE_HELD.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move || seen.set(Some(recover_in(&jdir).len()))))
+        });
+        assert_eq!(recover_in(&d).len(), 1, "the first start offers it");
+        assert_eq!(
+            second.get(),
+            Some(0),
+            "the second, at the same moment, does not"
+        );
         let _ = fs::remove_dir_all(&d);
     }
 

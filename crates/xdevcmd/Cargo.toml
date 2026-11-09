@@ -4,11 +4,14 @@ version.workspace = true
 description.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-publish = false
+publish = true
 
 # What `cargo release` does to the CHANGELOG; see release.toml at the top.
 [package.metadata.release]
@@ -23,7 +26,9 @@ name = "xdevcmd"
 path = "src/main.rs"
 
 [dependencies]
-xdevcmd-core = { path = "../xdevcmd-core" }
+# The exact version: the engine has no stable API of its own, and the two are released
+# together (cargo-release rewrites this pin; see release.toml).
+xdevcmd-core = { path = "../xdevcmd-core", version = "=0.2.1" }
 anyhow = "1"
 # How many cells a character takes, for clicks on the title's path. Already in the
 # tree through ratatui.

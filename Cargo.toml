@@ -11,8 +11,11 @@ description = "A terminal-style file commander, written in Rust."
 authors = ["XDevTeam"]
 license = "MIT"
 repository = "https://github.com/nci-gis/rust-commander"
-# Also the GitHub topics.
-keywords = ["file-manager", "tui", "terminal", "commander", "rust"]
+homepage = "https://github.com/nci-gis/rust-commander"
+# Also the GitHub topics, with `rust` added by scripts/sync-about.sh (crates.io allows
+# five keywords, and every crate there is Rust).
+keywords = ["file-manager", "tui", "terminal", "commander", "two-pane"]
+categories = ["command-line-utilities", "filesystem"]
 edition = "2021"
 rust-version = "1.88"   # zip 9, the first release without RUSTSEC-2026-0367..0369 and -0429
 

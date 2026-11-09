@@ -12,7 +12,8 @@ meta=$(cargo metadata --no-deps --format-version 1)
 field() { python3 -c 'import json,sys; p=[p for p in json.load(sys.stdin)["packages"] if p["name"]=="xdevcmd"][0]; v=p[sys.argv[1]]; print(" ".join(v) if isinstance(v,list) else v)' "$1" <<<"$meta"; }
 desc=$(field description)
 repo_url=$(field repository)
-keywords=$(field keywords)
+# crates.io keywords, plus `rust`: a GitHub topic of its own, pointless on crates.io.
+keywords="$(field keywords) rust"
 repo=${repo_url#https://github.com/}
 
 have_desc=$(gh repo view "$repo" --json description --jq .description)

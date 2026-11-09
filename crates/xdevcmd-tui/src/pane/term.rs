@@ -119,6 +119,20 @@ pub fn prompt_ready(quiet: bool, state: &ShellState, sees_foreground: bool) -> b
         }
 }
 
+/// Past this many bytes a typed line is asked about first: a shell reading its line
+/// through the terminal's own line editing (dash, sh, cmd) silently drops a line
+/// longer than the terminal's buffer, about 4 KB on Linux.
+pub const LONG_LINE: usize = 4000;
+
+/// [`decide`] for `len` bytes of text: what would be sent at once is asked about first
+/// when it is longer than [`LONG_LINE`].
+pub fn decide_for(state: &ShellState, send_when_idle: bool, len: usize) -> Decision {
+    match decide(state, send_when_idle) {
+        Decision::Send if len > LONG_LINE => Decision::AskWithSend,
+        d => d,
+    }
+}
+
 /// How long a new shell's output must have been quiet before its prompt counts as up.
 const PROMPT_QUIET: Duration = Duration::from_millis(250);
 
@@ -1334,6 +1348,21 @@ mod tests {
         assert!(prompt_ready(true, &Idle, true));
         assert!(!prompt_ready(true, &Busy("a command".into()), false));
         assert!(!prompt_ready(true, &Remote("ssh".into()), true));
+    }
+
+    #[test]
+    fn a_long_line_is_asked_about_even_at_an_idle_prompt() {
+        use Decision::*;
+        assert_eq!(decide_for(&ShellState::Idle, true, LONG_LINE), Send);
+        assert_eq!(
+            decide_for(&ShellState::Idle, true, LONG_LINE + 1),
+            AskWithSend
+        );
+        assert_eq!(
+            decide_for(&ShellState::Busy("vim".into()), true, 9000),
+            AskNewShell
+        );
+        assert_eq!(decide_for(&ShellState::Unknown, true, 9000), AskWithSend);
     }
 
     #[test]

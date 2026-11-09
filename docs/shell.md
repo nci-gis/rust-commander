@@ -82,7 +82,9 @@ is the whole job. Names, or the user menu's command, are typed there once its pr
 up; if no prompt
 shows within a few seconds, the shell stays open and nothing is typed (the status line
 says so). A name with a control character, or one your shell cannot be given safely
-(`%` for cmd), is refused before any question.
+(`%` for cmd), is refused before any question. Text over 4000 bytes is always asked
+about first, even at an idle prompt: a shell without a line editor of its own (dash,
+sh, cmd) silently drops a line longer than about 4 KB.
 
 "Surely at its prompt" comes from the system on Linux (`/proc`) and macOS (`ps`). On
 Windows the system does not say; only the prompt marks below can tell, and without them

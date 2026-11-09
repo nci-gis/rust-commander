@@ -1769,8 +1769,12 @@ impl App {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;
         };
-        let decision =
-            crate::pane::term::decide(&state, self.settings.config.terminal.send_when_idle);
+        let long = s.here.len() > crate::pane::term::LONG_LINE;
+        let decision = crate::pane::term::decide_for(
+            &state,
+            self.settings.config.terminal.send_when_idle,
+            s.here.len(),
+        );
         if decision == Decision::Send {
             return self.send_here(s);
         }
@@ -1803,14 +1807,21 @@ impl App {
                     "docs/shell.md shows the prompt snippet that lets it tell.".into(),
                 ],
             ),
-            ShellState::Idle => (
+            ShellState::Idle if !long => (
                 "Type into the shell?",
                 vec![
                     "The shell is at its prompt.".into(),
                     "Settings \u{2192} Terminal can send without asking.".into(),
                 ],
             ),
+            ShellState::Idle => ("Type into the shell?", vec!["The shell is at its prompt.".into()]),
         };
+        if long {
+            body.push(format!(
+                "It is {} bytes \u{2014} some shells drop a line over 4 KB without a word.",
+                s.here.len()
+            ));
+        }
         body.push(String::new());
         body.push(what);
         body.push(new_shell);

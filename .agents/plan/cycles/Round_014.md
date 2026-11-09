@@ -1,6 +1,6 @@
 # Round 014: Sharp image previews
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 20
 **Date started**: 2026-11-08 (owner: "Yes, next round", after 0.2.1 was published)
 **Date completed**: —
@@ -225,6 +225,206 @@ Order: 1, 2, 3, 4 (each its own commit with its tests), 5 only on the owner's wo
 
 ## Do
 
+- 2026-11-09, **close-out done; set aside at Review for the owner's hand tests. Round
+  015 starts from it** (on its own `feat/…` branch from this one). Commits on
+  `feat/image-preview`, local, not pushed: `0fff462` pty tests' `$` prompt as root,
+  `fa62a95` (1), `efdf77e` (2), `703b7d2` (3), `834adef` (4), `1dc7009` (5), `84fc8b8`
+  (6), `695ce94` (7), `3b491ad` (8), `943d6b9` (9), `792a4e9` (10), then two found in
+  step 11: "Read the terminal's input on its own thread" and "Cancel tests cancel a copy
+  still running". Each fix proved by putting the bug back: the test failed, then passed.
+
+  **Found in step 11.**
+  - Step 6's hang-up test failed 5 of 15 runs alone: crossterm 0.29's reader, on a
+    hung-up pty, loops on the failing read and never returns the error, so the loop
+    never saw it. The terminal's input is now read on a thread of its own (`KeyReader`);
+    the loop waits on a channel for one TICK and, on a timeout, polls stdin for
+    HUP/ERR (Unix). The thread reads only when asked and the loop waits for it to be
+    idle before `$EDITOR` takes the terminal, so it never takes the editor's keys. New
+    pty test `keys_typed_while_the_editor_runs_reach_the_editor` (a line typed while
+    the editor is still starting): 3/3 fail with a thread that reads all the time, 3/3
+    pass as written. Hang-up test after: 15/15 alone, and in every full run below.
+  - `with_safe_operations_a_cancelled_new_copy_leaves_nothing_under_any_name` (core)
+    failed once in a full `cargo test --workspace`: 8 MiB copied completely before the
+    test thread cancelled, and a complete copy is rightly kept. Under CPU load, 6/20
+    lib runs failed before, 0/30 after: the source is now a sparse 1 GiB file (also in
+    `cancelling_mid_file_removes_the_half_written_copy`, same window). Test only.
+
+  **Measured.**
+  - Resume flake, before: 2 failures in 20 alone, 14 in 20 within the full parallel pty
+    run. A 50 ms sleep after the rename made it fail 5/5: the plan's cause is real. A
+    second one showed too, the more frequent: `q` sent while the job box (which ignores
+    q) was still up, "did not exit on q". Waiting for the summary ("1 copied") covers
+    both. After: 0/20 alone, 20/20 full parallel runs clean (and 5 more after step 10).
+  - Pictures, a 2048x2048 photo-like picture, release build, this machine: Kitty (PNG,
+    base64) 6.75 MB, encode 60 ms; iTerm2 6.74 MB, 50 ms; sixel 2.24 MB, 239 ms (with
+    heavier noise: 14.7 / 14.7 / 4.5 MB, 84 / 65 / 220 ms). That encode was on the
+    drawing thread, per dialog closed and per file passed. Now on the decode thread;
+    the frame writes cached bytes: 0.3–2.6 ms for the copy. Kitty after a dialog:
+    `a=p`, about 40 bytes, instead of the whole picture again.
+
+  **Deviations from the plan, and why.**
+  - Before step 0: `a_directory_name_cannot_run…` and `the_terminal_answers_where…`
+    failed here because dash, run as root, ignores an inherited `PS1` and prompts `# `.
+    Fixed in the harness (`ENV` pointing at a file that sets `PS1`, which an interactive
+    sh reads last), its own commit.
+  - Step 4: the run tag is `<pid>x<start time in ns, hex>`. A journal with no `host`
+    line (an older one) counts as this machine's. A held lock is also checked against
+    the file's link count, so a journal removed by a job that just ended is never taken
+    for a dead run's. `Journal::gone` and `touch` removed with `TOUCH`/`STALE`.
+  - Step 6: `XDEVCMD_TEST_NO_SIGNALS` cannot skip the handlers outright: closing the
+    pty sends SIGHUP, whose default would kill xdevcmd before any EIO. It registers
+    them onto a flag nobody reads, so only the error can end the loop (the race the fix
+    is for). The harness's reader stops at its next read so the last master copy closes.
+    Without the fix the process did not end at all: the copy went on with no terminal.
+    `edit_externally`'s error goes the same way as the others (the loop body is now
+    `App::turn`).
+  - Step 7: `on_panic(main) -> Steps { restore, tell, note }` (calling the previous hook
+    is part of `restore`).
+  - Step 8: applied to a protocol chosen by hand as well as `auto`. Windows Terminal
+    counts as knowing its cell size (`WT_SESSION`): it maps sixel through a fixed
+    virtual 10x20 cell, which is the guess; without this, sixel would never be used on
+    Windows, where nothing gives the cell size. The iTerm2/sixel pty test now answers
+    the cell size.
+  - Step 9: the picture's key holds the box and the protocol as well as file, pixels and
+    date. Kitty transmissions and placements carry `p=1`, so a placement replaces
+    rather than adds. A resize or the editor's return sends the picture whole again.
+    The quick-run test sends Downs 60 ms apart (a key repeat); sent all at once it
+    passed even without the wait, since only the last decode was ever kept.
+
+  **Not verified here.** Windows and macOS were not compiled: `rustup target add` was
+  refused by this sandbox's proxy (static.rust-lang.org), so the Windows code paths
+  (share-mode journal lock, `COMPUTERNAME`, the `Lock` enum's `cfg_attr`) were checked by
+  reading only; CI or the owner's machines must build them. Also by hand: journal
+  locking on Windows (kill from Task Manager), NFS, pictures on real terminals (a Kitty
+  `a=p` after a dialog in kitty and Ghostty; sixel in Windows Terminal, which rests on its
+  10x20 virtual cell), Ctrl+Space in a real shell; the input thread on Windows and
+  macOS (Windows relies on crossterm's console reader reporting a closed console as an
+  error; not tried). `cargo deny` is not installed here (no new crate; rustix gains its
+  `system` feature, already in the tree).
+
+  Recorded for the owner, not changed: global Alt keys (`is_global`) that readline also
+  uses (Alt+D, Alt+C, Alt+T, Alt+N, Alt+1…9, the Alt+R group).
+
+- 2026-11-09, **close-out planned** (owner: run the rounds one after another, each left at
+  Review for the owner to close after testing by hand; each on its own `feat/…` branch,
+  chained). An independent review found nine issues; each was checked against the code
+  before planning; all nine are real. A tenth: **Ctrl+Space reaches a program in the
+  terminal panel as a space**, not NUL (`send_key` maps Ctrl+letter to a control byte, `' '`
+  is not a letter; Ctrl+@ the same). The owner's principle, the same day: xdevcmd
+  complements the shell and never competes with it. Ctrl+R history search and Tab
+  completion are the shell's job (bash, zsh, fish, PSReadLine, fzf, atuin). When a program
+  runs in the panel, the program gets the keys and the mouse.
+
+  Findings, as checked:
+  1. `resume()` (app.rs ~5352) sets `Existing::Update`: a file the user chose to keep in the
+     first run is replaced in the resumed run if its source is newer. Update does not even
+     help the case it was chosen for (a new file written in place gets its date only at the
+     end, so a file cut short carries *now* and Update skips it). Journals are only written
+     with safe operations on. A new file reaches its real name only when complete, so Skip
+     would be sound for new files, but not for a replacement cut short (old file still under
+     its real name; Skip would keep it although the user agreed to replace it). Rule that
+     never decides for the user: **skip what is identical (same size and date, within FAT's
+     two seconds), ask about anything else already there** = new `Existing::Resume`. A
+     cross-device move killed between copy and source removal leaves an identical copy and
+     the source: Resume skips the copy, leaves the source, the summary says so.
+     Also: `SAFE` is read per file, so toggling safe ops mid-job split a job — fixed by item 8.
+  2. Liveness. Windows: alive by journal date (`STALE` = 120 s), not refreshed during long
+     blocking steps. Unix: pid only. NFS-shared home → another machine's live job looks
+     dead here; reused pid → dead run looks alive, and `tidy` finds part files by
+     `.xdevcmd-part-<pid>-`, so a live run with that pid loses its part files.
+     `File::lock` is stable from 1.89; `rust-version` is 1.88 — not raised. Instead, no unsafe:
+     - Unix: `rustix::fs::flock(fd, NonBlockingLockExclusive)` on the journal file for the
+       life of the job (rustix `fs` already a core dependency). Kernel drops it on death.
+     - Windows: std `OpenOptionsExt::share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)` on the
+       journal handle; another start's probe (open read+write, `share_mode(0)`) fails with a
+       sharing violation while the job runs, succeeds once the process is gone.
+       `FILE_SHARE_DELETE` lets the job remove its own journal with the handle open.
+     - Journal gets a `host` line; a journal from another host is left alone. Temporary
+       names get a **run tag** `<pid>x<start time, hex>` (journal file name, part files,
+       rename-many names), so a reused pid never matches another run's files.
+     - Where flock is unsupported (ENOLCK, EOPNOTSUPP): fall back to the pid check, only for
+       journals from this host.
+     - Unix creates `.<run>-<n>.journal.new`, locks it, renames to `<run>-<n>.journal`; a
+       `.new` left unlocked is removed.
+     - `TOUCH`, `STALE` and every `touch()` go; `ask()` waits with a plain `recv`.
+  3. journal.rs:233 `line[5..]` panics on a bare `kind` line → panic at every start.
+     Fix: `strip_prefix("kind ")`.
+  4. No cell size from the terminal → `cell_px` defaults 10×20; sixel drawn pixel for pixel
+     overflows on 8×16 cells. Kitty/iTerm2 fit to cells, safe.
+  5. `sync_graphics` encodes (PNG / sixel) and writes up to 2048² on the drawing thread, again
+     on every dialog close and for every file passed in a photo directory.
+  6. `event::poll(TICK)?` / `event::read()?` (~695/698) return on EIO before the SIGHUP flag is
+     seen: `end_on_signal` and `save_session` skipped. `terminal.draw(...)?`,
+     `sync_graphics(...)?` the same.
+  7. Panic hook (main.rs) restores the terminal and prints "xdevcmd crashed" from any thread;
+     a background panic leaves the main loop running in a broken terminal; std's message
+     printed over the screen.
+  8. `ops::SAFE` process-global; a test flips it while other ops tests run in parallel.
+  9. `an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start` fails 2/5. Likely: the
+     resumed job keeps its journal until its worker is dropped, after the rename that makes
+     `b.txt` appear; the test checks "journal gone" the moment `b.txt` is there.
+
+  Close-out steps (each one commit with its tests, in this order), all done 2026-11-09:
+
+  - [x] **0. Measure the flake first** (no commit). Run that pty test 20× alone, 20× within a
+        full parallel `cargo test -p xdevcmd-tui --test pty`; record counts. Confirm cause with
+        a scratch 50 ms sleep after the rename.
+  - [x] **1. A truncated journal never crashes a start** (3). Test: every byte-prefix of a valid
+        journal and garbage lines go through `tidy` without panic; fails with `line[5..]`.
+  - [x] **2. Safe operations taken per job** (8). `Request.safe: bool`, filled from `ops::safe()`
+        by constructors at job start, kept by the worker for journal and in-place decisions.
+        `batch_rename::apply(moves, safe)`. No test writes the global. Test: two requests at once,
+        one safe one not, each writes as asked.
+  - [x] **3. Resume asks rather than decides** (1). `Existing::Resume`: skip a destination with the
+        same size and date (`compare::newer_than == Equal` + equal length), ask about others;
+        directories merge as before. `App::resume` uses it. Dialog line: "What was done is
+        skipped; a file cut short starts again; you are asked about any other file already
+        there." Core tests: identical skipped silently; a kept older different file is asked
+        about and stays on Skip (fails with Update); cross-device move with identical copy leaves
+        the source and says so. pty fixture gives `dst/a.txt` the source's date. docs/security.md
+        and guide updated; CHANGELOG.
+  - [x] **4. Liveness is a lock, not a date or bare pid** (2). As above. `hostname()` public in core
+        (rustix `system` feature on Unix; `COMPUTERNAME` on Windows). Tests: journal held by a live
+        `Journal` left alone even if pid not ours; unheld one recovered; other-host left alone
+        (fails without fix); same-pid different-tag part file not removed (fails without fix);
+        unlocked `.new` removed, held one not. pty fixtures gain `host`. docs/security.md: how a dead
+        run is told from a live one, NFS limit. Not verifiable here: Windows, NFS.
+  - [x] **5. The resume pty test waits for what it checks** (9). Wait for "copied", then wait
+        (bounded by `PATIENCE`) until the journal dir is empty. Proof: 20/20 alone and in parallel.
+  - [x] **6. Losing the terminal always cancels, cleans and saves** (6). Any error from poll, read,
+        draw or sync_graphics in the loop → `end_on_signal()`, break, save session after the loop,
+        return the error after the save. Hidden `XDEVCMD_TEST_NO_SIGNALS=1` skips registering
+        handlers; harness `Session::hang_up()` drops writer and master. Pty test: autosave off, a
+        large copy running, hang_up → process ends, session.toml holds the dir, no part file left;
+        fails without the fix.
+  - [x] **7. A background panic is logged, not the end** (7). Main thread id in a `OnceLock`. Main
+        thread: as today. Other threads: write crash log (thread name, "xdevcmd went on"), no
+        restore, no previous hook; put log path in a global that `background()` shows as "a
+        background task failed — details in <log>". Decision as pure `on_panic(main: bool) -> Steps`,
+        unit tested. Pty test via hidden `XDEVCMD_TEST_PANIC_THREAD=1`: screen still drawn, no
+        "crashed", a crash-*.log exists, q quits.
+  - [x] **8. Sixel only where the cell size is known** (4). `cell_known: bool`;
+        `graphics::effective(protocol, cell_known)` → half blocks for sixel without it. Usage /
+        start-up note says so. Unit test; pty test: terminal answering `CSI c` with 4 but not
+        `CSI 16 t` gets no `ESC P…q`; existing sixel test still draws sixel.
+  - [x] **9. Pictures prepared off the drawing thread, sent once the cursor settles** (5). Decode
+        thread also encodes (knows box size), cached in `quick_image`; `sync_graphics` writes cached
+        bytes only. Decoding starts after the cursor stays 120 ms; loop stays awake at TICK while
+        pending. Kitty: transmit once (`a=T`); under a dialog delete placement only (`d=i`); on
+        close place again (`a=p,i=<id>`); free (`d=I`) when the picture changes or pane closes.
+        iTerm2/sixel resend cached bytes. Pty tests: Kitty open, dialog, close → exactly one `a=T`
+        then `a=p`; five quick Downs over five pictures → one picture sent. Record bytes per
+        protocol for a 2048² photo and draw time before/after in Do.
+  - [x] **10. Ctrl+R, Tab, Ctrl+Space reach the program in the terminal panel.** Ctrl+Space and
+        Ctrl+@ send NUL. `send_key` mapping → pure `key_bytes(KeyEvent) -> Option<Vec<u8>>`, unit
+        tested (Ctrl+R → 0x12, Tab → 0x09, Ctrl+Space → 0x00, Alt+x → ESC x). Pty: in the panel
+        `stty raw -echo; dd bs=1 count=3 2>/dev/null | od -An -c; stty sane`, then Ctrl+R, Tab,
+        Ctrl+Space → screen shows `022  \t  \0` and xdevcmd's own Ctrl+R/Tab/Ctrl+Space didn't fire.
+  - [x] **11. Check and hand over.** fmt; clippy Linux + `x86_64-pc-windows-gnu` +
+        `aarch64-apple-darwin` (if targets install); `cargo test --workspace`; `cargo deny check`
+        (if available). ROADMAP rows in. Status → **Review**, a Do line: set aside for the owner's
+        hand tests; Round 015 starts from it.
+
 - 2026-11-09, three of the owner's finds in the terminal panel. (1) The wheel did nothing
   in Claude Code running in the panel: it now goes to the program (see the scrolling
   note above). (2) On macOS the scrollbar's thumb was dashed: Terminal.app leaves space
@@ -349,6 +549,33 @@ Order: 1, 2, 3, 4 (each its own commit with its tests), 5 only on the owner's wo
 - [ ] Not verified: how any picture looks — no terminal here draws them. Over SSH from
       iTerm2 or Ghostty to this machine, `auto` should find iTerm2 by `LC_TERMINAL` or
       Ghostty by `TERM`; Windows Terminal's sixel and the 8×16 cell guess there.
+
+- [x] Close-out (2026-11-10): fmt; clippy `--workspace --all-targets -D warnings` on
+      Linux; `cargo test --workspace` three times after the step-11 fixes: core 158 +
+      1, tui 143 unit + 150 render + 48 pty (1 ignored, the soak), all pass each time;
+      the pty suite 5 times in all, 48/48 each. Before the core test fix, one full run
+      failed on it (in Do). Windows and macOS targets could not be installed here
+      (proxy), so neither was compiled.
+- [x] Input thread: hang-up test 15/15 with it, 10/15 without; the editor-keys test
+      fails with a reader that never stops.
+- [x] No `kind`-line panic: prefix test fails with `line[5..]` put back.
+- [x] Resume never replaces a kept file: core test fails with `Update` put back.
+- [x] Liveness: other-host and same-pid tests fail with the pid-only check put back (and
+      the held-journal test with liveness by pid alone).
+- [x] Resume pty test 20/20 alone and in full parallel run (before: 2/20 and 14/20
+      failing; in Do).
+- [x] Hang-up: session saved on EIO with signals off; fails with `?` put back (the
+      process does not even end).
+- [x] Background panic leaves xdevcmd running, log written; fails with the old hook.
+- [x] Sixel without cell size: no sixel bytes; fails with the check off.
+- [x] Pictures: one `a=T` per picture, `a=p` after a dialog; five pictures passed, one
+      sent (fails without the 120 ms wait); bytes and draw times recorded in Do.
+- [x] Ctrl+R, Tab, Ctrl+Space arrive as `022 \t \0`; fails with Ctrl+Space as a space.
+- [ ] Not verified here, owner by hand: Windows journal locking (kill from Task Manager),
+      NFS, pictures on real terminals, Ctrl+Space in a real shell; Windows and macOS
+      builds (CI).
+- [x] Recorded for the owner, not changed: global Alt keys (`is_global`) that readline uses
+      (Alt+D, Alt+C, Alt+T, Alt+N, Alt+1…9, Alt+R group).
 
 ## Act
 

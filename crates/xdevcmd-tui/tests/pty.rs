@@ -120,6 +120,12 @@ impl Session {
         cmd.env("XDEVCMD_STATE", s.0.join("session.toml"));
         cmd.env("SHELL", "/bin/sh");
         cmd.env("PS1", "$ ");
+        // dash, run as root (a container, some CI), ignores an inherited PS1 and
+        // prompts `# `; the tests wait for `$ `. An interactive sh reads `$ENV` after
+        // setting its own prompt, so a file there has the last word.
+        let rc = s.0.join("shrc");
+        std::fs::write(&rc, "PS1='$ '\n").unwrap();
+        cmd.env("ENV", &rc);
         cmd.env_remove("VISUAL");
         cmd.env_remove("SSH_CONNECTION");
         cmd.env_remove("SSH_TTY");

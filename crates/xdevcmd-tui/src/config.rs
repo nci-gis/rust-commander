@@ -1302,6 +1302,31 @@ mod tests {
         assert_eq!(s.keymap.action_for(f2), Some(crate::keys::Action::Copy));
     }
 
+    /// Keymap A: the two actions that work inside the shell keep to F12's family, or a
+    /// rebinding would take a key from the program there (Ctrl+T, or a Ctrl+X prefix).
+    #[test]
+    fn the_shells_own_actions_take_only_f12s_family() {
+        for (action, key) in [
+            ("focus_terminal", "Ctrl+t"),
+            ("terminal_history", "Ctrl+x h"),
+            ("terminal_history", "Alt+h"),
+            ("focus_terminal", "F11"),
+            ("focus_terminal", "Ctrl+F12"),
+            ("terminal_history", "Alt+x h"),
+        ] {
+            let err = parse(&format!("[keys]\n{action} = [\"{key}\"]\n")).unwrap_err();
+            assert!(err.contains(action) && err.contains(key), "{err}");
+            assert!(err.contains("F12's family"), "names the rule: {err}");
+            assert!(err.contains("Alt+x F12"), "says what is allowed: {err}");
+        }
+        for key in crate::keys::F12_FAMILY {
+            let file = format!("[keys]\nfocus_terminal = [\"{key}\"]\nterminal_history = []\n");
+            parse(&file).unwrap_or_else(|e| panic!("{key}: {e}"));
+        }
+        // Any other action may still have any key.
+        parse("[keys]\nnew_terminal = [\"Ctrl+t\"]\n").unwrap();
+    }
+
     #[test]
     fn a_rejected_file_falls_back_and_says_why() {
         let dir = std::env::temp_dir().join(format!("xdevcmd-cfg-{}", std::process::id()));

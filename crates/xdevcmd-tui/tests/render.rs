@@ -1293,6 +1293,16 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
         "{help}"
     );
     assert!(help.contains("in the shell: Alt+x first"), "{help}");
+    // Resizing's Alt+R group cannot be opened after Alt+X: F1 names the key that works.
+    let resize = help
+        .lines()
+        .find(|l| l.contains("resize_left"))
+        .unwrap_or_default();
+    assert!(
+        resize.contains("in the shell: Alt+x Alt+Shift+Left"),
+        "{resize}"
+    );
+    assert!(!resize.contains("Alt+x first"), "{resize}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -3744,9 +3754,13 @@ fn the_key_to_leave_the_terminal_follows_a_rebind_and_hints_are_not_repeated() {
     let (a, b) = fixture();
     let cfg_dir = a.parent().unwrap().join("cfg-term");
     fs::create_dir_all(&cfg_dir).unwrap();
-    let cfg = write_config(&cfg_dir, "[keys]\nfocus_terminal = [\"F11\"]\n");
-    let s = shot_with(&cfg, "F11", &a, &b);
-    assert!(status(&s).contains("F11 back to files"), "{s}");
+    // Within F12's family, the only keys `focus_terminal` may have (keymap A).
+    let cfg = write_config(
+        &cfg_dir,
+        "[keys]\nfocus_terminal = [\"Shift+F12\"]\nterminal_history = [\"Alt+x F12\"]\n",
+    );
+    let s = shot_with(&cfg, "S-F12", &a, &b);
+    assert!(status(&s).contains("Shift+F12 back to files"), "{s}");
     // F9 is on the key bar; the menu bar does not say it again, and there is no
     // startup hint repeating F1 / F10 / F12 in the status line.
     let s = shot_keys(SIZE, "", &a, &b);

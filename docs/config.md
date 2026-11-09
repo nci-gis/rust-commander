@@ -187,6 +187,11 @@ Two actions given the same key here is an error, and so is a key that both runs 
 action and starts a group. Taking a key that xdevcmd uses by default is fine: that action
 loses it.
 
+`focus_terminal` and `terminal_history` work inside the shell, where xdevcmd takes only
+F12's family and every other key is the program's. They take only `F12`, `Shift+F12`,
+`Alt+x F12` and `Alt+x Shift+F12`; any other key for them (`Ctrl+t`, `Ctrl+x h`) is an
+error that says so, since it would take that key from the shell.
+
 ## Bookmarks
 
 ```toml

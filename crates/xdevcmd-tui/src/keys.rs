@@ -852,6 +852,10 @@ impl Action {
 
 pub type Chord = (KeyCode, KeyModifiers);
 
+/// Every key an `is_global` action may have (keymap A): F12 and Shift+F12, and Alt+X
+/// then either, for terminals that cannot send them.
+pub const F12_FAMILY: [&str; 4] = ["F12", "Shift+F12", "Alt+x F12", "Alt+x Shift+F12"];
+
 /// A binding: one key, or two in a row — `"Alt+r Left"`, Alt+R and then Left.
 /// Two-key bindings that start with the same key form a group: after that key, any
 /// of the group's second keys may be pressed again and again (see `App::on_key`).
@@ -995,6 +999,16 @@ impl Keymap {
             self.seqs.retain(|_, a| *a != action);
             for k in keys {
                 let parsed = parse_binding(k).map_err(|e| format!("[keys] {name}: {e}"))?;
+                // Keymap A: the actions xdevcmd takes inside the shell keep to F12's
+                // family, or a rebinding would take a key from the program there.
+                if action.is_global() && !F12_FAMILY.iter().any(|f| parse_binding(f) == Ok(parsed))
+                {
+                    return Err(format!(
+                        "[keys] {name} = \"{k}\": works inside the shell, where xdevcmd takes \
+                         only F12's family and every other key is the program's; use {}",
+                        F12_FAMILY.join(", ")
+                    ));
+                }
                 let clash = match parsed {
                     Keys::One(c) => one.insert(c, (action, name.clone())),
                     Keys::Two(p, c) => two.insert((p, c), (action, name.clone())),
@@ -1507,11 +1521,7 @@ mod tests {
         // Every key of theirs is F12 or Shift+F12, or Alt+X then one of those.
         for b in BINDINGS.iter().filter(|b| b.action.is_global()) {
             for k in km.keys_for(b.action) {
-                assert!(
-                    ["F12", "Shift+F12", "Alt+x F12", "Alt+x Shift+F12"].contains(&k.as_str()),
-                    "{} has {k}",
-                    b.name
-                );
+                assert!(F12_FAMILY.contains(&k.as_str()), "{} has {k}", b.name);
             }
         }
         assert_eq!(km.shell_prefix(), Some(parse_key("Alt+x").unwrap()));

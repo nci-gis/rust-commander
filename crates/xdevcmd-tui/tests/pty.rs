@@ -498,6 +498,50 @@ fn quick_view_draws_a_kitty_picture_once_and_removes_it_under_a_dialog() {
     x.quit();
 }
 
+/// Ended while a dialog covers a Kitty picture (kept by the terminal, not placed): the
+/// picture is freed on the way out, not left in the terminal's memory.
+#[test]
+fn a_kitty_picture_kept_under_a_dialog_is_freed_at_the_end() {
+    let s = Scratch::new("kitty-end");
+    let pic = xdevcmd_core::image::Picture {
+        width: 8,
+        height: 8,
+        source: (8, 8),
+        rgb: vec![[200, 30, 30]; 64],
+    };
+    std::fs::write(
+        s.left().join("a.png"),
+        xdevcmd_core::image::to_png(&pic).unwrap(),
+    )
+    .unwrap();
+    let cfg = s.file("kitty.toml", "[viewer]\nimages = \"kitty\"\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("a ");
+    x.send(DOWN);
+    x.send(b"\x1bq"); // quick view
+    wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
+    x.send(b"\x1bOP"); // F1: help over it
+    wait_bytes(&x, "\x1b_Ga=d,d=i,", 1);
+    // Ended by a polite kill with the dialog still open.
+    let pid = x.child.process_id().unwrap();
+    std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .unwrap();
+    let start = Instant::now();
+    while x.child.try_wait().unwrap().is_none() {
+        assert!(start.elapsed() < PATIENCE, "still running after SIGTERM");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    wait_bytes(&x, "\x1b_Ga=d,d=I,", 1);
+}
+
 #[test]
 fn going_quickly_past_pictures_sends_only_the_one_stopped_on() {
     let s = Scratch::new("kitty-run");
@@ -526,8 +570,9 @@ fn going_quickly_past_pictures_sends_only_the_one_stopped_on() {
     x.send(DOWN);
     x.send(b"\x1bq"); // quick view on a.png
     wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
-    // Five Downs a key-repeat apart (60 ms, under the 120 ms a picture must be stayed
-    // on): past b, c, d, e to f. Without the wait each was decoded and sent.
+    // Five Downs a key-repeat apart (`send` waits 60 ms after each, under the 120 ms a
+    // picture must be stayed on): past b, c, d, e to f. Without the wait each was
+    // decoded and sent.
     for _ in 0..5 {
         x.send(DOWN);
     }

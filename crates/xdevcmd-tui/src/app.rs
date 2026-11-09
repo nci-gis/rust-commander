@@ -885,7 +885,11 @@ impl App {
                 break;
             }
         }
-        if self.graphic_shown.take().is_some() && self.graphics == crate::graphics::Protocol::Kitty
+        // Shown, or kept by the terminal under a dialog: freed, or the terminal holds
+        // the picture's data after xdevcmd is gone.
+        let shown = self.graphic_shown.take().is_some();
+        if (shown || self.kitty_held.take().is_some())
+            && self.graphics == crate::graphics::Protocol::Kitty
         {
             let _ = terminal
                 .backend_mut()
@@ -5667,6 +5671,16 @@ impl App {
     /// picture is cells: the screen is repainted over it, and it is written again.
     fn sync_graphics(&mut self, terminal: &mut Term) -> Result<()> {
         use crate::graphics::{kitty_delete, kitty_place, kitty_unplace, Protocol};
+        // Kept under a dialog, and the dialog has closed with nothing to show (quick
+        // view closed meanwhile): freed, not left in the terminal.
+        if self.graphic_want.is_none()
+            && self.graphic_shown.is_none()
+            && self.modal.is_none()
+            && self.kitty_held.take().is_some()
+            && self.graphics == Protocol::Kitty
+        {
+            terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
+        }
         if self.graphic_want == self.graphic_shown {
             return Ok(());
         }

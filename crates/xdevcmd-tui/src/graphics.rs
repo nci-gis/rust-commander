@@ -219,6 +219,25 @@ pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>, probe: &Probe
     Protocol::Blocks
 }
 
+/// The protocol actually used. Sixel is drawn pixel for pixel, so it needs the cell's
+/// real size: with only a guess, a picture made for 10x20 cells runs over its box on
+/// 8x16 ones, across the pane's border and the panel below. Without the size, half
+/// blocks. Kitty and iTerm2 fit the picture to the cells they are given, and are safe.
+pub fn effective(p: Protocol, cell_known: bool) -> Protocol {
+    if p == Protocol::Sixel && !cell_known {
+        Protocol::Blocks
+    } else {
+        p
+    }
+}
+
+/// Whether the terminal draws sixel on a fixed cell, so its size is known without
+/// asking: Windows Terminal maps sixel through a virtual 10x20 cell (VT340's), whatever
+/// the font, which is xdevcmd's guess. Its tabs carry `WT_SESSION`.
+pub fn fixed_sixel_cell(var: impl Fn(&str) -> Option<String>) -> bool {
+    var("WT_SESSION").is_some_and(|v| !v.is_empty())
+}
+
 /// The bytes that draw `pic` with its top-left corner at the cursor, over `cols` x `rows`
 /// cells. `id` names a Kitty picture so it can be removed. The cursor is left where it
 /// was.
@@ -303,6 +322,18 @@ mod tests {
 
     fn detect_env(setting: &str, var: impl Fn(&str) -> Option<String>) -> Protocol {
         detect(setting, var, &Probe::default())
+    }
+
+    #[test]
+    fn sixel_only_where_the_cell_size_is_known() {
+        assert_eq!(effective(Protocol::Sixel, false), Protocol::Blocks);
+        assert_eq!(effective(Protocol::Sixel, true), Protocol::Sixel);
+        for p in [Protocol::Kitty, Protocol::Iterm2, Protocol::Blocks] {
+            assert_eq!(effective(p, false), p);
+        }
+        assert!(fixed_sixel_cell(env(&[("WT_SESSION", "x")])));
+        assert!(!fixed_sixel_cell(env(&[("WT_SESSION", "")])));
+        assert!(!fixed_sixel_cell(env(&[])));
     }
 
     #[test]

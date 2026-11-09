@@ -15,7 +15,8 @@ that heading and starts a new, empty one here. -->
   graphics protocol (kitty, Ghostty), iTerm2's inline images (iTerm2, WezTerm) and sixel
   (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and
   tmux included. `[viewer] images` (also in Settings) chooses: auto, kitty, iterm2,
-  sixel or blocks.
+  sixel or blocks. Sixel is drawn pixel for pixel, so only where the terminal gives its
+  cell size (Windows Terminal's is fixed); elsewhere half blocks, and Usage says so.
 - **Safe operations** (`[general] safe_operations`, on by default): every copy writes
   under a hidden temporary name and renames when complete, so no file is ever left cut
   short under its real name, whatever ends xdevcmd; a journal lets the next start clean

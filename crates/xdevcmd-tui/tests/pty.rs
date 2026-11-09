@@ -511,11 +511,13 @@ fn quick_view_draws_iterm2_and_sixel_pictures_and_repaints_them_away() {
         .unwrap();
         let cfg = s.file("p.toml", &format!("[viewer]\nimages = \"{name}\"\n"));
         let cfg = cfg.to_string_lossy().into_owned();
-        let mut x = Session::start_env(
+        // Sixel is drawn only where the terminal gives its cell size: this one does.
+        let mut x = Session::start_answering(
             &s,
             None,
             &[s.left(), s.right()],
             &[("XDEVCMD_CONFIG", &cfg)],
+            Some(b"\x1b[6;20;10t\x1b[?61;4;6;22c"),
         );
         x.wait_for("a ");
         x.send(DOWN);
@@ -563,6 +565,47 @@ fn a_terminal_that_answers_sixel_gets_sixel_with_nothing_in_the_environment() {
     x.send(DOWN);
     x.send(b"\x1bq");
     wait_bytes(&x, "\x1bP9;1;0q", 1);
+    x.quit();
+}
+
+#[test]
+fn a_terminal_that_answers_sixel_but_not_its_cell_size_gets_half_blocks() {
+    // Sixel drawn for a guessed cell runs over its box where the cells are smaller.
+    let s = Scratch::new("probe-nocell");
+    let pic = xdevcmd_core::image::Picture {
+        width: 8,
+        height: 8,
+        source: (8, 8),
+        rgb: vec![[30, 30, 200]; 64],
+    };
+    std::fs::write(
+        s.left().join("a.png"),
+        xdevcmd_core::image::to_png(&pic).unwrap(),
+    )
+    .unwrap();
+    let mut x = Session::start_answering(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[
+            ("TERM_PROGRAM", ""),
+            ("WT_SESSION", ""),
+            ("KITTY_WINDOW_ID", ""),
+            ("LC_TERMINAL", ""),
+        ],
+        Some(b"\x1b[?61;4;6;22c"),
+    );
+    x.wait_for("a ");
+    x.send(DOWN);
+    x.send(b"\x1bq");
+    // Decoded and drawn (in half blocks: the title says so either way).
+    x.wait_for("image 8");
+    std::thread::sleep(Duration::from_millis(300));
+    let raw = String::from_utf8_lossy(&x.raw.lock().unwrap()).into_owned();
+    assert!(
+        !raw.contains("\x1bP9;1;0q"),
+        "no sixel without the cell size"
+    );
     x.quit();
 }
 

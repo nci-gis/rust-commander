@@ -269,9 +269,13 @@ pub struct App {
     /// A big photo takes a moment to decode: never on the drawing thread.
     decoding: Option<Decoding>,
     /// How quick view draws pictures: the terminal's own protocol, or half blocks.
+    /// [`crate::graphics::effective`] of what was found, `graphics_found`.
     graphics: crate::graphics::Protocol,
+    graphics_found: crate::graphics::Protocol,
     /// A terminal cell in pixels, for decoding pictures at the terminal's resolution.
     cell_px: (u16, u16),
+    /// Whether `cell_px` is the terminal's word, not a guess: sixel needs it.
+    cell_known: bool,
     /// What the terminal answered at start-up about pictures (main.rs asks).
     pub probe: crate::graphics::Probe,
     /// Set by SIGHUP or SIGTERM: the terminal is gone, or someone asked us to end.
@@ -391,6 +395,8 @@ impl App {
             quick_image: None,
             decoding: None,
             graphics: crate::graphics::Protocol::Blocks,
+            graphics_found: crate::graphics::Protocol::Blocks,
+            cell_known: false,
             // VT340's cell, which Windows Terminal and xterm also use for sixel.
             cell_px: (10, 20),
             probe: crate::graphics::Probe::default(),
@@ -632,20 +638,25 @@ impl App {
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
         self.watcher = crate::watch::Watcher::new();
-        self.graphics = crate::graphics::detect(
+        self.graphics_found = crate::graphics::detect(
             &self.settings.config.viewer.images,
             |k| std::env::var(k).ok(),
             &self.probe,
         );
+        self.cell_known = crate::graphics::fixed_sixel_cell(|k| std::env::var(k).ok());
         if let Some((h, w)) = self.probe.cell {
             self.cell_px = (w, h);
+            self.cell_known = true;
         }
         self.measure_cells(terminal);
-        let pictures = match self.graphics {
-            crate::graphics::Protocol::Kitty => "Kitty",
-            crate::graphics::Protocol::Iterm2 => "iTerm2",
-            crate::graphics::Protocol::Sixel => "sixel",
-            crate::graphics::Protocol::Blocks => "half blocks",
+        let pictures = match (self.graphics, self.graphics_found) {
+            (crate::graphics::Protocol::Kitty, _) => "Kitty",
+            (crate::graphics::Protocol::Iterm2, _) => "iTerm2",
+            (crate::graphics::Protocol::Sixel, _) => "sixel",
+            (_, crate::graphics::Protocol::Sixel) => {
+                "half blocks (sixel needs the cell size, which the terminal did not give)"
+            }
+            (crate::graphics::Protocol::Blocks, _) => "half blocks",
         };
         let name = crate::graphics::terminal_name(|k| std::env::var(k).ok(), &self.probe);
         self.usage.terminal = format!("{name} \u{b7} pictures: {pictures}");
@@ -5437,8 +5448,10 @@ impl App {
             let (c, p) = (w.columns_rows, w.pixels);
             if c.width > 0 && c.height > 0 && p.width >= c.width && p.height >= c.height {
                 self.cell_px = (p.width / c.width, p.height / c.height);
+                self.cell_known = true;
             }
         }
+        self.graphics = crate::graphics::effective(self.graphics_found, self.cell_known);
     }
 
     /// After a frame: put the picture it wants on screen in the terminal's own protocol,
@@ -5749,11 +5762,12 @@ impl App {
         crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
         xdevcmd_core::ops::set_safe(s.config.general.safe_operations);
         if self.interactive {
-            self.graphics = crate::graphics::detect(
+            self.graphics_found = crate::graphics::detect(
                 &s.config.viewer.images,
                 |k| std::env::var(k).ok(),
                 &self.probe,
             );
+            self.graphics = crate::graphics::effective(self.graphics_found, self.cell_known);
         }
         self.settings = s;
         self.config_outcome = Outcome::Loaded(path.clone());

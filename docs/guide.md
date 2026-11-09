@@ -146,6 +146,11 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **Alt+N** opens a new terminal tab. **Alt+S** / **Alt+D** split it.
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
+- The wheel scrolls back through a shell's history. A full-screen program gets the
+  wheel instead: as the mouse if it asked for it (Claude Code, vim, htop), otherwise as
+  arrow keys (less, man).
+- Typing `xdevcmd` in the panel does not start a second one inside the first: F12 goes
+  back to the one running.
 - Want your shell to follow you when you quit xdevcmd? See [shell.md](shell.md).
 
 ## Mouse

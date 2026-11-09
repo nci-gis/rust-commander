@@ -1891,13 +1891,9 @@ impl App {
                 }
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if Some(id) == self.term_id => {
-                let d = if m.kind == MouseEventKind::ScrollUp {
-                    3
-                } else {
-                    -3
-                };
+                let up = m.kind == MouseEventKind::ScrollUp;
                 if let Some(p) = self.panel() {
-                    p.scroll_at(x, y, d);
+                    p.wheel_at(x, y, up);
                 }
             }
             MouseEventKind::Down(MouseButton::Left)

@@ -37,6 +37,9 @@ mod usermenu;
 mod viewer;
 mod watch;
 
+/// Set in the terminal panel's shells to the pid of the xdevcmd they belong to.
+pub(crate) const PANEL_VAR: &str = "XDEVCMD_PANEL";
+
 use std::io::stdout;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -368,6 +371,15 @@ fn main() -> Result<()> {
         return screenshot(app, w, h, &cli.keys);
     }
 
+    if let Some(pid) = inside_own_panel() {
+        eprintln!(
+            "xdevcmd is already running (process {pid}) and this is its terminal panel: \
+             F12 goes back to it. (To start one anyway: unset {})",
+            PANEL_VAR
+        );
+        std::process::exit(1);
+    }
+
     // init() for what it sets up (raw mode, the alternate screen, a panic hook that
     // undoes them); then our own Terminal, whose backend stays quiet when idle.
     drop(ratatui::init());
@@ -458,6 +470,22 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     }
     emit(&out);
     Ok(())
+}
+
+/// The xdevcmd whose terminal panel this is, if it still runs. A shell that outlived
+/// it (a tmux session started in the panel, attached again later) does not count. Where
+/// the system cannot be asked, the variable is taken at its word.
+fn inside_own_panel() -> Option<u32> {
+    let pid: u32 = std::env::var(PANEL_VAR).ok()?.trim().parse().ok()?;
+    if pid == std::process::id() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        let p = rustix::process::Pid::from_raw(i32::try_from(pid).ok()?)?;
+        rustix::process::test_kill_process(p).ok()?;
+    }
+    Some(pid)
 }
 
 /// Write to stdout. A reader that stops early (`xdevcmd --screenshot | head`) ends xdevcmd

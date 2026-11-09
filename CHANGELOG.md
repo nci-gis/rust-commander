@@ -34,8 +34,13 @@ that heading and starts a new, empty one here. -->
 - **`--print-completions bash|zsh|fish|powershell` and `--print-man`**: tab completion
   and a manual page, for packages to install.
 - About links the Releases page (xdevcmd never looks for updates itself).
+- **The wheel reaches full-screen programs in the terminal panel**: to a program that
+  asked for the mouse (Claude Code, vim, htop) as the mouse; as arrow keys to one that
+  did not (less, man). In a plain shell it still scrolls the history.
 
 ### Changed
+- **xdevcmd will not start inside its own terminal panel**: it says it is already
+  running and that F12 goes back to it.
 - **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and
   clean up, and the session is saved. Before, xdevcmd was killed on the spot.
 - **F10 with jobs running waits until they have cleaned up**, and asks again if one is
@@ -45,6 +50,8 @@ that heading and starts a new, empty one here. -->
 - **A click on a directory in the title of a pane split off below (Alt+D) did nothing**:
   that title sits on the boundary between the panes, and the click started a drag of
   the boundary instead. The names now take the click; the rest of the row still drags.
+- **The scrollbar looked dashed in macOS Terminal.app**, which leaves space between
+  lines; the bar is now solid there too.
 
 ## [0.2.1] - 2026-11-07
 

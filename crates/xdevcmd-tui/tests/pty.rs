@@ -123,6 +123,8 @@ impl Session {
         cmd.env_remove("VISUAL");
         cmd.env_remove("SSH_CONNECTION");
         cmd.env_remove("SSH_TTY");
+        // Run from xdevcmd's own terminal panel, the suite would be refused.
+        cmd.env_remove("XDEVCMD_PANEL");
         cmd.env("DISPLAY", ":0");
         match editor {
             Some(e) => cmd.env("EDITOR", e),
@@ -842,6 +844,59 @@ fn the_wheel_scrolls_back_through_shell_history() {
     xdevcmd.send(b"x");
     xdevcmd.wait_gone("lines back");
     xdevcmd.send(b"\x15"); // Ctrl+U clears the stray x
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Runs `setup` in the shell, then reads one line and shows it with `cat -v`, so what a
+/// wheel turn sent the program is on screen. Returns what it showed.
+fn wheel_into_program(tag: &str, setup: &str, reset: &str) -> String {
+    let s = Scratch::new(tag);
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    // "rea" "dy" apart, or the typed command itself would say it is ready.
+    let cmd = format!(
+        "stty -echo; printf '{setup}'; printf '%s%s\\n' rea dy; read -r l; \
+         printf '{reset}'; stty echo; echo \"got:$l\" | cat -v\r"
+    );
+    xdevcmd.send(cmd.as_bytes());
+    xdevcmd.wait_for("ready");
+    let (_, bar_y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.mouse(64, 10, bar_y + 3, false);
+    xdevcmd.send(b"\r");
+    xdevcmd.wait_for("got:^[");
+    let screen = xdevcmd.screen();
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+    screen
+}
+
+#[test]
+fn the_wheel_goes_to_a_program_that_asked_for_the_mouse() {
+    // As Claude Code, vim and htop ask: button presses, reported the SGR way.
+    let screen = wheel_into_program(
+        "wheel-mouse",
+        "\\033[?1000h\\033[?1006h",
+        "\\033[?1000l\\033[?1006l",
+    );
+    assert!(screen.contains("got:^[[<64;"), "{screen}");
+}
+
+#[test]
+fn the_wheel_is_arrow_keys_to_a_full_screen_program_without_the_mouse() {
+    // As less and man run: the other screen, no mouse.
+    let screen = wheel_into_program("wheel-arrows", "\\033[?1049h", "\\033[?1049l");
+    assert!(screen.contains("got:^[[A^[[A^[[A"), "{screen}");
+}
+
+#[test]
+fn xdevcmd_will_not_start_inside_its_own_terminal_panel() {
+    let s = Scratch::new("nested");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    let cmd = format!("'{}'\r", env!("CARGO_BIN_EXE_xdevcmd"));
+    xdevcmd.send(cmd.as_bytes());
+    xdevcmd.wait_for("already running");
     xdevcmd.send(F12);
     xdevcmd.quit();
 }

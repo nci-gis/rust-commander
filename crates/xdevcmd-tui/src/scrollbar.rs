@@ -87,8 +87,14 @@ pub fn draw(
     let (start, len) = thumb(track.height, total, visible, offset)?;
     for row in start..start + len {
         if let Some(cell) = buf.cell_mut(Position::new(track.x, track.y + row)) {
-            // A full block: a line-thin thumb on a line-thin border was easy to miss.
-            cell.set_symbol("\u{2588}").set_style(style);
+            // A full block: a line-thin thumb on a line-thin border was easy to miss. With
+            // the background the same colour, so a terminal that leaves space between
+            // lines (Terminal.app) still draws one bar, not a dashed one.
+            let fill = match style.fg {
+                Some(c) => style.bg(c),
+                None => style,
+            };
+            cell.set_symbol("\u{2588}").set_style(fill);
         }
     }
     Some(Bar {

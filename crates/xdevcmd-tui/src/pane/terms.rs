@@ -331,18 +331,18 @@ impl TermPanel {
         }
     }
 
-    pub fn scroll_at(&mut self, x: u16, y: u16, delta: isize) {
+    /// The wheel at (`x`, `y`): to the shell under it, which hands it on to its program
+    /// or scrolls its history ([`TermPane::wheel`]).
+    pub fn wheel_at(&mut self, x: u16, y: u16, up: bool) {
         let p = Position::new(x, y);
-        let Some(id) = self
-            .rects
-            .iter()
-            .find(|(_, r)| r.contains(p))
-            .map(|(id, _)| *id)
-        else {
+        let Some((id, r)) = self.rects.iter().find(|(_, r)| r.contains(p)).copied() else {
             return;
         };
+        // Counted from 1 inside the shell's border, as a terminal reports it.
+        let col = x.saturating_sub(r.x).max(1);
+        let row = y.saturating_sub(r.y).max(1);
         if let Some(t) = self.tabs[self.active].terms.get(&id) {
-            t.scroll_by(delta);
+            t.wheel(col, row, up);
         }
     }
 

@@ -182,6 +182,8 @@ impl TermPane {
         // vt100 understands xterm sequences; without this, programs probe for something
         // else and draw garbage into the pane.
         cmd.env("TERM", "xterm-256color");
+        // Who this shell belongs to: xdevcmd started in it would run inside itself.
+        cmd.env(crate::PANEL_VAR, std::process::id().to_string());
 
         let slave = pair.slave;
         let master = pair.master;
@@ -343,6 +345,65 @@ impl TermPane {
     /// For the tab bar: what it is doing, else what it is.
     pub fn tab_label(&self) -> String {
         self.activity().unwrap_or_else(|| self.label.clone())
+    }
+
+    /// The wheel over this shell, `col` and `row` counted from 1 inside its border. As a
+    /// terminal does it: to the program, as a mouse report, when it asked for the mouse
+    /// (Claude Code, vim, htop); as arrow keys when a full-screen program did not (less,
+    /// man); otherwise back through the history.
+    pub fn wheel(&self, col: u16, row: u16, up: bool) {
+        use vt100::{MouseProtocolEncoding as Enc, MouseProtocolMode as Mode};
+        let Ok(p) = self.parser.read() else { return };
+        let screen = p.screen();
+        let (mode, enc) = (
+            screen.mouse_protocol_mode(),
+            screen.mouse_protocol_encoding(),
+        );
+        let (alt, app_cursor) = (screen.alternate_screen(), screen.application_cursor());
+        drop(p);
+        if mode != Mode::None {
+            // Wheel up and down are buttons 4 and 5: 64 and 65 in the report.
+            let button: u32 = if up { 64 } else { 65 };
+            let bytes = match enc {
+                Enc::Sgr => format!("\x1b[<{button};{col};{row}M").into_bytes(),
+                Enc::Utf8 => {
+                    let mut out = b"\x1b[M".to_vec();
+                    for v in [button, u32::from(col), u32::from(row)] {
+                        let Some(c) = char::from_u32(32 + v) else {
+                            return;
+                        };
+                        let mut b = [0u8; 4];
+                        out.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
+                    }
+                    out
+                }
+                Enc::Default => {
+                    // One byte each: a position past 223 cannot be said.
+                    if col > 223 || row > 223 {
+                        return;
+                    }
+                    vec![
+                        0x1b,
+                        b'[',
+                        b'M',
+                        (32 + button) as u8,
+                        (32 + col) as u8,
+                        (32 + row) as u8,
+                    ]
+                }
+            };
+            self.send(bytes);
+        } else if alt {
+            let key: &[u8] = match (up, app_cursor) {
+                (true, true) => b"\x1bOA",
+                (true, false) => b"\x1b[A",
+                (false, true) => b"\x1bOB",
+                (false, false) => b"\x1b[B",
+            };
+            self.send(key.repeat(3));
+        } else {
+            self.scroll_by(if up { 3 } else { -3 });
+        }
     }
 
     /// Look back through history; positive goes further back. vt100 clamps to what it

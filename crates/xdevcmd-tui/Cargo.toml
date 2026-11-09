@@ -49,7 +49,7 @@ icy_sixel = "0.7"
 # Asking the terminal what it can draw (graphics.rs): a poll with a timeout on stdin,
 # which crossterm has not started reading yet. Already in the tree through crossterm.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["event", "stdio"] }
+rustix = { version = "1", features = ["event", "process", "stdio"] }
 # SIGHUP and SIGTERM (the terminal closed, SSH lost): stop jobs, clean up, save the
 # session before going. Already in the tree through crossterm.
 signal-hook = "0.3"

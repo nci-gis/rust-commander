@@ -50,6 +50,8 @@ fn isolated() -> Command {
     // sets the variable itself.
     c.env_remove("SSH_CONNECTION");
     c.env_remove("SSH_TTY");
+    // Run from xdevcmd's own terminal panel, the suite would be refused.
+    c.env_remove("XDEVCMD_PANEL");
     c.env("DISPLAY", ":0");
     c
 }

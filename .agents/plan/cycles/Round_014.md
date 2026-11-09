@@ -133,10 +133,13 @@ The owner's notes on the terminal panel (2026-11-09), to weigh; not started:
 
 - Scrolling: the wheel over a shell scrolls its history (tested,
   `the_wheel_scrolls_back_through_shell_history`), 3 lines a notch; there is no key for
-  it (PgUp goes to the shell), and a full-screen program (less, vim, htop) has no
-  history, so the wheel does nothing there. Proposed: Shift+PgUp/PgDn/Home/End scroll
-  the history; in a full-screen program the wheel sends arrow keys (what terminals call
-  alternate scroll), or mouse reports when the program asks for them.
+  it (PgUp goes to the shell). **Done 2026-11-09** for full-screen programs, after the
+  owner found Claude Code in the panel would not scroll: the wheel goes to the program
+  as a mouse report when it asked for the mouse (SGR, UTF-8 or X10, as it asked), as
+  three arrow keys on the other screen without the mouse (less, man; application-cursor
+  aware), otherwise history. Tests: `the_wheel_goes_to_a_program_that_asked_for_the_mouse`,
+  `the_wheel_is_arrow_keys_to_a_full_screen_program_without_the_mouse`. Still proposed:
+  Shift+PgUp/PgDn/Home/End for the history.
 - Copying: no selection in the panel at all, and xdevcmd holding the mouse keeps the
   outer terminal's own selection away (Shift-drag gets it in Windows Terminal, GNOME,
   kitty; Option-drag in iTerm2 — but across both panes, not just the shell). Proposed:
@@ -150,7 +153,19 @@ The owner's notes on the terminal panel (2026-11-09), to weigh; not started:
 - Copy all / save the history to a file from a menu on the panel; a PuTTY-like log of
   everything a shell prints (low priority, the owner said).
 
-## Do## Do
+## Do
+
+- 2026-11-09, three of the owner's finds in the terminal panel. (1) The wheel did nothing
+  in Claude Code running in the panel: it now goes to the program (see the scrolling
+  note above). (2) On macOS the scrollbar's thumb was dashed: Terminal.app leaves space
+  between lines, and a █ glyph does not fill it. The thumb's background is now its
+  colour too, so the cell is filled either way; still █, so text screenshots and their
+  tests see it. (3) xdevcmd started from its own panel ran inside itself. Its shells now
+  carry `XDEVCMD_PANEL=<pid>`; a start that finds it, with that process alive (Unix asks
+  the system; Windows takes the variable at its word), says "already running … F12 goes
+  back to it" and exits 1. A shell that outlived its xdevcmd (tmux started in the panel)
+  is not refused; `unset XDEVCMD_PANEL` overrides. `--screenshot` and the print options
+  are not refused. Test: `xdevcmd_will_not_start_inside_its_own_terminal_panel`.
 
 - 2026-11-08, a bug the owner found in 0.2.1 while using it: in a pane split off below
   (Alt+D), clicking a directory in the title's path did nothing. That title sits on the

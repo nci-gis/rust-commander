@@ -2136,6 +2136,38 @@ fn f2_saves_the_history_owner_only_and_asks_before_replacing() {
     xdevcmd.quit();
 }
 
+/// A shell in a directory whose name is not UTF-8: Save as… cannot offer that name as
+/// text, so it offers the file pane's directory instead of a mangled one.
+#[test]
+fn save_as_from_a_shell_in_a_non_utf8_directory_offers_the_panes() {
+    let s = Scratch::new("save-non-utf8");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    // Some filesystems (APFS) refuse such a name; then the shell stays where it is and
+    // the pane's directory is offered anyway.
+    xdevcmd
+        .send(b"mkdir \"$(printf 'odd\\377')\" && cd \"$(printf 'odd\\377')\"; echo IN_$((1+1))\r");
+    xdevcmd.wait_for("IN_2");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(F2);
+    xdevcmd.wait_for("Save as");
+    let want = format!("left{}xdevcmd-history-", std::path::MAIN_SEPARATOR);
+    xdevcmd.wait_for(&want);
+    assert!(
+        !xdevcmd.screen().contains('\u{fffd}'),
+        "{}",
+        xdevcmd.screen()
+    );
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("Save as");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 /// F2 on a file in the viewer is an ordinary copy under the name given, and the viewer
 /// comes back afterwards.
 #[test]

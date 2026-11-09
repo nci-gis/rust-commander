@@ -1527,6 +1527,13 @@ impl App {
                     .unwrap_or_default(),
             )
         };
+        // The prefill is text: a directory whose name is not UTF-8 would come back as
+        // another, with U+FFFD in it. The pane's directory is offered instead.
+        let dir = if dir.to_str().is_some() {
+            dir
+        } else {
+            self.focused_cwd()
+        };
         let what = if v.doc.in_memory {
             "the history, readable by you only"
         } else {

@@ -1925,7 +1925,12 @@ mod tests {
         let root = tmp("safe-cancel");
         let dst = root.join("dst");
         fs::create_dir_all(&dst).unwrap();
-        fs::write(root.join("big"), vec![1u8; 8 << 20]).unwrap();
+        // Big enough that the cancel lands before the copy ends even on a loaded machine:
+        // with 8 MiB the rest was sometimes copied before the test thread ran, and a
+        // copy that completes is rightly kept. Sparse, so it costs nothing to make.
+        let big = File::create(root.join("big")).unwrap();
+        big.set_len(1 << 30).unwrap();
+        drop(big);
         let mut req = Request::copy(vec![root.join("big")], dst.clone());
         req.safe = true;
         let h = start(req);
@@ -2206,7 +2211,8 @@ mod tests {
         let dst = root.join("dst");
         fs::create_dir_all(&dst).unwrap();
         let big = root.join("big.bin");
-        fs::write(&big, vec![7u8; 24 * 1024 * 1024]).unwrap();
+        // Sparse and large, so the cancel lands mid-copy even on a loaded machine.
+        File::create(&big).unwrap().set_len(1 << 30).unwrap();
 
         let h = start(Request::copy(vec![big], dst.clone()));
         let mut cancelled_at_progress = false;

@@ -150,7 +150,8 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
   key is the program's (readline's Alt+D, emacs' F-keys, mc's F10).
 - **Alt+N** opens a new terminal tab. Inside the shell, press **Alt+X** first:
   **Alt+X Alt+S** / **Alt+X Alt+D** split it, **Alt+X Alt+W** closes it, **Alt+X Alt+1**
-  goes to tab 1. Anything else after Alt+X goes to the program.
+  goes to tab 1. Anything else after Alt+X, Enter too, goes to the program with it;
+  Esc cancels.
 - **Shift+F12** opens the shell's history in the viewer, at its end: read it, search it
   with `/`, drag over lines and press `y` to copy them, **Esc** to go back. It stays in
   memory; nothing of it is written to disk. **Alt+X F12** does the same where Shift+F12

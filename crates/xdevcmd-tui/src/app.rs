@@ -1751,12 +1751,14 @@ impl App {
         let Some(first) = self.group.take() else {
             return false;
         };
+        // Inside the shell only Esc cancels: Enter is the program's like any other key
+        // xdevcmd does not use there, so it goes on after the prefix.
+        if self.focus_is_term() && k.code != KeyCode::Esc {
+            return self.in_shell_prefix(first, k);
+        }
         if matches!(k.code, KeyCode::Enter | KeyCode::Esc) {
             self.status.clear();
             return true;
-        }
-        if self.focus_is_term() {
-            return self.in_shell_prefix(first, k);
         }
         let Some(a) = self.settings.keymap.in_group(first, k) else {
             self.status.clear();

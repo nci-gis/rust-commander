@@ -1932,6 +1932,37 @@ fn alt_x_is_the_prefix_inside_the_shell_and_gives_back_what_it_does_not_use() {
     xdevcmd.quit();
 }
 
+/// Inside the shell only Esc cancels the prefix. Enter after Alt+X is the program's like
+/// any other key xdevcmd does not use there: it receives `ESC x` and then Enter, instead
+/// of losing both.
+#[test]
+fn alt_x_then_enter_in_the_shell_reaches_the_program() {
+    let s = Scratch::new("prefix-enter");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd
+        .send(b"stty raw -echo; dd bs=1 count=4 of=keys.bin 2>/dev/null; stty sane; echo GOT_IT\r");
+    std::thread::sleep(Duration::from_millis(300));
+    // Alt+X, Esc: cancelled, nothing sent.
+    xdevcmd.send(ALT_X);
+    xdevcmd.wait_for("ALT+X");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("ALT+X");
+    xdevcmd.send(b"z");
+    // Alt+X, Enter: both to the program.
+    xdevcmd.send(ALT_X);
+    xdevcmd.wait_for("ALT+X");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("GOT_IT");
+    assert_eq!(
+        std::fs::read(s.left().join("keys.bin")).unwrap(),
+        b"z\x1bx\r"
+    );
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 const SHIFT_F12: &[u8] = b"\x1b[24;2~";
 
 /// Shift+F12: the shell's history in the viewer, at its end; Home goes to its first

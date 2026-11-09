@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/xdevcmd-core", "crates/xdevcmd-tui"]
+members = ["crates/xdevcmd-core", "crates/xdevcmd"]
 resolver = "2"
 
 # The one place xdevcmd says what it is. Help > About, --help and --version read these at

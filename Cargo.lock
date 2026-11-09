@@ -2512,23 +2512,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "xdevcmd-core"
-version = "0.2.1"
-dependencies = [
- "chrono",
- "flate2",
- "libc",
- "objc2-foundation",
- "png",
- "rustix",
- "tar",
- "trash",
- "zip",
- "zune-jpeg",
-]
-
-[[package]]
-name = "xdevcmd-tui"
+name = "xdevcmd"
 version = "0.2.1"
 dependencies = [
  "anyhow",
@@ -2546,6 +2530,22 @@ dependencies = [
  "vt100",
  "winresource",
  "xdevcmd-core",
+]
+
+[[package]]
+name = "xdevcmd-core"
+version = "0.2.1"
+dependencies = [
+ "chrono",
+ "flate2",
+ "libc",
+ "objc2-foundation",
+ "png",
+ "rustix",
+ "tar",
+ "trash",
+ "zip",
+ "zune-jpeg",
 ]
 
 [[package]]

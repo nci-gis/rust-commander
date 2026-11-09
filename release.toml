@@ -4,7 +4,7 @@
 allow-branch = ["dev", "main"]
 # Not on crates.io: the release is the GitHub one that the tag starts.
 publish = false
-# xdevcmd-core and xdevcmd-tui share [workspace.package] version; one commit, one tag.
+# xdevcmd-core and xdevcmd share [workspace.package] version; one commit, one tag.
 shared-version = true
 consolidate-commits = true
 tag-name = "v{{version}}"

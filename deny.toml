@@ -53,7 +53,7 @@ ignore = true
 # two bitflags with it. Not ours to fix; a warning, so a new duplicate is noticed.
 multiple-versions = "warn"
 wildcards = "deny"
-# xdevcmd-tui depends on xdevcmd-core by path, with no version. Allowed only because
+# xdevcmd depends on xdevcmd-core by path, with no version. Allowed only because
 # neither crate is published (publish = false); a published crate could not do this.
 allow-wildcard-paths = true
 

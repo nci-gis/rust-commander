@@ -61,7 +61,7 @@ crates/xdevcmd-core/   engine, no terminal code
   rename.rs  batch_rename.rs  glob.rs  size.rs  find.rs  compare.rs
   archive.rs        zip / tar / tar.gz, with the hostile-archive rules
   attrs.rs  sha256.rs  image.rs  document.rs
-crates/xdevcmd-tui/    binary `xdevcmd`
+crates/xdevcmd/        binary `xdevcmd`
   app.rs            event loop, focus, key and mouse dispatch, App::refused
   keys.rs           Action, BINDINGS, key parsing
   config.rs         config.toml schema and validation
@@ -78,7 +78,7 @@ scripts/sync-about.sh
 ## Run and check
 
 ```bash
-cargo run -p xdevcmd-tui -- /etc /var                # two directories
+cargo run -p xdevcmd -- /etc /var                    # two directories
 ./target/release/xdevcmd --screenshot=118x34 --keys=F9 /etc /usr   # look without a terminal
 cargo test                                        # ~300 tests, about 15 s
 cargo clippy --all-targets -- -D warnings         # also --target x86_64-pc-windows-gnu

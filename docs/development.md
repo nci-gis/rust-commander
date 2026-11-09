@@ -4,8 +4,8 @@
 
 ```bash
 cargo build --release                 # target/release/xdevcmd
-cargo run -p xdevcmd-tui -- /etc /var    # start with two directories
-cargo install --path crates/xdevcmd-tui --locked   # install your build as `xdevcmd`
+cargo run -p xdevcmd -- /etc /var     # start with two directories
+cargo install --path crates/xdevcmd --locked   # install your build as `xdevcmd`
 ```
 
 Needs Rust 1.88 or newer (`rustup`). Nothing needs root.

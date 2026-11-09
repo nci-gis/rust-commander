@@ -1,5 +1,5 @@
 [package]
-name = "xdevcmd-tui"
+name = "xdevcmd"
 version.workspace = true
 description.workspace = true
 authors.workspace = true

@@ -44,7 +44,7 @@ F5 copy, F6 move, F8 delete. Runs on Linux, macOS and Windows.
 ## Install
 
 ```bash
-cargo install --git https://github.com/nci-gis/rust-commander xdevcmd-tui --locked
+cargo install --git https://github.com/nci-gis/rust-commander xdevcmd --locked
 ```
 
 Needs Rust 1.88 or newer. This installs the `xdevcmd` command.

@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 meta=$(cargo metadata --no-deps --format-version 1)
-field() { python3 -c 'import json,sys; p=[p for p in json.load(sys.stdin)["packages"] if p["name"]=="xdevcmd-tui"][0]; v=p[sys.argv[1]]; print(" ".join(v) if isinstance(v,list) else v)' "$1" <<<"$meta"; }
+field() { python3 -c 'import json,sys; p=[p for p in json.load(sys.stdin)["packages"] if p["name"]=="xdevcmd"][0]; v=p[sys.argv[1]]; print(" ".join(v) if isinstance(v,list) else v)' "$1" <<<"$meta"; }
 desc=$(field description)
 repo_url=$(field repository)
 keywords=$(field keywords)

@@ -740,6 +740,23 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
     assert!(left.is_empty(), "nothing left of the copy: {left:?}");
 }
 
+/// Safe operations on, but the journal cannot be made (its directory's name is taken by a
+/// file): the copy is done, and the summary says it ran without safe operations.
+#[test]
+fn a_job_without_its_journal_says_so() {
+    let s = Scratch::new("no-journal");
+    s.file("left/a.txt", "a");
+    s.file("journal", "a file where the journal directory goes");
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    wait_file(&s.right().join("a.txt"), "copied", |c| c.is_some());
+    x.wait_for("safe operations off for this job");
+    x.quit();
+}
+
 /// A panic on a background thread is logged and xdevcmd goes on: still drawn, no
 /// "crashed" over the screen, and q still quits.
 #[test]

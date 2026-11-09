@@ -225,6 +225,9 @@ pub struct Summary {
     /// already at the destination (a move across drives killed between the copy and
     /// the removal of its source). Never removed without a question.
     pub left: u64,
+    /// Safe operations were on but this job's journal could not be made: why. The job ran
+    /// as with safe operations off; a kill now is not tidied up at the next start.
+    pub journal_off: Option<String>,
 }
 
 impl Summary {
@@ -253,6 +256,9 @@ impl Summary {
         }
         if self.cancelled {
             s.push_str(" (cancelled)");
+        }
+        if let Some(why) = &self.journal_off {
+            s.push_str(&format!("; safe operations off for this job: {why}"));
         }
         s
     }
@@ -391,8 +397,15 @@ impl Worker {
             } else {
                 req.pairs.iter().map(|(s, _)| s.clone()).collect()
             };
-            self.journal =
-                crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash);
+            match crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash)
+            {
+                Some(Ok(j)) => self.journal = Some(j),
+                // The job runs all the same, as it would with safe operations off: but
+                // the summary says so, once, rather than leave the user believing a kill
+                // now would be tidied up.
+                Some(Err(e)) => self.sum.journal_off = Some(e.to_string()),
+                None => {}
+            }
         }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
@@ -1918,6 +1931,20 @@ mod tests {
         );
         assert_eq!((s.done, s.skipped), (1, 1));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_summary_says_when_its_job_ran_without_a_journal() {
+        let mut s = Summary {
+            done: 1,
+            ..Summary::default()
+        };
+        assert_eq!(s.describe(Kind::Copy), "1 copied");
+        s.journal_off = Some("permission denied".into());
+        assert_eq!(
+            s.describe(Kind::Copy),
+            "1 copied; safe operations off for this job: permission denied"
+        );
     }
 
     #[test]

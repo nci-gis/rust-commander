@@ -104,7 +104,7 @@ pub fn apply(moves: &[(PathBuf, PathBuf)], safe: bool) -> Outcome {
     // Safe operations: between the two steps the files are under temporary names; a run
     // killed there has them put back at the next start.
     let mut journal = if safe {
-        crate::journal::Journal::begin("rename", &[], None, false)
+        crate::journal::Journal::begin("rename", &[], None, false).and_then(Result::ok)
     } else {
         None
     };

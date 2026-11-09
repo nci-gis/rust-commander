@@ -151,14 +151,15 @@ fn probe_lock(file: &File) -> Lock {
 
 impl Journal {
     /// Start a journal for a job of `kind` ("copy", "move", "delete", "extract", "pack",
-    /// "sync", "rename"). `None` when journals are off or the file cannot be made.
+    /// "sync", "rename"). `None` when journals are off; an error when the file cannot be
+    /// made, for the job to say it runs without one.
     pub fn begin(
         kind: &str,
         sources: &[PathBuf],
         dest: Option<&Path>,
         to_trash: bool,
-    ) -> Option<Self> {
-        Self::begin_in(DIR.get()?, kind, sources, dest, to_trash)
+    ) -> Option<std::io::Result<Self>> {
+        Some(Self::begin_in(DIR.get()?, kind, sources, dest, to_trash))
     }
 
     fn begin_in(
@@ -167,15 +168,15 @@ impl Journal {
         sources: &[PathBuf],
         dest: Option<&Path>,
         to_trash: bool,
-    ) -> Option<Self> {
+    ) -> std::io::Result<Self> {
         static N: AtomicU64 = AtomicU64::new(0);
-        fs::create_dir_all(dir).ok()?;
+        fs::create_dir_all(dir)?;
         let n = N.fetch_add(1, Ordering::Relaxed);
         let name = format!("{}-{n}.journal", run_tag());
         // Made under a hidden name and locked before it takes its real one, so no start
         // ever sees a journal by its real name that is not yet locked.
         let new = dir.join(format!(".{name}.new"));
-        let file = open_held(&new).ok()?;
+        let file = open_held(&new)?;
         #[cfg(test)]
         before_lock_in_test(&new);
         // Busy: another start is looking at it, has taken it for a dead run's, and is
@@ -184,12 +185,14 @@ impl Journal {
         #[cfg(unix)]
         if try_lock(&file) == Lock::Busy {
             let _ = fs::remove_file(&new);
-            return None;
+            return Err(std::io::Error::other(
+                "another xdevcmd starting took its journal",
+            ));
         }
         let path = dir.join(name);
-        if fs::rename(&new, &path).is_err() {
+        if let Err(e) = fs::rename(&new, &path) {
             let _ = fs::remove_file(&new);
-            return None;
+            return Err(e);
         }
         let mut j = Self {
             path,
@@ -207,7 +210,7 @@ impl Journal {
         if to_trash {
             j.line("trash");
         }
-        Some(j)
+        Ok(j)
     }
 
     fn line(&mut self, s: &str) {
@@ -726,7 +729,7 @@ mod tests {
         });
         let j = Journal::begin_in(&d, "copy", &[d.join("a")], Some(&d), false);
         assert!(
-            j.is_none(),
+            j.is_err(),
             "a journal not locked by its job would look dead"
         );
         assert_eq!(fs::read_dir(&d).unwrap().count(), 0, "nothing left behind");

@@ -52,6 +52,9 @@ pub struct Ask {
     pub body: Vec<String>,
     pub danger: bool,
     pub yes: Option<(String, Cmd)>,
+    /// A second way forward, between `yes` and cancel: its key (a letter), its verb,
+    /// and what it does. "Send to this shell" in the question before typing into one.
+    pub also: Option<(char, String, Cmd)>,
     pub buttons: Vec<Rect>,
     /// A quiet line at the bottom right, on the buttons' row: a credit, not content.
     pub footnote: Option<String>,
@@ -522,8 +525,23 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     }
     let y = full.y + full.height.saturating_sub(1);
     let inner = Rect::new(full.x, full.y, full.width, full.height);
-    a.buttons = match &a.yes {
-        Some((verb, _)) => buttons(
+    let also_key = a
+        .also
+        .as_ref()
+        .map(|(k, _, _)| k.to_ascii_uppercase().to_string());
+    a.buttons = match (&a.yes, &a.also, &also_key) {
+        (Some((verb, _)), Some((_, also, _)), Some(key)) => buttons(
+            frame,
+            inner.x,
+            y,
+            inner.width,
+            &[
+                ("Enter", verb.as_str(), accent),
+                (key.as_str(), also.as_str(), th.accent),
+                ("Esc", "cancel", th.accent),
+            ],
+        ),
+        (Some((verb, _)), _, _) => buttons(
             frame,
             inner.x,
             y,
@@ -533,7 +551,7 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
                 ("Esc", "cancel", th.accent),
             ],
         ),
-        None => buttons(
+        (None, _, _) => buttons(
             frame,
             inner.x,
             y,

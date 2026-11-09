@@ -210,6 +210,9 @@ pub struct Terminal {
     /// costs lines × columns × a cell's size (Settings shows the figure). Read when a
     /// shell starts; vt100 cannot change a history's length in place.
     pub scrollback: usize,
+    /// Alt+C and typing names (Alt+Enter) send to the shell without asking when it is
+    /// surely at its prompt; false asks every time (owner, 2026-11-09: default true).
+    pub send_when_idle: bool,
 }
 
 /// The range `[terminal] scrollback` takes.
@@ -223,6 +226,7 @@ impl Default for Terminal {
             shell: String::new(),
             max_terminals: 3,
             scrollback: 5000,
+            send_when_idle: true,
         }
     }
 }
@@ -1252,6 +1256,14 @@ mod tests {
         assert!(parse("[terminal]\nmax_terminals = 0\n")
             .unwrap_err()
             .contains("show = false"));
+    }
+
+    #[test]
+    fn sending_to_an_idle_shell_without_asking_is_on_by_default() {
+        assert!(parse("").unwrap().config.terminal.send_when_idle);
+        let s = parse("[terminal]\nsend_when_idle = false\n").unwrap();
+        assert!(!s.config.terminal.send_when_idle);
+        assert!(render_default().contains("send_when_idle = true"));
     }
 
     #[test]

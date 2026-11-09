@@ -286,6 +286,15 @@ const FIELDS: &[Field] = &[
         Kind::Pick(&["100", "1000", "2000", "5000", "9999"]),
         true,
     ),
+    f(
+        3,
+        "terminal",
+        "send_when_idle",
+        "Send to the shell without asking when it is surely idle",
+        "For cd here and typing names; when off, or unsure, it asks first",
+        Kind::Bool,
+        true,
+    ),
 ];
 
 /// What a full history costs a shell, for the Settings row: vt100 keeps every cell of
@@ -327,6 +336,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("terminal", "height_percent") => c.terminal.height_percent.to_string(),
         ("terminal", "max_terminals") => c.terminal.max_terminals.to_string(),
         ("terminal", "scrollback") => c.terminal.scrollback.to_string(),
+        ("terminal", "send_when_idle") => c.terminal.send_when_idle.to_string(),
         _ => String::new(),
     }
 }
@@ -373,6 +383,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         ("terminal", "scrollback") => {
             c.terminal.scrollback = n().map_or(c.terminal.scrollback, |x| x as usize)
         }
+        ("terminal", "send_when_idle") => c.terminal.send_when_idle = b,
         _ => {}
     }
 }

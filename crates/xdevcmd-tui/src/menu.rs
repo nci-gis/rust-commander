@@ -74,6 +74,11 @@ pub enum Cmd {
     Undo,
     /// Switch to this theme now (not saved: Settings saves it).
     SetTheme(String),
+    /// The question before typing into a shell: open a new shell in the pane's
+    /// directory instead (and type there, for names).
+    ShellNew(Box<crate::pane::terms::ShellSend>),
+    /// The same question: type into that shell after all.
+    ShellSendHere(Box<crate::pane::terms::ShellSend>),
 }
 
 pub struct Item {

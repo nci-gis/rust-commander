@@ -63,6 +63,9 @@ pub struct TermPane {
     keep: bool,
     /// How the process ended, once it has: "exit 0", "exit 2".
     ended: Arc<std::sync::Mutex<Option<String>>>,
+    /// When the shell last printed anything: a new shell's prompt is taken to be up
+    /// once it has printed and gone quiet ([`TermPane::prompt_ready`]).
+    last_output: Arc<std::sync::Mutex<Option<Instant>>>,
 }
 
 /// Whether a shell can take typed text: what every action that types into it asks
@@ -79,6 +82,30 @@ pub enum ShellState {
     /// This system cannot tell (Windows without prompt marks).
     Unknown,
 }
+
+/// What sending to a shell in a given state does (owner, 2026-11-09): the one table
+/// every action that types into a shell goes through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// Type it now.
+    Send,
+    /// Ask: Open a new shell (default), Send to this shell, Cancel.
+    AskWithSend,
+    /// Ask: Open a new shell (default), Cancel. Nothing is typed into a program.
+    AskNewShell,
+}
+
+/// The decision for `state`; `send_when_idle` is `[terminal] send_when_idle`.
+pub fn decide(state: &ShellState, send_when_idle: bool) -> Decision {
+    match state {
+        ShellState::Idle if send_when_idle => Decision::Send,
+        ShellState::Idle | ShellState::Unknown => Decision::AskWithSend,
+        ShellState::Busy(_) | ShellState::Remote(_) => Decision::AskNewShell,
+    }
+}
+
+/// How long a new shell's output must have been quiet before its prompt counts as up.
+const PROMPT_QUIET: Duration = Duration::from_millis(250);
 
 /// Programs whose terminal is another machine's.
 pub const REMOTE: &[&str] = &["ssh", "mosh-client", "mosh", "autossh", "et", "telnet"];
@@ -336,9 +363,11 @@ impl TermPane {
             rows, cols, scrollback, reports,
         )));
         let (tx, rx) = channel::<Vec<u8>>();
+        let last_output = Arc::new(std::sync::Mutex::new(None));
         {
             let parser = parser.clone();
             let answers = tx.clone();
+            let last_output = last_output.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 let mut tail = Vec::new();
@@ -350,6 +379,9 @@ impl TermPane {
                         }
                         Ok(n) => {
                             let asked = cursor_queries(&mut tail, &buf[..n]);
+                            if let Ok(mut t) = last_output.lock() {
+                                *t = Some(Instant::now());
+                            }
                             if let Ok(mut p) = parser.write() {
                                 p.process(&buf[..n]);
                                 OUTPUT.store(true, Ordering::Relaxed);
@@ -388,6 +420,7 @@ impl TermPane {
             activity: RefCell::new((None, None)),
             keep,
             ended,
+            last_output,
         })
     }
 
@@ -478,6 +511,45 @@ impl TermPane {
             self.reported().2,
             SEES_FOREGROUND,
         )
+    }
+
+    /// Whether the program in the terminal turned bracketed paste on (bash, zsh, fish
+    /// and PowerShell's PSReadLine do at their prompt): typed names are then wrapped
+    /// in it, so the line editor takes them as text, not keys.
+    pub fn bracketed_paste(&self) -> bool {
+        self.parser
+            .read()
+            .map(|p| p.screen().bracketed_paste())
+            .unwrap_or(false)
+    }
+
+    /// A new shell's prompt is up: the shell is known to be idle and has printed
+    /// something, then been quiet for a moment. On Windows "known idle" needs a prompt
+    /// mark (docs/shell.md); without one this never turns true.
+    pub fn prompt_ready(&self) -> bool {
+        let quiet = self
+            .last_output
+            .lock()
+            .ok()
+            .and_then(|t| *t)
+            .is_some_and(|t| t.elapsed() >= PROMPT_QUIET);
+        quiet && self.state() == ShellState::Idle
+    }
+
+    /// Type `text` into this shell; with `paste`, inside bracketed paste when the
+    /// shell asked for it. Back to the live screen first, as typing a key does.
+    pub fn type_text(&self, text: &str, paste: bool) {
+        self.scroll_by(-(self.scrolled() as isize));
+        let mut bytes = Vec::with_capacity(text.len() + 12);
+        let wrap = paste && self.bracketed_paste();
+        if wrap {
+            bytes.extend_from_slice(b"\x1b[200~");
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if wrap {
+            bytes.extend_from_slice(b"\x1b[201~");
+        }
+        self.send(bytes);
     }
 
     /// What the shell last said about itself in its output: the directory (OSC 7 or
@@ -1012,6 +1084,21 @@ mod tests {
         );
         // A program's own tab is always busy with it.
         assert_eq!(s(true, None, Some(Mark::Prompt), true), Busy("bash".into()));
+    }
+
+    #[test]
+    fn one_table_decides_every_send() {
+        use Decision::*;
+        let busy = ShellState::Busy("vim".into());
+        let remote = ShellState::Remote("ssh".into());
+        assert_eq!(decide(&ShellState::Idle, true), Send);
+        assert_eq!(decide(&ShellState::Idle, false), AskWithSend);
+        assert_eq!(decide(&ShellState::Unknown, true), AskWithSend);
+        assert_eq!(decide(&ShellState::Unknown, false), AskWithSend);
+        for w in [true, false] {
+            assert_eq!(decide(&busy, w), AskNewShell);
+            assert_eq!(decide(&remote, w), AskNewShell);
+        }
     }
 
     #[test]

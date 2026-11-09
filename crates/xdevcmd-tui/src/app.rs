@@ -38,8 +38,9 @@ use crate::menu::{Cmd, Item, Menu, Outcome as MenuOutcome};
 use crate::modal::{self, Confirm, Input, InputKind, Job, Modal};
 use crate::opener;
 use crate::pane::tabs::Click as TabClick;
-use crate::pane::term::ShellState;
+use crate::pane::term::{Decision, ShellState};
 use crate::pane::terms::Click as TermClick;
+use crate::pane::terms::{ShellKey, ShellSend};
 use crate::pane::{FilePane, FileTabs, Pane, TermPanel};
 use crate::rename_dialog::{self, RenameDialog};
 use crate::search::{self, Search};
@@ -290,6 +291,18 @@ struct Comparing {
 
 /// What undo says while a delete to the trash is still running.
 const TRASH_RUNNING: &str = "a delete to the trash that is still running";
+/// Names to type into a new shell at its prompt; see `App::pending_type`.
+struct PendingType {
+    key: ShellKey,
+    text: String,
+    paste: bool,
+    what: String,
+    since: Instant,
+}
+
+/// How long a new shell has to show its prompt before names are typed into it.
+const PROMPT_WAIT: Duration = Duration::from_secs(4);
+
 const TICK: Duration = Duration::from_millis(40);
 /// With nothing known to have changed, the screen is still drawn this often, for what
 /// changes without telling (the usage view's clock, a listing's age). Drawing every
@@ -436,6 +449,10 @@ pub struct App {
     /// Where the history shown in the viewer came from: its shell's directory where the
     /// system says (Linux), else the file pane's. Save as… offers it.
     history_dir: Option<PathBuf>,
+    /// Names waiting to be typed into a new shell once its prompt is up ("Open a new
+    /// shell" in the question before typing): that shell, the text, bracketed paste
+    /// allowed, what it is, and since when.
+    pending_type: Option<PendingType>,
     /// Copy, move, delete, extract and pack jobs sent to the background (B in the
     /// progress box). One that asks a question comes back to the front.
     jobs: Vec<Job>,
@@ -578,6 +595,7 @@ impl App {
             save_from: None,
             save_only: false,
             history_dir: None,
+            pending_type: None,
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
@@ -1017,7 +1035,7 @@ impl App {
     /// changed on disk, and messages from programs started in the background. True when
     /// any of it changed what is on screen.
     fn background(&mut self) -> bool {
-        let mut changed = false;
+        let mut changed = self.pump_pending_type();
         // A thread other than this one panicked: xdevcmd goes on, and says where the
         // details went.
         if let Some(log) = crate::crash::take_background() {
@@ -1628,6 +1646,7 @@ impl App {
                         danger: true,
                         yes: Some(("Replace".into(), Cmd::SaveReplacing(dest))),
                         buttons: Vec::new(),
+                        also: None,
                         footnote: None,
                         pictures: Vec::new(),
                     }));
@@ -1648,34 +1667,206 @@ impl App {
 
     /// Send the active pane's directory to the shell. The one place the two halves of
     /// the program actually talk to each other, and the reason having both is worth it.
+    /// Typed through [`App::send_to_shell`], like everything typed into a shell.
     fn cd_terminal_here(&mut self) {
         let cwd = self.focused_cwd();
-        let Some(id) = self.term_id else {
-            self.status = "no terminal yet — F12".into();
+        let Some(panel) = self.panel_ref() else {
+            let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
+            self.status = format!("no terminal yet \u{2014} {key}");
             return;
         };
-        if let Some(Pane::Term(t)) = self.panes.get(&id) {
-            let text = cwd.display().to_string();
-            // Typed text goes to whatever owns the terminal. Into an editor it edits;
-            // into a sudo prompt it becomes the password. Only a shell at its prompt
-            // should receive a cd.
-            match t.shell_state() {
-                ShellState::Busy(program) | ShellState::Remote(program) => {
-                    self.status =
-                        format!("{program} is running in the terminal \u{2014} not typed into it");
-                    return;
-                }
-                ShellState::Idle | ShellState::Unknown => {}
+        let Some(target) = panel.focused_key() else {
+            return;
+        };
+        // A lossy name would be another directory, or none.
+        let Some(text) = cwd.to_str() else {
+            self.status = "the directory's name is not UTF-8 \u{2014} not typed".into();
+            return;
+        };
+        let line = match crate::safety::cd_command(&panel.shell_name(), text) {
+            Ok(line) => line,
+            Err(why) => {
+                self.status = why;
+                return;
             }
-            match crate::safety::cd_command(&t.shell_name(), &text) {
-                Ok(line) => t.send(line.into_bytes()),
-                Err(why) => {
-                    self.status = why;
-                    return;
-                }
-            }
-            self.status = format!("shell: cd {}", cwd.display());
+        };
+        self.send_to_shell(ShellSend {
+            target,
+            here: line,
+            new_shell: None,
+            what: format!("cd {}", cwd.display()),
+            dir: cwd,
+            paste: false,
+        });
+    }
+
+    /// Everything xdevcmd types into a shell comes through here (owner, 2026-11-09), and
+    /// one table decides ([`crate::pane::term::decide`]): a shell surely at its prompt
+    /// gets it at once (when `[terminal] send_when_idle`, the default); a program in
+    /// the terminal, or ssh, gets nothing, and the question offers a new shell instead;
+    /// a shell whose state cannot be known (Windows without prompt marks), or an idle
+    /// one with the setting off, asks with Send to this shell as well.
+    fn send_to_shell(&mut self, s: ShellSend) {
+        let Some(state) = self
+            .panel_ref()
+            .and_then(|p| p.shell(s.target))
+            .map(crate::pane::TermPane::state)
+        else {
+            self.status = "that shell is gone \u{2014} nothing typed".into();
+            return;
+        };
+        let decision =
+            crate::pane::term::decide(&state, self.settings.config.terminal.send_when_idle);
+        if decision == Decision::Send {
+            return self.send_here(s);
         }
+        let new_shell = if s.new_shell.is_some() {
+            format!("Open a new shell in {} and type it there?", tidy(&s.dir))
+        } else {
+            format!("Open a new shell in {} instead?", tidy(&s.dir))
+        };
+        let what = format!(
+            "To type: {}",
+            xdevcmd_core::format::elide_middle(&s.what, 70)
+        );
+        let (title, mut body) = match &state {
+            ShellState::Busy(p) => (
+                "A program is running",
+                vec![format!(
+                    "{p} is running in this terminal \u{2014} xdevcmd does not type into a program."
+                )],
+            ),
+            ShellState::Remote(p) => (
+                "The shell is on another machine",
+                vec![format!(
+                    "{p} is running in this terminal \u{2014} the shell there is on another machine."
+                )],
+            ),
+            ShellState::Unknown => (
+                "Type into the shell?",
+                vec![
+                    "xdevcmd cannot tell whether a program is running in this shell.".into(),
+                    "docs/shell.md shows the prompt snippet that lets it tell.".into(),
+                ],
+            ),
+            ShellState::Idle => (
+                "Type into the shell?",
+                vec![
+                    "The shell is at its prompt.".into(),
+                    "Settings \u{2192} Terminal can send without asking.".into(),
+                ],
+            ),
+        };
+        body.push(String::new());
+        body.push(what);
+        body.push(new_shell);
+        let s = Box::new(s);
+        let (yes, also) = match decision {
+            Decision::AskNewShell => (("open a new shell".to_string(), Cmd::ShellNew(s)), None),
+            _ => {
+                let here = s.clone();
+                (
+                    ("open a new shell".to_string(), Cmd::ShellNew(s)),
+                    Some((
+                        's',
+                        "send to this shell".to_string(),
+                        Cmd::ShellSendHere(here),
+                    )),
+                )
+            }
+        };
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: title.into(),
+            body,
+            danger: false,
+            yes: Some(yes),
+            also,
+            buttons: Vec::new(),
+            footnote: None,
+            pictures: Vec::new(),
+        }));
+    }
+
+    /// Type `s` into its shell now, if that shell is still there.
+    fn send_here(&mut self, s: ShellSend) {
+        let Some(t) = self.panel_ref().and_then(|p| p.shell(s.target)) else {
+            self.status = "that shell is gone \u{2014} nothing typed".into();
+            return;
+        };
+        t.type_text(&s.here, s.paste);
+        self.status = format!("shell: {}", s.what);
+    }
+
+    /// "Open a new shell": a new terminal tab started in the pane's directory. For a
+    /// `cd` that is the whole job; names are typed into it once its prompt is up
+    /// (`pending_type`, in `background`), or not at all if it does not come up in time.
+    fn open_shell_for(&mut self, s: ShellSend) {
+        if self.term_id.is_none() {
+            self.status = "that shell is gone \u{2014} nothing typed".into();
+            return;
+        }
+        if !self.term_shown {
+            let full = self.screen;
+            self.toggle_term(full);
+        }
+        if !self.terminal_room() {
+            return;
+        }
+        let key = match self.panel().map(|p| p.add_tab(&s.dir)) {
+            Some(Ok(k)) => k,
+            Some(Err(e)) => {
+                self.status = format!("no shell: {e}");
+                return;
+            }
+            None => return,
+        };
+        match s.new_shell {
+            None => self.status = format!("a new shell in {}", tidy(&s.dir)),
+            Some(text) => {
+                self.status = format!(
+                    "a new shell in {} \u{2014} typing at its prompt",
+                    tidy(&s.dir)
+                );
+                self.pending_type = Some(PendingType {
+                    key,
+                    text,
+                    paste: s.paste,
+                    what: s.what,
+                    since: Instant::now(),
+                });
+            }
+        }
+    }
+
+    /// Names waiting for a new shell's prompt: typed once it is up, dropped (and said)
+    /// if the shell ends or the prompt does not come in time. True when it said so.
+    fn pump_pending_type(&mut self) -> bool {
+        let Some(p) = self.pending_type.take() else {
+            return false;
+        };
+        let ready = self
+            .panel_ref()
+            .and_then(|panel| panel.shell(p.key))
+            .map(|t| (t.prompt_ready(), t));
+        match ready {
+            None => {
+                self.status = "the new shell ended before its prompt \u{2014} nothing typed".into();
+            }
+            Some((true, t)) => {
+                t.type_text(&p.text, p.paste);
+                self.status = format!("new shell: {}", p.what);
+            }
+            Some((false, _)) if p.since.elapsed() >= PROMPT_WAIT => {
+                self.status = "a new shell is open, but its prompt did not show in time \u{2014} \
+                               nothing typed (docs/shell.md)"
+                    .into();
+            }
+            Some((false, _)) => {
+                self.pending_type = Some(p);
+                return false;
+            }
+        }
+        true
     }
 
     /// The terminal panel, to read from.
@@ -3053,6 +3244,8 @@ impl App {
             Cmd::Settings => self.open_settings(),
             Cmd::Undo => self.undo(),
             Cmd::SetTheme(name) => self.set_theme(&name),
+            Cmd::ShellNew(s) => self.open_shell_for(*s),
+            Cmd::ShellSendHere(s) => self.send_here(*s),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
             Cmd::UserCommand(i) => self.run_user_command(i),
             Cmd::About => {
@@ -3078,6 +3271,7 @@ impl App {
                     danger: false,
                     yes: None,
                     buttons: Vec::new(),
+                    also: None,
                     footnote: Some(format!(
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
@@ -3136,6 +3330,7 @@ impl App {
                         danger: true,
                         yes: Some(("quit anyway".into(), Cmd::QuitNow)),
                         buttons: Vec::new(),
+                        also: None,
                         footnote: None,
                         pictures: Vec::new(),
                     }));
@@ -3394,12 +3589,19 @@ impl App {
                 }
             }
             Some(Modal::Ask(a)) if left => {
+                // [yes] [also] [cancel], or [yes] [cancel].
+                let cancel = if a.also.is_some() { 2 } else { 1 };
                 if hit(&a.buttons, 0) {
                     act = match a.yes.take() {
                         Some((_, c)) => ModalAct::Run(c),
                         None => ModalAct::Close,
                     };
-                } else if hit(&a.buttons, 1) {
+                } else if cancel == 2 && hit(&a.buttons, 1) {
+                    act = match a.also.take() {
+                        Some((_, _, c)) => ModalAct::Run(c),
+                        None => ModalAct::Close,
+                    };
+                } else if hit(&a.buttons, cancel) {
                     act = ModalAct::Close;
                 }
             }
@@ -4145,6 +4347,16 @@ impl App {
                 find_dialog::Outcome::Start => act = ModalAct::StartFind,
             },
             Some(Modal::Ask(a)) => match k.code {
+                KeyCode::Char(c)
+                    if a.also
+                        .as_ref()
+                        .is_some_and(|(key, _, _)| key.eq_ignore_ascii_case(&c)) =>
+                {
+                    act = match a.also.take() {
+                        Some((_, _, c)) => ModalAct::Run(c),
+                        None => ModalAct::Close,
+                    }
+                }
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => {
                     act = match a.yes.take() {
                         Some((_, c)) => ModalAct::Run(c),
@@ -4879,6 +5091,7 @@ impl App {
             danger: false,
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
+            also: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -5124,6 +5337,7 @@ impl App {
             danger: bad,
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
+            also: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -5253,6 +5467,7 @@ impl App {
             danger: true,
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
+            also: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -5451,6 +5666,7 @@ impl App {
             danger: overwrites > 0,
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
+            also: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -6030,6 +6246,7 @@ impl App {
             danger: false,
             yes,
             buttons: Vec::new(),
+            also: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -6284,6 +6501,7 @@ impl App {
             danger: false,
             yes: Some(("undo".into(), Cmd::Undo)),
             buttons: Vec::new(),
+            also: None,
             footnote: None,
             pictures: Vec::new(),
         }));

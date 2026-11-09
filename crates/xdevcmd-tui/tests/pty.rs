@@ -1373,12 +1373,59 @@ fn alt_c_does_not_type_into_a_program_that_owns_the_terminal() {
     xdevcmd.wait_for("\u{2302} 1 cat");
     xdevcmd.send(F12);
     xdevcmd.send(ALT_C);
-    xdevcmd.wait_for("cat is running in the terminal");
+    // Two ways out: a new shell, or nothing. No way to type into cat.
+    xdevcmd.wait_for("A program is running");
+    xdevcmd.wait_for("cat is running in this terminal");
+    xdevcmd.wait_for("[Enter] open a new shell");
+    assert!(!xdevcmd.screen().contains("send to this shell"));
+    xdevcmd.send(ENTER);
+    // A second tab, its shell started in the pane's directory: the whole job of Alt+C.
+    xdevcmd.wait_for("\u{2302} 2");
+    xdevcmd.wait_for("a new shell in");
     xdevcmd.send(F12);
-    xdevcmd.send(b"\x04"); // Ctrl+D ends cat
-    std::thread::sleep(Duration::from_millis(300));
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"pwd > where.txt\r");
+    wait_file(&s.left().join("where.txt"), "the new shell's pwd", |t| {
+        t.is_some_and(|t| t.trim_end().ends_with("left"))
+    });
+    std::thread::sleep(Duration::from_millis(200));
     let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
-    assert!(!typed.contains("cd "), "the cd went into cat: {typed:?}");
+    assert!(typed.is_empty(), "something went into cat: {typed:?}");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+#[test]
+fn with_sending_without_asking_off_alt_c_asks_and_s_sends() {
+    let s = Scratch::new("ask3");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let cfg = s.file("config.toml", "[terminal]\nsend_when_idle = false\n");
+    let cfg = cfg.to_str().unwrap().to_string();
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(F12);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(ENTER); // into sub
+    xdevcmd.send(ALT_C);
+    xdevcmd.wait_for("[S] send to this shell");
+    xdevcmd.wait_for("The shell is at its prompt.");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("send to this shell");
+    xdevcmd.send(ALT_C);
+    xdevcmd.wait_for("[S] send to this shell");
+    xdevcmd.send(b"s");
+    xdevcmd.wait_for("shell: cd");
+    xdevcmd.send(F12);
+    xdevcmd.send(b"pwd > here.txt\r");
+    wait_file(&s.left().join("sub").join("here.txt"), "pwd in sub", |t| {
+        t.is_some_and(|t| t.trim_end().ends_with("sub"))
+    });
     xdevcmd.send(F12);
     xdevcmd.quit();
 }
@@ -2631,7 +2678,9 @@ fn alt_c_does_not_type_into_a_program_run_in_a_terminal_tab() {
     xdevcmd.wait_for("waiting");
     xdevcmd.send(F12);
     xdevcmd.send(ALT_C);
-    xdevcmd.wait_for("ask.sh is running in the terminal");
+    xdevcmd.wait_for("ask.sh is running in this terminal");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("A program is running");
     xdevcmd.send(F12);
     xdevcmd.send(b"done\r");
     xdevcmd.wait_for("ask.sh ended");

@@ -67,6 +67,27 @@ pub struct History {
 /// A terminal tab's identity, never reused within a panel.
 pub type TabId = u64;
 
+/// One shell: its tab and its place in the tab. Kept by a question about typing into
+/// it, so the answer goes to that shell or to none, never to whichever has focus then.
+pub type ShellKey = (TabId, PaneId);
+
+/// Something an action types into a shell, through `App::send_to_shell`.
+#[derive(Clone)]
+pub struct ShellSend {
+    pub target: ShellKey,
+    /// Typed into `target`.
+    pub here: String,
+    /// Typed into a new shell once its prompt is up; `None` when starting one in
+    /// `dir` is the whole job (Alt+C).
+    pub new_shell: Option<String>,
+    /// Where a new shell starts: the file pane's directory.
+    pub dir: std::path::PathBuf,
+    /// Words, not a command line: wrapped in bracketed paste where the shell asked.
+    pub paste: bool,
+    /// What it does, for messages: "cd /tmp", "2 names".
+    pub what: String,
+}
+
 pub struct TermPanel {
     tabs: Vec<Tab>,
     next_tab: TabId,
@@ -159,7 +180,8 @@ impl TermPanel {
         self.focused().is_some_and(|t| t.keeps() && t.has_exited())
     }
 
-    pub fn add_tab(&mut self, cwd: &Path) -> Result<()> {
+    /// A new tab with a shell in `cwd`, made the active tab; the new shell's key.
+    pub fn add_tab(&mut self, cwd: &Path) -> Result<ShellKey> {
         let (id, t) = self.spawn(cwd)?;
         let mut terms = BTreeMap::new();
         terms.insert(id, t);
@@ -171,7 +193,21 @@ impl TermPanel {
             focus: id,
         });
         self.active = self.tabs.len() - 1;
-        Ok(())
+        Ok((tab_id, id))
+    }
+
+    /// The focused shell's key.
+    pub fn focused_key(&self) -> Option<ShellKey> {
+        let tab = self.tabs.get(self.active)?;
+        Some((tab.id, tab.focus))
+    }
+
+    /// The shell `key` names, while it lives.
+    pub fn shell(&self, key: ShellKey) -> Option<&TermPane> {
+        self.tabs
+            .iter()
+            .find(|t| t.id == key.0)
+            .and_then(|t| t.terms.get(&key.1))
     }
 
     pub fn split(&mut self, axis: Axis, cwd: &Path) -> Result<()> {

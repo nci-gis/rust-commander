@@ -1363,6 +1363,29 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
 }
 
 #[test]
+fn alt_c_asks_with_three_buttons_when_sending_without_asking_is_off() {
+    let (a, b) = files(&["alpha.txt"]);
+    let cfg = "[terminal]\nsend_when_idle = false\n";
+    let s = shot_cfg_env(cfg, &[], "Alt+c", &a, &b);
+    assert!(s.contains("Type into the shell?"), "{s}");
+    assert!(s.contains("[Enter] open a new shell"), "{s}");
+    assert!(s.contains("[S] send to this shell"), "{s}");
+    assert!(s.contains("[Esc] cancel"), "{s}");
+    assert!(s.contains("To type: cd "), "{s}");
+    // Esc: nothing typed, the question gone.
+    let s = shot_cfg_env(cfg, &[], "Alt+c,Esc", &a, &b);
+    assert!(!s.contains("Type into the shell?"), "{s}");
+    assert!(!status(&s).contains("shell: cd"), "{s}");
+    // By default a shell surely at its prompt gets it at once, where that is known.
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
+        let s = shot_cfg_env("", &[], "Alt+c", &a, &b);
+        assert!(!s.contains("Type into the shell?"), "{s}");
+        assert!(status(&s).contains("shell: cd"), "{s}");
+    }
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
 fn f1_lists_alt_g_as_a_pane_key() {
     let (a, b) = files(&["alpha.txt"]);
     let help = shot_keys("150x150", "F1", &a, &b);

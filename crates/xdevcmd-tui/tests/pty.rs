@@ -1452,6 +1452,29 @@ fn alt_c_does_not_type_into_a_program_that_owns_the_terminal() {
     xdevcmd.quit();
 }
 
+/// A pipeline whose first program has ended (`git log | less` once git is done): its
+/// group still has the terminal, but the group's leader has no /proc entry to name it.
+/// Before the fix that read as "no program", and Alt+C typed into the pipeline.
+#[cfg(target_os = "linux")]
+#[test]
+fn alt_c_does_not_type_into_a_pipeline_whose_first_program_ended() {
+    let s = Scratch::new("busy-pipe");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"true | sleep 5\r");
+    std::thread::sleep(Duration::from_millis(500));
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_C);
+    xdevcmd.wait_for("A program is running");
+    xdevcmd.wait_for("a program is running in this terminal");
+    assert!(!xdevcmd.screen().contains("send to this shell"));
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("A program is running");
+    assert!(!xdevcmd.screen().contains("$ cd "), "a cd was typed");
+    xdevcmd.quit();
+}
+
 #[test]
 fn with_sending_without_asking_off_alt_c_asks_and_s_sends() {
     let s = Scratch::new("ask3");

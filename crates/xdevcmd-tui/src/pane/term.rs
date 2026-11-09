@@ -124,14 +124,14 @@ const SEES_FOREGROUND: bool = cfg!(any(target_os = "linux", target_os = "macos")
 pub fn state_of(
     keep: bool,
     label: &str,
-    fg: Option<String>,
+    fg: Fg,
     mark: Option<Mark>,
     sees_foreground: bool,
 ) -> ShellState {
     if keep {
         return ShellState::Busy(label.to_string());
     }
-    if let Some(name) = fg {
+    if let Fg::Program(name) = fg {
         let lower = name.to_ascii_lowercase();
         let bare = lower.strip_suffix(".exe").unwrap_or(&lower);
         return if REMOTE.contains(&bare) {
@@ -140,11 +140,24 @@ pub fn state_of(
             ShellState::Busy(name)
         };
     }
-    match (mark, sees_foreground) {
-        (Some(Mark::Running), _) => ShellState::Busy("a command".into()),
-        (_, true) | (Some(Mark::Prompt), false) => ShellState::Idle,
-        (None, false) => ShellState::Unknown,
+    match (mark, sees_foreground, fg) {
+        (Some(Mark::Running), _, _) => ShellState::Busy("a command".into()),
+        (_, true, Fg::Shell) | (Some(Mark::Prompt), false, _) => ShellState::Idle,
+        // Where the system should say and could not (its answer unreadable): never
+        // idle on a guess.
+        _ => ShellState::Unknown,
     }
+}
+
+/// Who has the terminal, as the system says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fg {
+    /// The shell itself: it is at its prompt.
+    Shell,
+    /// Another program; its name, or "a program" when that cannot be read.
+    Program(String),
+    /// The system did not say (Windows, or a read that failed).
+    Unknown,
 }
 
 /// The directory in `lsof -a -p PID -d cwd -Fn` output: the `n` field after the `cwd`
@@ -600,7 +613,7 @@ impl TermPane {
         state_of(
             self.keep,
             &self.label,
-            self.foreground_program(),
+            self.foreground(),
             self.reported().2,
             SEES_FOREGROUND,
         )
@@ -663,19 +676,21 @@ impl TermPane {
         &self.label
     }
 
-    /// The program that owns the terminal when it is not the shell — an editor, a
-    /// pager, a password prompt. Anything typed into the terminal goes to it, not to
-    /// the shell. `None` at a prompt, and wherever the system cannot say.
+    /// Who owns the terminal: the shell, or a program — an editor, a pager, a password
+    /// prompt — which gets anything typed. [`Fg::Unknown`] wherever the system cannot
+    /// say, and before the shell has started.
     ///
     /// A tab started for one program (`keeps`) has no shell at all: its process *is*
     /// the program, so the shell-versus-foreground test would call it idle. It is
     /// always busy, with that program, and nothing is typed into it.
-    pub fn foreground_program(&self) -> Option<String> {
+    pub fn foreground(&self) -> Fg {
         if self.keep {
-            return Some(self.label.clone());
+            return Fg::Program(self.label.clone());
         }
-        let pid = self.pid.load(Ordering::Relaxed);
-        (pid != 0).then(|| foreground_of(pid)).flatten()
+        match self.pid.load(Ordering::Relaxed) {
+            0 => Fg::Unknown,
+            pid => foreground_of(pid),
+        }
     }
 
     /// For the tab bar: what it is doing, else what it is.
@@ -906,8 +921,10 @@ impl TermPane {
 /// The label, and the directory when no program has the terminal.
 #[cfg(target_os = "linux")]
 fn activity_of(pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
-    if let Some(program) = foreground_of(pid) {
-        return (Some(program), None);
+    match foreground_of(pid) {
+        Fg::Program(program) => return (Some(program), None),
+        Fg::Unknown => return (None, None),
+        Fg::Shell => {}
     }
     match std::fs::read_link(format!("/proc/{pid}/cwd")) {
         Ok(cwd) => (Some(short_dir(&cwd)), Some(cwd)),
@@ -916,22 +933,43 @@ fn activity_of(pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
 }
 
 #[cfg(target_os = "linux")]
-fn foreground_of(pid: u32) -> Option<String> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+fn foreground_of(pid: u32) -> Fg {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => fg_from_stat(&stat, |tpgid| {
+            std::fs::read_to_string(format!("/proc/{tpgid}/comm")).ok()
+        }),
+        Err(_) => Fg::Unknown,
+    }
+}
+
+/// The decision in [`foreground_of`], over the shell's `/proc/PID/stat` and a reader
+/// of a process's `comm`. A group whose leader has gone (`git log | less` once git
+/// ends: the group lives on in less) has no `comm` to read, and is still a program.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn fg_from_stat(stat: &str, comm: impl Fn(i32) -> Option<String>) -> Fg {
     // The command name sits in parentheses and may itself contain spaces or ')', so
     // the fields are counted from the last ')'.
-    let rest = stat.get(stat.rfind(')')? + 2..)?;
-    let f: Vec<&str> = rest.split_whitespace().collect();
-    let pgrp: i32 = f.get(2)?.parse().ok()?;
-    let tpgid: i32 = f.get(5)?.parse().ok()?;
+    let ids = || -> Option<(i32, i32)> {
+        let rest = stat.get(stat.rfind(')')? + 2..)?;
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        Some((f.get(2)?.parse().ok()?, f.get(5)?.parse().ok()?))
+    };
+    let Some((pgrp, tpgid)) = ids() else {
+        return Fg::Unknown;
+    };
     if tpgid > 0 && tpgid != pgrp {
         // Something else owns the terminal: name it. A process group id is its
         // leader's pid, so this reads the leader's name.
-        let comm = std::fs::read_to_string(format!("/proc/{tpgid}/comm")).ok()?;
-        let comm = comm.trim();
-        return Some(if comm.is_empty() { "a program" } else { comm }.to_string());
+        let name = comm(tpgid)
+            .map(|c| c.trim().to_string())
+            .unwrap_or_default();
+        return Fg::Program(if name.is_empty() {
+            "a program".into()
+        } else {
+            name
+        });
     }
-    None
+    Fg::Shell
 }
 
 /// macOS has no /proc. `ps` knows the shell's process group and its terminal's
@@ -941,28 +979,39 @@ fn foreground_of(pid: u32) -> Option<String> {
 /// Not run on this machine (Linux); the pty test that covers it is enabled for macOS
 /// so the CI runner verifies it.
 #[cfg(target_os = "macos")]
-fn foreground_of(pid: u32) -> Option<String> {
+fn foreground_of(pid: u32) -> Fg {
+    // By its full path, never through PATH.
     let ps = |args: &[&str]| -> Option<String> {
-        let out = std::process::Command::new("ps").args(args).output().ok()?;
+        let out = std::process::Command::new("/bin/ps")
+            .args(args)
+            .output()
+            .ok()?;
         out.status
             .success()
             .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
-    let ids = ps(&["-o", "pgid=,tpgid=", "-p", &pid.to_string()])?;
-    let mut it = ids.split_whitespace();
-    let pgrp: i32 = it.next()?.parse().ok()?;
-    let tpgid: i32 = it.next()?.parse().ok()?;
+    let ids = || -> Option<(i32, i32)> {
+        let ids = ps(&["-o", "pgid=,tpgid=", "-p", &pid.to_string()])?;
+        let mut it = ids.split_whitespace();
+        Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+    };
+    let Some((pgrp, tpgid)) = ids() else {
+        return Fg::Unknown;
+    };
     if tpgid > 0 && tpgid != pgrp {
         let comm = ps(&["-o", "comm=", "-p", &tpgid.to_string()]).unwrap_or_default();
         let name = comm.rsplit('/').next().unwrap_or("").trim();
-        return Some(if name.is_empty() { "a program" } else { name }.to_string());
+        return Fg::Program(if name.is_empty() { "a program" } else { name }.to_string());
     }
-    None
+    Fg::Shell
 }
 
 #[cfg(target_os = "macos")]
 fn activity_of(pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
-    (foreground_of(pid), None)
+    match foreground_of(pid) {
+        Fg::Program(p) => (Some(p), None),
+        _ => (None, None),
+    }
 }
 
 /// Windows: the console's foreground process is not something std or a small crate
@@ -974,8 +1023,8 @@ fn activity_of(_pid: u32) -> (Option<String>, Option<std::path::PathBuf>) {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn foreground_of(_pid: u32) -> Option<String> {
-    None
+fn foreground_of(_pid: u32) -> Fg {
+    Fg::Unknown
 }
 
 #[cfg(target_os = "linux")]
@@ -1160,8 +1209,13 @@ mod tests {
     #[test]
     fn a_shell_is_idle_only_when_that_is_known() {
         use ShellState::*;
-        let s = |keep, fg: Option<&str>, mark, sees| {
-            state_of(keep, "bash", fg.map(str::to_string), mark, sees)
+        let s = |keep, fg: Option<&str>, mark, sees: bool| {
+            let fg = match fg {
+                Some(p) => Fg::Program(p.to_string()),
+                None if sees => Fg::Shell,
+                None => Fg::Unknown,
+            };
+            state_of(keep, "bash", fg, mark, sees)
         };
         // Linux and macOS: the system sees the foreground.
         assert_eq!(s(false, None, None, true), Idle);
@@ -1192,8 +1246,37 @@ mod tests {
             s(false, None, Some(Mark::Running), false),
             Busy("a command".into())
         );
+        // The system should say and its answer could not be read: never idle, not
+        // even with a prompt mark; a C mark is still busy.
+        assert_eq!(state_of(false, "bash", Fg::Unknown, None, true), Unknown);
+        assert_eq!(
+            state_of(false, "bash", Fg::Unknown, Some(Mark::Prompt), true),
+            Unknown
+        );
+        assert_eq!(
+            state_of(false, "bash", Fg::Unknown, Some(Mark::Running), true),
+            Busy("a command".into())
+        );
         // A program's own tab is always busy with it.
         assert_eq!(s(true, None, Some(Mark::Prompt), true), Busy("bash".into()));
+    }
+
+    #[test]
+    fn a_group_whose_leader_has_gone_is_still_a_program() {
+        // `/proc/PID/stat` of a bash whose terminal belongs to group 900 (pgrp 100).
+        let stat = "100 (ba sh) S 1 100 100 34816 900 4194560 0 0";
+        let none = |_| None;
+        assert_eq!(fg_from_stat(stat, none), Fg::Program("a program".into()));
+        assert_eq!(
+            fg_from_stat(stat, |_| Some("less\n".into())),
+            Fg::Program("less".into())
+        );
+        // The shell's own group has the terminal.
+        let idle = "100 (bash) S 1 100 100 34816 100 4194560 0 0";
+        assert_eq!(fg_from_stat(idle, none), Fg::Shell);
+        // Unreadable: not idle.
+        assert_eq!(fg_from_stat("garbage", none), Fg::Unknown);
+        assert_eq!(fg_from_stat("", none), Fg::Unknown);
     }
 
     #[test]

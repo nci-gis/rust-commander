@@ -106,6 +106,19 @@ pub fn decide(state: &ShellState, send_when_idle: bool) -> Decision {
     }
 }
 
+/// Whether a shell xdevcmd has just started has its prompt up. Where the system sees
+/// the foreground, it must say idle. Where it cannot (Windows without prompt marks:
+/// [`ShellState::Unknown`]), a new shell that printed and went quiet is taken to be at
+/// its prompt — nothing else has had a chance to run in it. Busy is never ready.
+pub fn prompt_ready(quiet: bool, state: &ShellState, sees_foreground: bool) -> bool {
+    quiet
+        && match state {
+            ShellState::Idle => true,
+            ShellState::Unknown => !sees_foreground,
+            ShellState::Busy(_) | ShellState::Remote(_) => false,
+        }
+}
+
 /// How long a new shell's output must have been quiet before its prompt counts as up.
 const PROMPT_QUIET: Duration = Duration::from_millis(250);
 
@@ -660,9 +673,9 @@ impl TermPane {
             .unwrap_or(false)
     }
 
-    /// A new shell's prompt is up: the shell is known to be idle and has printed
-    /// something, then been quiet for a moment. On Windows "known idle" needs a prompt
-    /// mark (docs/shell.md); without one this never turns true.
+    /// A new shell's prompt is up (asked only of a shell xdevcmd just started for
+    /// "Open a new shell"): it has printed something, then been quiet for a moment,
+    /// and is not known to be busy; see [`prompt_ready`].
     pub fn prompt_ready(&self) -> bool {
         let quiet = self
             .last_output
@@ -670,7 +683,7 @@ impl TermPane {
             .ok()
             .and_then(|t| *t)
             .is_some_and(|t| t.elapsed() >= PROMPT_QUIET);
-        quiet && self.state() == ShellState::Idle
+        prompt_ready(quiet, &self.state(), SEES_FOREGROUND)
     }
 
     /// Type `text` into this shell; with `paste`, inside bracketed paste when the
@@ -1308,6 +1321,19 @@ mod tests {
         // Unreadable: not idle.
         assert_eq!(fg_from_stat("garbage", none), Fg::Unknown);
         assert_eq!(fg_from_stat("", none), Fg::Unknown);
+    }
+
+    #[test]
+    fn a_new_shell_is_ready_once_quiet_even_where_its_state_cannot_be_read() {
+        use ShellState::*;
+        // Windows without marks: printed and quiet is enough.
+        assert!(prompt_ready(true, &Unknown, false));
+        assert!(!prompt_ready(false, &Unknown, false));
+        // Where the system should see the foreground, Unknown is a failed read.
+        assert!(!prompt_ready(true, &Unknown, true));
+        assert!(prompt_ready(true, &Idle, true));
+        assert!(!prompt_ready(true, &Busy("a command".into()), false));
+        assert!(!prompt_ready(true, &Remote("ssh".into()), true));
     }
 
     #[test]

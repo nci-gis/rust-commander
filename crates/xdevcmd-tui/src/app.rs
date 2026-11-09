@@ -136,6 +136,129 @@ fn prepare(key: &PicKey, w: usize, h: usize, bg: [u8; 3], cell: (u16, u16)) -> P
     Prepared { pic, cells, bytes }
 }
 
+/// The terminal's input, read on a thread of its own. crossterm (0.29) must not be read
+/// from the main loop: on a hung-up terminal (its window closed, SSH lost) its reader
+/// loops forever, at full speed, on the read that fails, and nothing after it runs:
+/// not the SIGHUP flag, not the clean-up. Here the main loop waits on a channel, looks
+/// at the terminal itself meanwhile ([`terminal_alive`]), and ends tidily while the
+/// stuck thread spins until the process ends. The thread reads only when asked, so it
+/// never takes keys meant for an editor run in the meantime.
+struct KeyReader {
+    ask: Sender<Duration>,
+    got: Receiver<std::io::Result<Option<Event>>>,
+    /// A read asked for and not answered yet.
+    pending: bool,
+    /// An event that arrived while waiting for quiet ([`KeyReader::quiet`]).
+    held: Option<Event>,
+}
+
+impl KeyReader {
+    fn new() -> Self {
+        let (ask, asked) = mpsc::channel::<Duration>();
+        let (tell, got) = mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("input".into())
+            .spawn(move || {
+                for wait in asked {
+                    let r = event::poll(wait).and_then(|any| {
+                        if any {
+                            event::read().map(Some)
+                        } else {
+                            Ok(None)
+                        }
+                    });
+                    if tell.send(r).is_err() {
+                        break;
+                    }
+                }
+            });
+        Self {
+            ask,
+            got,
+            pending: false,
+            held: None,
+        }
+    }
+
+    /// The next event, waiting at most `wait`; an error once the terminal is gone.
+    fn next(&mut self, wait: Duration) -> Result<Option<Event>> {
+        if let Some(e) = self.held.take() {
+            return Ok(Some(e));
+        }
+        if !self.pending {
+            self.ask
+                .send(wait)
+                .map_err(|_| anyhow::anyhow!("the input thread is gone"))?;
+            self.pending = true;
+        }
+        // One wait, not slices of it: an idle xdevcmd wakes once a TICK, as it did when
+        // it polled crossterm itself. A hung-up terminal is seen within that wait.
+        match self.got.recv_timeout(wait) {
+            Ok(r) => {
+                self.pending = false;
+                Ok(r?)
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                terminal_alive()?;
+                Ok(None)
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("the input thread is gone")
+            }
+        }
+    }
+
+    /// Wait until the thread is not reading (at most the wait it was given), before
+    /// another program takes the terminal; what it read is kept for later.
+    fn quiet(&mut self) -> Result<()> {
+        while self.pending {
+            match self.got.recv_timeout(TICK) {
+                Ok(r) => {
+                    self.pending = false;
+                    if let Some(e) = r? {
+                        self.held = Some(e);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => terminal_alive()?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("the input thread is gone")
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// An error if the terminal (stdin) is hung up. When stdin is not the terminal (crossterm
+/// then reads /dev/tty), nothing is known here; SIGHUP still tells.
+#[cfg(unix)]
+fn terminal_alive() -> Result<()> {
+    use rustix::event::{poll, PollFd, PollFlags, Timespec};
+    use std::io::IsTerminal;
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return Ok(());
+    }
+    let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+    match poll(&mut fds, Some(&Timespec::default())) {
+        Ok(_) | Err(rustix::io::Errno::INTR) => {}
+        Err(e) => return Err(std::io::Error::from(e).into()),
+    }
+    if fds[0]
+        .revents()
+        .intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL)
+    {
+        anyhow::bail!("the terminal is gone (hung up)");
+    }
+    Ok(())
+}
+
+/// Windows: crossterm's console reader reports a closed console as an error itself.
+#[cfg(not(unix))]
+fn terminal_alive() -> Result<()> {
+    Ok(())
+}
+
 /// How long the cursor stays on a picture before it is decoded: going down a directory
 /// of photos decodes and sends only the one stopped on.
 const SETTLE: Duration = Duration::from_millis(120);
@@ -317,6 +440,8 @@ pub struct App {
     cell_known: bool,
     /// What the terminal answered at start-up about pictures (main.rs asks).
     pub probe: crate::graphics::Probe,
+    /// The terminal's input, on its own thread; made by the first turn of the loop.
+    input: Option<KeyReader>,
     /// Set by SIGHUP or SIGTERM: the terminal is gone, or someone asked us to end.
     hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The "running in …" note shown at start, cleared by the first key or click.
@@ -443,6 +568,7 @@ impl App {
             cell_px: (10, 20),
             probe: crate::graphics::Probe::default(),
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            input: None,
             boot_note: None,
             graphic_want: None,
             graphic_shown: None,
@@ -784,10 +910,10 @@ impl App {
             *drawn = Instant::now();
             *dirty = false;
         }
-        if event::poll(TICK)? {
+        let input = self.input.get_or_insert_with(KeyReader::new);
+        if let Some(event) = input.next(TICK)? {
             // Any event, a resize or a focus change included, may change the screen.
             *dirty = true;
-            let event = event::read()?;
             if matches!(event, Event::Key(_) | Event::Mouse(_)) {
                 if let Some(note) = self.boot_note.take() {
                     if self.status == note {
@@ -818,6 +944,10 @@ impl App {
                 self.status = "that file is outside the root xdevcmd is confined to".into();
                 self.pending_batch = None;
                 return Ok(());
+            }
+            // Nothing may read the terminal while the editor has it.
+            if let Some(input) = self.input.as_mut() {
+                input.quiet()?;
             }
             self.edit_externally(terminal, &path)?;
             if let Some((files, list)) = self.pending_batch.take() {

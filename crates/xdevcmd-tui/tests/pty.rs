@@ -925,6 +925,37 @@ fn f4_hands_the_terminal_to_the_editor_and_takes_it_back() {
     xdevcmd.quit();
 }
 
+#[test]
+fn keys_typed_while_the_editor_runs_reach_the_editor() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("editor-keys");
+    let target = s.file("left/draft.txt", "");
+    let ready = s.0.join("ready");
+    // An editor that reads a line from the terminal, typed before it reads (an editor
+    // still starting): whatever reads the terminal meanwhile takes the line, so
+    // xdevcmd's input thread must not be reading while the editor runs.
+    let editor = s.file(
+        "line-editor.sh",
+        &format!(
+            "#!/bin/sh\n: > '{}'\nsleep 1\nIFS= read -r line\nprintf '%s\\n' \"$line\" >> \"$1\"\n",
+            ready.display()
+        ),
+    );
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut xdevcmd = Session::start(&s, Some(&editor));
+    xdevcmd.send(DOWN);
+    xdevcmd.send(F4);
+    wait_file(&ready, "the editor started", |c| c.is_some());
+    xdevcmd.send(b"typed by hand\r");
+    wait_file(&target, "the line typed", |c| {
+        c.is_some_and(|c| c.contains("typed by hand"))
+    });
+    xdevcmd.wait_for("closed");
+    xdevcmd.wait_for("10 Quit");
+    xdevcmd.quit();
+}
+
 // ── mouse ──────────────────────────────────────────────────────────────────────────
 
 #[test]

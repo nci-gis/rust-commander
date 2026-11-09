@@ -52,6 +52,9 @@ pub struct Viewer {
     /// Lines chosen with the mouse: where the drag began, where it is now.
     selection: Option<(usize, usize)>,
     held: Option<Held>,
+    /// Show the last screenful at the next draw, once the screen's height is known: a
+    /// shell's history opens where the shell was, at its end.
+    to_end: bool,
 }
 
 impl Viewer {
@@ -80,7 +83,13 @@ impl Viewer {
             bar: None,
             selection: None,
             held: None,
+            to_end: false,
         }
+    }
+
+    /// Open at the end: the last line on the last row, as the shell showed it.
+    pub fn show_end(&mut self) {
+        self.to_end = true;
     }
 
     /// The selected lines, first to last.
@@ -345,6 +354,9 @@ impl Viewer {
             Mode::Hex => self.doc.hex_rows(),
         };
         self.body = body;
+        if std::mem::take(&mut self.to_end) {
+            self.top = total.saturating_sub(body.height as usize);
+        }
         self.row_lines.clear();
         self.bar = crate::scrollbar::draw(
             frame.buffer_mut(),

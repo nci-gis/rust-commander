@@ -1400,6 +1400,33 @@ impl App {
         }
     }
 
+    /// Shift+F12: the shell's history and screen in the viewer, held in memory — a
+    /// shell's output can hold tokens and customer data, so none of it is written
+    /// anywhere unless the user saves it. The focused shell, or from the files the
+    /// shell the panel last had in focus; `tab` names another tab's (the tab menu).
+    /// The viewer is a dialog over everything, so Esc leaves focus where it was.
+    fn view_history(&mut self, tab: Option<usize>) {
+        if self.term_id.is_none() {
+            let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
+            self.status = format!("no terminal yet \u{2014} {key}");
+            return;
+        }
+        let Some((title, text)) = self.panel().and_then(|p| p.history(tab)) else {
+            self.status = "no such terminal tab".into();
+            return;
+        };
+        let lines = text.lines().count();
+        let doc = Document::from_bytes(title, text.into_bytes());
+        let v = &self.settings.config.viewer;
+        let mut viewer = Viewer::open(doc, v.wrap, v.tab_width);
+        viewer.show_end();
+        viewer.note(&format!(
+            "{lines} line{}, in memory only \u{2014} Esc back",
+            if lines == 1 { "" } else { "s" }
+        ));
+        self.modal = Some(Modal::View(Box::new(viewer)));
+    }
+
     /// Send the active pane's directory to the shell. The one place the two halves of
     /// the program actually talk to each other, and the reason having both is worth it.
     fn cd_terminal_here(&mut self) {
@@ -1907,8 +1934,7 @@ impl App {
             }
             Action::FocusNextPane => self.focus_next_file(),
             Action::FocusTerminal => self.toggle_term_focus(full),
-            // The view itself is Round 015's step 1; the key is in place with keymap A.
-            Action::TerminalHistory => self.status = "the history view is not built yet".into(),
+            Action::TerminalHistory => self.view_history(None),
             Action::ToggleTerminal => self.toggle_term(full),
             Action::CdTerminalHere => self.cd_terminal_here(),
             Action::SplitRight => self.split_focused(Axis::Cols),
@@ -5499,6 +5525,7 @@ impl App {
             Some(("Synchronise\u{2026}", A::SyncDirs)),
             None,
             Some(("Terminal", A::FocusTerminal)),
+            Some(("Terminal history", A::TerminalHistory)),
             Some(("New terminal", A::NewTerminal)),
             Some(("Show or hide terminal", A::ToggleTerminal)),
         ];
@@ -6312,7 +6339,7 @@ impl App {
                 )
             }
             Some(Pane::Term(p)) => format!(
-                " terminal {}/{}{}  \u{b7}  {} back to files",
+                " terminal {}/{}{}  \u{b7}  {} back to files  \u{b7}  {} history",
                 p.active_tab() + 1,
                 p.tab_count(),
                 if p.split_count() > 1 {
@@ -6320,7 +6347,8 @@ impl App {
                 } else {
                     String::new()
                 },
-                self.footer_key(Action::FocusTerminal).unwrap_or_default()
+                self.footer_key(Action::FocusTerminal).unwrap_or_default(),
+                self.footer_key(Action::TerminalHistory).unwrap_or_default()
             ),
             None => String::new(),
         };

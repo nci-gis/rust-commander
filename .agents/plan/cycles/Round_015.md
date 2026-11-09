@@ -30,7 +30,7 @@ as agreed on 2026-11-09; Step 5 (logging) stays out.
       focused, every Alt+letter, Alt+digit and Ctrl+letter except the F12 family reaches the
       PTY (bytes read with `stty raw; od` as in Round 014's test), and none fires an xdevcmd
       action. docs/keys.md, Help (F1) and docs/shell.md say the rule in one line.
-- [ ] **1. History view (copy mode).**
+- [x] **1. History view (copy mode).**
   - Core: `Document` gets a second source, bytes in memory, beside the file
     (`Document::from_bytes(title, Vec<u8>)`; a private `Source { File(File), Memory(Vec<u8>) }`
     under `read_up_to`, `bytes_at` and the line index). Nothing of a shell's output touches
@@ -147,6 +147,39 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   `acts_on_shell` row in F1 says "in the shell: Alt+x first". docs/shell.md, the guide
   and CHANGELOG updated. `reference/ui.md` still describes the old global keys; it is
   read-only to agents, so it is left for the owner.
+
+- 2026-11-10, **step 1, the history view.** Core: `Document` reads through a private
+  `Source { File, Memory }` (`read_at`), so `line`, `bytes_at`, search and the line index
+  are one code path for both; `Document::from_bytes(title, bytes)`, `pub in_memory`, and
+  `memory_bytes()` for Save as (step 2). tui: `pane::term::history_text(&mut Parser)`
+  walks the offset from the top of the history to 0 a screen at a time; row `i` of the
+  page at offset `o` is row `history − o + i` of the whole and is taken only if it is
+  the next one wanted, which is what keeps the overlapping last page from doubling
+  lines. `TermPanel::history(tab)` gives the text and the title
+  "history · <shell> · tab N"; `App::view_history` opens it in the viewer at its end
+  (`Viewer::show_end`, resolved at the first draw when the height is known), with "N
+  lines, in memory only — Esc back". The viewer is a dialog, so Esc returns with focus
+  where it was. The status line in the shell now also says "Shift+F12 history", and
+  View → Terminal history is in the menu bar.
+  **Measured** (`history_text_timing`, ignored test, 50×200 screen, 9999 lines of
+  history, one row each, 10,048 lines and 2.0 MB out): release 30, 38, 33 ms over three
+  runs; debug 138 ms. That is how long the shell's reader waits on the write lock. Not
+  worth moving off the drawing thread at this size.
+  Tests: unit — 300 lines into a 10-row parser come back as exactly 1…300 with the view's
+  offset put back; every history length 1…45 on a 7-row screen (every page remainder)
+  exact; a 250-character line in 80 columns comes back as one line, also when a page
+  boundary cuts it; empty and prompt-only screens. Taking the "next row" guard out fails
+  the first two; ignoring `row_wrapped` fails the third. Core — a memory document and a
+  file with the same 3000 lines agree on lines, bytes, hex rows and search; binary sniff
+  and empty. Pty — `seq 1 300`, Shift+F12: line 301 is `300`, the prompt on the last
+  row, no file under the scratch directory holds the output; Home shows line 1; a drag
+  over seq's `1` and `2` and `y` writes `ESC ]52;c;MQoy BEL`; Esc Esc (the first lets go
+  of the selection, as the viewer always did) and typing reaches the shell. Second pty
+  test: Terminal.app's `ESC [34~`, Alt+X F12, and Shift+F12 from the files all open it.
+  **Plan vs code:** the plan's pty check "`300` at the bottom and `1` after Home" holds
+  with the command line counted: the history's line 1 is `$ seq 1 300`.
+  Not done: a full-screen program on the other screen (htop) has no history in vt100;
+  the view then shows that screen only. Not checked by hand with Claude Code or htop.
 
 ## Check
 

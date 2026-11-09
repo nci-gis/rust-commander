@@ -1932,6 +1932,83 @@ fn alt_x_is_the_prefix_inside_the_shell_and_gives_back_what_it_does_not_use() {
     xdevcmd.quit();
 }
 
+const SHIFT_F12: &[u8] = b"\x1b[24;2~";
+
+/// Shift+F12: the shell's history in the viewer, at its end; Home goes to its first
+/// line; a drag and y put those lines on the clipboard (OSC 52); Esc is back in the
+/// shell, typing into it.
+#[test]
+fn shift_f12_reads_the_shells_history_in_the_viewer() {
+    let s = Scratch::new("history");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"seq 1 300\r");
+    xdevcmd.wait_for("300");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh \u{b7} tab 1");
+    // The command line is the history's line 1, so seq's 300 is line 301; the prompt
+    // after it is the last line, on the viewer's last row.
+    xdevcmd.wait_for("301 \u{2502}300");
+    xdevcmd.wait_for("302 \u{2502}$");
+    xdevcmd.wait_for("in memory only");
+    // Nothing of the shell's output was written anywhere xdevcmd keeps files.
+    let written: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| std::fs::read(p).is_ok_and(|b| b.windows(8).any(|w| w == b"299\n300\n")))
+        .collect();
+    assert!(written.is_empty(), "history on disk: {written:?}");
+    xdevcmd.send(b"\x1b[H"); // Home
+    xdevcmd.wait_for("  1 \u{2502}$ seq 1 300");
+    let (x, y) = xdevcmd.locate("  2 \u{2502}1");
+    let (_, y3) = xdevcmd.locate("  3 \u{2502}2");
+    assert_eq!(y3, y + 1);
+    xdevcmd.drag((x + 6, y), (x + 6, y + 1));
+    xdevcmd.wait_for("2 lines selected");
+    xdevcmd.send(b"y");
+    xdevcmd.wait_for("copied 2 lines");
+    let raw = String::from_utf8_lossy(&xdevcmd.raw.lock().unwrap()).into_owned();
+    // base64 of "1\n2".
+    assert!(
+        raw.contains("\x1b]52;c;MQoy\x07"),
+        "OSC 52 with the two lines"
+    );
+    // The first Esc lets go of the selection, as always in the viewer; the second
+    // closes it.
+    xdevcmd.send(b"\x1b");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(b"echo BACK_$((1+1))\r");
+    xdevcmd.wait_for("BACK_2");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Terminal.app sends Shift+F12 as `ESC [34~` (xterm's F20; crossterm numbers it F17),
+/// and Alt+X F12 stands for Shift+F12 where neither arrives: both open the history.
+#[test]
+fn terminal_apps_shift_f12_and_alt_x_f12_open_the_history_too() {
+    let s = Scratch::new("history-keys");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"\x1b[34~");
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    // From the files it opens the shell the panel last had in focus.
+    xdevcmd.send(F12);
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh \u{b7} tab 1");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.quit();
+}
+
 /// Reported from Windows: closing the window instead of pressing q lost the session,
 /// since it was written only on quit and a closed window kills xdevcmd without asking.
 /// It is saved when it changes now, so a kill keeps what was open.

@@ -282,6 +282,17 @@ impl TermPanel {
         tab.terms.get(&tab.focus)
     }
 
+    /// The text of tab `tab`'s focused shell (the active tab's when `None`), all its
+    /// history and screen, with the title the viewer shows it under:
+    /// "history · sh · tab 2". `None` when there is no such tab.
+    pub fn history(&self, tab: Option<usize>) -> Option<(String, String)> {
+        let i = tab.unwrap_or(self.active);
+        let t = self.tabs.get(i)?;
+        let shell = t.terms.get(&t.focus)?;
+        let title = format!("history \u{b7} {} \u{b7} tab {}", shell.shell_name(), i + 1);
+        Some((title, shell.history_text()))
+    }
+
     pub fn send_key(&self, k: KeyEvent) -> bool {
         self.focused().is_some_and(|t| t.send_key(k))
     }

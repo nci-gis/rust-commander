@@ -415,6 +415,14 @@ impl TermPane {
         }
     }
 
+    /// The whole history and screen as text, for the viewer (Shift+F12).
+    pub fn history_text(&self) -> String {
+        self.parser
+            .write()
+            .map(|mut p| history_text(&mut p))
+            .unwrap_or_default()
+    }
+
     fn history(&self) -> usize {
         self.parser
             .write()
@@ -625,6 +633,57 @@ fn short_dir(p: &Path) -> String {
         .unwrap_or_else(|| "/".into())
 }
 
+/// Everything a shell's screen holds, history first, as plain text: the lines the user
+/// would read if they scrolled all the way up and then down again.
+///
+/// vt100 shows its history only a screen at a time (`set_scrollback`), so this walks
+/// the offset from the top of the history down to 0 and takes each page's rows. Row
+/// `i` of the page at offset `o` is row `history - o + i` of the whole, so each row is
+/// taken once by that number: the last page overlaps the one before it unless the
+/// history is a whole number of screens, and the overlap is where lines would be
+/// doubled. A row that `row_wrapped` says went on is joined to the next without a line
+/// break, so a long line comes back as the one line it was. Blank rows at the end
+/// (below the prompt) are cut. The view's own offset is put back.
+///
+/// Pure over the parser; the caller holds the write lock, which pauses that shell's
+/// output for as long as this runs (measured in Round 015's Do).
+pub fn history_text(p: &mut vt100::Parser) -> String {
+    let before = p.screen().scrollback();
+    let history = history_of(p);
+    let (rows, cols) = p.screen().size();
+    let rows = usize::from(rows.max(1));
+    let mut out = String::new();
+    let mut next = 0usize; // the next row of the whole to take
+    let mut offset = history;
+    loop {
+        p.screen_mut().set_scrollback(offset);
+        let screen = p.screen();
+        let first = history - offset;
+        for (i, text) in screen.rows(0, cols).enumerate() {
+            if first + i != next {
+                continue;
+            }
+            next += 1;
+            out.push_str(&text);
+            let wrapped = u16::try_from(i).is_ok_and(|r| screen.row_wrapped(r));
+            if !wrapped {
+                out.push('\n');
+            }
+        }
+        if offset == 0 {
+            break;
+        }
+        offset = offset.saturating_sub(rows);
+    }
+    p.screen_mut().set_scrollback(before);
+    let kept = out.trim_end_matches(['\n', ' ']).len();
+    out.truncate(kept);
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
 /// How many lines of history vt100 holds. It does not say, but it clamps a scrollback
 /// offset to that length, so ask for everything and put the offset back.
 fn history_of(p: &mut vt100::Parser) -> usize {
@@ -777,6 +836,82 @@ mod tests {
             Some(b" ".to_vec())
         );
         assert_eq!(k(KeyCode::Null, KeyModifiers::NONE), None);
+    }
+
+    fn fed(rows: u16, cols: u16, keep: usize, bytes: &[u8]) -> vt100::Parser {
+        let mut p = vt100::Parser::new(rows, cols, keep);
+        p.process(bytes);
+        p
+    }
+
+    #[test]
+    fn history_text_gives_every_line_once_in_order() {
+        let body: String = (1..=300).map(|i| format!("{i}\r\n")).collect();
+        let mut p = fed(10, 80, 1000, body.as_bytes());
+        p.screen_mut().set_scrollback(17);
+        let text = history_text(&mut p);
+        let lines: Vec<&str> = text.lines().collect();
+        let want: Vec<String> = (1..=300).map(|i| i.to_string()).collect();
+        assert_eq!(lines, want, "none missing or doubled where the pages meet");
+        assert_eq!(p.screen().scrollback(), 17, "the view stays where it was");
+    }
+
+    #[test]
+    fn history_text_at_every_page_alignment() {
+        // The last page lines up with the one before only when the history is a whole
+        // number of screens; every remainder is where a join could double or drop.
+        for n in 1..=45 {
+            let body: String = (1..=n).map(|i| format!("L{i}\r\n")).collect();
+            let mut p = fed(7, 20, 1000, body.as_bytes());
+            let text = history_text(&mut p);
+            let want: String = (1..=n).map(|i| format!("L{i}\n")).collect();
+            assert_eq!(text, want, "{n} lines");
+        }
+    }
+
+    #[test]
+    fn a_wrapped_line_comes_back_whole() {
+        let long: String = (0..250)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect();
+        let body = format!("before\r\n{long}\r\nafter\r\n");
+        let mut p = fed(10, 80, 100, body.as_bytes());
+        let text = history_text(&mut p);
+        assert_eq!(text, format!("before\n{long}\nafter\n"));
+        // The same with the long line pushed into the history and cut by a page.
+        let pad: String = (0..13).map(|i| format!("p{i}\r\n")).collect();
+        let mut p = fed(4, 80, 100, format!("{pad}{body}").as_bytes());
+        assert_eq!(
+            history_text(&mut p),
+            format!("{}before\n{long}\nafter\n", pad.replace("\r\n", "\n"))
+        );
+    }
+
+    #[test]
+    fn history_text_of_an_empty_screen_is_empty() {
+        let mut p = fed(5, 20, 100, b"");
+        assert_eq!(history_text(&mut p), "");
+        let mut p = fed(5, 20, 100, b"$ ");
+        assert_eq!(history_text(&mut p), "$\n", "trailing blanks cut");
+    }
+
+    /// Not a check: how long the walk holds the write lock on the largest history the
+    /// setting allows, 9999 lines of 200 columns. `cargo test --release -- --ignored
+    /// --nocapture history_text_timing`.
+    #[test]
+    #[ignore]
+    fn history_text_timing() {
+        let line: String = "x".repeat(194); // 199 columns with the number: one row each
+        let body: String = (0..10_050).map(|i| format!("{i:05}{line}\r\n")).collect();
+        let mut p = fed(50, 200, 9999, body.as_bytes());
+        let t = std::time::Instant::now();
+        let text = history_text(&mut p);
+        let took = t.elapsed();
+        eprintln!(
+            "history_text: {} lines, {} bytes, {took:?}",
+            text.lines().count(),
+            text.len()
+        );
     }
 
     #[test]

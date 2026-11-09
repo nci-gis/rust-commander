@@ -4,9 +4,13 @@
 //! So the file stays on disk: opening streams through it once to record where each line
 //! starts (eight bytes per line), and everything after that is a seek and a short read of
 //! only what is on screen.
+//!
+//! A document can also hold bytes in memory instead ([`Document::from_bytes`]): a
+//! shell's history, which can carry tokens and customer data, is viewed without ever
+//! touching the disk. The line index, search and hex work the same on either.
 
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// Stop indexing here. A file with more lines than this is still viewable; the viewer
@@ -30,9 +34,37 @@ pub enum Mode {
     Hex,
 }
 
+/// Where a document's bytes are: a file left on disk, or bytes held in memory.
+enum Source {
+    File(File),
+    Memory(Vec<u8>),
+}
+
+impl Source {
+    /// Up to `buf.len()` bytes from `offset`; fewer at the end, which is not an error.
+    fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Source::File(f) => {
+                f.seek(SeekFrom::Start(offset))?;
+                read_up_to(f, buf)
+            }
+            Source::Memory(bytes) => {
+                let start = (offset as usize).min(bytes.len());
+                let n = buf.len().min(bytes.len() - start);
+                buf[..n].copy_from_slice(&bytes[start..start + n]);
+                Ok(n)
+            }
+        }
+    }
+}
+
 pub struct Document {
+    /// The file's path, or for a document held in memory the name it is shown under.
     pub path: PathBuf,
-    file: File,
+    /// Held in memory rather than read from `path`: nothing of it is on disk, and
+    /// saving it means writing these bytes, not copying a file.
+    pub in_memory: bool,
+    source: Source,
     pub len: u64,
     /// Byte offset where each line begins.
     lines: Vec<u64>,
@@ -64,7 +96,8 @@ impl Document {
 
         let mut doc = Self {
             path: path.to_path_buf(),
-            file,
+            in_memory: false,
+            source: Source::File(file),
             len,
             lines: Vec::new(),
             binary,
@@ -75,6 +108,37 @@ impl Document {
             doc.index_lines()?;
         }
         Ok(doc)
+    }
+
+    /// A document over bytes held in memory, shown as `title`. Nothing is written
+    /// anywhere; text or binary is decided as for a file.
+    pub fn from_bytes(title: impl Into<PathBuf>, bytes: Vec<u8>) -> Self {
+        let len = bytes.len() as u64;
+        let binary = bytes[..SNIFF.min(bytes.len())].contains(&0);
+        let mut doc = Self {
+            path: title.into(),
+            in_memory: true,
+            source: Source::Memory(bytes),
+            len,
+            lines: Vec::new(),
+            binary,
+            fully_indexed: true,
+            indexed_len: len,
+        };
+        if !binary {
+            // Reading memory cannot fail.
+            let _ = doc.index_lines();
+        }
+        doc
+    }
+
+    /// The bytes of a document held in memory, for saving them; `None` for a file,
+    /// which is saved by copying it.
+    pub fn memory_bytes(&self) -> Option<&[u8]> {
+        match &self.source {
+            Source::Memory(b) => Some(b),
+            Source::File(_) => None,
+        }
     }
 
     /// Index the lines of a file that opened as binary, the first time text is asked
@@ -89,16 +153,14 @@ impl Document {
     }
 
     fn index_lines(&mut self) -> io::Result<()> {
-        self.file.seek(SeekFrom::Start(0))?;
-        let mut reader = BufReader::with_capacity(256 * 1024, &self.file);
-        let mut buf = [0u8; 256 * 1024];
-        let mut offset: u64 = 0;
         self.lines.clear();
         if self.len > 0 {
             self.lines.push(0);
         }
-        loop {
-            let n = reader.read(&mut buf)?;
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut offset: u64 = 0;
+        while offset < self.len {
+            let n = self.source.read_at(offset, &mut buf)?;
             if n == 0 {
                 break;
             }
@@ -140,8 +202,7 @@ impl Document {
         let end = self.lines.get(i + 1).copied().unwrap_or(self.indexed_len);
         let want = end.saturating_sub(start).min(MAX_LINE) as usize;
         let mut buf = vec![0u8; want];
-        self.file.seek(SeekFrom::Start(start))?;
-        let got = read_up_to(&mut self.file, &mut buf)?;
+        let got = self.source.read_at(start, &mut buf)?;
         buf.truncate(got);
         while matches!(buf.last(), Some(b'\n') | Some(b'\r')) {
             buf.pop();
@@ -162,10 +223,7 @@ impl Document {
         }
         let want = want.min((self.len - offset) as usize);
         let mut buf = vec![0u8; want];
-        if self.file.seek(SeekFrom::Start(offset)).is_err() {
-            return Vec::new();
-        }
-        match read_up_to(&mut self.file, &mut buf) {
+        match self.source.read_at(offset, &mut buf) {
             Ok(n) => {
                 buf.truncate(n);
                 buf
@@ -212,8 +270,7 @@ impl Document {
 
         while pos < to && budget > 0 {
             let want = ((to - pos) as usize).min(buf.len());
-            self.file.seek(SeekFrom::Start(pos)).ok()?;
-            let n = read_up_to(&mut self.file, &mut buf[..want]).ok()?;
+            let n = self.source.read_at(pos, &mut buf[..want]).ok()?;
             if n == 0 {
                 break;
             }
@@ -481,6 +538,48 @@ mod tests {
             .err()
             .expect("/dev/zero has no end to index");
         assert!(e.to_string().contains("device"), "{e}");
+    }
+
+    #[test]
+    fn a_document_in_memory_reads_as_a_file_with_the_same_bytes() {
+        let body: Vec<u8> = (0..3000)
+            .flat_map(|i| format!("row {i} \x1b-free text\n").into_bytes())
+            .collect();
+        let p = write("same.txt", &body);
+        let mut file = Document::open(&p).unwrap();
+        let mut mem = Document::from_bytes("history \u{b7} sh \u{b7} tab 1", body.clone());
+        assert!(mem.in_memory && !file.in_memory);
+        assert_eq!(mem.path, PathBuf::from("history \u{b7} sh \u{b7} tab 1"));
+        assert_eq!(mem.len, file.len);
+        assert_eq!(mem.line_count(), file.line_count());
+        assert_eq!(mem.lines_from(2990, 20), file.lines_from(2990, 20));
+        assert_eq!(mem.bytes_at(100, 64), file.bytes_at(100, 64));
+        assert_eq!(mem.hex_rows(), file.hex_rows());
+        assert_eq!(mem.find("ROW 2500", 0, false), Some(2500));
+        assert_eq!(
+            mem.find("row 10 ", 2500, true),
+            file.find("row 10 ", 2500, true)
+        );
+        assert_eq!(mem.memory_bytes(), Some(&body[..]));
+        assert_eq!(file.memory_bytes(), None);
+    }
+
+    #[test]
+    fn a_document_in_memory_sniffs_binary_and_handles_empty() {
+        let bin = Document::from_bytes("b", b"ab\0cd".to_vec());
+        assert!(bin.binary);
+        assert_eq!(
+            bin.line_count(),
+            0,
+            "binary skips the index, as a file does"
+        );
+        let mut empty = Document::from_bytes("e", Vec::new());
+        assert_eq!(empty.line_count(), 0);
+        assert_eq!(empty.bytes_at(0, 16), b"");
+        assert_eq!(empty.find("x", 0, false), None);
+        let mut one = Document::from_bytes("o", b"no newline".to_vec());
+        assert_eq!(one.line_count(), 1);
+        assert_eq!(one.line(0).unwrap(), "no newline");
     }
 
     #[test]

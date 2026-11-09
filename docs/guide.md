@@ -149,6 +149,10 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **Alt+N** opens a new terminal tab. Inside the shell, press **Alt+X** first:
   **Alt+X Alt+S** / **Alt+X Alt+D** split it, **Alt+X Alt+W** closes it, **Alt+X Alt+1**
   goes to tab 1. Anything else after Alt+X goes to the program.
+- **Shift+F12** opens the shell's history in the viewer, at its end: read it, search it
+  with `/`, drag over lines and press `y` to copy them, **Esc** to go back. It stays in
+  memory; nothing of it is written to disk. **Alt+X F12** does the same where Shift+F12
+  does not arrive.
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
 - The wheel scrolls back through a shell's history. A full-screen program gets the

@@ -11,6 +11,12 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Shift+F12: the shell's history in the viewer** (copy mode). Everything the focused
+  shell kept, and its screen, opens in the F3 viewer at its end: read, `/` search, drag
+  and `y` to copy (OSC 52). It is held in memory only; nothing of a shell's output is
+  written to disk. Works from inside the shell, and from the files on the shell last in
+  focus. Alt+X F12 where Shift+F12 does not arrive; macOS Terminal.app's Shift+F12 is
+  understood as it is. Esc goes back where you were.
 - **Sharp pictures in quick view** where the terminal draws them itself: the Kitty
   graphics protocol (kitty, Ghostty), iTerm2's inline images (iTerm2, WezTerm) and sixel
   (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and

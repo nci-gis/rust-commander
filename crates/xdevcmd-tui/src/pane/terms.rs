@@ -54,6 +54,16 @@ pub enum Click {
     Selected,
 }
 
+/// A shell's text for the viewer (Shift+F12).
+pub struct History {
+    pub title: String,
+    pub text: String,
+    /// The shell's directory, where the system says.
+    pub cwd: Option<std::path::PathBuf>,
+    /// A full-screen program has the other screen up, so `text` is that screen only.
+    pub full_screen: bool,
+}
+
 /// A terminal tab's identity, never reused within a panel.
 pub type TabId = u64;
 
@@ -323,15 +333,18 @@ impl TermPanel {
     /// history and screen, with the title the viewer shows it under,
     /// "history · sh · tab 2", and the shell's directory where the system says.
     /// `None` when there is no such tab.
-    pub fn history(
-        &self,
-        tab: Option<usize>,
-    ) -> Option<(String, String, Option<std::path::PathBuf>)> {
+    pub fn history(&self, tab: Option<usize>) -> Option<History> {
         let i = tab.unwrap_or(self.active);
         let t = self.tabs.get(i)?;
         let shell = t.terms.get(&t.focus)?;
         let title = format!("history \u{b7} {} \u{b7} tab {}", shell.shell_name(), i + 1);
-        Some((title, shell.history_text(), shell.cwd()))
+        let (text, full_screen) = shell.history_text();
+        Some(History {
+            title,
+            text,
+            cwd: shell.cwd(),
+            full_screen,
+        })
     }
 
     pub fn send_key(&self, k: KeyEvent) -> bool {

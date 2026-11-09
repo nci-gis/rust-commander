@@ -418,11 +418,13 @@ impl TermPane {
         }
     }
 
-    /// The whole history and screen as text, for the viewer (Shift+F12).
-    pub fn history_text(&self) -> String {
+    /// The whole history and screen as text, for the viewer (Shift+F12), and whether a
+    /// full-screen program has the other screen up: vt100 keeps no history there, so
+    /// the text is that screen only.
+    pub fn history_text(&self) -> (String, bool) {
         self.parser
             .write()
-            .map(|mut p| history_text(&mut p))
+            .map(|mut p| (history_text(&mut p), p.screen().alternate_screen()))
             .unwrap_or_default()
     }
 

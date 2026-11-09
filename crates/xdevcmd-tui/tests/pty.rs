@@ -1984,6 +1984,32 @@ fn shift_f12_reads_the_shells_history_in_the_viewer() {
     xdevcmd.quit();
 }
 
+/// A full-screen program on the other screen (htop, vim) leaves vt100 no history to
+/// give: the viewer shows that screen and says so, instead of counting it as history.
+#[test]
+fn shift_f12_over_a_full_screen_program_says_it_is_that_screen_only() {
+    let s = Scratch::new("history-alt");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"printf '\\033[?1049hON_THE_%s\\n' OTHER; read x; printf '\\033[?1049l'\r");
+    xdevcmd.wait_for("ON_THE_OTHER");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("a full-screen program is running");
+    xdevcmd.wait_for("its screen only");
+    assert!(!xdevcmd.screen().contains("in memory only"));
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(ENTER); // ends `read`, back to the shell's own screen
+    xdevcmd.wait_gone("ON_THE_OTHER");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 const F2: &[u8] = b"\x1bOQ";
 
 /// F2 in the history view: offered as xdevcmd-history-<date>-<time>.txt in the shell's

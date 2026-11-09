@@ -154,7 +154,8 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **Shift+F12** opens the shell's history in the viewer, at its end: read it, search it
   with `/`, drag over lines and press `y` to copy them, **Esc** to go back. It stays in
   memory; nothing of it is written to disk. **Alt+X F12** does the same where Shift+F12
-  does not arrive.
+  does not arrive. While a full-screen program (vim, htop) is up, it shows that
+  program's screen only, and says so.
 - A **right-click on a terminal tab** opens its menu: View history, Save history as…,
   Close tab, for that tab whichever has focus. Inside the shell a right-click is left
   to the program.

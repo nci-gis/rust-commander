@@ -1424,20 +1424,27 @@ impl App {
             self.status = format!("no terminal yet \u{2014} {key}");
             return;
         }
-        let Some((title, text, cwd)) = self.panel().and_then(|p| p.history(tab)) else {
+        let Some(h) = self.panel().and_then(|p| p.history(tab)) else {
             self.status = "no such terminal tab".into();
             return;
         };
-        self.history_dir = Some(cwd.unwrap_or_else(|| self.focused_cwd()));
-        let lines = text.lines().count();
-        let doc = Document::from_bytes(title, text.into_bytes());
+        self.history_dir = Some(h.cwd.unwrap_or_else(|| self.focused_cwd()));
+        let lines = h.text.lines().count();
+        let doc = Document::from_bytes(h.title, h.text.into_bytes());
         let v = &self.settings.config.viewer;
         let mut viewer = Viewer::open(doc, v.wrap, v.tab_width);
         viewer.show_end();
-        viewer.note(&format!(
-            "{lines} line{}, in memory only \u{2014} Esc back",
-            if lines == 1 { "" } else { "s" }
-        ));
+        let note = if h.full_screen {
+            // The shell's lines are behind the program's screen, and vt100 keeps no
+            // history for that screen: say so rather than count a screenful as history.
+            "a full-screen program is running \u{2014} its screen only \u{2014} Esc back".into()
+        } else {
+            format!(
+                "{lines} line{}, in memory only \u{2014} Esc back",
+                if lines == 1 { "" } else { "s" }
+            )
+        };
+        viewer.note(&note);
         self.modal = Some(Modal::View(Box::new(viewer)));
     }
 

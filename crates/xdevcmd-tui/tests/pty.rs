@@ -648,11 +648,16 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.wait_for("unfinished temporary file removed");
     assert!(!part.exists(), "the temporary file is gone");
     x.send(ENTER); // continue
-    wait_file(&dst.join("b.txt"), "copied", |c| c.as_deref() == Some("b"));
-    assert!(
-        std::fs::read_dir(&journal).unwrap().next().is_none(),
-        "the journal is gone"
-    );
+    // The job is over once its summary is on the status line: b.txt appears earlier,
+    // at its rename, while the worker still holds the journal and the job box (which
+    // ignores q) is still up.
+    x.wait_for("1 copied");
+    assert_eq!(std::fs::read_to_string(dst.join("b.txt")).unwrap(), "b");
+    let start = Instant::now();
+    while std::fs::read_dir(&journal).unwrap().next().is_some() {
+        assert!(start.elapsed() < PATIENCE, "the journal is gone");
+        std::thread::sleep(Duration::from_millis(25));
+    }
     x.quit();
 }
 

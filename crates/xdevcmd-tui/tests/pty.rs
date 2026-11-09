@@ -1646,6 +1646,69 @@ fn with_follow_on_the_pane_follows_the_shells_cd_and_only_when_it_changes() {
     xdevcmd.quit();
 }
 
+/// Linux: a directory printed into the terminal (a forged OSC 7) is not where the
+/// shell is; Alt+G goes where /proc says.
+#[cfg(target_os = "linux")]
+#[test]
+fn alt_g_on_linux_ignores_a_directory_printed_into_the_terminal() {
+    let s = Scratch::new("altg-forged");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    std::fs::create_dir(s.left().join("other")).unwrap();
+    s.file("left/sub/inside-sub.txt", "x");
+    s.file("left/other/inside-other.txt", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let forged = format!(
+        "cd sub && printf '\\033]7;file://%s\\033\\\\' '{}'\r",
+        s.left().join("other").display()
+    );
+    xdevcmd.send(forged.as_bytes());
+    std::thread::sleep(Duration::from_millis(400));
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_G);
+    xdevcmd.wait_for("the shell's directory:");
+    let screen = xdevcmd.screen();
+    assert!(screen.contains("inside-sub"), "{screen}");
+    assert!(!screen.contains("inside-other"), "{screen}");
+    xdevcmd.quit();
+}
+
+/// Follow waits while the last prompt mark says a command runs, even when the system
+/// sees the shell itself in the foreground (a shell built-in, a hung prompt hook).
+#[cfg(target_os = "linux")]
+#[test]
+fn follow_waits_while_the_last_mark_says_a_command_runs() {
+    let s = Scratch::new("follow-mark");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    s.file("left/sub/inside-sub.txt", "x");
+    s.file("left/at-left.txt", "x");
+    let cfg = s.file("config.toml", "[terminal]\nfollow = true\n");
+    let cfg = cfg.to_str().unwrap().to_string();
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    std::thread::sleep(Duration::from_millis(700));
+    // A prompt mark (so marks count), then C, then the cd: the shell is back at its
+    // prompt with C the last mark.
+    xdevcmd.send(b"printf '\\033]133;A\\007\\033]133;C\\007'; cd sub\r");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        !xdevcmd.screen().contains("inside-sub"),
+        "followed while the last mark said running"
+    );
+    // The command finished (D): now it follows.
+    xdevcmd.send(b"printf '\\033]133;D\\007'\r");
+    xdevcmd.wait_for("inside-sub");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn follow_is_off_by_default_and_nothing_moves() {

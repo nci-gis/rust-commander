@@ -149,8 +149,9 @@ What xdevcmd learns about the shell, and how far it trusts each source
   same sequences. So:
   - A reported directory only ever **moves a file pane** (Alt+G, `follow`), and only to
     a directory that exists on this machine and lies inside the root xdevcmd is confined
-    to. It is never typed, run or written to. A host other than this machine's is
-    ignored.
+    to. It is never typed, run or written to: typed names are bare only when the
+    system gave the shell's directory (full paths otherwise), and the history's Save
+    as… does not offer it. A host other than this machine's is ignored.
   - A mark that says "running" (`C`) is believed everywhere: it can only stop xdevcmd
     from typing. A mark that says "at the prompt" makes a shell idle **only on Windows**,
     where the system does not say; on Linux and macOS a program the system sees always

@@ -149,6 +149,15 @@ pub fn state_of(
     }
 }
 
+/// The shell's directory, and where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellDir {
+    pub path: std::path::PathBuf,
+    /// From the system (`/proc`, lsof). False: from the shell's own output (OSC 7 or
+    /// 9;9), which any program printing into the terminal can forge.
+    pub trusted: bool,
+}
+
 /// Who has the terminal, as the system says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Fg {
@@ -589,19 +598,41 @@ impl TermPane {
     ///   snippets in docs/shell.md); nothing otherwise, rather than a guess.
     ///
     /// `None` when it is not known. The caller checks that it exists and lies inside
-    /// the policy root before a pane goes there.
-    pub fn shell_dir(&self) -> Option<std::path::PathBuf> {
+    /// the policy root before a pane goes there, and uses a directory that is not
+    /// [`ShellDir::trusted`] only to move a pane, never to decide what is typed.
+    pub fn shell_dir(&self) -> Option<ShellDir> {
         let pid = self.pid.load(Ordering::Relaxed);
         if pid == 0 {
             return None;
         }
+        let reported = || {
+            self.reported().0.map(|path| ShellDir {
+                path,
+                trusted: false,
+            })
+        };
+        #[cfg(target_os = "linux")]
+        {
+            let _ = reported;
+            std::fs::read_link(format!("/proc/{pid}/cwd"))
+                .ok()
+                .map(|path| ShellDir {
+                    path,
+                    trusted: true,
+                })
+        }
         #[cfg(target_os = "macos")]
         {
-            lsof_cwd_of(pid).or_else(|| self.reported().0)
+            lsof_cwd_of(pid)
+                .map(|path| ShellDir {
+                    path,
+                    trusted: true,
+                })
+                .or_else(reported)
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
-            self.cwd()
+            reported()
         }
     }
 

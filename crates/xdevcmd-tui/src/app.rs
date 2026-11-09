@@ -1731,28 +1731,8 @@ impl App {
         };
         let shell = panel.shell_name();
         // Read only when a key asks: on macOS this runs lsof.
-        let shell_dir = panel.shell_dir();
-        let build = |dir: Option<&Path>| -> Result<String, String> {
-            let bare = dir.is_some_and(|d| paths.iter().all(|p| p.parent() == Some(d)));
-            let mut names = Vec::with_capacity(paths.len());
-            for p in &paths {
-                let shown = if bare {
-                    p.file_name().map(Path::new).unwrap_or(p)
-                } else {
-                    p.as_path()
-                };
-                // A lossy name would be another file, or none.
-                names.push(
-                    shown
-                        .to_str()
-                        .ok_or_else(|| "a name is not UTF-8 \u{2014} not typed".to_string())?,
-                );
-            }
-            crate::safety::words(&shell, &names)
-        };
-        let typed = shell_dir
-            .as_deref()
-            .map(|d| xdevcmd_core::paths::canonical(d).unwrap_or_else(|_| d.to_path_buf()));
+        let typed = bare_names_dir(panel.shell_dir());
+        let build = |dir: Option<&Path>| name_words(&shell, &paths, dir);
         let (here, new_shell) = match (build(typed.as_deref()), build(Some(&pane_dir))) {
             (Ok(h), Ok(n)) => (h, n),
             (Err(why), _) | (_, Err(why)) => {
@@ -2058,7 +2038,8 @@ impl App {
             // Reading types nothing, so a shell whose state is unknown may be read.
             ShellState::Idle | ShellState::Unknown => {}
         }
-        let Some(dir) = panel.shell_dir() else {
+        // A reported directory (OSC 7, 9;9) may be used here: it only moves a pane.
+        let Some(dir) = panel.shell_dir().map(|d| d.path) else {
             self.status = "the shell's directory is not known \u{2014} see docs/shell.md".into();
             return;
         };
@@ -7388,6 +7369,34 @@ pub(crate) fn base64(data: &[u8]) -> String {
 }
 
 /// "s" for a count other than one.
+/// The directory typed names may be bare in: the shell's, only when the system gave it.
+/// One the shell reported about itself could be forged by any program's output, and
+/// bare names typed against a forged directory would name other files.
+fn bare_names_dir(d: Option<crate::pane::term::ShellDir>) -> Option<PathBuf> {
+    let d = d.filter(|d| d.trusted)?.path;
+    Some(xdevcmd_core::paths::canonical(&d).unwrap_or(d))
+}
+
+/// `paths` as words for `shell`: bare names when all are in `dir`, else full paths.
+fn name_words(shell: &str, paths: &[PathBuf], dir: Option<&Path>) -> Result<String, String> {
+    let bare = dir.is_some_and(|d| paths.iter().all(|p| p.parent() == Some(d)));
+    let mut names = Vec::with_capacity(paths.len());
+    for p in paths {
+        let shown = if bare {
+            p.file_name().map(Path::new).unwrap_or(p)
+        } else {
+            p.as_path()
+        };
+        // A lossy name would be another file, or none.
+        names.push(
+            shown
+                .to_str()
+                .ok_or_else(|| "a name is not UTF-8 \u{2014} not typed".to_string())?,
+        );
+    }
+    crate::safety::words(shell, &names)
+}
+
 /// A mouse button as a terminal numbers it in a report.
 fn button_number(b: MouseButton) -> u32 {
     match b {
@@ -7409,6 +7418,30 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use super::base64;
     use super::*;
+
+    /// Bare names only against a directory the system gave: a reported one (OSC 7 or
+    /// 9;9, forgeable by any output) gets full paths even when it equals theirs.
+    #[test]
+    fn typed_names_are_bare_only_in_a_directory_the_system_gave() {
+        use crate::pane::term::ShellDir;
+        let dir = std::env::temp_dir().join("xdevcmd-bare-names");
+        let paths = vec![dir.join("a b"), dir.join("c")];
+        let words =
+            |d: Option<ShellDir>| name_words("bash", &paths, bare_names_dir(d).as_deref()).unwrap();
+        // Not created on disk, so canonical() leaves the path as it is.
+        let trusted = ShellDir {
+            path: dir.clone(),
+            trusted: true,
+        };
+        let reported = ShellDir {
+            path: dir.clone(),
+            trusted: false,
+        };
+        assert_eq!(words(Some(trusted)), "'a b' 'c' ");
+        let full = words(Some(reported));
+        assert!(full.contains("xdevcmd-bare-names"), "{full}");
+        assert_eq!(full, words(None));
+    }
 
     /// A live terminal is not taken for a lost one, and a hung-up one is seen: the check
     /// must never end xdevcmd under a working terminal (as `poll`'s POLLNVAL might on

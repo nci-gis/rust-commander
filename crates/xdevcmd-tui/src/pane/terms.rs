@@ -378,7 +378,8 @@ impl TermPanel {
         Some(History {
             title,
             text,
-            cwd: shell.shell_dir(),
+            // Only a directory the system gave: a Save as… default is written to.
+            cwd: shell.shell_dir().filter(|d| d.trusted).map(|d| d.path),
             full_screen,
         })
     }
@@ -400,7 +401,7 @@ impl TermPanel {
     }
 
     /// The focused shell's directory; see [`TermPane::shell_dir`].
-    pub fn shell_dir(&self) -> Option<std::path::PathBuf> {
+    pub fn shell_dir(&self) -> Option<crate::pane::term::ShellDir> {
         self.focused().and_then(TermPane::shell_dir)
     }
 

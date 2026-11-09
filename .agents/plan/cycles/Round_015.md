@@ -20,7 +20,7 @@ Branch `feat/terminal-history`, from `feat/image-preview` at Round 014's Review
 commit (owner, 2026-11-09: rounds run one after another, chained). Steps 1–4 exactly
 as agreed on 2026-11-09; Step 5 (logging) stays out.
 
-- [ ] **0. Keymap A: the shell owns its keys** (owner, 2026-11-09: "Option A"; no users yet,
+- [x] **0. Keymap A: the shell owns its keys** (owner, 2026-11-09: "Option A"; no users yet,
       so changed now). With the terminal panel focused, xdevcmd takes **only the F12 family**:
       F12 (focus, as today), Shift+F12 (history view, step 1), and their Alt+X forms. Every
       other key in `is_global` today (Alt+D, Alt+C, Alt+T, Alt+N, Alt+1…9, the Alt+R group, and
@@ -104,6 +104,49 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   text was changed to say so, with the owner's leave to edit it), and the principle that
   xdevcmd complements the shell and never competes: a program in the panel gets its keys
   and its mouse.
+
+- 2026-11-10, **step 0, keymap A.** `is_global` before this round held 16 actions, each
+  of them xdevcmd's even when typed into the shell: `focus_terminal` (F12),
+  `toggle_terminal` (Alt+T), `cd_terminal_here` (Alt+C), `new_terminal` (Alt+N),
+  `next_tab` / `prev_tab` (Ctrl+PgDn / Ctrl+PgUp), `go_tab` (Alt+1…9), `next_split`
+  (Alt+O), `split_right` (Alt+S), `split_down` (Alt+D), `close_pane` (Alt+W),
+  `resize_left/right/up/down` (Alt+Shift+arrows, and the whole Alt+R group, which
+  opened in the shell because every action in it was global), `zoom` (Alt+Z). Now
+  `is_global` is F12's family only: `focus_terminal` and the new `terminal_history`
+  (Shift+F12, Alt+X F12; the view itself is step 1, a status line says so until then).
+  The other 15 are `Action::acts_on_shell`. F13–F20 were handled nowhere: nothing bound
+  them, so Terminal.app's Shift+F5…F12 did nothing (Alt+X Fn is the answer there).
+  **Deviation, why:** the plan says "from the shell it is F12 then the key". In the code
+  F12 moves focus to a file pane, and split, close, next split, resize, zoom, tabs and
+  go-tab act on *whatever has focus*, so F12 then Alt+S splits a file pane: those 15
+  could no longer reach a shell by any key. The sound way inside keymap A: Alt+X, which
+  keymap A already takes for Alt+X F12, is xdevcmd's prefix in the shell. Alt+X then a
+  key of an `acts_on_shell` action runs it on the shell (Alt+X Alt+S splits it); Alt+X
+  then any other key sends both to the program, so nothing is lost (Esc and Enter cancel,
+  as in every group). No further key is taken from the shell. A group's first key opens
+  in the shell only if the group holds a global action (`Keymap::shell_prefix`), so
+  Alt+R is readline's revert-line again. Alt+R after Alt+X is not a nested group: from
+  the shell, resizing is Alt+X Alt+Shift+arrow or a drag.
+  **Also deviates, why:** `key_bytes` returned nothing for any F-key, so no F-key reached
+  a program in the panel before (mc, htop). Keymap A's "every other key is the
+  program's" needs them: F1–F12 now go as xterm sends them, modifiers as a parameter
+  (`ESC [17;2~` is Shift+F6). Shift+F12 from Terminal.app arrives as `ESC [34~`, which
+  crossterm 0.29 numbers **F17** (its table maps 31..=34 to F14..F17; xterm calls it
+  F20), not F20 as the plan says: `normalise` takes a bare F17 or F20 as Shift+F12.
+  Shift+F5…F11 cannot be mapped back that way, since crossterm gives two of their
+  sequences one number. On rxvt, `ESC [34~` is Shift+F10, which now opens the history
+  rather than the menu (Alt+X F10 still does); not checked on a real rxvt.
+  Tests: pty `inside_the_shell_only_f12s_family_is_xdevcmds` (25 Alt+letters, Alt+1…9,
+  Ctrl+A…Z, F1–F11 and Shift+F6, one write each, read back byte for byte by `dd` into a
+  file; focus, tab count and splits unchanged) fails with the old global set put back
+  (dd never gets its bytes); `alt_x_is_the_prefix…` (Alt+X q reaches the program as
+  `ESC x q`; Alt+X Alt+N opens a tab); render `terminal_keys_typed_into_the_shell…`;
+  unit tests for the global set, the prefix, F17/F20 and the F-key bytes. 20 render and
+  4 pty tests that typed terminal keys into the shell now press Alt+X first. F1 and
+  docs/keys.md say the rule in two sentences generated from the keymap; each
+  `acts_on_shell` row in F1 says "in the shell: Alt+x first". docs/shell.md, the guide
+  and CHANGELOG updated. `reference/ui.md` still describes the old global keys; it is
+  read-only to agents, so it is left for the owner.
 
 ## Check
 

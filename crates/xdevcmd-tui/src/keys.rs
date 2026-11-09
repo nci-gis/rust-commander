@@ -17,6 +17,7 @@ pub enum Action {
     FocusNextPane,
     FocusTerminal,
     ToggleTerminal,
+    TerminalHistory,
     CdTerminalHere,
     NewTerminal,
     NewTab,
@@ -415,6 +416,15 @@ pub const BINDINGS: &[Binding] = &[
         keys: &["F12"],
     },
     Binding {
+        action: Action::TerminalHistory,
+        name: "terminal_history",
+        group: "Terminal",
+        about: "The shell's history in the viewer: read, search, copy, save",
+        // F12's family, the only keys xdevcmd takes inside the shell. Alt+X F12 for
+        // terminals that cannot send Shift+F12, as Alt+X F6 stands for Shift+F6.
+        keys: &["Shift+F12", "Alt+x F12"],
+    },
+    Binding {
         action: Action::ToggleTerminal,
         name: "toggle_terminal",
         group: "Terminal",
@@ -732,6 +742,32 @@ pub fn grouped() -> Vec<(&'static str, Vec<&'static Binding>)> {
         .collect()
 }
 
+/// Keymap A, from the live keymap, for F1 and `docs/keys.md`: what xdevcmd takes inside
+/// the shell, and how the prefix reaches the rest. One sentence each.
+pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
+    let mut taken: Vec<String> = [Action::FocusTerminal, Action::TerminalHistory]
+        .iter()
+        .filter_map(|a| keymap.keys_for(*a).into_iter().find(|k| !k.contains(' ')))
+        .collect();
+    let prefix = keymap.shell_prefix().map(|c| key_name(c.0, c.1));
+    if let Some(p) = &prefix {
+        taken.push(p.clone());
+    }
+    let listed = match taken.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => taken.join(""),
+    };
+    let mut out = vec![format!(
+        "In the shell, xdevcmd takes only {listed}; every other key is the program's."
+    )];
+    if let Some(p) = prefix {
+        out.push(format!(
+            "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p} goes to the program."
+        ));
+    }
+    out
+}
+
 /// Every key as Markdown, for `docs/keys.md`.
 pub fn markdown(keymap: &Keymap) -> String {
     let mut out = String::from(
@@ -739,6 +775,7 @@ pub fn markdown(keymap: &Keymap) -> String {
          These are the defaults. Press **F1** in xdevcmd to see your own, after any changes in\n\
          `[keys]` in the config. This file is generated: `xdevcmd --print-keys > docs/keys.md`.\n",
     );
+    let _ = writeln!(out, "\n{}", shell_rule(keymap).join(" "));
     for (group, rows) in grouped() {
         let _ = write!(out, "\n## {group}\n\n| Keys | Does |\n|---|---|\n");
         for b in rows {
@@ -767,13 +804,22 @@ impl Action {
             .or_else(|| ALIASES.iter().find(|(old, _)| *old == s).map(|(_, a)| *a))
     }
 
-    /// Actions that work wherever focus is, including inside the shell pane. Everything
-    /// else is passed through to the shell so it can have its own keys.
+    /// The keys xdevcmd takes inside the shell: F12's family, F12 itself and Shift+F12
+    /// (owner, 2026-11-09, "keymap A"). Every other key typed there is the program's —
+    /// xdevcmd sits beside the shell and must not compete with it for keys, so a
+    /// program in the panel (readline, emacs, Claude Code) gets every key it expects.
     pub fn is_global(self) -> bool {
+        matches!(self, Action::FocusTerminal | Action::TerminalHistory)
+    }
+
+    /// Actions that act on the shell when the shell has focus: splitting it, closing it,
+    /// its tabs. Inside the shell their keys are the program's, so they are reached
+    /// through the prefix that opens F12's two-key forms (Alt+X): Alt+X, then the key.
+    /// From a file pane the same keys act on the panes, as before.
+    pub fn acts_on_shell(self) -> bool {
         matches!(
             self,
-            Action::FocusTerminal
-                | Action::ToggleTerminal
+            Action::ToggleTerminal
                 | Action::CdTerminalHere
                 | Action::NewTerminal
                 | Action::NextTab
@@ -881,6 +927,19 @@ impl Keymap {
     pub fn starts_group(&self, k: KeyEvent) -> bool {
         let c = normalise(k);
         self.seqs.keys().any(|(p, _)| *p == c)
+    }
+
+    /// The prefix inside the shell: the first key of a two-key binding of F12's family
+    /// (Alt+X, from Alt+X F12). `None` if the user bound none of them that way.
+    pub fn shell_prefix(&self) -> Option<Chord> {
+        let mut firsts: Vec<Chord> = self
+            .seqs
+            .iter()
+            .filter(|(_, a)| a.is_global())
+            .map(|((p, _), _)| *p)
+            .collect();
+        firsts.sort_by_key(|c| key_name(c.0, c.1));
+        firsts.first().copied()
     }
 
     /// What `k` does in the group that `first` opened.
@@ -1043,6 +1102,15 @@ fn normalise(k: KeyEvent) -> Chord {
     }
     // Terminals that speak the Kitty protocol add these; nothing here binds them.
     m.remove(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META);
+    // macOS Terminal.app sends Shift+F12 as `ESC [34~`, which is xterm's F20 and which
+    // crossterm 0.29 numbers F17 (its table maps 31..=34 to F14..F17). Nothing binds
+    // F17 or F20, so both are taken as the Shift+F12 they were meant as, and the
+    // history view opens from Terminal.app without Alt+X. Shift+F5…F11 cannot be
+    // mapped back the same way: crossterm gives two of their sequences one number.
+    if m.is_empty() && matches!(code, KeyCode::F(17) | KeyCode::F(20)) {
+        code = KeyCode::F(12);
+        m = KeyModifiers::SHIFT;
+    }
     (code, m)
 }
 
@@ -1169,6 +1237,7 @@ mod tests {
             Action::FocusNextPane,
             Action::FocusTerminal,
             Action::ToggleTerminal,
+            Action::TerminalHistory,
             Action::CdTerminalHere,
             Action::SplitRight,
             Action::SplitDown,
@@ -1423,6 +1492,47 @@ mod tests {
         assert_eq!(
             parse_key("Space").unwrap(),
             (KeyCode::Char(' '), KeyModifiers::NONE)
+        );
+    }
+
+    #[test]
+    fn inside_the_shell_xdevcmd_has_only_f12s_family() {
+        let km = Keymap::default();
+        let global: Vec<&str> = BINDINGS
+            .iter()
+            .filter(|b| b.action.is_global())
+            .map(|b| b.name)
+            .collect();
+        assert_eq!(global, ["focus_terminal", "terminal_history"]);
+        // Every key of theirs is F12 or Shift+F12, or Alt+X then one of those.
+        for b in BINDINGS.iter().filter(|b| b.action.is_global()) {
+            for k in km.keys_for(b.action) {
+                assert!(
+                    ["F12", "Shift+F12", "Alt+x F12", "Alt+x Shift+F12"].contains(&k.as_str()),
+                    "{} has {k}",
+                    b.name
+                );
+            }
+        }
+        assert_eq!(km.shell_prefix(), Some(parse_key("Alt+x").unwrap()));
+        assert!(Action::SplitRight.acts_on_shell() && !Action::SplitRight.is_global());
+    }
+
+    #[test]
+    fn terminal_apps_shift_f12_is_shift_f12() {
+        // ESC [34~: crossterm 0.29 reports it as F17; xterm's name for it is F20.
+        let km = Keymap::default();
+        for n in [17, 20] {
+            assert_eq!(
+                km.action_for(k(KeyCode::F(n), KeyModifiers::NONE)),
+                Some(Action::TerminalHistory),
+                "F{n}"
+            );
+        }
+        assert_eq!(
+            km.action_for(k(KeyCode::F(17), KeyModifiers::CONTROL)),
+            None,
+            "only the bare key: Terminal.app sends no modifier with it"
         );
     }
 

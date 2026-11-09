@@ -36,6 +36,9 @@ The bash version is tested. The fish and PowerShell versions have not been run y
   program is running there (an editor, a password prompt) or if the name has control
   characters in it.
 - **F12** moves between the panes and the terminal.
+- **Inside the terminal, xdevcmd takes only F12, Shift+F12 and Alt+X**; every other key
+  is the program's. Alt+X, then a terminal key (Alt+S split, Alt+W close, Alt+N new tab,
+  Alt+1…9 tab N) acts on the shell; anything else after Alt+X goes to the program.
 
 ## Tab completion and the manual page
 

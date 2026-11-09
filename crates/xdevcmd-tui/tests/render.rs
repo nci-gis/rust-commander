@@ -398,13 +398,13 @@ fn alt_r_then_arrows_resizes_as_alt_shift_arrows_do() {
 
 #[test]
 fn alt_digit_in_the_terminal_picks_the_terminals_tab() {
-    // Alt+N opens a second terminal tab and moves focus into it; Alt+1 goes back to the
-    // first. The status line counts them ("terminal 2/2") on every system; the panel's
+    // Alt+N opens a second terminal tab and moves focus into it; Alt+X Alt+1 goes back
+    // to the first (inside the shell, Alt+1 alone is the program's: keymap A). The status line counts them ("terminal 2/2") on every system; the panel's
     // title shows the shell's directory only where xdevcmd can read it (Linux).
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Alt+n", &a, &b);
     assert!(s.contains("terminal 2/2"), "a second tab, in focus\n{s}");
-    let s = shot_keys("110x24", "Alt+n,Alt+1", &a, &b);
+    let s = shot_keys("110x24", "Alt+n,Alt+x,Alt+1", &a, &b);
     assert!(s.contains("terminal 1/2"), "Alt+1: the first tab\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
@@ -1186,7 +1186,7 @@ fn col(line: &str, needle: &str) -> usize {
 #[test]
 fn alt_n_opens_tabs_and_ctrl_page_keys_move_between_them() {
     let (a, b) = files(&["alpha.txt"]);
-    let s = shot_keys(SIZE, "F12,A-n,A-n", &a, &b);
+    let s = shot_keys(SIZE, "F12,A-x,A-n,A-x,A-n", &a, &b);
     assert!(status(&s).contains("terminal 3/3"), "{s}");
     let (bar, _) = tab_bar(&s);
     assert!(
@@ -1194,13 +1194,30 @@ fn alt_n_opens_tabs_and_ctrl_page_keys_move_between_them() {
         "{bar}"
     );
 
-    let back = shot_keys(SIZE, "F12,A-n,A-n,C-PageUp", &a, &b);
+    let back = shot_keys(SIZE, "F12,A-x,A-n,A-x,A-n,A-x,C-PageUp", &a, &b);
     assert!(status(&back).contains("terminal 2/3"), "{back}");
-    let round = shot_keys(SIZE, "F12,A-n,A-n,C-PageDown", &a, &b);
+    let round = shot_keys(SIZE, "F12,A-x,A-n,A-x,A-n,A-x,C-PageDown", &a, &b);
     assert!(
         status(&round).contains("terminal 1/3"),
         "wraps around\n{round}"
     );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Keymap A: typed into the shell, a terminal key is the program's; after Alt+X it acts
+/// on the shell. F1 says the rule, from the keymap.
+#[test]
+fn terminal_keys_typed_into_the_shell_are_the_shells() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys(SIZE, "F12,A-n,A-s,A-w,A-t", &a, &b);
+    assert!(status(&s).contains("terminal 1/1"), "{s}");
+    assert!(!status(&s).contains("split"), "{s}");
+    let help = shot_keys("150x150", "F1", &a, &b);
+    assert!(
+        help.contains("In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x"),
+        "{help}"
+    );
+    assert!(help.contains("in the shell: Alt+x first"), "{help}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -1209,9 +1226,9 @@ fn split_keys_split_the_shell_when_it_has_focus() {
     // Tall enough for a top/bottom split: a shorter panel is refused, since one-row
     // shells were what crashed vt100.
     let (a, b) = files(&["alpha.txt"]);
-    let s = shot_keys("100x50", "F12,A-s,A-d", &a, &b);
+    let s = shot_keys("100x50", "F12,A-x,A-s,A-x,A-d", &a, &b);
     assert!(status(&s).contains("split 3/3"), "{s}");
-    let cycled = shot_keys("100x50", "F12,A-s,A-d,A-o", &a, &b);
+    let cycled = shot_keys("100x50", "F12,A-x,A-s,A-x,A-d,A-x,A-o", &a, &b);
     assert!(
         status(&cycled).contains("split 1/3"),
         "Alt+O wraps to the first\n{cycled}"
@@ -1222,18 +1239,18 @@ fn split_keys_split_the_shell_when_it_has_focus() {
 #[test]
 fn closing_shells_then_the_last_one_removes_the_panel() {
     let (a, b) = files(&["alpha.txt"]);
-    let one_left = shot_keys(SIZE, "F12,A-s,A-w", &a, &b);
+    let one_left = shot_keys(SIZE, "F12,A-x,A-s,A-x,A-w", &a, &b);
     assert!(status(&one_left).contains("terminal 1/1"), "{one_left}");
     assert!(!status(&one_left).contains("split"), "{one_left}");
 
-    let none = shot_keys(SIZE, "F12,A-w", &a, &b);
+    let none = shot_keys(SIZE, "F12,A-x,A-w", &a, &b);
     assert!(!none.contains('\u{2302}'), "no panel should remain\n{none}");
     assert!(
         status(&none).contains("items"),
         "focus goes back to the files\n{none}"
     );
 
-    let fresh = shot_keys(SIZE, "F12,A-w,F12", &a, &b);
+    let fresh = shot_keys(SIZE, "F12,A-x,A-w,F12", &a, &b);
     assert!(
         status(&fresh).contains("terminal 1/1"),
         "F12 starts a new one\n{fresh}"
@@ -1255,17 +1272,17 @@ fn the_tab_bar_buttons_are_clickable() {
         "+ should open a tab\n{added}"
     );
 
-    let two = shot_keys(SIZE, "F12,A-n", &a, &b);
+    let two = shot_keys(SIZE, "F12,A-x,A-n", &a, &b);
     let (bar, y) = tab_bar(&two);
     let first = col(&bar, "\u{2302} 1");
-    let picked = shot_keys(SIZE, &format!("F12,A-n,click:{first}:{y}"), &a, &b);
+    let picked = shot_keys(SIZE, &format!("F12,A-x,A-n,click:{first}:{y}"), &a, &b);
     assert!(
         status(&picked).contains("terminal 1/2"),
         "a tab label selects it\n{picked}"
     );
 
     let close = col(&bar, "\u{00d7}");
-    let closed = shot_keys(SIZE, &format!("F12,A-n,click:{close}:{y}"), &a, &b);
+    let closed = shot_keys(SIZE, &format!("F12,A-x,A-n,click:{close}:{y}"), &a, &b);
     assert!(
         status(&closed).contains("terminal 1/1"),
         "\u{00d7} closes that tab\n{closed}"
@@ -1276,12 +1293,12 @@ fn the_tab_bar_buttons_are_clickable() {
 #[test]
 fn dragging_the_boundary_between_shells_resizes_them() {
     let (a, b) = files(&["alpha.txt"]);
-    let s = shot_keys(SIZE, "F12,A-s", &a, &b);
+    let s = shot_keys(SIZE, "F12,A-x,A-s", &a, &b);
     let (_, bar_y) = tab_bar(&s);
     let line = s.lines().nth(bar_y + 1).unwrap();
     let x = col(line, "\u{2510}\u{250c}");
     let y = bar_y + 3;
-    let moved = shot_keys(SIZE, &format!("F12,A-s,drag:{x}:{y}:25:{y}"), &a, &b);
+    let moved = shot_keys(SIZE, &format!("F12,A-x,A-s,drag:{x}:{y}:25:{y}"), &a, &b);
     let line = moved.lines().nth(bar_y + 1).unwrap();
     assert!(
         col(line, "\u{2510}\u{250c}") < x,
@@ -1421,12 +1438,12 @@ fn split_stops_at_max_panes_and_terminals_stop_at_max_terminals() {
     let panes = shot_keys("140x30", "A-s,A-s", &a, &b);
     assert!(panes.contains("at most 3 file panes"), "{panes}");
 
-    let shells = shot_keys("140x30", "F12,A-n,A-n,A-n", &a, &b);
+    let shells = shot_keys("140x30", "F12,A-x,A-n,A-x,A-n,A-x,A-n", &a, &b);
     assert!(status(&shells).contains("terminal 3/3"), "{shells}");
     assert!(shells.contains("at most 3 terminals"), "{shells}");
 
     // Splits inside a tab count towards the same limit.
-    let mixed = shot_keys("140x40", "F12,A-n,A-s,A-s", &a, &b);
+    let mixed = shot_keys("140x40", "F12,A-x,A-n,A-x,A-s,A-x,A-s", &a, &b);
     assert!(mixed.contains("at most 3 terminals"), "{mixed}");
 
     let cfg = write_config(a.parent().unwrap(), "[files]\nmax_panes = 4\n");
@@ -1484,7 +1501,7 @@ fn dropping_onto_a_pane_showing_the_same_directory_says_so() {
 #[test]
 fn a_terminal_split_too_small_to_use_is_refused() {
     let (a, b) = files(&["alpha.txt"]);
-    let s = shot_keys("80x24", "F12,A-d", &a, &b);
+    let s = shot_keys("80x24", "F12,A-x,A-d", &a, &b);
     assert!(s.contains("too small to split"), "{s}");
     assert!(!status(&s).contains("split 2/2"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
@@ -1508,11 +1525,17 @@ fn no_layout_at_any_size_panics_or_overflows() {
         String::new(),
         "A-s,A-s".into(),
         "A-s,A-d".into(),
-        "F12,A-n,A-n".into(),
-        "F12,A-s,A-d".into(),
-        format!("A-s,A-s,F12,A-s,A-d,{grow}"),
-        format!("A-s,A-s,F12,{shrink},{long_output}"),
-        "A-s,A-s,Tab,A-w,A-w,F12,A-s,A-w,A-w".into(),
+        "F12,A-x,A-n,A-x,A-n".into(),
+        "F12,A-x,A-s,A-x,A-d".into(),
+        format!(
+            "A-s,A-s,F12,A-x,A-s,A-x,A-d,{}",
+            grow.replace("Alt+Shift", "A-x,Alt+Shift")
+        ),
+        format!(
+            "A-s,A-s,F12,{},{long_output}",
+            shrink.replace("Alt+Shift", "A-x,Alt+Shift")
+        ),
+        "A-s,A-s,Tab,A-w,A-w,F12,A-x,A-s,A-x,A-w,A-x,A-w".into(),
         "F1,Tab".into(),
         "Down,Down,F3,h".into(),
         "Down,Down,F8".into(),
@@ -1612,7 +1635,7 @@ fn moving_focus_ends_the_zoom_and_its_message() {
 #[test]
 fn the_terminal_zooms_too() {
     let (a, b) = files(&["alpha.txt"]);
-    let s = shot_keys("110x30", "F12,A-z", &a, &b);
+    let s = shot_keys("110x30", "F12,A-x,A-z", &a, &b);
     let (_, bar_y) = tab_bar(&s);
     assert_eq!(
         bar_y, 1,
@@ -1627,10 +1650,10 @@ fn alt_shift_arrows_move_the_border_in_the_arrow_direction() {
     let row = |keys: &str| tab_bar(&shot_keys("110x30", keys, &a, &b)).1;
     let start = row("F12");
     assert!(
-        row("F12,Alt+Shift+Up") < start,
+        row("F12,A-x,Alt+Shift+Up") < start,
         "up raises the terminal's top edge"
     );
-    assert!(row("F12,Alt+Shift+Down") > start, "down lowers it");
+    assert!(row("F12,A-x,Alt+Shift+Down") > start, "down lowers it");
     // From a file pane on top, Down moves the same edge down: the terminal shrinks.
     assert!(row("Alt+Shift+Down") > start);
 

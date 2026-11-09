@@ -42,6 +42,13 @@ that heading and starts a new, empty one here. -->
   did not (less, man). In a plain shell it still scrolls the history.
 
 ### Changed
+- **Inside the terminal panel, xdevcmd takes only F12, Shift+F12 and Alt+X** (keymap
+  A). Every other key is the program's: Alt+N, Alt+S, Alt+D, Alt+W, Alt+O, Alt+T, Alt+C,
+  Alt+Z, the Alt+R group, Alt+Shift+arrows, Alt+1…9 and Ctrl+PgUp/PgDn no longer act
+  when typed into the shell, so readline's Alt+D, Alt+C, Alt+T, Alt+N and Alt+1…9 work
+  there. From the files they do what they did. To use one on the shell, press Alt+X
+  first (Alt+X Alt+S splits the shell); anything else after Alt+X goes to the program.
+  F1…F11 now reach the program too (mc, htop); before, no F-key did.
 - **xdevcmd will not start inside its own terminal panel**: it says it is already
   running and that F12 goes back to it.
 - **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and

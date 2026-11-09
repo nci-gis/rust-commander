@@ -1479,18 +1479,27 @@ impl App {
     }
 
     /// The status line while a group is open: its first key and the keys that follow.
+    /// Inside the shell only the keys that work there are offered, and the rest of
+    /// what the prefix does is said in words.
     fn group_hint(&self, first: crate::keys::Chord) -> String {
+        let in_shell = self.focus_is_term();
         let keys: Vec<String> = self
             .settings
             .keymap
             .group(first)
             .iter()
+            .filter(|(_, a)| !in_shell || a.is_global())
             .map(|((c, m), _)| crate::keys::key_name(*c, *m))
             .collect();
         // A group whose keys all repeat is a mode, left with Enter or Esc; any other
         // is a key to pick, after which it closes by itself.
         if self.group_repeats(first) {
             format!("{} \u{b7} Enter or Esc: done", keys.join(" "))
+        } else if in_shell {
+            format!(
+                "then: {} \u{b7} a terminal key for this shell \u{b7} Esc: cancel",
+                keys.join(" ")
+            )
         } else {
             format!("then: {} \u{b7} Esc: cancel", keys.join(" "))
         }
@@ -1526,6 +1535,9 @@ impl App {
             self.status.clear();
             return true;
         }
+        if self.focus_is_term() {
+            return self.in_shell_prefix(first, k);
+        }
         let Some(a) = self.settings.keymap.in_group(first, k) else {
             self.status.clear();
             return false;
@@ -1538,6 +1550,31 @@ impl App {
         }
         self.run_bound(a, k);
         // An action may have put up its own message; the group's comes back next key.
+        true
+    }
+
+    /// The key after the prefix (Alt+X) inside the shell. One of the prefix's own keys
+    /// that works in the shell (F12, for the history) runs; a key whose action acts on
+    /// the shell (Alt+S, Alt+W, Alt+1…) runs on it; anything else was the program's all
+    /// along, so the prefix and the key both go to it, as if xdevcmd had not looked.
+    /// Always `true`: in the shell no key falls through to a second meaning.
+    fn in_shell_prefix(&mut self, first: crate::keys::Chord, k: KeyEvent) -> bool {
+        self.status.clear();
+        let keymap = &self.settings.keymap;
+        let run = keymap
+            .in_group(first, k)
+            .filter(|a| a.is_global())
+            .or_else(|| {
+                keymap
+                    .action_for(k)
+                    .filter(|a| a.is_global() || a.acts_on_shell())
+            });
+        if let Some(a) = run {
+            self.run_bound(a, k);
+        } else if let Some(Pane::Term(t)) = self.panes.get(&self.focus) {
+            t.send_key(KeyEvent::new(first.0, first.1));
+            t.send_key(k);
+        }
         true
     }
 
@@ -1582,8 +1619,16 @@ impl App {
         } else {
             format!("{count} tabs")
         };
+        let prefix = self
+            .settings
+            .keymap
+            .shell_prefix()
+            .map(|c| format!("{} ", crate::keys::key_name(c.0, c.1)))
+            .unwrap_or_default();
         self.status = if whose == "this file pane" && self.term_shown {
-            format!("no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then Alt+{n} picks its tabs")
+            format!(
+                "no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then {prefix}Alt+{n} picks its tabs"
+            )
         } else {
             format!("no tab {n}: {whose} has {has}")
         };
@@ -1607,17 +1652,18 @@ impl App {
             return;
         }
         self.option_hint(k);
-        // The first key of a group. In the shell only when everything in the group works
-        // there (resizing does); otherwise the key is the shell's.
+        // The first key of a group. In the shell only the group holding F12's two-key
+        // forms opens (Alt+X, for Alt+X F12); it is xdevcmd's prefix there. Any other
+        // group's first key is the shell's (Alt+R is readline's revert-line).
         if self.settings.keymap.starts_group(k) {
             let first = crate::keys::Keymap::chord(k);
-            let all_global = self
+            let prefix = self
                 .settings
                 .keymap
                 .group(first)
                 .iter()
-                .all(|(_, a)| a.is_global());
-            if !self.focus_is_term() || all_global {
+                .any(|(_, a)| a.is_global());
+            if !self.focus_is_term() || prefix {
                 self.group = Some(first);
                 self.status = self.group_hint(first);
                 return;
@@ -1647,8 +1693,8 @@ impl App {
             }
         }
 
-        // Layout and terminal actions work from anywhere, the shell pane included.
-        // Everything else typed into the shell belongs to the shell.
+        // F12's family works from anywhere, the shell included (keymap A, owner
+        // 2026-11-09). Everything else typed into the shell belongs to the shell.
         if let Some(a) = action.filter(|a| a.is_global()) {
             return self.run_bound(a, k);
         }
@@ -1704,6 +1750,7 @@ impl App {
                 && matches!(
                     a,
                     Action::FocusTerminal
+                        | Action::TerminalHistory
                         | Action::ToggleTerminal
                         | Action::CdTerminalHere
                         | Action::NewTerminal
@@ -1860,6 +1907,8 @@ impl App {
             }
             Action::FocusNextPane => self.focus_next_file(),
             Action::FocusTerminal => self.toggle_term_focus(full),
+            // The view itself is Round 015's step 1; the key is in place with keymap A.
+            Action::TerminalHistory => self.status = "the history view is not built yet".into(),
             Action::ToggleTerminal => self.toggle_term(full),
             Action::CdTerminalHere => self.cd_terminal_here(),
             Action::SplitRight => self.split_focused(Axis::Cols),

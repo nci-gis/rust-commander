@@ -3,6 +3,8 @@
 These are the defaults. Press **F1** in xdevcmd to see your own, after any changes in
 `[keys]` in the config. This file is generated: `xdevcmd --print-keys > docs/keys.md`.
 
+In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x goes to the program.
+
 ## General
 
 | Keys | Does |
@@ -122,6 +124,7 @@ These are the defaults. Press **F1** in xdevcmd to see your own, after any chang
 | Keys | Does |
 |---|---|
 | `F12` | Jump into or out of the shell |
+| `Shift+F12` `Alt+x F12` | The shell's history in the viewer: read, search, copy, save |
 | `Alt+t` | Show or hide the shell |
 | `Alt+c` | cd the shell to this pane's directory |
 | `Alt+n` | Open a new terminal tab |

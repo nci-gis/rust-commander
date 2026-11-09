@@ -1129,6 +1129,9 @@ fn dragging_the_border_resizes_the_panes() {
 // ── terminal tabs and splits ───────────────────────────────────────────────────────
 
 const ALT_N: &[u8] = b"\x1bn";
+/// Inside the shell xdevcmd takes only F12's family (keymap A); its terminal keys are
+/// reached through this prefix: Alt+X, then the key.
+const ALT_X: &[u8] = b"\x1bx";
 const ALT_S: &[u8] = b"\x1bs";
 const CTRL_PAGE_UP: &[u8] = b"\x1b[5;5~";
 
@@ -1140,6 +1143,7 @@ fn each_terminal_tab_is_its_own_shell() {
     xdevcmd.send(b"echo ONE_$((0+1))\r");
     xdevcmd.wait_for("ONE_1");
 
+    xdevcmd.send(ALT_X);
     xdevcmd.send(ALT_N);
     xdevcmd.wait_for("terminal 2/2");
     xdevcmd.wait_gone("ONE_1");
@@ -1147,6 +1151,7 @@ fn each_terminal_tab_is_its_own_shell() {
     xdevcmd.wait_for("TWO_2");
 
     // Back to the first tab: its own screen, untouched by what ran in the second.
+    xdevcmd.send(ALT_X);
     xdevcmd.send(CTRL_PAGE_UP);
     xdevcmd.wait_for("ONE_1");
     xdevcmd.wait_gone("TWO_2");
@@ -1159,6 +1164,7 @@ fn typing_exit_closes_that_terminal_and_the_last_one_closes_the_panel() {
     let s = Scratch::new("exit");
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
+    xdevcmd.send(ALT_X);
     xdevcmd.send(ALT_S);
     xdevcmd.wait_for("split 2/2");
 
@@ -1452,6 +1458,7 @@ fn terminal_tabs_reopen_where_their_shells_were() {
     xdevcmd.send(F12);
     xdevcmd.send(b"cd /tmp\r");
     xdevcmd.wait_for("\u{2302} 1 tmp");
+    xdevcmd.send(ALT_X);
     xdevcmd.send(ALT_N);
     xdevcmd.wait_for("\u{2302} 2 left");
     xdevcmd.send(F12);
@@ -1825,6 +1832,102 @@ fn ctrl_r_tab_and_ctrl_space_reach_the_program_in_the_panel() {
         "{}",
         xdevcmd.screen()
     );
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Keymap A (owner, 2026-11-09): with the panel focused, xdevcmd takes only F12's family
+/// (F12, Shift+F12, and Alt+X for their two-key forms). Every other Alt+letter, every
+/// Alt+digit, every Ctrl+letter and F1…F11 reach the program, byte for byte as a
+/// terminal sent them, and none of them does anything of xdevcmd's: the shell keeps
+/// focus, no tab, split or panel change. Before, Alt+N, Alt+S, Alt+D, Alt+W, Alt+O,
+/// Alt+T, Alt+C, Alt+Z, Alt+R and Alt+1…9 were xdevcmd's inside the shell, and no F-key
+/// reached it at all.
+#[test]
+fn inside_the_shell_only_f12s_family_is_xdevcmds() {
+    let s = Scratch::new("keymap-a");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let mut keys: Vec<Vec<u8>> = Vec::new();
+    for c in (b'a'..=b'z').filter(|c| *c != b'x') {
+        keys.push(vec![0x1b, c]);
+    }
+    for d in b'1'..=b'9' {
+        keys.push(vec![0x1b, d]);
+    }
+    for c in 1u8..=26 {
+        keys.push(vec![c]);
+    }
+    for f in [
+        &b"\x1bOP"[..],
+        b"\x1bOQ",
+        b"\x1bOR",
+        b"\x1bOS",
+        b"\x1b[15~",
+        b"\x1b[17~",
+        b"\x1b[18~",
+        b"\x1b[19~",
+        b"\x1b[20~",
+        b"\x1b[21~",
+        b"\x1b[23~",
+        b"\x1b[17;2~", // Shift+F6, rename in the panes
+    ] {
+        keys.push(f.to_vec());
+    }
+    let expected: Vec<u8> = keys.concat();
+    let cmd = format!(
+        "stty raw -echo; dd bs=1 count={} of=keys.bin 2>/dev/null; stty sane; echo GOT_ALL\r",
+        expected.len()
+    );
+    xdevcmd.send(cmd.as_bytes());
+    std::thread::sleep(Duration::from_millis(300));
+    for k in &keys {
+        // One key per write, as a person types them: ESC and its letter together is
+        // Alt+letter, as a terminal sends it.
+        let mut w = xdevcmd.writer.lock().unwrap();
+        w.write_all(k).unwrap();
+        w.flush().unwrap();
+        drop(w);
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    xdevcmd.wait_for("GOT_ALL");
+    let got = std::fs::read(s.left().join("keys.bin")).unwrap();
+    assert_eq!(
+        got, expected,
+        "every key reached the program as it was sent"
+    );
+    let screen = xdevcmd.screen();
+    assert!(
+        screen.contains("F12 back to files"),
+        "the shell kept focus\n{screen}"
+    );
+    assert!(screen.contains("terminal 1/1"), "no tab opened\n{screen}");
+    assert!(!screen.contains("split"), "no split\n{screen}");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// The prefix inside the shell: Alt+X, then a terminal key, acts on the shell (here
+/// Alt+N, a new tab); Alt+X then a key that means nothing to xdevcmd there sends both
+/// to the program, as if xdevcmd had not looked.
+#[test]
+fn alt_x_is_the_prefix_inside_the_shell_and_gives_back_what_it_does_not_use() {
+    let s = Scratch::new("prefix");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd
+        .send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT_IT\r");
+    std::thread::sleep(Duration::from_millis(300));
+    xdevcmd.send(ALT_X);
+    xdevcmd.wait_for("ALT+X");
+    xdevcmd.send(b"q");
+    xdevcmd.wait_for("GOT_IT");
+    assert_eq!(std::fs::read(s.left().join("keys.bin")).unwrap(), b"\x1bxq");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_N);
+    xdevcmd.wait_for("terminal 2/2");
     xdevcmd.send(F12);
     xdevcmd.quit();
 }

@@ -144,7 +144,11 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 ## The terminal
 
 - A shell runs under the panes. **F12** goes into it and back.
-- **Alt+N** opens a new terminal tab. **Alt+S** / **Alt+D** split it.
+- Inside the shell, xdevcmd takes only **F12**, **Shift+F12** and **Alt+X**; every other
+  key is the program's (readline's Alt+D, emacs' F-keys, mc's F10).
+- **Alt+N** opens a new terminal tab. Inside the shell, press **Alt+X** first:
+  **Alt+X Alt+S** / **Alt+X Alt+D** split it, **Alt+X Alt+W** closes it, **Alt+X Alt+1**
+  goes to tab 1. Anything else after Alt+X goes to the program.
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
 - The wheel scrolls back through a shell's history. A full-screen program gets the

@@ -643,6 +643,9 @@ fn history_of(p: &mut vt100::Parser) -> usize {
 pub fn key_bytes(k: KeyEvent) -> Option<Vec<u8>> {
     let alt = k.modifiers.contains(KeyModifiers::ALT);
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    if let KeyCode::F(n) = k.code {
+        return function_key_bytes(n, k.modifiers);
+    }
     let mut bytes: Vec<u8> = match k.code {
         KeyCode::Char(' ' | '@') if ctrl => vec![0],
         KeyCode::Char(c) if ctrl => {
@@ -681,9 +684,80 @@ pub fn key_bytes(k: KeyEvent) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// F1…F12 as xterm sends them, which is what `TERM=xterm-256color` promises the
+/// program: F1–F4 as `ESC O P`…`S`, the rest as `ESC [ n ~`; with Shift, Alt or Ctrl
+/// the modifier rides in a parameter (`ESC [ 1 ; 2 P` is Shift+F1, `ESC [ 17 ; 5 ~`
+/// Ctrl+F6), never as a leading ESC. Before keymap A (Round 015) no F-key reached the
+/// panel at all; mc and htop are driven by them. `None` past F12, which has no
+/// xterm sequence of its own.
+fn function_key_bytes(n: u8, mods: KeyModifiers) -> Option<Vec<u8>> {
+    let mut m = 1;
+    if mods.contains(KeyModifiers::SHIFT) {
+        m += 1;
+    }
+    if mods.contains(KeyModifiers::ALT) {
+        m += 2;
+    }
+    if mods.contains(KeyModifiers::CONTROL) {
+        m += 4;
+    }
+    let ss3 = match n {
+        1 => Some('P'),
+        2 => Some('Q'),
+        3 => Some('R'),
+        4 => Some('S'),
+        _ => None,
+    };
+    if let Some(c) = ss3 {
+        return Some(
+            if m == 1 {
+                format!("\x1bO{c}")
+            } else {
+                format!("\x1b[1;{m}{c}")
+            }
+            .into_bytes(),
+        );
+    }
+    let code = match n {
+        5 => 15,
+        6 => 17,
+        7 => 18,
+        8 => 19,
+        9 => 20,
+        10 => 21,
+        11 => 23,
+        12 => 24,
+        _ => return None,
+    };
+    Some(
+        if m == 1 {
+            format!("\x1b[{code}~")
+        } else {
+            format!("\x1b[{code};{m}~")
+        }
+        .into_bytes(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn function_keys_reach_the_program_as_xterm_sends_them() {
+        let k = |n, m| key_bytes(KeyEvent::new(KeyCode::F(n), m));
+        let none = KeyModifiers::NONE;
+        assert_eq!(k(1, none), Some(b"\x1bOP".to_vec()));
+        assert_eq!(k(4, none), Some(b"\x1bOS".to_vec()));
+        assert_eq!(k(5, none), Some(b"\x1b[15~".to_vec()));
+        assert_eq!(k(10, none), Some(b"\x1b[21~".to_vec()));
+        assert_eq!(k(11, none), Some(b"\x1b[23~".to_vec()));
+        assert_eq!(k(1, KeyModifiers::SHIFT), Some(b"\x1b[1;2P".to_vec()));
+        assert_eq!(k(6, KeyModifiers::SHIFT), Some(b"\x1b[17;2~".to_vec()));
+        assert_eq!(k(6, KeyModifiers::CONTROL), Some(b"\x1b[17;5~".to_vec()));
+        assert_eq!(k(9, KeyModifiers::ALT), Some(b"\x1b[20;3~".to_vec()));
+        assert_eq!(k(13, none), None);
+    }
 
     #[test]
     fn keys_reach_the_program_as_a_terminal_sends_them() {
@@ -702,7 +776,7 @@ mod tests {
             k(KeyCode::Char(' '), KeyModifiers::NONE),
             Some(b" ".to_vec())
         );
-        assert_eq!(k(KeyCode::F(5), KeyModifiers::NONE), None);
+        assert_eq!(k(KeyCode::Null, KeyModifiers::NONE), None);
     }
 
     #[test]

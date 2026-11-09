@@ -201,6 +201,18 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
         .map(|b| b.name.len())
         .max()
         .unwrap_or(0);
+    let shell_prefix = settings
+        .keymap
+        .shell_prefix()
+        .map(|c| crate::keys::key_name(c.0, c.1));
+    // Keymap A in one line, from the live keymap: what xdevcmd takes inside the shell.
+    for sentence in crate::keys::shell_rule(&settings.keymap) {
+        out.push(Line::from(Span::styled(
+            format!("  {sentence}"),
+            Style::new().fg(th.fg_dim),
+        )));
+    }
+    out.push(Line::raw(""));
     for (i, (group, rows)) in crate::keys::grouped().into_iter().enumerate() {
         if i > 0 {
             out.push(Line::raw(""));
@@ -242,6 +254,11 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
             if b.action.is_global() {
                 spans.push(Span::styled(
                     "  works in the shell",
+                    Style::new().fg(th.fg_dim),
+                ));
+            } else if let Some(p) = shell_prefix.as_ref().filter(|_| b.action.acts_on_shell()) {
+                spans.push(Span::styled(
+                    format!("  in the shell: {p} first"),
                     Style::new().fg(th.fg_dim),
                 ));
             }

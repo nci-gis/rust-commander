@@ -84,6 +84,11 @@ pub struct Request {
     pub overwrite_confirmed: bool,
     /// Copy and move: what to do with files already at the destination.
     pub existing: Existing,
+    /// Safe operations for this job, taken from the setting when the request is made
+    /// and kept to the end: turning the setting over mid-job must not split one job
+    /// between two ways of writing, and tests set it here rather than in a global
+    /// other tests read.
+    pub safe: bool,
 }
 
 impl Request {
@@ -131,6 +136,7 @@ impl Request {
             pairs: Vec::new(),
             overwrite_confirmed: false,
             existing: Existing::Ask,
+            safe: safe(),
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -147,6 +153,7 @@ impl Request {
             pairs: Vec::new(),
             overwrite_confirmed: false,
             existing: Existing::Ask,
+            safe: safe(),
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -163,6 +170,7 @@ impl Request {
             pairs: Vec::new(),
             overwrite_confirmed: false,
             existing: Existing::Ask,
+            safe: safe(),
         }
     }
 }
@@ -295,6 +303,7 @@ pub fn start(req: Request) -> Handle {
             moving: false,
             approved: None,
             journal: None,
+            safe: req.safe,
         };
         w.run(req);
     });
@@ -334,6 +343,9 @@ struct Worker {
     /// Safe operations: what this job is in the middle of, for the next start if it is
     /// killed. Removed when the job ends.
     journal: Option<crate::journal::Journal>,
+    /// [`Request::safe`]: decides the journal and whether a new file is written under
+    /// a temporary name.
+    safe: bool,
 }
 
 impl Worker {
@@ -345,7 +357,7 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
-        if safe() {
+        if self.safe {
             let kind = match req.kind {
                 Kind::Copy if !req.pairs.is_empty() => "sync",
                 Kind::Copy => "copy",
@@ -751,12 +763,13 @@ impl Worker {
     fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
-        let in_place = new_only && !safe();
+        let in_place = new_only && !self.safe;
         let target = if in_place {
             dst.to_path_buf()
         } else {
             part_name(dst)
         };
+        writing_in_test(&target);
         if !in_place {
             if let Some(j) = self.journal.as_mut() {
                 j.part(&target);
@@ -1077,7 +1090,8 @@ pub fn remove_tree(p: &Path) -> io::Result<()> {
 /// `[general] safe_operations`: every copy writes under a temporary name and renames at
 /// the end, and jobs keep a journal (journal.rs) so a run killed outright is tidied up
 /// at the next start. Off, a new file is written under its own name, as before; a
-/// replacement goes through a temporary name either way.
+/// replacement goes through a temporary name either way. Read once per job, into
+/// [`Request::safe`], never by a running worker.
 static SAFE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_safe(on: bool) {
@@ -1117,6 +1131,18 @@ fn appear_in_test(dst: &Path) {
 
 #[cfg(not(test))]
 fn appear_in_test(_: &Path) {}
+
+/// Every name a copy opened to write, for tests to see which way a job wrote.
+#[cfg(test)]
+static WRITING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn writing_in_test(target: &Path) {
+    WRITING.lock().unwrap().push(target.to_path_buf());
+}
+
+#[cfg(not(test))]
+fn writing_in_test(_: &Path) {}
 
 fn is_cross_device(e: &io::Error) -> bool {
     #[cfg(unix)]
@@ -1785,8 +1811,9 @@ mod tests {
         let dst = root.join("dst");
         fs::create_dir_all(&dst).unwrap();
         fs::write(root.join("big"), vec![1u8; 8 << 20]).unwrap();
-        set_safe(true);
-        let h = start(Request::copy(vec![root.join("big")], dst.clone()));
+        let mut req = Request::copy(vec![root.join("big")], dst.clone());
+        req.safe = true;
+        let h = start(req);
         loop {
             match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
                 // Stop it as soon as it starts writing.
@@ -1795,7 +1822,6 @@ mod tests {
                 _ => {}
             }
         }
-        set_safe(false);
         let left: Vec<_> = fs::read_dir(&dst)
             .unwrap()
             .flatten()
@@ -1805,6 +1831,53 @@ mod tests {
             left.is_empty(),
             "nothing under the real name or a temporary one: {left:?}"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn two_jobs_at_once_each_write_the_way_their_request_says() {
+        let root = tmp("safe-per-job");
+        let (on, off) = (root.join("on"), root.join("off"));
+        fs::create_dir_all(&on).unwrap();
+        fs::create_dir_all(&off).unwrap();
+        let src: Vec<PathBuf> = (0..20)
+            .map(|i| {
+                let p = root.join(format!("f{i}"));
+                fs::write(&p, vec![b'x'; 64 << 10]).unwrap();
+                p
+            })
+            .collect();
+        let mut a = Request::copy(src.clone(), on.clone());
+        a.safe = true;
+        let mut b = Request::copy(src, off.clone());
+        b.safe = false;
+        let (ha, hb) = (start(a), start(b));
+        for h in [ha, hb] {
+            while !matches!(
+                h.events.recv_timeout(Duration::from_secs(20)).unwrap(),
+                Event::Done(_)
+            ) {}
+        }
+        let written = WRITING.lock().unwrap().clone();
+        let names = |dir: &Path| -> Vec<String> {
+            written
+                .iter()
+                .filter(|p| p.parent() == Some(dir))
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+        let (safe_names, plain_names) = (names(&on), names(&off));
+        assert_eq!((safe_names.len(), plain_names.len()), (20, 20));
+        assert!(
+            safe_names.iter().all(|n| n.contains(".xdevcmd-part-")),
+            "the safe job writes every file under a temporary name: {safe_names:?}"
+        );
+        assert!(
+            plain_names.iter().all(|n| !n.contains(".xdevcmd-part-")),
+            "the other writes in place: {plain_names:?}"
+        );
+        assert_eq!(fs::read_dir(&on).unwrap().count(), 20);
+        assert_eq!(fs::read_dir(&off).unwrap().count(), 20);
         fs::remove_dir_all(&root).unwrap();
     }
 

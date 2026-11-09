@@ -2535,7 +2535,7 @@ impl App {
             }
             Cmd::CopyText(t) => self.copy_text(t),
             Cmd::BatchRename(moves) => {
-                let out = xdevcmd_core::batch_rename::apply(&moves);
+                let out = xdevcmd_core::batch_rename::apply(&moves, xdevcmd_core::ops::safe());
                 self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves.clone()));
                 self.reload_all();
                 self.status = match (out.renamed, out.errors.first()) {
@@ -5569,7 +5569,7 @@ impl App {
         };
         match plan {
             Plan::Rename(moves) => {
-                let out = xdevcmd_core::batch_rename::apply(&moves);
+                let out = xdevcmd_core::batch_rename::apply(&moves, xdevcmd_core::ops::safe());
                 self.status = match out.errors.first() {
                     None => format!("undone: {}", u.describe()),
                     Some(e) => format!(

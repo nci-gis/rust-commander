@@ -92,8 +92,9 @@ pub struct Outcome {
     pub errors: Vec<String>,
 }
 
-/// Carry out a plan from [`plan`].
-pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
+/// Carry out a plan from [`plan`]. `safe`: safe operations for this batch (a journal
+/// of the temporary names), taken from the setting by the caller.
+pub fn apply(moves: &[(PathBuf, PathBuf)], safe: bool) -> Outcome {
     let mut out = Outcome::default();
     if let Err(e) = crate::policy::guard_write() {
         out.errors.push(e.to_string());
@@ -102,7 +103,7 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
     let tag = std::process::id();
     // Safe operations: between the two steps the files are under temporary names; a run
     // killed there has them put back at the next start.
-    let mut journal = if crate::ops::safe() {
+    let mut journal = if safe {
         crate::journal::Journal::begin("rename", &[], None, false)
     } else {
         None
@@ -195,7 +196,7 @@ mod tests {
         let (d, paths) = dir("basic", &["a.txt", "b.txt", "c.txt"]);
         let moves = plan(&paths, "a.txt\nbee.txt\nc.txt\n").unwrap();
         assert_eq!(moves, vec![(d.join("b.txt"), d.join("bee.txt"))]);
-        assert_eq!(apply(&moves).renamed, 1);
+        assert_eq!(apply(&moves, false).renamed, 1);
         assert_eq!(body(&d.join("bee.txt")), "b.txt");
         let _ = fs::remove_dir_all(&d);
     }
@@ -205,7 +206,7 @@ mod tests {
         let (d, paths) = dir("swap", &["a", "b"]);
         let moves = plan(&paths, "b\na\n").unwrap();
         assert_eq!(
-            apply(&moves),
+            apply(&moves, false),
             Outcome {
                 renamed: 2,
                 errors: vec![]
@@ -253,7 +254,7 @@ mod tests {
         let moves = vec![(p[0].clone(), d.join("x")), (p[1].clone(), d.join("y"))];
         // Another program creates x between the plan and the renaming.
         fs::write(d.join("x"), "theirs").unwrap();
-        let out = apply(&moves);
+        let out = apply(&moves, false);
         assert_eq!(out.renamed, 1, "{:?}", out.errors);
         assert!(
             out.errors[0].contains("appeared meanwhile"),

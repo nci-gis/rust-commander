@@ -299,6 +299,61 @@ impl Document {
     }
 }
 
+/// The name Save as offers for a shell's history: `xdevcmd-history-2026-11-10-142233.txt`,
+/// local time, so two saves a second apart never offer the same name.
+pub fn history_file_name() -> String {
+    chrono::Local::now()
+        .format("xdevcmd-history-%Y-%m-%d-%H%M%S.txt")
+        .to_string()
+}
+
+/// Write a document held in memory to `path` (Save as…). Behind the UI's own refusal,
+/// the engine's wall: nothing is written in read-only mode.
+///
+/// Without `replace`, an existing `path` is never touched: the file is made with
+/// `create_new`, so a name taken between the question and the write fails with
+/// `AlreadyExists` instead of being overwritten. With `replace`, the bytes go to a
+/// hidden temporary name beside `path` and are renamed over it only once complete, so
+/// the old file stays whole if anything fails on the way. `private` makes the file
+/// readable by its owner only (`0600`) on Unix, for a shell's output, which can hold
+/// tokens and customer data; Windows gives a new file its directory's permissions.
+pub fn save_bytes(path: &Path, bytes: &[u8], replace: bool, private: bool) -> io::Result<()> {
+    crate::policy::guard_write()?;
+    if !replace {
+        return write_new(path, bytes, private);
+    }
+    let part = crate::ops::part_name(path);
+    if let Err(e) = write_new(&part, bytes, private) {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
+    }
+    std::fs::rename(&part, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&part);
+    })
+}
+
+/// A new file at `path` holding `bytes`; removed again if the write fails, so a full
+/// disk does not leave half of it under a name that looks finished.
+fn write_new(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
+    use std::io::Write as _;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(if private { 0o600 } else { 0o666 });
+    }
+    #[cfg(not(unix))]
+    let _ = private;
+    let mut f = opts.open(path)?;
+    let written = f.write_all(bytes).and_then(|()| f.sync_all());
+    if written.is_err() {
+        drop(f);
+        let _ = std::fs::remove_file(path);
+    }
+    written
+}
+
 /// First occurrence of `pat` in `hay`. Short needles over megabyte chunks, so the
 /// obvious scan is fine and avoids a dependency.
 fn find_sub(hay: &[u8], pat: &[u8]) -> Option<usize> {
@@ -580,6 +635,70 @@ mod tests {
         let mut one = Document::from_bytes("o", b"no newline".to_vec());
         assert_eq!(one.line_count(), 1);
         assert_eq!(one.line(0).unwrap(), "no newline");
+    }
+
+    #[test]
+    fn save_bytes_never_replaces_without_being_told() {
+        let p = write("saved.txt", b"first");
+        let e = save_bytes(&p, b"second", false, true).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&p).unwrap(), b"first", "the old file is untouched");
+        save_bytes(&p, b"second", true, true).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"second");
+        // No temporary name left beside it.
+        let dir = p.parent().unwrap();
+        let names: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("saved.txt")]);
+    }
+
+    #[test]
+    fn a_failed_replacement_leaves_the_old_file_and_no_part() {
+        // A directory where the file should be: the rename over it fails.
+        let p = write("keep.txt", b"keep");
+        let dir = p.with_file_name("a-dir");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("inside"), b"x").unwrap();
+        assert!(save_bytes(&dir, b"new", true, true).is_err());
+        assert!(dir.is_dir(), "the directory is still there");
+        let names: Vec<_> = fs::read_dir(p.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !names.iter().any(|n| n.contains("xdevcmd-part")),
+            "{names:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_history_is_the_owners_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = write("placeholder", b"");
+        let new = p.with_file_name("history.txt");
+        save_bytes(&new, b"token=abc\n", false, true).unwrap();
+        let mode = fs::metadata(&new).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        // A replacement too, whatever the old file's mode was.
+        fs::set_permissions(&new, fs::Permissions::from_mode(0o644)).unwrap();
+        save_bytes(&new, b"again\n", true, true).unwrap();
+        let mode = fs::metadata(&new).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn the_history_name_carries_date_and_time() {
+        let n = history_file_name();
+        assert!(
+            n.starts_with("xdevcmd-history-20") && n.ends_with(".txt"),
+            "{n}"
+        );
+        assert_eq!(n.len(), "xdevcmd-history-2026-11-10-142233.txt".len());
     }
 
     #[test]

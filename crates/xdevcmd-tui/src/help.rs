@@ -275,6 +275,11 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 ("/", "Search; Enter to jump"),
                 ("n \u{b7} N", "Next / previous match"),
                 ("g \u{b7} G", "Top / bottom"),
+                (
+                    ": \u{b7} Ctrl+G",
+                    "Go to a line, or 50%; in hex an offset (0x1f00)",
+                ),
+                ("F2", "Save as\u{2026}: a copy, or a shell's history (0600)"),
                 ("Drag", "Select lines with the mouse"),
                 ("y \u{b7} Y", "Copy the selection or top line / the screen"),
                 ("Esc \u{b7} q", "Close the viewer"),

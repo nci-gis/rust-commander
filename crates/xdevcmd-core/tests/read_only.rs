@@ -44,6 +44,11 @@ fn nothing_writes_once_read_only_is_installed() {
         assert!(s.errors[0].contains("read-only"), "{:?}", s.errors);
     }
     assert!(xdevcmd_core::rename::rename(&d.join("f.txt"), "g.txt").is_err());
+    // Save as… of a shell's history, new name and replacement alike.
+    let saved = d.join("dst").join("history.txt");
+    let e = xdevcmd_core::document::save_bytes(&saved, b"h", false, true).unwrap_err();
+    assert!(e.to_string().contains("read-only"), "{e}");
+    assert!(xdevcmd_core::document::save_bytes(&d.join("f.txt"), b"h", true, true).is_err());
 
     assert_eq!(fs::read(d.join("f.txt")).unwrap(), b"keep", "untouched");
     assert!(

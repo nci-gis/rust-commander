@@ -426,6 +426,12 @@ pub struct App {
     /// A file extracted from an archive so F3 can show it; removed when the viewer
     /// closes.
     view_temp: Option<PathBuf>,
+    /// The viewer while F2's Save as… asks where (and perhaps whether to replace, or a
+    /// copy runs): it comes back, where it was, once that dialog closes.
+    save_from: Option<Box<Viewer>>,
+    /// Where the history shown in the viewer came from: its shell's directory where the
+    /// system says (Linux), else the file pane's. Save as… offers it.
+    history_dir: Option<PathBuf>,
     /// Copy, move, delete, extract and pack jobs sent to the background (B in the
     /// progress box). One that asks a question comes back to the front.
     jobs: Vec<Job>,
@@ -565,6 +571,8 @@ impl App {
             to_reload: HashSet::new(),
             to_check: HashSet::new(),
             view_temp: None,
+            save_from: None,
+            history_dir: None,
             jobs: Vec::new(),
             quick_image: None,
             decoding: None,
@@ -1411,10 +1419,11 @@ impl App {
             self.status = format!("no terminal yet \u{2014} {key}");
             return;
         }
-        let Some((title, text)) = self.panel().and_then(|p| p.history(tab)) else {
+        let Some((title, text, cwd)) = self.panel().and_then(|p| p.history(tab)) else {
             self.status = "no such terminal tab".into();
             return;
         };
+        self.history_dir = Some(cwd.unwrap_or_else(|| self.focused_cwd()));
         let lines = text.lines().count();
         let doc = Document::from_bytes(title, text.into_bytes());
         let v = &self.settings.config.viewer;
@@ -1425,6 +1434,132 @@ impl App {
             if lines == 1 { "" } else { "s" }
         ));
         self.modal = Some(Modal::View(Box::new(viewer)));
+    }
+
+    /// F2 in the viewer: ask where to save what it shows. History (held in memory) is
+    /// offered as `xdevcmd-history-<date>-<time>.txt` in its shell's directory; a file
+    /// under its own name in its own directory, to be changed. Refused as any other way
+    /// of creating a file is, in read-only and restricted modes.
+    fn begin_save_as(&mut self) {
+        // Saving is creating a file, which is what Copy as… is refused for.
+        if let Some(why) = self.refused(Action::CopyAs) {
+            if let Some(Modal::View(v)) = self.modal.as_mut() {
+                v.note(&why);
+            }
+            self.status = why;
+            return;
+        }
+        let Some(Modal::View(v)) = self.modal.take() else {
+            return;
+        };
+        let (dir, name) = if v.doc.in_memory {
+            (
+                self.history_dir
+                    .clone()
+                    .unwrap_or_else(|| self.focused_cwd()),
+                xdevcmd_core::document::history_file_name(),
+            )
+        } else {
+            let p = &v.doc.path;
+            (
+                p.parent()
+                    .map_or_else(|| self.focused_cwd(), Path::to_path_buf),
+                p.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            )
+        };
+        let what = if v.doc.in_memory {
+            "the history, readable by you only"
+        } else {
+            "a copy of this file"
+        };
+        self.save_from = Some(v);
+        self.modal = Some(Modal::Input(Input {
+            title: "Save as".into(),
+            label: format!("{what}, to:"),
+            edit: LineEdit::new(&dir.join(name).display().to_string()),
+            kind: InputKind::SaveAs,
+            dir,
+            buttons: Vec::new(),
+            error: None,
+        }));
+    }
+
+    /// Enter in Save as…: a document in memory is written by the core
+    /// (`document::save_bytes`, `0600`), asking first if the name is taken; a file is
+    /// copied by an ordinary job, which asks its own question about a name taken.
+    fn apply_save_as(&mut self, i: Input) {
+        let typed = i.edit.text();
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return;
+        }
+        let mut dest = expand_tilde(typed);
+        if dest.is_relative() {
+            dest = i.dir.join(dest);
+        }
+        // Under --root, as F7 and Alt+F5: no `..`, and the directory it goes in must be
+        // inside, links resolved.
+        let climbs = Path::new(typed)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+        let inside = dest
+            .parent()
+            .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
+        let refuse = |app: &mut Self, i: Input, why: String| {
+            app.modal = Some(Modal::Input(Input {
+                error: Some(why),
+                ..i
+            }));
+        };
+        if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+            return refuse(self, i, "outside the root xdevcmd is confined to".into());
+        }
+        if dest.is_dir() {
+            return refuse(
+                self,
+                i,
+                "that is a directory \u{2014} add a file name".into(),
+            );
+        }
+        let Some(v) = self.save_from.as_ref() else {
+            return;
+        };
+        if let Some(bytes) = v.doc.memory_bytes() {
+            let len = bytes.len() as u64;
+            match xdevcmd_core::document::save_bytes(&dest, bytes, false, true) {
+                Ok(()) => self.status = format!("saved to {}", dest.display()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // The same question a copy asks, before anything is touched.
+                    let on_disk = std::fs::metadata(&dest).map_or(0, |m| m.len());
+                    self.modal = Some(Modal::Ask(modal::Ask {
+                        title: "Already exists".into(),
+                        body: vec![
+                            dest.display().to_string(),
+                            String::new(),
+                            format!("on disk   {}", human_size(on_disk)),
+                            format!("incoming  {}", human_size(len)),
+                        ],
+                        danger: true,
+                        yes: Some(("Replace".into(), Cmd::SaveReplacing(dest))),
+                        buttons: Vec::new(),
+                        footnote: None,
+                        pictures: Vec::new(),
+                    }));
+                }
+                Err(e) => refuse(self, i, format!("cannot save: {e}")),
+            }
+            return;
+        }
+        let from = v.doc.path.clone();
+        let (Some(dir), Some(name)) = (dest.parent(), dest.file_name()) else {
+            return refuse(self, i, "not a file name".into());
+        };
+        let mut req = Request::copy(vec![from], dir.to_path_buf());
+        req.rename_to = Some(name.to_os_string());
+        self.remember_job(&req);
+        self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
     }
 
     /// Send the active pane's directory to the shell. The one place the two halves of
@@ -2848,6 +2983,18 @@ impl App {
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             Cmd::CopyText(t) => self.copy_text(t),
+            Cmd::SaveReplacing(dest) => {
+                let saved = self
+                    .save_from
+                    .as_ref()
+                    .and_then(|v| v.doc.memory_bytes())
+                    .map(|b| xdevcmd_core::document::save_bytes(&dest, b, true, true));
+                self.status = match saved {
+                    Some(Ok(())) => format!("saved to {}, replacing it", dest.display()),
+                    Some(Err(e)) => format!("cannot save: {e}"),
+                    None => "nothing to save".into(),
+                };
+            }
             Cmd::BatchRename(moves) => {
                 let out = xdevcmd_core::batch_rename::apply(&moves, xdevcmd_core::ops::safe());
                 self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves.clone()));
@@ -3348,6 +3495,7 @@ impl App {
     fn apply_input(&mut self, i: Input) {
         let text = i.edit.text();
         match &i.kind {
+            InputKind::SaveAs => self.apply_save_as(i),
             InputKind::MkDir => {
                 let name = text.trim();
                 if name.is_empty() {
@@ -3709,6 +3857,8 @@ impl App {
         }
         if finished {
             self.finish_job();
+            // A copy started by the viewer's Save as… gives the viewer back.
+            self.back_to_viewer();
         }
     }
 
@@ -3778,6 +3928,7 @@ impl App {
                     }
                     return;
                 }
+                viewer::Action::SaveAs => return self.begin_save_as(),
                 viewer::Action::Stay => {}
             },
             Some(Modal::Help(h)) => {
@@ -3833,6 +3984,25 @@ impl App {
     }
 
     fn modal_act(&mut self, act: ModalAct) {
+        self.modal_act_inner(act);
+        self.back_to_viewer();
+    }
+
+    /// Once Save as…'s dialogs are all closed (asked, answered, or the copy done), the
+    /// viewer it was started from comes back, with what happened on its message line.
+    fn back_to_viewer(&mut self) {
+        if self.modal.is_some() {
+            return;
+        }
+        if let Some(mut v) = self.save_from.take() {
+            if !self.status.is_empty() {
+                v.note(&self.status);
+            }
+            self.modal = Some(Modal::View(v));
+        }
+    }
+
+    fn modal_act_inner(&mut self, act: ModalAct) {
         match act {
             ModalAct::Run(c) => {
                 self.modal = None;
@@ -3840,8 +4010,11 @@ impl App {
             }
             ModalAct::Close => {
                 self.modal = None;
-                if let Some(t) = self.view_temp.take() {
-                    let _ = std::fs::remove_dir_all(&t);
+                // Not while Save as… holds the viewer: it still shows that file.
+                if self.save_from.is_none() {
+                    if let Some(t) = self.view_temp.take() {
+                        let _ = std::fs::remove_dir_all(&t);
+                    }
                 }
             }
             ModalAct::Start => {

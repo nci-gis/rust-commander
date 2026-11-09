@@ -47,6 +47,8 @@ pub enum Cmd {
     UserCommand(usize),
     /// Put this text on the clipboard (OSC 52).
     CopyText(String),
+    /// Save as… from the viewer, onto a file that exists: the user said replace it.
+    SaveReplacing(PathBuf),
     /// A confirmed synchronisation plan: each source and the directory it goes into.
     Sync(Vec<(PathBuf, PathBuf)>),
     /// Quit even though jobs are still running: they are cancelled first.

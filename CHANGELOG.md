@@ -17,6 +17,13 @@ that heading and starts a new, empty one here. -->
   written to disk. Works from inside the shell, and from the files on the shell last in
   focus. Alt+X F12 where Shift+F12 does not arrive; macOS Terminal.app's Shift+F12 is
   understood as it is. Esc goes back where you were.
+- **The viewer saves and goes to a line.** F2 is Save as…: a shell's history is offered
+  as `xdevcmd-history-<date>-<time>.txt` in the shell's directory and written readable
+  by you only (`0600`, Unix); a file is copied under the name given. A name that exists
+  is asked about first; read-only and restricted modes refuse. `:` or Ctrl+G goes to a
+  line (`40`) or a share (`50%`), and in hex to an offset (`0x1f00`); past the end goes
+  to the end and says so. A message on the viewer's last row now always shows, keys
+  making room for it.
 - **Sharp pictures in quick view** where the terminal draws them itself: the Kitty
   graphics protocol (kitty, Ghostty), iTerm2's inline images (iTerm2, WezTerm) and sixel
   (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and

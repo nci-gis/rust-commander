@@ -172,6 +172,9 @@ pub enum InputKind {
     Pack {
         sources: Vec<PathBuf>,
     },
+    /// F2 in the viewer: where to write what it shows. The viewer waits in
+    /// `App::save_from` meanwhile.
+    SaveAs,
 }
 
 pub struct Input {
@@ -626,6 +629,7 @@ fn render_input(frame: &mut Frame, area: Rect, i: &mut Input) {
         InputKind::CopyAs { .. } => "copy",
         InputKind::Permissions { .. } => "apply",
         InputKind::Pack { .. } => "pack",
+        InputKind::SaveAs => "save",
     };
     let y = inner.y + inner.height.saturating_sub(1);
     i.buttons = buttons(

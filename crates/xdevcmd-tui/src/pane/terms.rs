@@ -283,14 +283,18 @@ impl TermPanel {
     }
 
     /// The text of tab `tab`'s focused shell (the active tab's when `None`), all its
-    /// history and screen, with the title the viewer shows it under:
-    /// "history · sh · tab 2". `None` when there is no such tab.
-    pub fn history(&self, tab: Option<usize>) -> Option<(String, String)> {
+    /// history and screen, with the title the viewer shows it under,
+    /// "history · sh · tab 2", and the shell's directory where the system says.
+    /// `None` when there is no such tab.
+    pub fn history(
+        &self,
+        tab: Option<usize>,
+    ) -> Option<(String, String, Option<std::path::PathBuf>)> {
         let i = tab.unwrap_or(self.active);
         let t = self.tabs.get(i)?;
         let shell = t.terms.get(&t.focus)?;
         let title = format!("history \u{b7} {} \u{b7} tab {}", shell.shell_name(), i + 1);
-        Some((title, shell.history_text()))
+        Some((title, shell.history_text(), shell.cwd()))
     }
 
     pub fn send_key(&self, k: KeyEvent) -> bool {

@@ -65,7 +65,9 @@ xdevcmd for yours, or see [keys.md](keys.md).
 
 - **In the viewer** (F3): **/** searches, **n** / **N** next / previous, **h** switches
   text and hex, **w** wraps lines, **y** copies the selected lines (or the top one),
-  **Y** the screen, **q** or **Esc** closes.
+  **Y** the screen, **:** or **Ctrl+G** goes to a line (`40`, `50%`, or in hex an
+  offset such as `0x1f00`), **F2** saves a copy under another name (a shell's history
+  readable by you only), **q** or **Esc** closes.
 - **Enter on a program or script** asks "Run it?" (Cancel first). **Run in a terminal
   tab** shows its output and keeps it after the program ends; Enter or Esc closes the
   tab.

@@ -772,6 +772,77 @@ fn dragging_over_lines_in_the_viewer_selects_them_for_y() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// The first text row of the viewer: the line its gutter numbers, and what it holds.
+fn viewer_top(s: &str) -> String {
+    s.lines().nth(1).unwrap_or_default().to_string()
+}
+
+#[test]
+fn go_to_line_in_the_viewer_takes_a_number_a_share_or_an_offset() {
+    let body: String = (1..=300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    let s = shot_keys("100x16", "Down,F3,:,4,0,Enter", &a, &b);
+    assert!(
+        viewer_top(&s).contains(" 40 \u{2502}line 40"),
+        "line 40 at the top\n{s}"
+    );
+    let s = shot_keys("100x16", "Down,F3,C-g,5,0,%,Enter", &a, &b);
+    assert!(
+        viewer_top(&s).contains("150 \u{2502}line 150"),
+        "50% of 300\n{s}"
+    );
+    let s = shot_keys("100x16", "Down,F3,:,9,9,9,Enter", &a, &b);
+    assert!(
+        viewer_top(&s).contains("300 \u{2502}line 300"),
+        "past the end: the end\n{s}"
+    );
+    assert!(s.contains("999 is past the end"), "and says so\n{s}");
+    let s = shot_keys("100x16", "Down,F3,:,x,Enter", &a, &b);
+    assert!(s.contains("not a line: x"), "{s}");
+    // In hex, an offset: 0x40 is the fifth row, and so is 64.
+    let s = shot_keys("100x16", "Down,F3,h,:,0,x,4,0,Enter", &a, &b);
+    assert!(viewer_top(&s).contains("00000040"), "{s}");
+    let s = shot_keys("100x16", "Down,F3,h,:,6,4,Enter", &a, &b);
+    assert!(viewer_top(&s).contains("00000040"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Ctrl+G reached the viewer as 'g' with Ctrl held, and the arm for `g` (to the top)
+/// took it whatever the modifiers. Now it asks where to go, and the view stays put.
+#[test]
+fn ctrl_g_in_the_viewer_asks_where_rather_than_going_to_the_top() {
+    let body: String = (1..=300).map(|i| format!("line {i}\n")).collect();
+    let (a, b) = with_file("doc.txt", body.as_bytes());
+    let s = shot_keys("100x16", "Down,F3,PageDown,PageDown,C-g", &a, &b);
+    assert!(s.contains("go to line:"), "{s}");
+    assert!(
+        !viewer_top(&s).contains("  1 \u{2502}line 1"),
+        "not the top\n{s}"
+    );
+    let s = shot_keys("100x16", "Down,F3,PageDown,PageDown,g", &a, &b);
+    assert!(
+        viewer_top(&s).contains("  1 \u{2502}line 1"),
+        "g still goes to the top\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn f2_in_the_viewer_offers_the_files_own_name_and_is_refused_read_only() {
+    let (a, b) = with_file("doc.txt", b"one\ntwo\n");
+    let s = shot_keys("110x20", "Down,F3,F2", &a, &b);
+    assert!(s.contains("Save as") && s.contains("doc.txt"), "{s}");
+    let s = shot_keys("110x20", "Down,F3,F2,Esc", &a, &b);
+    assert!(
+        s.contains("view ") && s.contains("\u{2502}one"),
+        "Esc: back to the viewer\n{s}"
+    );
+    let s = shot_flags(&["--read-only"], "Down,F3,F2", &a, &b);
+    assert!(s.contains("creating files is turned off"), "{s}");
+    assert!(!s.contains("Save as"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn tabs_are_expanded_rather_than_sent_to_the_terminal() {
     let (a, b) = with_file("doc.txt", b"ab\tc\n");

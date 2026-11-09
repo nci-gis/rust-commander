@@ -22,6 +22,16 @@ pub enum Action {
     Close,
     /// Put this on the clipboard: `y` the selection or the top line, `Y` the screen.
     Copy(String),
+    /// F2: write what is shown to a file the user names (the app asks where).
+    SaveAs,
+}
+
+/// What is being typed on the viewer's last row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Prompt {
+    Search,
+    /// `:` or Ctrl+G: a line, `50%`, or in hex an offset.
+    Line,
 }
 
 /// What the left button is holding down.
@@ -42,7 +52,7 @@ pub struct Viewer {
     pub wrap: bool,
     tab_width: usize,
     needle: Option<String>,
-    typing: Option<String>,
+    typing: Option<(Prompt, String)>,
     message: String,
     page: usize,
     /// Where the text was drawn, and which line each of its rows shows.
@@ -206,15 +216,71 @@ impl Viewer {
         }
     }
 
+    /// `:` / Ctrl+G, then Enter: go to what was typed. In text, a line number (`40`) or a
+    /// share of the document (`50%`) puts that line at the top; in hex, a byte offset,
+    /// `0x1f00` or decimal, or a share. Past the end goes to the end and says so.
+    fn go_to(&mut self, typed: &str) {
+        let t = typed.trim();
+        let last = self.last();
+        let rows = last + 1;
+        let unit = match self.mode {
+            Mode::Text => "line",
+            Mode::Hex => "offset",
+        };
+        let target: Option<u64> = if let Some(p) = t.strip_suffix('%') {
+            p.trim()
+                .parse::<u64>()
+                .ok()
+                .map(|p| (rows as u64 * p.min(100) / 100).saturating_sub(1))
+        } else if self.mode == Mode::Hex {
+            let (digits, radix) = match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+                Some(h) => (h, 16),
+                None => (t, 10),
+            };
+            u64::from_str_radix(digits, radix)
+                .ok()
+                .map(|off| off / HEX_COLS)
+        } else {
+            t.parse::<u64>().ok().map(|n| n.saturating_sub(1))
+        };
+        let Some(row) = target else {
+            self.message = format!("not a {unit}: {t} \u{2014} a number, or 50%");
+            return;
+        };
+        self.selection = None;
+        if row > last as u64 {
+            self.top = last;
+            self.message = match self.mode {
+                Mode::Text => format!("{t} is past the end \u{2014} line {rows} is the last"),
+                Mode::Hex => format!(
+                    "{t} is past the end \u{2014} the file is {} bytes",
+                    self.doc.len
+                ),
+            };
+        } else {
+            self.top = row as usize;
+            self.message.clear();
+        }
+    }
+
     pub fn on_key(&mut self, k: KeyEvent) -> Action {
-        if let Some(buf) = self.typing.as_mut() {
+        if let Some((prompt, buf)) = self.typing.as_mut() {
+            let prompt = *prompt;
             match k.code {
                 KeyCode::Char(c) => buf.push(c),
                 KeyCode::Backspace => {
                     buf.pop();
                 }
+                KeyCode::Enter if prompt == Prompt::Line => {
+                    let typed = self.typing.take().map(|(_, b)| b).unwrap_or_default();
+                    if typed.trim().is_empty() {
+                        self.message.clear();
+                    } else {
+                        self.go_to(&typed);
+                    }
+                }
                 KeyCode::Enter => {
-                    let n = self.typing.take().unwrap_or_default();
+                    let n = self.typing.take().map(|(_, b)| b).unwrap_or_default();
                     if n.is_empty() {
                         self.message.clear();
                     } else {
@@ -247,6 +313,13 @@ impl Viewer {
             KeyCode::Up | KeyCode::Char('k') => self.scroll(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => self.scroll(page),
             KeyCode::PageUp => self.scroll(-page),
+            KeyCode::F(2) => return Action::SaveAs,
+            KeyCode::Char(':') => self.typing = Some((Prompt::Line, String::new())),
+            // Ctrl+G before `g`: the arm below matches 'g' whatever the modifiers, and
+            // Ctrl+G (go to, as in the panes) must not be taken as Home.
+            KeyCode::Char('g') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.typing = Some((Prompt::Line, String::new()));
+            }
             KeyCode::Home | KeyCode::Char('g') => self.top = 0,
             KeyCode::End | KeyCode::Char('G') => self.top = self.last(),
             KeyCode::Char('h') => {
@@ -291,7 +364,7 @@ impl Viewer {
             KeyCode::Left => self.col = self.col.saturating_sub(8),
             KeyCode::Right if !self.wrap => self.col += 8,
             KeyCode::Char('/') => {
-                self.typing = Some(String::new());
+                self.typing = Some((Prompt::Search, String::new()));
                 self.message.clear();
             }
             KeyCode::Char('n') => self.search(false),
@@ -514,10 +587,18 @@ impl Viewer {
             .buffer_mut()
             .set_style(area, Style::new().bg(theme::t().bg_bar));
 
-        if let Some(buf) = &self.typing {
+        if let Some((prompt, buf)) = &self.typing {
+            let (lead, hint) = match (prompt, self.mode) {
+                (Prompt::Search, _) => (" /", ""),
+                (Prompt::Line, Mode::Text) => (" go to line: ", "   40 \u{b7} 50% \u{b7} Esc"),
+                (Prompt::Line, Mode::Hex) => (
+                    " go to offset: ",
+                    "   0x1f00 \u{b7} 8000 \u{b7} 50% \u{b7} Esc",
+                ),
+            };
             let line = Line::from(vec![
                 Span::styled(
-                    " /",
+                    lead,
                     Style::new()
                         .fg(theme::t().accent)
                         .add_modifier(Modifier::BOLD),
@@ -526,6 +607,7 @@ impl Viewer {
                     format!("{buf}\u{2588}"),
                     Style::new().fg(theme::t().fg).add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(hint, Style::new().fg(theme::t().fg_dim)),
             ]);
             frame
                 .buffer_mut()
@@ -541,7 +623,28 @@ impl Viewer {
             ("/", "search"),
             ("n/N", "next"),
             ("g/G", "ends"),
+            (":", "line"),
+            ("F2", "save"),
         ];
+        // A message is what just happened (a refusal, "past the end"): it must be read,
+        // so keys are dropped from the end, down to Esc, until it fits beside them.
+        let width = |n: usize| -> usize {
+            keys[..n]
+                .iter()
+                .map(|(k, l)| k.chars().count() + l.chars().count() + 3)
+                .sum()
+        };
+        let room = area.width as usize;
+        let said = if self.message.is_empty() {
+            0
+        } else {
+            self.message.chars().count() + 2
+        };
+        let mut shown = keys.len();
+        while shown > 1 && width(shown) + said > room {
+            shown -= 1;
+        }
+        let keys = &keys[..shown];
         let mut spans = Vec::new();
         for (k, label) in keys {
             spans.push(Span::styled(

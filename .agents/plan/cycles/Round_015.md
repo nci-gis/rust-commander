@@ -51,7 +51,7 @@ as agreed on 2026-11-09; Step 5 (logging) stays out.
     line. Core: memory document indexes, searches, shows hex as a file with the same bytes.
     Pty: `seq 1 300`, Shift+F12; viewer shows `300` at the bottom and `1` after Home; drag then `y`
     sends OSC 52 with those lines; Esc, typing reaches the shell.
-- [ ] **2. Save as… and Go to line in the viewer**, for every document.
+- [x] **2. Save as… and Go to line in the viewer**, for every document.
   - **F2 Save as…** (free in the viewer). Prefilled `<dir>/xdevcmd-history-<date>-<time>.txt`
     for history, the file's own name for a file. `<dir>` = shell's directory where known
     (`TermPane::cwd`), else the focused pane's. Through both walls: `App::refused` (read-only
@@ -180,6 +180,45 @@ history; Paste or Clear history in the menu; a second viewer; any temporary file
   with the command line counted: the history's line 1 is `$ seq 1 300`.
   Not done: a full-screen program on the other screen (htop) has no history in vt100;
   the view then shows that screen only. Not checked by hand with Claude Code or htop.
+
+- 2026-11-10, **step 2, Save as… and Go to line.** Viewer: F2 returns `Action::SaveAs`;
+  `:` and Ctrl+G open a prompt on the last row (`Prompt::{Search, Line}` replaces the
+  search-only `typing`). The Ctrl+G arm sits before `Home | Char('g')`, which matched
+  'g' whatever the modifiers. Text takes `40` or `50%`; hex takes `0x1f00`, a decimal
+  offset or a share; past the end goes to the end and says so; anything else says what
+  it takes. App: `begin_save_as` asks `App::refused(Action::CopyAs)` (saving creates a
+  file, which is what Copy as… is refused for; no new Action, since every Action needs a
+  key row and this one is the viewer's own F2), then keeps the viewer in `save_from` and
+  opens the Input. Memory documents go to core `document::save_bytes(path, bytes,
+  replace, private)`: `guard_write`, then `create_new` with mode `0600`; a name taken
+  gets the copy's question ("Already exists", on disk / incoming sizes) as an Ask,
+  Replace writes under `ops::part_name` and renames over. A file document is an ordinary
+  copy job with `rename_to`. The viewer comes back once the dialogs are closed
+  (`back_to_viewer`, after every modal action and after a clean job closes its own box);
+  a file extracted from an archive for viewing is not removed while Save as… holds it.
+  The prefill is `<dir>/xdevcmd-history-<date>-<time>.txt`, `<dir>` the shell's
+  directory recorded when the history was opened (`TermPanel::history` now returns
+  `TermPane::cwd` too), else the file pane's; under `--root` the same checks as Alt+F5.
+  **Found and fixed on the way:** a clean copy closes its progress box from `pump_job`,
+  not through `modal_act`, so the first try lost the viewer after saving a file;
+  `f2_on_a_viewed_file…` caught it. **Also changed:** a message on the viewer's last row
+  was cut off behind the key hints on a 100-column screen ("999 is past the end", the
+  read-only refusal); keys are now dropped from the end, down to Esc, until the message
+  fits.
+  Tests: render — `: 40 Enter` puts line 40 on top, `Ctrl+G 50% Enter` line 150 of 300,
+  `:999` the end and "past the end", `:x` refused, hex `0x40` and `64` both row
+  `00000040`; Ctrl+G after two PageDowns asks and does not go to the top (fails with the
+  Ctrl+G arm moved after `g`); F2 offers the file's name, Esc is back in the viewer,
+  `--read-only` refuses with "creating files is turned off". Core — `save_bytes` never
+  replaces without `replace` (the file untouched, `AlreadyExists`); a replacement
+  leaves no part file; a failed replacement (a directory at the name) leaves it and no
+  part; `0600` for a new file and for a replacement of a `0644` one; read-only refuses
+  both (`tests/read_only.rs`). Pty — F2 Enter on history writes one
+  `xdevcmd-history-*` in the shell's directory, `0600`, holding the output; F2 to that
+  name asks, Esc keeps it byte for byte; read-only refuses and writes nothing; F2 on a
+  viewed file copies it and the viewer comes back.
+  Not verified: Windows (`rename` over an existing file is `MoveFileExW` with replace in
+  std; a new file there gets its directory's permissions, no `0600`), not compiled here.
 
 ## Check
 

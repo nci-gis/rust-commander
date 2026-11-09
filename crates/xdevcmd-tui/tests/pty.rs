@@ -1984,6 +1984,107 @@ fn shift_f12_reads_the_shells_history_in_the_viewer() {
     xdevcmd.quit();
 }
 
+const F2: &[u8] = b"\x1bOQ";
+
+/// F2 in the history view: offered as xdevcmd-history-<date>-<time>.txt in the shell's
+/// directory, written there readable by its owner only; F2 to a name that exists asks
+/// first, and Esc keeps the file that was there.
+#[test]
+fn f2_saves_the_history_owner_only_and_asks_before_replacing() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("save-history");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"echo SAVED_$((40+2))\r");
+    xdevcmd.wait_for("SAVED_42");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(F2);
+    xdevcmd.wait_for("Save as");
+    xdevcmd.wait_for("xdevcmd-history-");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("saved to");
+    xdevcmd.wait_for("view history"); // back in the viewer
+    let saved: Vec<PathBuf> = std::fs::read_dir(s.left())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().contains("xdevcmd-history-"))
+        .collect();
+    // Linux knows the shell's directory; elsewhere it is the file pane's, the same here.
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    let text = std::fs::read_to_string(&saved[0]).unwrap();
+    assert!(text.contains("SAVED_42\n"), "{text:?}");
+    let mode = std::fs::metadata(&saved[0]).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+
+    // The same name again: asked, and Esc keeps the first.
+    let first = std::fs::read(&saved[0]).unwrap();
+    xdevcmd.send(F2);
+    xdevcmd.wait_for("Save as");
+    xdevcmd.send(b"\x15"); // Ctrl+U clears the line
+    xdevcmd.send(saved[0].to_string_lossy().as_bytes());
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("Already exists");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("Already exists");
+    xdevcmd.wait_for("view history");
+    assert_eq!(std::fs::read(&saved[0]).unwrap(), first, "kept as it was");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// F2 on a file in the viewer is an ordinary copy under the name given, and the viewer
+/// comes back afterwards.
+#[test]
+fn f2_on_a_viewed_file_copies_it_under_the_new_name() {
+    let s = Scratch::new("save-file");
+    s.file("left/notes.txt", "keep these\n");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(b"\x1b[13~"); // F3
+    xdevcmd.wait_for("keep these");
+    xdevcmd.send(F2);
+    xdevcmd.wait_for("Save as");
+    xdevcmd.send(b"\x15");
+    xdevcmd.send(s.right().join("copy.txt").to_string_lossy().as_bytes());
+    xdevcmd.send(ENTER);
+    wait_file(&s.right().join("copy.txt"), "the copy", |b| {
+        b.as_deref() == Some("keep these\n")
+    });
+    // A clean copy closes its box by itself, and the viewer is back.
+    xdevcmd.wait_for("view ");
+    xdevcmd.wait_for("1 copied");
+    xdevcmd.wait_for("keep these");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("keep these");
+    xdevcmd.quit();
+}
+
+/// Read-only mode: the history can be read, not saved.
+#[test]
+fn read_only_mode_refuses_saving_the_history() {
+    let s = Scratch::new("save-ro");
+    let mut xdevcmd = Session::start_flags(&s, &["--read-only"]);
+    xdevcmd.wait_for("READ-ONLY");
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("in memory only");
+    xdevcmd.send(F2);
+    xdevcmd.wait_for("creating files is turned off");
+    assert!(!xdevcmd.screen().contains("Save as"));
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("view history");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+    let left: Vec<_> = std::fs::read_dir(s.left()).unwrap().collect();
+    assert!(left.is_empty(), "nothing written");
+}
+
 /// Terminal.app sends Shift+F12 as `ESC [34~` (xterm's F20; crossterm numbers it F17),
 /// and Alt+X F12 stands for Shift+F12 where neither arrives: both open the history.
 #[test]

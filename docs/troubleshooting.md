@@ -74,7 +74,9 @@ function keys**.
 **Shift+F keys do nothing in Terminal.app** (Shift+F8, Shift+F10, Shift+F2…).
 Terminal.app sends Shift+F5–F12 as other keys (F13–F20) and nothing at all for
 Shift+F1–F4. Use **Alt+X, then the F key** instead: Alt+X F8 is Shift+F8, Alt+X F10 the
-right-click menu, and so on for every Shift+F key; a badge shows Alt+X waiting. (Alt
+right-click menu, and so on for every Shift+F key; a badge shows Alt+X waiting. The one
+exception is **Shift+F12** (the shell's history): xdevcmd takes the key Terminal.app
+sends for it (a bare F17 or F20, depending on how it is counted) as Shift+F12. (Alt
 needs "Use Option as Meta key", above.) iTerm2, Ghostty and kitty send Shift+F keys as
 they are. To make Terminal.app send them itself: Settings → Profiles → Keyboard, **+**,
 the key with Shift, "Send Text": `\033[1;2P` `\033[1;2Q` `\033[1;2R` `\033[1;2S` for

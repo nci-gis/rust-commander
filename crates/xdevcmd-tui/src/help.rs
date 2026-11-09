@@ -257,10 +257,16 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                     Style::new().fg(th.fg_dim),
                 ));
             } else if let Some(p) = shell_prefix.as_ref().filter(|_| b.action.acts_on_shell()) {
-                spans.push(Span::styled(
-                    format!("  in the shell: {p} first"),
-                    Style::new().fg(th.fg_dim),
-                ));
+                // After the prefix only single keys work: Alt+X Alt+R is not a group in a
+                // group, so `Alt+r Left` is not reachable from the shell. Say which one is.
+                let hint = match keys.iter().find(|k| !k.contains(' ')) {
+                    Some(_) if keys.iter().all(|k| !k.contains(' ')) => {
+                        format!("  in the shell: {p} first")
+                    }
+                    Some(one) => format!("  in the shell: {p} {one}"),
+                    None => "  not from the shell".to_string(),
+                };
+                spans.push(Span::styled(hint, Style::new().fg(th.fg_dim)));
             }
             out.push(Line::from(spans));
         }

@@ -489,7 +489,7 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::NextSplit,
         name: "next_split",
         group: "Panes",
-        about: "Next split, in the shell or the file panes",
+        about: "Next split, of the file panes or the terminal",
         keys: &["Alt+o"],
     },
     Binding {
@@ -762,7 +762,7 @@ pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
     )];
     if let Some(p) = prefix {
         out.push(format!(
-            "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p} goes to the program."
+            "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p}, Enter too, goes to the program with it; Esc cancels."
         ));
     }
     out

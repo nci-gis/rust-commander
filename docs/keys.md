@@ -3,7 +3,7 @@
 These are the defaults. Press **F1** in xdevcmd to see your own, after any changes in
 `[keys]` in the config. This file is generated: `xdevcmd --print-keys > docs/keys.md`.
 
-In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x goes to the program.
+In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x, Enter too, goes to the program with it; Esc cancels.
 
 ## General
 
@@ -102,7 +102,7 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Alt+Shift+Up` `Alt+r Up` | Move the pane's border up |
 | `Alt+Shift+Down` `Alt+r Down` | Move the pane's border down |
 | `Alt+z` | Fill the screen with this pane, or put it back |
-| `Alt+o` | Next split, in the shell or the file panes |
+| `Alt+o` | Next split, of the file panes or the terminal |
 | `Ctrl+u` | Swap this pane with the other one |
 | `Alt+=` | Show this directory in the other pane too |
 | `Alt+q` | The other pane previews the file under the cursor |

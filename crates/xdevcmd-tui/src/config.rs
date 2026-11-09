@@ -210,7 +210,7 @@ pub struct Terminal {
     /// costs lines × columns × a cell's size (Settings shows the figure). Read when a
     /// shell starts; vt100 cannot change a history's length in place.
     pub scrollback: usize,
-    /// Alt+C and typing names (Alt+Enter) send to the shell without asking when it is
+    /// Alt+C, typing names (Alt+Enter) and the user menu send to the shell without asking when it is
     /// surely at its prompt; false asks every time (owner, 2026-11-09: default true).
     pub send_when_idle: bool,
     /// The file pane used last goes to the shell's directory when the shell's `cd`

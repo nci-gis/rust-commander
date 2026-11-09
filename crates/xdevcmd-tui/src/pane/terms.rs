@@ -404,12 +404,6 @@ impl TermPanel {
         self.focused().and_then(TermPane::shell_dir)
     }
 
-    pub fn send(&self, bytes: Vec<u8>) {
-        if let Some(t) = self.focused() {
-            t.send(bytes);
-        }
-    }
-
     /// Move a border between this tab's shells. False when the focused shell has no
     /// border that way inside the tab, so the caller moves the panel's own edge.
     pub fn move_boundary(&mut self, axis: Axis, delta: i16) -> bool {

@@ -17,7 +17,8 @@ that heading and starts a new, empty one here. -->
   marked names into the shell's command line, quoted for that shell, without Enter.
   `[terminal] follow` (off by default) lets the file pane used last follow the shell's
   `cd`, at the prompt only, never the other way.
-- **One check before anything is typed into a shell**, for Alt+C and typed names: a
+- **One check before anything is typed into a shell**, for Alt+C, typed names and the
+  user menu (Shift+F9): a
   shell surely at its prompt gets it at once (`[terminal] send_when_idle`, on by
   default); a program running there, or `ssh`, gets nothing and xdevcmd offers **Open a
   new shell** in the pane's directory instead; when it cannot tell (Windows without
@@ -81,8 +82,9 @@ that heading and starts a new, empty one here. -->
   did not (less, man). In a plain shell it still scrolls the history.
 
 ### Changed
-- **Alt+C with a program running in the shell** no longer only says so on the status
-  line: it asks, offering to open a new shell in the pane's directory instead.
+- **Alt+C and the user menu with a program running in the shell** no longer only say so
+  on the status line: they ask, offering to open a new shell in the pane's directory
+  instead. On Windows, where xdevcmd cannot tell without prompt marks, they ask too.
 - **Inside the terminal panel, xdevcmd takes only F12, Shift+F12 and Alt+X** (keymap
   A). Every other key is the program's: Alt+N, Alt+S, Alt+D, Alt+W, Alt+O, Alt+T, Alt+C,
   Alt+Z, the Alt+R group, Alt+Shift+arrows, Alt+1…9 and Ctrl+PgUp/PgDn no longer act

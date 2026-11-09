@@ -68,8 +68,8 @@ program's.
 
 ### Before anything is typed into the shell
 
-xdevcmd complements the shell; it never types into a program. Alt+C and Alt+Enter go
-through the same check first:
+xdevcmd complements the shell; it never types into a program. Alt+C, Alt+Enter and the
+user menu (Shift+F9) go through the same check first:
 
 | The shell is… | What happens |
 |---|---|
@@ -78,7 +78,8 @@ through the same check first:
 | in a state xdevcmd cannot tell | A question: **Open a new shell** (default), **Send to this shell** (S), or **Cancel**, with a pointer to this page. |
 
 **Open a new shell** starts a new terminal tab in the pane's directory. For Alt+C that
-is the whole job. For names, they are typed there once its prompt is up; if no prompt
+is the whole job. Names, or the user menu's command, are typed there once its prompt is
+up; if no prompt
 shows within a few seconds, the shell stays open and nothing is typed (the status line
 says so). A name with a control character, or one your shell cannot be given safely
 (`%` for cmd), is refused before any question.

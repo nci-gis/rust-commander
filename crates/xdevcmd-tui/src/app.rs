@@ -5588,19 +5588,21 @@ impl App {
                 return;
             }
         };
-        if let Some(Pane::Term(t)) = self.panes.get(&id) {
-            match t.shell_state() {
-                ShellState::Busy(program) | ShellState::Remote(program) => {
-                    self.status =
-                        format!("{program} is running in the terminal \u{2014} not typed into it");
-                    return;
-                }
-                ShellState::Idle | ShellState::Unknown => {}
-            }
-            t.send(format!("{line}\r").into_bytes());
-        }
+        let Some(target) = self.panel_ref().and_then(TermPanel::focused_key) else {
+            return;
+        };
         self.focus = id;
-        self.status = format!("ran {}", item.label);
+        // Typed like everything else typed into a shell: the one decision, which asks
+        // where the shell is busy or cannot be read (owner, 2026-11-09).
+        let line = format!("{line}\r");
+        self.send_to_shell(ShellSend {
+            target,
+            here: line.clone(),
+            new_shell: Some(line),
+            dir: cx.dir,
+            paste: false,
+            what: format!("ran {}", item.label),
+        });
     }
 
     // ── background jobs ────────────────────────────────────────────────────────────

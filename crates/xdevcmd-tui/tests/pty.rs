@@ -2006,6 +2006,37 @@ fn shift_f9_types_a_menu_command_into_the_shell_with_names_quoted() {
     xdevcmd.quit();
 }
 
+/// The user menu types through the same decision as Alt+C: with a program running, it
+/// asks, and a new shell in the pane's directory runs the command instead.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn shift_f9_with_a_program_running_offers_a_new_shell() {
+    let s = Scratch::new("usermenu-busy");
+    s.file("left/it's here.txt", "x");
+    s.file(
+        "config.toml",
+        "[[menu]]\nkey = \"e\"\nlabel = \"say it\"\ncommand = \"echo GOT %s DONE\"\n",
+    );
+    let flag = format!("--config={}", s.0.join("config.toml").display());
+    let mut xdevcmd = Session::start_flags(&s, &[&flag]);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"sleep 30\r");
+    std::thread::sleep(Duration::from_millis(300));
+    xdevcmd.send(F12);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(b"\x1b[20;2~"); // Shift+F9
+    xdevcmd.wait_for("say it");
+    xdevcmd.send(b"e");
+    xdevcmd.wait_for("A program is running");
+    assert!(!xdevcmd.screen().contains("send to this shell"));
+    xdevcmd.send(ENTER); // Open a new shell
+    xdevcmd.wait_for("GOT it's here.txt DONE");
+    xdevcmd.wait_for("new shell: ran say it");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 // ── long-running: does memory settle? ───────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]

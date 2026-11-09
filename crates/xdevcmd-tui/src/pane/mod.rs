@@ -1,4 +1,5 @@
 pub mod files;
+pub mod shell_report;
 pub mod tabs;
 pub mod term;
 pub mod terms;

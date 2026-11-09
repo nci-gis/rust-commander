@@ -22,7 +22,12 @@ use ratatui::widgets::Block;
 use ratatui::Frame;
 use tui_term::widget::PseudoTerminal;
 
+use crate::pane::shell_report::ShellReports;
 use crate::theme;
+
+/// The parser every shell's output goes through, keeping what the shell reports about
+/// itself ([`ShellReports`]) beside the screen.
+pub type Parser = vt100::Parser<ShellReports>;
 
 /// Smallest grid vt100 is ever given. With one row, a line that wraps underflows a row
 /// index inside vt100 (grid.rs, `prev_pos.row -= scrolled`) and panics the reader
@@ -42,7 +47,7 @@ pub fn take_output() -> bool {
 }
 
 pub struct TermPane {
-    parser: Arc<RwLock<vt100::Parser>>,
+    parser: Arc<RwLock<Parser>>,
     tx: Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
     size: (u16, u16),
@@ -222,7 +227,10 @@ impl TermPane {
             });
         }
 
-        let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, scrollback)));
+        let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows));
+        let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
+            rows, cols, scrollback, reports,
+        )));
         let (tx, rx) = channel::<Vec<u8>>();
         {
             let parser = parser.clone();
@@ -652,7 +660,7 @@ fn short_dir(p: &Path) -> String {
 ///
 /// Pure over the parser; the caller holds the write lock, which pauses that shell's
 /// output for as long as this runs (measured in Round 015's Do).
-pub fn history_text(p: &mut vt100::Parser) -> String {
+pub fn history_text<CB: vt100::Callbacks>(p: &mut vt100::Parser<CB>) -> String {
     let before = p.screen().scrollback();
     let history = history_of(p);
     let (rows, cols) = p.screen().size();
@@ -691,7 +699,7 @@ pub fn history_text(p: &mut vt100::Parser) -> String {
 
 /// How many lines of history vt100 holds. It does not say, but it clamps a scrollback
 /// offset to that length, so ask for everything and put the offset back.
-fn history_of(p: &mut vt100::Parser) -> usize {
+fn history_of<CB: vt100::Callbacks>(p: &mut vt100::Parser<CB>) -> usize {
     let now = p.screen().scrollback();
     p.screen_mut().set_scrollback(usize::MAX);
     let all = p.screen().scrollback();

@@ -126,16 +126,23 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
 pub fn words(shell: &str, names: &[&str]) -> Result<String, String> {
     let mut out = String::new();
     for name in names {
-        let dashed = name.starts_with('-') && !matches!(shell_kind(shell), Shell::Cmd);
-        let name = if dashed {
-            format!(".{}{name}", std::path::MAIN_SEPARATOR)
-        } else {
-            (*name).to_string()
-        };
-        out.push_str(&quote(shell, &name)?);
+        out.push_str(&word(shell, name)?);
         out.push(' ');
     }
     Ok(out)
+}
+
+/// One name as one word for `shell`: quoted, and a name starting with `-` given a
+/// `./` in front so the command takes it for a file, not an option (`rm -rf` from a
+/// file called `-rf`). The rule for every name xdevcmd types, here and in the user
+/// menu.
+pub fn word(shell: &str, name: &str) -> Result<String, String> {
+    let dashed = name.starts_with('-') && !matches!(shell_kind(shell), Shell::Cmd);
+    if dashed {
+        quote(shell, &format!(".{}{name}", std::path::MAIN_SEPARATOR))
+    } else {
+        quote(shell, name)
+    }
 }
 
 #[cfg(test)]

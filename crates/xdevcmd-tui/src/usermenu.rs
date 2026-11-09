@@ -17,7 +17,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::safety::quote;
+use crate::safety::word;
 
 pub struct Context {
     pub shell: String,
@@ -27,14 +27,19 @@ pub struct Context {
     pub other: Option<PathBuf>,
 }
 
-fn name(p: &Path) -> String {
-    p.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| p.display().to_string())
+/// A lossy name would be another file, or none: refused, as typing names refuses it.
+fn text(p: &Path) -> Result<String, String> {
+    p.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| "a name is not UTF-8 \u{2014} not typed".to_string())
+}
+
+fn name(p: &Path) -> Result<String, String> {
+    text(p.file_name().map(Path::new).unwrap_or(p))
 }
 
 pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
-    let q = |s: &str| quote(&cx.shell, s);
+    let q = |s: &str| word(&cx.shell, s);
     let mut out = String::new();
     let mut it = template.chars();
     while let Some(c) = it.next() {
@@ -54,11 +59,7 @@ pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
                 let Some(p) = &cx.current else {
                     return Err(format!("%{code} needs a file under the cursor"));
                 };
-                vec![if code == 'f' {
-                    name(p)
-                } else {
-                    p.display().to_string()
-                }]
+                vec![if code == 'f' { name(p)? } else { text(p)? }]
             }
             's' | 'S' => {
                 if cx.selection.is_empty() {
@@ -66,18 +67,12 @@ pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
                 }
                 cx.selection
                     .iter()
-                    .map(|p| {
-                        if code == 's' {
-                            name(p)
-                        } else {
-                            p.display().to_string()
-                        }
-                    })
-                    .collect()
+                    .map(|p| if code == 's' { name(p) } else { text(p) })
+                    .collect::<Result<_, _>>()?
             }
-            'd' => vec![cx.dir.display().to_string()],
+            'd' => vec![text(&cx.dir)?],
             'D' => match &cx.other {
-                Some(d) => vec![d.display().to_string()],
+                Some(d) => vec![text(d)?],
                 None => return Err("%D needs a second pane".into()),
             },
             other => {
@@ -103,6 +98,34 @@ mod tests {
             dir: PathBuf::from("/w"),
             selection: vec![PathBuf::from("/w/a b"), PathBuf::from("/w/c")],
             other: Some(PathBuf::from("/x")),
+        }
+    }
+
+    #[test]
+    fn a_name_like_an_option_is_a_file_and_a_lossy_name_is_refused() {
+        let mut c = cx("bash");
+        c.current = Some(PathBuf::from("/w/-rf"));
+        c.selection = vec![PathBuf::from("/w/-n"), PathBuf::from("/w/c")];
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(expand("rm %f", &c).unwrap(), format!("rm '.{sep}-rf'"));
+        assert_eq!(expand("ls %s", &c).unwrap(), format!("ls '.{sep}-n' 'c'"));
+        // As typed names do: the same rule, the same place.
+        assert_eq!(
+            expand("rm %f", &c).unwrap(),
+            format!(
+                "rm {}",
+                crate::safety::words("bash", &["-rf"]).unwrap().trim_end()
+            )
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let bad = std::ffi::OsStr::from_bytes(b"/w/caf\xe9");
+            c.current = Some(PathBuf::from(bad));
+            assert!(expand("cat %f", &c).unwrap_err().contains("not UTF-8"));
+            assert!(expand("cat %F", &c).unwrap_err().contains("not UTF-8"));
+            c.selection = vec![PathBuf::from(bad)];
+            assert!(expand("cat %s", &c).unwrap_err().contains("not UTF-8"));
         }
     }
 

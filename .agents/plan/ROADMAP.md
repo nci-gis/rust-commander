@@ -196,7 +196,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 25 | Safe operations (a setting, on): temp-then-rename for every copy, a journal, clean-up and resume at the next start; proper quit waits; a closed terminal cancels, cleans, saves | M | [014](cycles/Round_014.md) | done on `feat/image-preview` (local) |
 | 26 | Terminal copy mode: history in the viewer (Shift+F12), Save as… and Go to line in the viewer, `[terminal] scrollback`, the terminal tab's menu; keymap A (only the F12 family is xdevcmd's inside the shell) | M | [015](cycles/Round_015.md) | done on `feat/terminal-history` (local), at Review for the owner's hand tests |
 | 27 | Shell ↔ pane bridge: the shell's directory on every system, go there, type names into the command line, `[terminal] follow` | M | [016](cycles/Round_016.md) | review: done on `feat/shell-bridge`, at Review for the owner's hand tests (macOS, Windows, fish) |
-| 28 | Release prep for 0.3.0: package `xdevcmd`, crates publishable, Scoop and winget templates | S | [017](cycles/Round_017.md) | in progress on `feat/release-0.3.0`; publishing stays the owner's |
+| 28 | Release prep for 0.3.0: package `xdevcmd`, crates publishable, Scoop and winget templates | S | [017](cycles/Round_017.md) | review: done on `feat/release-0.3.0`, at Review for the owner's hand tests; publishing stays the owner's |
 | 29 | One directory history for panes and shells | M | — | v0.4 (owner, 2026-11-09) |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |

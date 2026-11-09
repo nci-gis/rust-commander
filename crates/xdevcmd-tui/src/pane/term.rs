@@ -460,43 +460,9 @@ impl TermPane {
     pub fn send_key(&self, k: KeyEvent) -> bool {
         // Typing while scrolled back would type into a screen you cannot see.
         self.scroll_by(-(self.scrolled() as isize));
-        let alt = k.modifiers.contains(KeyModifiers::ALT);
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-
-        let mut bytes: Vec<u8> = match k.code {
-            KeyCode::Char(c) if ctrl => {
-                let up = c.to_ascii_uppercase() as u8;
-                if up.is_ascii_uppercase() || matches!(up, b'[' | b']' | b'\\' | b'^' | b'_') {
-                    vec![up & 0x1f]
-                } else {
-                    let mut b = [0u8; 4];
-                    c.encode_utf8(&mut b).as_bytes().to_vec()
-                }
-            }
-            KeyCode::Char(c) => {
-                let mut b = [0u8; 4];
-                c.encode_utf8(&mut b).as_bytes().to_vec()
-            }
-            KeyCode::Enter => vec![b'\r'],
-            KeyCode::Backspace => vec![0x7f],
-            KeyCode::Tab => vec![b'\t'],
-            KeyCode::BackTab => b"\x1b[Z".to_vec(),
-            KeyCode::Esc => vec![0x1b],
-            KeyCode::Up => b"\x1b[A".to_vec(),
-            KeyCode::Down => b"\x1b[B".to_vec(),
-            KeyCode::Right => b"\x1b[C".to_vec(),
-            KeyCode::Left => b"\x1b[D".to_vec(),
-            KeyCode::Home => b"\x1b[H".to_vec(),
-            KeyCode::End => b"\x1b[F".to_vec(),
-            KeyCode::PageUp => b"\x1b[5~".to_vec(),
-            KeyCode::PageDown => b"\x1b[6~".to_vec(),
-            KeyCode::Delete => b"\x1b[3~".to_vec(),
-            KeyCode::Insert => b"\x1b[2~".to_vec(),
-            _ => return false,
+        let Some(bytes) = key_bytes(k) else {
+            return false;
         };
-        if alt {
-            bytes.insert(0, 0x1b);
-        }
         self.send(bytes);
         true
     }
@@ -669,9 +635,75 @@ fn history_of(p: &mut vt100::Parser) -> usize {
     all
 }
 
+/// The bytes a terminal sends for `k`, as the program in the panel expects them; `None`
+/// for a key with none. Ctrl+letter is its control byte (Ctrl+R is 0x12, readline's
+/// history search); Ctrl+Space and Ctrl+@ are NUL (emacs' mark, zsh's
+/// set-mark-command), which legacy terminals send and crossterm reports as Ctrl+Space;
+/// Alt puts ESC first.
+pub fn key_bytes(k: KeyEvent) -> Option<Vec<u8>> {
+    let alt = k.modifiers.contains(KeyModifiers::ALT);
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    let mut bytes: Vec<u8> = match k.code {
+        KeyCode::Char(' ' | '@') if ctrl => vec![0],
+        KeyCode::Char(c) if ctrl => {
+            let up = c.to_ascii_uppercase() as u8;
+            if up.is_ascii_uppercase() || matches!(up, b'[' | b']' | b'\\' | b'^' | b'_') {
+                vec![up & 0x1f]
+            } else {
+                let mut b = [0u8; 4];
+                c.encode_utf8(&mut b).as_bytes().to_vec()
+            }
+        }
+        KeyCode::Char(c) => {
+            let mut b = [0u8; 4];
+            c.encode_utf8(&mut b).as_bytes().to_vec()
+        }
+        KeyCode::Enter => vec![b'\r'],
+        KeyCode::Backspace => vec![0x7f],
+        KeyCode::Tab => vec![b'\t'],
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Esc => vec![0x1b],
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::Insert => b"\x1b[2~".to_vec(),
+        _ => return None,
+    };
+    if alt {
+        bytes.insert(0, 0x1b);
+    }
+    Some(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_reach_the_program_as_a_terminal_sends_them() {
+        let k = |code, m| key_bytes(KeyEvent::new(code, m));
+        let ctrl = KeyModifiers::CONTROL;
+        assert_eq!(k(KeyCode::Char('r'), ctrl), Some(vec![0x12]));
+        assert_eq!(k(KeyCode::Char('R'), ctrl), Some(vec![0x12]));
+        assert_eq!(k(KeyCode::Tab, KeyModifiers::NONE), Some(vec![0x09]));
+        assert_eq!(k(KeyCode::Char(' '), ctrl), Some(vec![0x00]));
+        assert_eq!(k(KeyCode::Char('@'), ctrl), Some(vec![0x00]));
+        assert_eq!(
+            k(KeyCode::Char('x'), KeyModifiers::ALT),
+            Some(b"\x1bx".to_vec())
+        );
+        assert_eq!(
+            k(KeyCode::Char(' '), KeyModifiers::NONE),
+            Some(b" ".to_vec())
+        );
+        assert_eq!(k(KeyCode::F(5), KeyModifiers::NONE), None);
+    }
 
     #[test]
     fn history_is_measured_without_moving_the_view() {

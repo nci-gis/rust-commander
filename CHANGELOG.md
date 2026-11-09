@@ -50,6 +50,8 @@ that heading and starts a new, empty one here. -->
   stuck after five seconds, instead of quitting under it.
 
 ### Fixed
+- **Ctrl+Space (and Ctrl+@) reached a program in the terminal panel as a space**, not
+  the NUL a terminal sends: emacs' and zsh's set-mark did nothing.
 - **A click on a directory in the title of a pane split off below (Alt+D) did nothing**:
   that title sits on the boundary between the panes, and the click started a drag of
   the boundary instead. The names now take the click; the rest of the row still drags.

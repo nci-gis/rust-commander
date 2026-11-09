@@ -1671,6 +1671,31 @@ fn the_terminal_answers_where_the_cursor_is() {
     xdevcmd.quit();
 }
 
+/// The shell's keys are the shell's: Ctrl+R (history search), Tab (completion) and
+/// Ctrl+Space (set mark) reach the program in the panel as a terminal sends them.
+#[test]
+fn ctrl_r_tab_and_ctrl_space_reach_the_program_in_the_panel() {
+    let s = Scratch::new("shell-keys");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(b"stty raw -echo; dd bs=1 count=3 2>/dev/null | od -An -c; stty sane\r");
+    std::thread::sleep(Duration::from_millis(300));
+    // Ctrl+R, Tab, Ctrl+Space, as a terminal sends them.
+    xdevcmd.send(b"\x12");
+    xdevcmd.send(b"\t");
+    xdevcmd.send(b"\x00");
+    xdevcmd.wait_for("022  \\t  \\0");
+    // Still in the panel: none of them was taken by xdevcmd.
+    assert!(
+        xdevcmd.screen().contains("F12 back to files"),
+        "{}",
+        xdevcmd.screen()
+    );
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
 /// Reported from Windows: closing the window instead of pressing q lost the session,
 /// since it was written only on quit and a closed window kills xdevcmd without asking.
 /// It is saved when it changes now, so a kill keeps what was open.

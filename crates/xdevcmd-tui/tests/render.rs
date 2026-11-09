@@ -1591,6 +1591,28 @@ fn the_context_menu_offers_rename() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+#[test]
+fn the_context_menu_types_into_the_shell() {
+    let (a, b) = files(&["alpha.txt"]);
+    let (x, y) = locate(&shot_keys("100x50", "", &a, &b), "alpha");
+    let s = shot_keys("100x50", &format!("rclick:{x}:{y}"), &a, &b);
+    let line = s
+        .lines()
+        .find(|l| l.contains("Type into the shell"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(line.contains("Alt+Enter"), "{line}");
+    let help = shot_keys("150x150", "F1", &a, &b);
+    let row = help
+        .lines()
+        .find(|l| l.contains("type_names"))
+        .unwrap_or_default();
+    assert!(
+        row.contains("Alt+Enter") && row.contains("Ctrl+Enter"),
+        "{row}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 // ── Alt+arrows ─────────────────────────────────────────────────────────────────────
 
 #[test]

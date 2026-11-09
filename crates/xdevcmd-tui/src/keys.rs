@@ -20,6 +20,7 @@ pub enum Action {
     TerminalHistory,
     CdTerminalHere,
     GoShellDir,
+    TypeNames,
     NewTerminal,
     NewTab,
     CloseTab,
@@ -446,6 +447,15 @@ pub const BINDINGS: &[Binding] = &[
         about: "Go to the shell's directory (the reverse of cd here)",
         // A pane key, like Alt+C: inside the shell Alt+G is the program's.
         keys: &["Alt+g"],
+    },
+    Binding {
+        action: Action::TypeNames,
+        name: "type_names",
+        group: "Terminal",
+        about: "Type the marked names into the shell's command line, without Enter",
+        // Midnight Commander's and Total Commander's keys. A legacy terminal sends
+        // Ctrl+Enter as Enter (the file opens); the files' right-click menu has it too.
+        keys: &["Alt+Enter", "Ctrl+Enter"],
     },
     Binding {
         action: Action::NewTerminal,
@@ -1263,6 +1273,7 @@ mod tests {
             Action::TerminalHistory,
             Action::CdTerminalHere,
             Action::GoShellDir,
+            Action::TypeNames,
             Action::SplitRight,
             Action::SplitDown,
             Action::ClosePane,

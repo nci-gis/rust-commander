@@ -1483,6 +1483,122 @@ fn alt_g_refuses_while_a_program_runs_and_when_the_directory_is_gone() {
     xdevcmd.quit();
 }
 
+const ALT_ENTER: &[u8] = b"\x1b\r";
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn alt_enter_types_the_marked_names_quoted_without_running_them() {
+    let s = Scratch::new("typenames");
+    s.file("left/a b", "x");
+    s.file("left/it's", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(F12);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(INSERT);
+    xdevcmd.send(INSERT);
+    xdevcmd.send(ALT_ENTER);
+    // The shell is in the names' directory: bare names, quoted, a space after, no Enter.
+    xdevcmd.wait_for("$ 'a b' 'it'\\''s' ");
+    std::thread::sleep(Duration::from_millis(300));
+    let screen = xdevcmd.screen();
+    let prompts = screen.lines().filter(|l| l.contains("$ ")).count();
+    assert_eq!(prompts, 1, "nothing ran:\n{screen}");
+    // The shell elsewhere: full paths.
+    xdevcmd.send(F12);
+    xdevcmd.send(b"\x15cd ..\r");
+    std::thread::sleep(Duration::from_millis(300));
+    xdevcmd.send(F12);
+    xdevcmd.send(b"\x1b[H"); // Home: the cursor on ..
+    xdevcmd.send(DOWN); // on "a b", with the marks still on both
+    xdevcmd.send(ALT_ENTER);
+    let full = format!("'{}' ", s.left().join("a b").display());
+    xdevcmd.wait_for(&full);
+    xdevcmd.send(F12);
+    xdevcmd.send(b"\x15");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn alt_enter_types_nothing_into_a_running_program() {
+    let s = Scratch::new("typenames-busy");
+    s.file("left/a b", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.send(b"cat > typed.txt\r");
+    xdevcmd.wait_for("\u{2302} 1 cat");
+    xdevcmd.send(F12);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(ALT_ENTER);
+    xdevcmd.wait_for("cat is running in this terminal");
+    xdevcmd.wait_for("Open a new shell in");
+    assert!(!xdevcmd.screen().contains("send to this shell"));
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("A program is running");
+    std::thread::sleep(Duration::from_millis(200));
+    let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
+    assert!(typed.is_empty(), "cat got {typed:?}");
+    // Open a new shell: the names are typed at its prompt, not into cat.
+    xdevcmd.send(ALT_ENTER);
+    xdevcmd.wait_for("[Enter] open a new shell");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("\u{2302} 2");
+    xdevcmd.wait_for("$ 'a b' ");
+    xdevcmd.wait_for("new shell: 'a b'");
+    let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
+    assert!(typed.is_empty(), "cat got {typed:?}");
+    xdevcmd.quit();
+}
+
+/// A "shell" that turns bracketed paste on, as bash, zsh and fish do at their prompt,
+/// then writes what it is sent to a file, byte for byte.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("typenames-paste");
+    s.file("left/a b", "x");
+    let out = s.0.join("got.bin");
+    let script = s.file(
+        "paste.sh",
+        &format!(
+            "#!/bin/sh\nprintf '\\033[?2004h'\nstty raw -echo\nhead -c 18 > '{}'\nsleep 30\n",
+            out.display()
+        ),
+    );
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cfg = s.file(
+        "config.toml",
+        &format!("[terminal]\nshell = \"{}\"\n", script.display()),
+    );
+    let cfg = cfg.to_str().unwrap().to_string();
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    xdevcmd.send(F12);
+    std::thread::sleep(Duration::from_millis(500));
+    xdevcmd.send(F12);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(ALT_ENTER);
+    let start = Instant::now();
+    loop {
+        let got = std::fs::read(&out).unwrap_or_default();
+        if got.len() >= 18 {
+            assert_eq!(got, b"\x1b[200~'a b' \x1b[201~".to_vec());
+            break;
+        }
+        assert!(start.elapsed() < PATIENCE, "got {got:?}");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    xdevcmd.quit();
+}
+
 #[test]
 fn f3_on_a_fifo_says_so_instead_of_freezing() {
     let s = Scratch::new("fifo");

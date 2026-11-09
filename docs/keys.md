@@ -128,4 +128,5 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Alt+t` | Show or hide the shell |
 | `Alt+c` | cd the shell to this pane's directory |
 | `Alt+g` | Go to the shell's directory (the reverse of cd here) |
+| `Alt+Enter` `Ctrl+Enter` | Type the marked names into the shell's command line, without Enter |
 | `Alt+n` | Open a new terminal tab |

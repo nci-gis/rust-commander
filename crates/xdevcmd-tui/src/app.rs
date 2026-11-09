@@ -1700,6 +1700,70 @@ impl App {
         });
     }
 
+    /// Alt+Enter / Ctrl+Enter: the marked names (else the cursor's) typed into the
+    /// shell's command line, each quoted for that shell, a space after the last, no
+    /// Enter: the user finishes the command. Bare names where the shell is in their
+    /// directory, full paths otherwise. Through [`App::send_to_shell`].
+    fn type_names(&mut self) {
+        let paths = self.selection();
+        if paths.is_empty() {
+            self.status = "nothing to type \u{2014} the cursor is on ..".into();
+            return;
+        }
+        let pane_dir = self.focused_cwd();
+        let Some(panel) = self.panel_ref() else {
+            let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
+            self.status = format!("no terminal yet \u{2014} {key}");
+            return;
+        };
+        let Some(target) = panel.focused_key() else {
+            return;
+        };
+        let shell = panel.shell_name();
+        // Read only when a key asks: on macOS this runs lsof.
+        let shell_dir = panel.shell_dir();
+        let build = |dir: Option<&Path>| -> Result<String, String> {
+            let bare = dir.is_some_and(|d| paths.iter().all(|p| p.parent() == Some(d)));
+            let mut names = Vec::with_capacity(paths.len());
+            for p in &paths {
+                let shown = if bare {
+                    p.file_name().map(Path::new).unwrap_or(p)
+                } else {
+                    p.as_path()
+                };
+                // A lossy name would be another file, or none.
+                names.push(
+                    shown
+                        .to_str()
+                        .ok_or_else(|| "a name is not UTF-8 \u{2014} not typed".to_string())?,
+                );
+            }
+            crate::safety::words(&shell, &names)
+        };
+        let typed = shell_dir
+            .as_deref()
+            .map(|d| xdevcmd_core::paths::canonical(d).unwrap_or_else(|_| d.to_path_buf()));
+        let (here, new_shell) = match (build(typed.as_deref()), build(Some(&pane_dir))) {
+            (Ok(h), Ok(n)) => (h, n),
+            (Err(why), _) | (_, Err(why)) => {
+                self.status = why;
+                return;
+            }
+        };
+        let what = match paths.len() {
+            1 => here.trim_end().to_string(),
+            n => format!("{n} names"),
+        };
+        self.send_to_shell(ShellSend {
+            target,
+            here,
+            new_shell: Some(new_shell),
+            dir: pane_dir,
+            paste: true,
+            what,
+        });
+    }
+
     /// Everything xdevcmd types into a shell comes through here (owner, 2026-11-09), and
     /// one table decides ([`crate::pane::term::decide`]): a shell surely at its prompt
     /// gets it at once (when `[terminal] send_when_idle`, the default); a program in
@@ -2266,6 +2330,7 @@ impl App {
                         | Action::ToggleTerminal
                         | Action::CdTerminalHere
                         | Action::GoShellDir
+                        | Action::TypeNames
                         | Action::NewTerminal
                         | Action::UserMenu
                 ) =>
@@ -2304,6 +2369,7 @@ impl App {
                     | Action::Pack
                     | Action::Unpack
                     | Action::FindFiles
+                    | Action::TypeNames
             )
         {
             let k = self.footer_key(Action::Copy).unwrap_or_default();
@@ -2424,6 +2490,7 @@ impl App {
             Action::ToggleTerminal => self.toggle_term(full),
             Action::CdTerminalHere => self.cd_terminal_here(),
             Action::GoShellDir => self.go_shell_dir(),
+            Action::TypeNames => self.type_names(),
             Action::SplitRight => self.split_focused(Axis::Cols),
             Action::SplitDown => self.split_focused(Axis::Rows),
             Action::ClosePane => self.close_focused(),
@@ -3154,6 +3221,12 @@ impl App {
             k(Action::CdTerminalHere),
             Action::CdTerminalHere,
             self.term_id.is_some(),
+        ));
+        items.push(Item::act(
+            "Type into the shell",
+            k(Action::TypeNames),
+            Action::TypeNames,
+            self.term_id.is_some() && has_sel,
         ));
         items.push(Item::act(
             "Refresh",

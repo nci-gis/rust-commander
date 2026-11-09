@@ -87,8 +87,21 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         return Err(why);
     }
     Ok(match shell_kind(shell) {
-        // PowerShell: single quotes are literal, and a quote inside is doubled.
-        Shell::Pwsh => format!("'{}'", text.replace('\'', "''")),
+        // PowerShell: single quotes are literal, and a quote inside is doubled. It also
+        // takes the typographic quotes ‘ ’ ‚ ‛ as single quotes, so a name like
+        // `it’s` would end the string early: each is doubled the same way.
+        Shell::Pwsh => {
+            let mut q = String::with_capacity(text.len() + 2);
+            q.push('\'');
+            for c in text.chars() {
+                if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+                    q.push(c);
+                }
+                q.push(c);
+            }
+            q.push('\'');
+            q
+        }
         // cmd.exe has no quoting that stops %VAR% expansion, and a path cannot hold ".
         Shell::Cmd => {
             if let Some(c) = text.chars().find(|c| matches!(c, '%' | '"' | '!' | '^')) {
@@ -103,6 +116,26 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         // POSIX shells and anything unknown: close the quote, escape one, reopen.
         Shell::Posix => format!("'{}'", text.replace('\'', r"'\''")),
     })
+}
+
+/// File names as words for `shell`'s command line: each quoted, joined by spaces,
+/// with a space after the last so the next word can be typed straight on, and no
+/// Enter. One that cannot be typed refuses the whole list: a list with a name missing
+/// would be a different command. A name starting with `-` gets `./` in front, so
+/// `rm ` followed by a file called `-rf` is not an option.
+pub fn words(shell: &str, names: &[&str]) -> Result<String, String> {
+    let mut out = String::new();
+    for name in names {
+        let dashed = name.starts_with('-') && !matches!(shell_kind(shell), Shell::Cmd);
+        let name = if dashed {
+            format!(".{}{name}", std::path::MAIN_SEPARATOR)
+        } else {
+            (*name).to_string()
+        };
+        out.push_str(&quote(shell, &name)?);
+        out.push(' ');
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -140,6 +173,55 @@ mod tests {
         assert!(cd_command("cmd.exe", r"C:\a%PATH%b")
             .unwrap_err()
             .contains("'%'"));
+    }
+
+    #[test]
+    fn names_are_words_for_each_shell() {
+        let names = ["a b", "it's", "$HOME", "bang!", "50%"];
+        assert_eq!(
+            words("bash", &names).unwrap(),
+            "'a b' 'it'\\''s' '$HOME' 'bang!' '50%' "
+        );
+        assert_eq!(
+            words("/usr/bin/fish", &names).unwrap(),
+            "'a b' 'it\\'s' '$HOME' 'bang!' '50%' "
+        );
+        assert_eq!(
+            words("pwsh", &names).unwrap(),
+            "'a b' 'it''s' '$HOME' 'bang!' '50%' "
+        );
+        // cmd.exe cannot be given % or ! safely: the whole list is refused.
+        assert!(words("cmd.exe", &names).is_err());
+        assert_eq!(
+            words("cmd.exe", &["a b", "it's", "$HOME"]).unwrap(),
+            "\"a b\" \"it's\" \"$HOME\" "
+        );
+        // One control character refuses every name, in every shell.
+        for sh in ["bash", "fish", "pwsh", "cmd.exe"] {
+            assert!(words(sh, &["fine", "bad\u{15}x"]).is_err(), "{sh}");
+        }
+        assert_eq!(words("bash", &[]).unwrap(), "");
+    }
+
+    #[test]
+    fn a_name_that_looks_like_an_option_is_not_one() {
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(words("bash", &["-rf"]).unwrap(), format!("'.{sep}-rf' "));
+        assert_eq!(words("cmd", &["-rf"]).unwrap(), "\"-rf\" ");
+    }
+
+    #[test]
+    fn powershell_doubles_its_typographic_quotes_too() {
+        assert_eq!(
+            quote("pwsh", "it\u{2019}s").unwrap(),
+            "'it\u{2019}\u{2019}s'"
+        );
+        assert_eq!(
+            quote("powershell.exe", "\u{2018}a\u{201a}b\u{201b}").unwrap(),
+            "'\u{2018}\u{2018}a\u{201a}\u{201a}b\u{201b}\u{201b}'"
+        );
+        // Other shells leave them alone: they are ordinary characters there.
+        assert_eq!(quote("bash", "it\u{2019}s").unwrap(), "'it\u{2019}s'");
     }
 
     #[test]

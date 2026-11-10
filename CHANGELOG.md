@@ -130,6 +130,8 @@ that heading and starts a new, empty one here. -->
   root for a run that may go there.
 
 ### Fixed
+- **Settings → Save said where it saved in Windows' internal form**, `\\?\C:\…`, and F1's
+  Settings page showed the config file the same way. Both show `C:\…` now.
 - **Inside GNU screen, xdevcmd's start-up question about pictures became screen's status
   line.** It is no longer asked inside screen (as inside tmux), also under `sudo`, where
   `TMUX` and `STY` are dropped but `TERM` says it. A reply arriving after the start-up

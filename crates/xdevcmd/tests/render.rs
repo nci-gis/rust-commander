@@ -2678,6 +2678,8 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
         &b,
     );
     assert!(s.contains("settings saved"), "{s}");
+    // Windows: the path as people write it, not the verbatim form canonicalize gives.
+    assert!(!s.contains(r"\\?\"), "{s}");
     let after = fs::read_to_string(&cfg).unwrap();
     assert!(
         after.starts_with("# mine\n[general]\nmenu_bar = true   # keep this comment\n"),

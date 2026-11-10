@@ -6847,8 +6847,10 @@ impl App {
             return;
         };
         // A config.toml that is a link (dotfiles managed with stow, chezmoi) is
-        // written where it points, so the link stays a link.
-        let path = std::fs::canonicalize(&path)
+        // written where it points, so the link stays a link. Through `paths::canonical`:
+        // std's gives Windows' verbatim form (`\\?\C:\…`), which then showed in the
+        // status line and in F1's Settings page.
+        let path = xdevcmd_core::paths::canonical(&path)
             .or_else(|_| {
                 // A link whose target does not exist yet (stow before the first save):
                 // write the target, so the link stays.

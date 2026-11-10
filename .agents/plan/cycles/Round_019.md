@@ -1,6 +1,6 @@
 # Round 019: Foundation for v0.4 — split app.rs, Windows end to end, housekeeping
 
-**Status**: Planning (kickoff written; waiting for the owner's go)
+**Status**: Review
 **Part of**: v0.4.0, entry A of `.agents/memory/2026-11-10-v0.4.0-plan.md`
 **Date started**: 2026-11-10
 **Date completed**: YYYY-MM-DD
@@ -144,12 +144,61 @@ Risks:
 
 ## Do
 
-(Not started.)
+The owner: "Go with defaults" — the split as tabled, a separate `windows_e2e.rs`,
+binstall yes, no canon edits, no CI until the pull request into `dev`.
+
+- **Step 1, the split.** 15 move commits, `8da7be5` (draw) … `752bc8d` (panes), then
+  `74c0c60`, which drops the twelve `// ── … ──` section headers left with nothing under
+  them (comments only).
+  - Done by script (scratch only, not in the repository):
+    - a parser for `impl App`'s methods (each method with its docs and attributes, up to
+      its closing `    }`);
+    - a mover that moves the named methods in their order and turns `fn` into
+      `pub(super) fn`;
+    - a checker. With whitespace and rustfmt's added trailing commas ignored, each new
+      file's methods are exactly HEAD's text, and `app.rs` is HEAD's file minus them.
+  - Every commit passed fmt, the checker, clippy for Linux, windows-gnu and darwin, and
+    the whole suite (616 tests).
+  - Deviations:
+    - `session` and `ops` clashed with `use crate::session::{self, …}` and
+      `use xdevcmd_core::ops::{self, …}`, so the files are `persist.rs` and `file_ops.rs`.
+    - `Graphic`, `PicKey`, `Prepared` and `prepare` stay in `app.rs`. They are types that
+      `App`'s fields hold, so moving them means changing visibility; methods only.
+    - The first checker compared lines and refused a signature that rustfmt rewrapped
+      after `pub(super)` (`show_sync_plan`). The second compares text without whitespace,
+      which is stricter about order and still blind to formatting.
+  - Result:
+    - `app.rs` is 1,130 lines (from 7,739); the rest is in 15 files of 165 to 880 lines.
+    - 170 `impl App` methods before and after.
+    - `new` and `boot` stay in `app.rs`.
+- **Step 2.** `tests/winpty/mod.rs` is the ConPTY harness lifted from `windows_panel.rs`,
+  plus a vt100 screen.
+  - `windows_e2e.rs` checks: panes drawn, a file listed after Ctrl+R; F12 opens cmd in the
+    pane's directory; `echo e2e-%OS:~0,0%done` shows `e2e-done`; F12, then F10 exits 0.
+  - Compile-checked by clippy for windows-gnu (`e11467b`). Not run here.
+- **Step 3.** `[package.metadata.binstall]` with a Windows zip override (`2e9f37e`).
+  - `tests/packaging.rs` fills the templates in for the six release targets and compares
+    the result with `release.yml`'s archive names. Breaking the Windows `pkg-fmt` failed
+    it.
+  - README: `cargo binstall xdevcmd` (from 0.4.0). CHANGELOG: one line.
+- **Step 4** is not done: the canon edits wait for the owner.
 
 ## Check
 
-- [ ] Each move commit: build, three clippy targets, full suite green; `--color-moved`
-  shows a pure move
-- [ ] `app.rs` is about 1,100 lines; no `impl App` method lost (170 before, 170 after)
-- [ ] `windows_e2e.rs` compiles for windows-gnu; the owner runs it on Windows
-- [ ] binstall dry run by the owner
+- [x] Each move commit: build, three clippy targets and the full suite green. A pure move
+  is shown by the text checker, which is stricter than `--color-moved`.
+- [x] `app.rs` is 1,130 lines; 170 `impl App` methods before and after
+- [x] `windows_e2e.rs` and `windows_panel.rs` (now on the shared harness) compile for
+  windows-gnu
+- [ ] The owner runs on Windows: `cargo test -p xdevcmd --test windows_e2e --test windows_panel`
+- [ ] binstall dry run by the owner, once 0.4.0 is on crates.io (the metadata ships with
+  the crate)
+- [x] fmt, clippy for three targets, 617 tests, `cargo deny`, `cargo package` (63 files in
+  xdevcmd)
+
+Not verified here: any Windows test run (no CI, by the owner's choice), and binstall
+against a real release.
+
+Left for later rounds, as B–E touch the code (tidying, which this round did not do):
+- `input.rs` (880 lines) and `shell.rs` (851) are the largest files;
+- `perform` and `perform_cmd` are two big dispatch functions in `input.rs`.

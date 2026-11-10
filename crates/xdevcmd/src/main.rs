@@ -39,6 +39,8 @@ mod watch;
 
 /// Set in the terminal panel's shells to the pid of the xdevcmd they belong to.
 pub(crate) const PANEL_VAR: &str = "XDEVCMD_PANEL";
+/// Set beside it (Unix): the name of that shell's terminal, `/dev/pts/N`.
+pub(crate) const PANEL_TTY_VAR: &str = "XDEVCMD_PANEL_TTY";
 
 use std::io::stdout;
 use std::path::PathBuf;
@@ -372,12 +374,19 @@ fn main() -> Result<()> {
         return screenshot(app, w, h, &cli.keys);
     }
 
-    if let Some(pid) = inside_own_panel() {
-        eprintln!(
-            "xdevcmd is already running (process {pid}) and this is its terminal panel: \
-             F12 goes back to it."
-        );
-        std::process::exit(1);
+    match own_panel_here() {
+        Nested::Refuse(pid) => {
+            eprintln!(
+                "xdevcmd is already running (process {pid}) and this is its terminal panel: \
+                 F12 goes back to it."
+            );
+            std::process::exit(1);
+        }
+        Nested::Note(pid) => app.say(format!(
+            "started from the terminal panel of xdevcmd {pid}: if this is that panel, \
+             F12 there goes back to it"
+        )),
+        Nested::No => {}
     }
 
     // init() for what it sets up (raw mode, the alternate screen, a panic hook that
@@ -492,20 +501,74 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     Ok(())
 }
 
-/// The xdevcmd whose terminal panel this is, if it still runs. A shell that outlived
-/// it (a tmux session started in the panel, attached again later) does not count. Where
-/// the system cannot be asked, the variable is taken at its word.
-fn inside_own_panel() -> Option<u32> {
-    let pid: u32 = std::env::var(PANEL_VAR).ok()?.trim().parse().ok()?;
-    if pid == std::process::id() {
-        return None;
-    }
+/// Whether xdevcmd is starting inside its own terminal panel.
+#[derive(Debug, PartialEq, Eq)]
+enum Nested {
+    No,
+    /// This is that panel's terminal: it would run inside itself.
+    Refuse(u32),
+    /// Started from a panel, but which terminal this is cannot be told (Windows): start,
+    /// and say so.
+    Note(u32),
+}
+
+/// [`own_panel`] with what this process has: its variables, its terminal's name and,
+/// on Unix, whether the panel's xdevcmd still runs.
+fn own_panel_here() -> Nested {
+    let var = |k| std::env::var(k).ok();
     #[cfg(unix)]
-    {
-        let p = rustix::process::Pid::from_raw(i32::try_from(pid).ok()?)?;
-        rustix::process::test_kill_process(p).ok()?;
+    let (mine, alive) = (
+        rustix::termios::ttyname(std::io::stdin(), Vec::new())
+            .ok()
+            .map(|c| c.to_string_lossy().into_owned()),
+        |pid: u32| {
+            let p = i32::try_from(pid)
+                .ok()
+                .and_then(rustix::process::Pid::from_raw);
+            Some(p.is_some_and(|p| rustix::process::test_kill_process(p).is_ok()))
+        },
+    );
+    #[cfg(not(unix))]
+    let (mine, alive): (Option<String>, _) = (None, |_: u32| None);
+    own_panel(
+        var(PANEL_VAR).as_deref(),
+        var(PANEL_TTY_VAR).as_deref(),
+        mine.as_deref(),
+        std::process::id(),
+        alive,
+    )
+}
+
+/// The decision. `pid` and `tty` are the panel's variables; `mine` the name of the
+/// terminal this process starts in; `alive` whether a process runs (`None`: the system
+/// cannot be asked).
+///
+/// Every program started from the panel's shell inherits the variables, a new window
+/// (`code .`, `kitty &`, `wt`) and a tmux started there included; only the same terminal
+/// is the panel. Unix compares the names; a panel's xdevcmd that has ended, or a value
+/// that is not a pid, does not count. Without names (Windows, or a shell from a build
+/// that did not set the tty) a live pid is all there is: Unix refuses as before, Windows,
+/// which cannot ask, starts and says so.
+fn own_panel(
+    pid: Option<&str>,
+    tty: Option<&str>,
+    mine: Option<&str>,
+    me: u32,
+    alive: impl Fn(u32) -> Option<bool>,
+) -> Nested {
+    let Some(pid) = pid.and_then(|p| p.trim().parse::<u32>().ok()) else {
+        return Nested::No;
+    };
+    if pid == me {
+        return Nested::No;
     }
-    Some(pid)
+    match (alive(pid), tty.filter(|t| !t.is_empty()), mine) {
+        (Some(false), _, _) => Nested::No,
+        (_, Some(t), Some(m)) if t == m => Nested::Refuse(pid),
+        (_, Some(_), _) => Nested::No,
+        (Some(true), None, _) => Nested::Refuse(pid),
+        (None, None, _) => Nested::Note(pid),
+    }
 }
 
 /// Write to stdout. A reader that stops early (`xdevcmd --screenshot | head`) ends xdevcmd
@@ -692,4 +755,67 @@ fn show_keys(keymap: &keys::Keymap, depth: xdevcmd_core::color::Depth) -> Result
 fn fail(msg: &str) -> ! {
     eprintln!("xdevcmd: {msg}");
     std::process::exit(2);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PTS: &str = "/dev/pts/7";
+
+    #[test]
+    fn only_the_panels_own_terminal_is_refused() {
+        let live = |_| Some(true);
+        assert_eq!(
+            own_panel(Some("41"), Some(PTS), Some(PTS), 99, live),
+            Nested::Refuse(41)
+        );
+        // A new window started from the panel's shell (`code .`, `kitty &`), or a tmux
+        // started there: another terminal.
+        assert_eq!(
+            own_panel(Some("41"), Some(PTS), Some("/dev/pts/9"), 99, live),
+            Nested::No
+        );
+        assert_eq!(own_panel(Some("41"), Some(PTS), None, 99, live), Nested::No);
+    }
+
+    #[test]
+    fn a_gone_panel_a_garbage_value_or_this_process_is_not_refused() {
+        let dead = |_| Some(false);
+        assert_eq!(
+            own_panel(Some("41"), Some(PTS), Some(PTS), 99, dead),
+            Nested::No
+        );
+        assert_eq!(own_panel(Some("41"), None, None, 99, dead), Nested::No);
+        let live = |_| Some(true);
+        for junk in ["", "x", "-1", "4294967296", "41; rm -rf ~"] {
+            assert_eq!(
+                own_panel(Some(junk), Some(PTS), Some(PTS), 99, live),
+                Nested::No
+            );
+        }
+        assert_eq!(own_panel(None, Some(PTS), Some(PTS), 99, live), Nested::No);
+        assert_eq!(
+            own_panel(Some("99"), Some(PTS), Some(PTS), 99, live),
+            Nested::No
+        );
+    }
+
+    #[test]
+    fn without_terminal_names_unix_refuses_and_windows_says_so() {
+        // A shell from a build that set only the pid: as before.
+        assert_eq!(
+            own_panel(Some("41"), None, Some(PTS), 99, |_| Some(true)),
+            Nested::Refuse(41)
+        );
+        assert_eq!(
+            own_panel(Some("41"), Some(""), Some(PTS), 99, |_| Some(true)),
+            Nested::Refuse(41)
+        );
+        // Windows: no names, no asking.
+        assert_eq!(
+            own_panel(Some("41"), None, None, 99, |_| None),
+            Nested::Note(41)
+        );
+    }
 }

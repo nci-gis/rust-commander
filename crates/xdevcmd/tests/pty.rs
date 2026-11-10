@@ -1383,6 +1383,26 @@ fn xdevcmd_will_not_start_inside_its_own_terminal_panel() {
     xdevcmd.quit();
 }
 
+/// A new window started from the panel's shell (`code .`, `kitty &`) inherits its
+/// variables while the panel's xdevcmd still runs; it is another terminal, and xdevcmd
+/// starts there.
+#[test]
+fn xdevcmd_starts_in_another_terminal_started_from_its_panel() {
+    let s = Scratch::new("nested-other");
+    let live = std::process::id().to_string();
+    let xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[
+            ("XDEVCMD_PANEL", live.as_str()),
+            ("XDEVCMD_PANEL_TTY", "/dev/pts/no-such-terminal"),
+        ],
+    );
+    xdevcmd.wait_for("Name");
+    xdevcmd.quit();
+}
+
 // ── rename ─────────────────────────────────────────────────────────────────────────
 
 #[test]

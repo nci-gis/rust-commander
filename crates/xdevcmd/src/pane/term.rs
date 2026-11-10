@@ -430,7 +430,13 @@ impl TermPane {
         // else and draw garbage into the pane.
         cmd.env("TERM", "xterm-256color");
         // Who this shell belongs to: xdevcmd started in it would run inside itself.
+        // Every program started from the shell inherits these, a new window too
+        // (`code .`, `kitty &`), so the terminal's own name says which one is this.
         cmd.env(crate::PANEL_VAR, std::process::id().to_string());
+        #[cfg(unix)]
+        if let Some(tty) = pair.master.tty_name() {
+            cmd.env(crate::PANEL_TTY_VAR, tty);
+        }
 
         let slave = pair.slave;
         let master = pair.master;

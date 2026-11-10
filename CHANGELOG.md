@@ -104,7 +104,10 @@ that heading and starts a new, empty one here. -->
   first (Alt+X Alt+S splits the shell); anything else after Alt+X goes to the program.
   F1…F11 now reach the program too (mc, htop); before, no F-key did.
 - **xdevcmd will not start inside its own terminal panel**: it says it is already
-  running and that F12 goes back to it.
+  running and that F12 goes back to it. Only that terminal counts: a new window started
+  from the panel (`code .`, `kitty &`) starts xdevcmd as usual. On Windows, where the
+  terminal cannot be told apart, xdevcmd starts and says on its status line that it was
+  started from a panel.
 - **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and
   clean up, and the session is saved. Before, xdevcmd was killed on the spot.
 - **F10 with jobs running waits until they have cleaned up**, and asks again if one is

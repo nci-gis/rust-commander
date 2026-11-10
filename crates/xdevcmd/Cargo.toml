@@ -60,8 +60,10 @@ icy_sixel = "0.7"
 # Asking the terminal what it can draw (graphics.rs): a poll with a timeout on stdin,
 # which crossterm has not started reading yet. Already in the tree through crossterm.
 [target.'cfg(unix)'.dependencies]
-# Also: whether the terminal is hung up (app.rs, `tty_gone`), by `tcgetattr`.
-rustix = { version = "1", features = ["event", "process", "stdio", "termios"] }
+# Also: whether the terminal is hung up (app.rs, `tty_gone`), by `tcgetattr`; and the
+# name of the terminal xdevcmd starts in (`ttyname`, which needs "fs"), to tell its own
+# terminal panel from another window started from it (main.rs, `own_panel`).
+rustix = { version = "1", features = ["event", "process", "stdio", "termios", "fs"] }
 # SIGHUP and SIGTERM (the terminal closed, SSH lost): stop jobs, clean up, save the
 # session before going. Already in the tree through crossterm.
 signal-hook = "0.3"

@@ -2114,6 +2114,11 @@ impl App {
         self.on_mouse(m);
     }
 
+    /// A line for the status bar at start-up, in place of where xdevcmd is running.
+    pub fn say(&mut self, text: String) {
+        self.status = text;
+    }
+
     /// Pictures may be drawn by the terminal itself: worth asking it, at start-up, what
     /// it draws and how big its cells are (also when a protocol is chosen by hand, for
     /// the cell size).

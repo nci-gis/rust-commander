@@ -114,6 +114,11 @@ fn try_lock(file: &File) -> Lock {
 fn open_held(path: &Path) -> std::io::Result<File> {
     let mut o = OpenOptions::new();
     o.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
@@ -181,6 +186,13 @@ impl Journal {
     ) -> std::io::Result<Self> {
         static N: AtomicU64 = AtomicU64::new(0);
         fs::create_dir_all(dir)?;
+        // A journal names the user's files by their full paths: the user's to read only,
+        // also when an older xdevcmd made the directory open to others.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+        }
         let n = N.fetch_add(1, Ordering::Relaxed);
         let name = format!("{}-{n}.journal", run_tag());
         // Made under a hidden name and locked before it takes its real one, so no start
@@ -618,6 +630,22 @@ mod tests {
 
     /// A run tag no live process has: the largest pid a 32-bit pid_t allows.
     const DEAD: &str = "2147483646x1";
+
+    /// Journals hold full paths: the user's alone, file and directory, even where the
+    /// directory was left open by an older run.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_and_its_directory_are_the_users_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dir("private");
+        fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+        let j = Journal::begin_in(&d, "copy", &[d.join("a")], Some(&d), false).unwrap();
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&j.path), 0o600, "the journal");
+        assert_eq!(mode(&d), 0o700, "its directory");
+        drop(j);
+        let _ = fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn a_journal_held_by_a_running_job_is_left_alone_whatever_pid_it_names() {

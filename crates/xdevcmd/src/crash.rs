@@ -110,16 +110,43 @@ fn chrono_free_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// The log is the user's alone (`0600` on Unix): a panic's message and backtrace name
+/// files and the home directory. The home directory is written `~`, so a log attached to
+/// a report does not carry the user's name in every path.
 fn write_in(dir: &Path, text: &str) -> Option<PathBuf> {
+    use std::io::Write as _;
     std::fs::create_dir_all(dir).ok()?;
     let path = dir.join(format!(
         "crash-{}-{}.log",
         chrono_free_now(),
         std::process::id()
     ));
-    std::fs::write(&path, text).ok()?;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    let text = home_as_tilde(text, home().as_deref());
+    o.open(&path).ok()?.write_all(text.as_bytes()).ok()?;
     prune(dir);
     Some(path)
+}
+
+/// The user's home directory, as the system names it.
+fn home() -> Option<String> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var(var).ok()
+}
+
+/// `text` with every mention of `home` written `~`. A home of `/` or shorter says
+/// nothing and is left alone (it would turn every path into `~`).
+fn home_as_tilde(text: &str, home: Option<&str>) -> String {
+    match home.map(|h| h.trim_end_matches(['/', '\\'])) {
+        Some(h) if h.len() > 1 => text.replace(h, "~"),
+        _ => text.to_string(),
+    }
 }
 
 /// Keep only the newest [`KEEP`] crash logs.
@@ -195,6 +222,35 @@ mod tests {
         let left = std::fs::read_dir(&d).unwrap().count();
         assert_eq!(left, KEEP, "only the newest {KEEP}");
         assert!(p.exists(), "the new one is among them");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "the user's alone");
+        }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_home_directory_is_written_as_a_tilde() {
+        let text = "panicked at /home/ann/.cargo/registry/src/x.rs:1\n  in /home/ann/work\n";
+        assert_eq!(
+            home_as_tilde(text, Some("/home/ann")),
+            "panicked at ~/.cargo/registry/src/x.rs:1\n  in ~/work\n"
+        );
+        assert_eq!(
+            home_as_tilde(text, Some("/home/ann/")),
+            home_as_tilde(text, Some("/home/ann"))
+        );
+        assert_eq!(
+            home_as_tilde("/x", Some("/")),
+            "/x",
+            "a home of / says nothing"
+        );
+        assert_eq!(home_as_tilde("/x", None), "/x");
+        assert_eq!(
+            home_as_tilde(r"C:\Users\ann\src\x.rs", Some(r"C:\Users\ann")),
+            r"~\src\x.rs"
+        );
     }
 }

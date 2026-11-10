@@ -117,6 +117,9 @@ that heading and starts a new, empty one here. -->
   banner over `ssh`, stopped xdevcmd for minutes. vt100 is now 0.18, where it takes
   microseconds; the panel is drawn by xdevcmd's own code, and `tui-term` is no longer a
   dependency.
+- **Crash logs and the safe-operations journal were readable by other users** on a shared
+  machine; both name files by their full paths. They are now the user's alone (`0600`,
+  and the journal's directory `0700`), and a crash log writes the home directory as `~`.
 
 ### Fixed
 - **The user menu's `%f`/`%s` could pass a file named like an option** (`-rf`) to the

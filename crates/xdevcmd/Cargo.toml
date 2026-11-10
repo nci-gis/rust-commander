@@ -32,7 +32,7 @@ path = "src/main.rs"
 [dependencies]
 # The exact version: the engine has no stable API of its own, and the two are released
 # together (cargo-release rewrites this pin; see release.toml).
-xdevcmd-core = { path = "../xdevcmd-core", version = "=0.2.1" }
+xdevcmd-core = { path = "../xdevcmd-core", version = "=0.3.0" }
 anyhow = "1"
 # How many cells a character takes, for clicks on the title's path. Already in the
 # tree through ratatui.

@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.3.0] - 2026-11-10
+
 ### Added
 - **Between the panes and the shell** (docs/shell.md). In the file panes: **Alt+G** takes
   the pane to the shell's directory (the reverse of Alt+C); **Alt+Enter** or

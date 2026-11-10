@@ -2515,7 +2515,7 @@ dependencies = [
 
 [[package]]
 name = "xdevcmd"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "icy_sixel",
@@ -2536,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "xdevcmd-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "flate2",

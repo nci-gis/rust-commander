@@ -6,7 +6,7 @@ resolver = "2"
 # compile time, and scripts/sync-about.sh copies them to the GitHub repository's About
 # box, so a change here is a change everywhere.
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 description = "xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell."
 authors = ["XDevTeam"]
 license = "MIT"

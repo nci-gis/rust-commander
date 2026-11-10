@@ -82,6 +82,8 @@ that heading and starts a new, empty one here. -->
 - **The wheel reaches full-screen programs in the terminal panel**: to a program that
   asked for the mouse (Claude Code, vim, htop) as the mouse; as arrow keys to one that
   did not (less, man). In a plain shell it still scrolls the history.
+- **Four more example themes**: Dracula, Night Owl, Tokyo Night and Catppuccin Mocha, in
+  `themes/` beside Nord, Gruvbox dark and Solarized light.
 
 ### Changed
 - **The name, spelled out: xDev Commander.** The one-line description is now "xDev

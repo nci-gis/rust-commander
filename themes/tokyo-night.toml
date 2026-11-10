@@ -1,0 +1,21 @@
+# Tokyo Night (https://github.com/enkia/tokyo-night-vscode-theme, MIT) for xdevcmd: an example theme file.
+# Copy it into themes/ beside your config.toml, or keep it in themes/ beside the
+# xdevcmd binary, then pick "tokyo-night" in View > Theme... or with
+# [theme] name = "tokyo-night". Start your own with: xdevcmd --print-theme dark
+base = "dark"
+background = "#16161e"
+panel = "#1a1b26"
+bar = "#1f2335"
+border = "#3b4261"
+border_active = "#7aa2f7"
+accent = "#7aa2f7"
+text = "#c0caf5"
+text_dim = "#565f89"
+directory = "#7dcfff"
+executable = "#9ece6a"
+symlink = "#bb9af7"
+archive = "#ff9e64"
+error = "#f7768e"
+marked = "#e0af68"
+cursor = "#292e42"
+cursor_active = "#33467c"

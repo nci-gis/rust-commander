@@ -1,0 +1,21 @@
+# Catppuccin Mocha (https://catppuccin.com, MIT) for xdevcmd: an example theme file.
+# Copy it into themes/ beside your config.toml, or keep it in themes/ beside the
+# xdevcmd binary, then pick "catppuccin-mocha" in View > Theme... or with
+# [theme] name = "catppuccin-mocha". Start your own with: xdevcmd --print-theme dark
+base = "dark"
+background = "#11111b"
+panel = "#1e1e2e"
+bar = "#181825"
+border = "#45475a"
+border_active = "#cba6f7"
+accent = "#cba6f7"
+text = "#cdd6f4"
+text_dim = "#7f849c"
+directory = "#89b4fa"
+executable = "#a6e3a1"
+symlink = "#f5c2e7"
+archive = "#fab387"
+error = "#f38ba8"
+marked = "#f9e2af"
+cursor = "#313244"
+cursor_active = "#45475a"

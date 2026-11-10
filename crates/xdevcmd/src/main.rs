@@ -384,9 +384,9 @@ fn main() -> Result<()> {
     // undoes them); then our own Terminal, whose backend stays quiet when idle.
     drop(ratatui::init());
     // What the terminal can draw, asked before anything reads its replies; over SSH the
-    // environment rarely says. Not inside tmux, which answers for itself.
+    // environment rarely says. Not inside tmux or screen (`graphics::multiplexer`).
     #[cfg(unix)]
-    if std::env::var_os("TMUX").is_none() && app.settings_images_probe() {
+    if !graphics::multiplexer(|k| std::env::var(k).ok()) && app.settings_images_probe() {
         // Ends as soon as the device attributes come, which every terminal answers;
         // long enough that a slow SSH link's replies are not left for crossterm to read
         // as keys.

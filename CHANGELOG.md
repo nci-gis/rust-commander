@@ -126,6 +126,10 @@ that heading and starts a new, empty one here. -->
   root for a run that may go there.
 
 ### Fixed
+- **Inside GNU screen, xdevcmd's start-up question about pictures became screen's status
+  line.** It is no longer asked inside screen (as inside tmux), also under `sudo`, where
+  `TMUX` and `STY` are dropped but `TERM` says it. A reply arriving after the start-up
+  wait is now read and kept, instead of reaching the shell as typed keys.
 - **The user menu's `%f`/`%s` could pass a file named like an option** (`-rf`) to the
   command as an option. Such a name now gets `./` in front, as typed names do, and a
   name that is not UTF-8 stops the command instead of being typed changed.

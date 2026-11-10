@@ -136,6 +136,9 @@ impl Session {
         cmd.env_remove("SSH_TTY");
         // Run from xdevcmd's own terminal panel, the suite would be refused.
         cmd.env_remove("XDEVCMD_PANEL");
+        // Run inside tmux or screen, xdevcmd would ask the terminal nothing at start-up.
+        cmd.env_remove("TMUX");
+        cmd.env_remove("STY");
         cmd.env("DISPLAY", ":0");
         match editor {
             Some(e) => cmd.env("EDITOR", e),
@@ -664,6 +667,37 @@ fn a_terminal_that_answers_sixel_gets_sixel_with_nothing_in_the_environment() {
     x.send(b"\x1bq");
     wait_bytes(&x, "\x1bP9;1;0q", 1);
     x.quit();
+}
+
+/// GNU screen takes the Kitty query (an APC) for its status line, and passes no picture
+/// on: inside it, as inside tmux, xdevcmd asks the terminal nothing.
+#[test]
+fn nothing_is_asked_at_start_inside_screen_or_tmux() {
+    for env in [
+        [("STY", "4242.pts-0.box"), ("TERM", "xterm-256color")],
+        [
+            ("TMUX", "/tmp/tmux-1/default,1,0"),
+            ("TERM", "xterm-256color"),
+        ],
+        [("STY", ""), ("TERM", "screen.xterm-256color")],
+    ] {
+        let s = Scratch::new("probe-mux");
+        let x = Session::start_answering(
+            &s,
+            None,
+            &[s.left(), s.right()],
+            &env,
+            Some(b"\x1b[6;20;10t\x1b[?61;4;6;22c"),
+        );
+        x.wait_for("Name");
+        let raw = String::from_utf8_lossy(&x.raw.lock().unwrap()).into_owned();
+        assert!(!raw.contains("\x1b_G"), "{env:?}: the Kitty query was sent");
+        assert!(
+            !raw.contains("\x1b[c"),
+            "{env:?}: the attributes were asked"
+        );
+        x.quit();
+    }
 }
 
 #[test]

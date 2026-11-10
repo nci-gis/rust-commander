@@ -35,14 +35,23 @@ pub struct Probe {
     pub da2: Option<(u32, u32)>,
 }
 
+/// Whether xdevcmd runs inside tmux or GNU screen, by their variables or by `TERM`
+/// (which survives `sudo`, where `TMUX` and `STY` are dropped). Neither passes picture
+/// sequences on unless told to, and screen takes the Kitty query (an APC) for its own
+/// status line, so neither is asked anything at start-up and both get half blocks.
+pub fn multiplexer(var: impl Fn(&str) -> Option<String>) -> bool {
+    let has = |k: &str| var(k).is_some_and(|v| !v.is_empty());
+    let term = var("TERM").unwrap_or_default();
+    has("TMUX") || has("STY") || term.starts_with("screen") || term.starts_with("tmux")
+}
+
 /// Ask the terminal, before anything else reads its replies: a Kitty graphics query,
 /// the cell size (`CSI 16 t`), and the device attributes (`CSI c`), which every terminal
 /// answers and so marks the end. Waits at most `wait` for a terminal that answers none.
 #[cfg(unix)]
 pub fn probe(wait: std::time::Duration) -> Probe {
-    use rustix::event::{poll, PollFd, PollFlags, Timespec};
     use std::io::Write;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
     let mut out = std::io::stdout();
     // Kitty graphics, cell size, name and version, kind (DA2), then DA1 last: every
     // terminal answers DA1, so its reply marks the end of the others.
@@ -51,30 +60,58 @@ pub fn probe(wait: std::time::Duration) -> Probe {
         return Probe::default();
     }
     let stdin = std::io::stdin();
-    let deadline = Instant::now() + wait;
     let mut got = Vec::new();
+    read_until(&stdin, &mut got, Instant::now() + wait, None);
+    // Replies still on their way when the wait ran out would reach crossterm as keys
+    // (`ESC P` read as Alt+P, then the terminal's name typed into the shell): read on
+    // while they keep coming, until the line has been quiet for a moment, at most a
+    // second, and keep what came.
+    if !answered(&got) {
+        let quiet = Duration::from_millis(200);
+        read_until(
+            &stdin,
+            &mut got,
+            Instant::now() + Duration::from_secs(1),
+            Some(quiet),
+        );
+    }
+    parse_probe(&got)
+}
+
+/// Read the terminal's replies into `got` until the device attributes reply has come or
+/// `deadline` passes; with `quiet`, also once nothing has come for that long. Straight
+/// from the descriptor: std's Stdin would keep what it read ahead in its own buffer,
+/// where crossterm, which reads the descriptor, would never see it.
+#[cfg(unix)]
+fn read_until(
+    stdin: &std::io::Stdin,
+    got: &mut Vec<u8>,
+    deadline: std::time::Instant,
+    quiet: Option<std::time::Duration>,
+) {
+    use rustix::event::{poll, PollFd, PollFlags, Timespec};
     let mut buf = [0u8; 512];
-    while !answered(&got) {
-        let left = deadline.saturating_duration_since(Instant::now());
-        let Ok(timeout) = Timespec::try_from(left) else {
-            break;
-        };
+    while !answered(got) {
+        let mut left = deadline.saturating_duration_since(std::time::Instant::now());
+        if let Some(q) = quiet {
+            left = left.min(q);
+        }
         if left.is_zero() {
             break;
         }
-        let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+        let Ok(timeout) = Timespec::try_from(left) else {
+            break;
+        };
+        let mut fds = [PollFd::new(stdin, PollFlags::IN)];
         match poll(&mut fds, Some(&timeout)) {
             Ok(n) if n > 0 => {}
             _ => break,
         }
-        // Straight from the descriptor: std's Stdin would keep what it read ahead in its
-        // own buffer, where crossterm, which reads the descriptor, would never see it.
-        match rustix::io::read(&stdin, &mut buf) {
+        match rustix::io::read(stdin, &mut buf) {
             Ok(n) if n > 0 => got.extend_from_slice(&buf[..n]),
             _ => break,
         }
     }
-    parse_probe(&got)
 }
 
 /// Whether the device attributes reply, the last one asked for, has come.
@@ -186,7 +223,7 @@ pub fn detect(setting: &str, var: impl Fn(&str) -> Option<String>, probe: &Probe
     let is = |k: &str, v: &str| var(k).is_some_and(|x| x == v);
     let term = var("TERM").unwrap_or_default();
     // tmux passes these sequences on only when told to: half blocks always work there.
-    if has("TMUX") || term.starts_with("screen") || term.starts_with("tmux") {
+    if multiplexer(&var) {
         return Protocol::Blocks;
     }
     if term.contains("kitty") || has("KITTY_WINDOW_ID") {
@@ -377,6 +414,26 @@ mod tests {
             Protocol::Blocks
         );
         assert!(answered(b"\x1b[?62;4c") && !answered(b"\x1b[6;20;10t"));
+        // GNU screen too, by STY or by a TERM that survives sudo; an empty STY is unset.
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| (*v).to_string())
+            }
+        };
+        assert!(multiplexer(env(&[("STY", "4242.pts-0.box")])));
+        assert!(multiplexer(env(&[("TERM", "screen.xterm-256color")])));
+        assert!(multiplexer(env(&[("TERM", "tmux-256color")])));
+        assert!(!multiplexer(env(&[
+            ("STY", ""),
+            ("TERM", "xterm-256color")
+        ])));
+        assert_eq!(
+            detect("auto", env(&[("STY", "1.x"), ("TERM", "xterm-kitty")]), &wt),
+            Protocol::Blocks
+        );
     }
 
     #[test]

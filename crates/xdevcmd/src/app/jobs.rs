@@ -1,0 +1,406 @@
+//! Jobs: pumping and finishing them, quitting with them running, recovery after a crash, and undo.
+
+use super::*;
+
+impl App {
+    /// A job is working and not waiting on a question: a screenshot (the tests) waits
+    /// for it before the last frame, rather than ending the process under it.
+    pub fn job_working(&self) -> bool {
+        let working = |j: &Job| j.done.is_none() && j.question.is_none();
+        matches!(&self.modal, Some(Modal::Job(j)) if working(j)) || self.jobs.iter().any(working)
+    }
+
+    pub(super) fn reload_all(&mut self) {
+        // Every tab, not only those on show: a tab you switch to after a move must not
+        // still list the files that left it.
+        for p in self.panes.values_mut() {
+            if let Some(t) = p.as_tabs_mut() {
+                t.reload_all();
+            }
+        }
+    }
+
+    /// Drain the worker's events each tick, and close the box by itself on a clean run.
+    pub(super) fn pump_job(&mut self) {
+        let mut finished = false;
+        if let Some(Modal::Job(j)) = self.modal.as_mut() {
+            j.pump();
+            if let Some(s) = &j.done {
+                finished = s.errors.is_empty() && !s.cancelled;
+            }
+        }
+        if finished {
+            self.finish_job();
+            // A copy started by the viewer's Save as… gives the viewer back.
+            self.back_to_viewer();
+        }
+    }
+
+    pub(super) fn finish_job(&mut self) {
+        if let Some(Modal::Job(j)) = self.modal.take() {
+            if let Some(s) = &j.done {
+                self.status = s.describe(j.kind);
+                self.note_trashed(s);
+            }
+        }
+        // Marks are cleared once an operation has run, the way every orthodox manager
+        // does it. Leaving them set means the next F8 silently includes the files from
+        // the last F5 — which is how you delete something you never selected.
+        for p in self.panes.values_mut() {
+            if let Some(f) = p.as_files_mut() {
+                f.marked.clear();
+            }
+        }
+        self.reload_all();
+    }
+
+    pub(super) fn pump_background_jobs(&mut self) {
+        let mut finished = Vec::new();
+        for (i, j) in self.jobs.iter_mut().enumerate() {
+            j.pump();
+            if j.done.is_some() {
+                finished.push(i);
+            }
+        }
+        for i in finished.into_iter().rev() {
+            let j = self.jobs.remove(i);
+            if let Some(s) = &j.done {
+                self.status = format!("background: {}", s.describe(j.kind));
+                let s = s.clone();
+                self.note_trashed(&s);
+                // A job that ended in errors comes forward so they can be read.
+                if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
+                    self.modal = Some(Modal::Job(j));
+                }
+            }
+            self.reload_all();
+        }
+        // A job waiting on a question is blocked until someone answers: bring it to
+        // the front as soon as nothing else is.
+        if self.modal.is_none() {
+            if let Some(i) = self.jobs.iter().position(|j| j.question.is_some()) {
+                let j = self.jobs.remove(i);
+                self.modal = Some(Modal::Job(j));
+            }
+        }
+    }
+
+    /// Jobs still running: ask first. True when the question is now on screen.
+    pub(super) fn ask_before_quitting(&mut self) -> bool {
+        if self.jobs.is_empty() {
+            return false;
+        }
+        let n = self.jobs.len();
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Quit?".into(),
+            body: vec![
+                format!(
+                    "{n} job{} still running in the background.",
+                    if n == 1 { " is" } else { "s are" }
+                ),
+                "Quitting cancels them; a file being written is removed, not left half done."
+                    .into(),
+            ],
+            danger: true,
+            yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
+            buttons: Vec::new(),
+            also: None,
+            footnote: None,
+            pictures: Vec::new(),
+        }));
+        true
+    }
+
+    /// What a job about to start means for Ctrl+Z: a move can be undone; the rest say
+    /// that they cannot, so an older rename is never undone behind them.
+    pub(super) fn remember_job(&mut self, r: &Request) {
+        use xdevcmd_core::undo::Undo;
+        self.last_undo = Some(match r.kind {
+            ops::Kind::Move => Undo::Move {
+                sources: r.sources.clone(),
+                dest: r.dest.clone().unwrap_or_default(),
+                rename_to: r.rename_to.clone(),
+            },
+            ops::Kind::Copy => Undo::Cannot("a copy".into()),
+            ops::Kind::Delete if r.to_trash => {
+                // Undoable once it has finished and said where each item went.
+                self.trash_pending = Some(r.sources.clone());
+                Undo::Cannot(TRASH_RUNNING.into())
+            }
+            ops::Kind::Delete => Undo::Cannot("a permanent delete".into()),
+            ops::Kind::Extract => Undo::Cannot("an extraction".into()),
+            ops::Kind::Pack => Undo::Cannot("packing".into()),
+        });
+    }
+
+    /// At start-up: tidy up after a run that was killed (safe operations' journal), say
+    /// what was done, and offer to resume a job it was in the middle of.
+    pub(super) fn recover_interrupted(&mut self) {
+        if self.settings.mode.read_only() {
+            return;
+        }
+        let found = xdevcmd_core::journal::recover();
+        if found.is_empty() {
+            return;
+        }
+        let cleaned: usize = found.iter().map(|i| i.cleaned).sum();
+        let restored: usize = found.iter().map(|i| i.restored).sum();
+        let stranded: Vec<_> = found.iter().flat_map(|i| i.stranded.clone()).collect();
+        let mut body = vec!["The last run of xdevcmd ended in the middle of a job.".to_string()];
+        if cleaned > 0 {
+            body.push(format!(
+                "{cleaned} unfinished temporary file{} removed.",
+                plural(cleaned)
+            ));
+        }
+        if restored > 0 {
+            body.push(format!(
+                "{restored} file{} put back under {} own name (rename many).",
+                plural(restored),
+                if restored == 1 { "its" } else { "their" }
+            ));
+        }
+        for (tmp, orig) in stranded.iter().take(3) {
+            body.push(format!(
+                "Could not put back {} as {} (the name is taken).",
+                tidy(tmp),
+                tidy(orig)
+            ));
+        }
+        // A permanent delete is not offered again: it would go on with one Enter, where
+        // Shift+F8 itself takes only Y.
+        let resumable = found.into_iter().find(|i| {
+            let kind_ok = match i.kind.as_str() {
+                "copy" | "move" => true,
+                "delete" => i.to_trash,
+                _ => false,
+            };
+            kind_ok && !i.sources.is_empty()
+        });
+        let yes = resumable.map(|it| {
+            let what = match it.kind.as_str() {
+                "copy" => "a copy",
+                "move" => "a move",
+                _ => "a delete",
+            };
+            let to = it
+                .dest
+                .as_deref()
+                .map(|d| format!(" to {}", tidy(d)))
+                .unwrap_or_default();
+            body.push(String::new());
+            body.push(format!(
+                "It was {what} of {}{to}.",
+                Self::describe(&it.sources)
+            ));
+            body.push("Continue it? What was done is skipped; a file cut short starts".into());
+            body.push("again; you are asked about any other file already there.".into());
+            ("continue".to_string(), Cmd::Resume(it))
+        });
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Interrupted".into(),
+            body,
+            danger: false,
+            yes,
+            buttons: Vec::new(),
+            also: None,
+            footnote: None,
+            pictures: Vec::new(),
+        }));
+    }
+
+    /// Run an interrupted job again: what it finished (identical at the destination) is
+    /// skipped and anything else already there is asked about, never decided; a move or
+    /// delete on the sources still there.
+    pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted) {
+        let still: Vec<PathBuf> = it
+            .sources
+            .iter()
+            .filter(|p| std::fs::symlink_metadata(p).is_ok())
+            .cloned()
+            .collect();
+        if still.is_empty() {
+            self.status = "nothing left to do: every source has gone".into();
+            return;
+        }
+        let mut req = match (it.kind.as_str(), it.dest) {
+            ("copy", Some(d)) => Request::copy(still, d),
+            ("move", Some(d)) => Request::mv(still, d),
+            ("delete", _) if it.to_trash => Request::delete(still, true),
+            _ => return,
+        };
+        req.existing = ops::Existing::Resume;
+        let kind = req.kind;
+        self.remember_job(&req);
+        self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));
+    }
+
+    /// Keep the system watching the directories on screen, and note the panes whose
+    /// directory it says changed; they re-read on the next quiet moment.
+    pub(super) fn watch_panes(&mut self, shown: &[PaneId], every: Duration) {
+        let Some(w) = self.watcher.as_mut() else {
+            return;
+        };
+        let mut dirs = HashSet::new();
+        let mut owners: Vec<(PaneId, PathBuf)> = Vec::new();
+        if !every.is_zero() {
+            for id in shown {
+                let Some(f) = self.panes.get(id).and_then(Pane::as_files) else {
+                    continue;
+                };
+                if f.archive.is_some() || f.results.is_some() {
+                    continue;
+                }
+                // The system reports canonical paths (macOS's /tmp is /private/tmp).
+                let canon = self
+                    .canonical
+                    .entry(f.cwd.clone())
+                    .or_insert_with(|| f.cwd.canonicalize().unwrap_or_else(|_| f.cwd.clone()))
+                    .clone();
+                dirs.insert(canon.clone());
+                owners.push((*id, canon));
+            }
+        }
+        let new = w.sync(&dirs);
+        let changed = w.changed();
+        for (id, canon) in owners {
+            if changed.contains(&canon) {
+                self.to_reload.insert(id);
+            } else if new.contains(&canon) {
+                self.to_check.insert(id);
+            }
+        }
+        // Forget what is no longer shown, so the map does not grow without end.
+        self.canonical.retain(|_, c| dirs.contains(c));
+    }
+
+    /// A delete to the trash has finished: if it is still the last operation, undo
+    /// can now put back what it moved.
+    pub(super) fn note_trashed(&mut self, s: &ops::Summary) {
+        let Some(sources) = &self.trash_pending else {
+            return;
+        };
+        let ours = !s.trashed.is_empty() && s.trashed.iter().all(|t| sources.contains(&t.original));
+        let still_last = matches!(&self.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(w)) if w == TRASH_RUNNING);
+        if ours && still_last {
+            self.last_undo = Some(xdevcmd_core::undo::Undo::Trashed(s.trashed.clone()));
+            self.trash_pending = None;
+        }
+    }
+
+    /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
+    pub(super) fn ask_undo(&mut self) {
+        let Some(u) = &self.last_undo else {
+            self.status = "nothing to undo".into();
+            return;
+        };
+        let plan = match u.plan() {
+            Ok(p) => p,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        use xdevcmd_core::undo::Plan;
+        let what = match &plan {
+            Plan::Rename(m) => m
+                .iter()
+                .take(8)
+                .map(|(f, t)| {
+                    format!(
+                        "{}  \u{2192}  {}",
+                        Self::describe(std::slice::from_ref(f)),
+                        Self::describe(std::slice::from_ref(t))
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Plan::Move { back, into } => vec![format!(
+                "move {} back to {}",
+                Self::describe(back),
+                tidy(into)
+            )],
+            Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+            Plan::Restore(items) => {
+                let mut lines: Vec<String> = items
+                    .iter()
+                    .take(8)
+                    .map(|i| format!("put back {}", tidy(&i.original)))
+                    .collect();
+                if items.len() > 8 {
+                    lines.push(format!("\u{2026} and {} more", items.len() - 8));
+                }
+                lines
+            }
+        };
+        let mut body = vec![format!("Undo the {}?", u.describe()), String::new()];
+        body.extend(what);
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Undo".into(),
+            body,
+            danger: false,
+            yes: Some(("undo".into(), Cmd::Undo)),
+            buttons: Vec::new(),
+            also: None,
+            footnote: None,
+            pictures: Vec::new(),
+        }));
+    }
+
+    /// Carry out the undo, checking the disk once more.
+    pub(super) fn undo(&mut self) {
+        use xdevcmd_core::undo::Plan;
+        let Some(u) = self.last_undo.clone() else {
+            return;
+        };
+        let plan = match u.plan() {
+            Ok(p) => p,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
+        };
+        match plan {
+            Plan::Rename(moves) => {
+                let out = xdevcmd_core::batch_rename::apply(&moves, xdevcmd_core::ops::safe());
+                self.status = match out.errors.first() {
+                    None => format!("undone: {}", u.describe()),
+                    Some(e) => format!(
+                        "undo: {} renamed back, {} failed \u{2014} {e}",
+                        out.renamed,
+                        out.errors.len()
+                    ),
+                };
+            }
+            Plan::Move { back, into } => {
+                let request = Request::mv(back, into);
+                self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
+                self.status = format!("undoing the {}", u.describe());
+            }
+            Plan::Remove(p) => {
+                self.status = match xdevcmd_core::undo::remove(&p) {
+                    Ok(()) => format!("undone: {}", u.describe()),
+                    Err(e) => format!("cannot undo: {e}"),
+                };
+            }
+            Plan::Restore(items) => {
+                let mut failed = Vec::new();
+                for t in &items {
+                    if let Err(e) = xdevcmd_core::trashed::restore(t) {
+                        failed.push(e.to_string());
+                    }
+                }
+                self.status = match failed.first() {
+                    None => format!("undone: {}", u.describe()),
+                    Some(e) => format!(
+                        "undo: {} put back, {} not \u{2014} {e}",
+                        items.len() - failed.len(),
+                        failed.len()
+                    ),
+                };
+            }
+        }
+        // One step: an undone operation is not undone again.
+        self.last_undo = None;
+        self.reload_all();
+    }
+}

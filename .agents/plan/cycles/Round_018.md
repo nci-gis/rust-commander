@@ -76,7 +76,7 @@ screenshot: "Shift+F12 historystarted from the terminal panel…").
 
 - [x] fmt; clippy `-D warnings` for Linux, x86_64-pc-windows-gnu and x86_64-apple-darwin
 - [x] Linux: unit, render, pty suites green
-- [ ] `windows_panel.rs` in Windows CI (`gh workflow run ci --ref feat/v0.4.0`)
+- [x] `windows_panel.rs` in Windows CI: run 42880953728 on `b091027`, both tests ok (Enter → exit 1; `y` → starts, `q` ends); every job green
 - [ ] The owner on Windows:
   - `xdevcmd` in the panel (cmd, pwsh) asks; Enter ends it;
   - `start cmd` from the panel, then `xdevcmd`, asks; `y` starts;

@@ -1257,8 +1257,9 @@ fn the_wheel_scrolls_back_through_shell_history() {
     let s = Scratch::new("scrollback");
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
-    xdevcmd.send(b"seq 1 300\r");
-    xdevcmd.wait_for("300");
+    // A mark only the output has: "300" is in the typed command too.
+    xdevcmd.send(b"seq 1 300; echo seq-done-$((6*7))\r");
+    xdevcmd.wait_for("seq-done-42");
 
     let (_, bar_y) = xdevcmd.locate("\u{2302} 1");
     for _ in 0..10 {
@@ -2563,14 +2564,16 @@ fn shift_f12_reads_the_shells_history_in_the_viewer() {
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
-    xdevcmd.send(b"seq 1 300\r");
-    xdevcmd.wait_for("300");
+    // A mark only the output has: "300" is in the typed command too.
+    xdevcmd.send(b"seq 1 300; echo seq-done-$((6*7))\r");
+    xdevcmd.wait_for("seq-done-42");
     xdevcmd.send(SHIFT_F12);
     xdevcmd.wait_for("history \u{b7} sh \u{b7} tab 1");
-    // The command line is the history's line 1, so seq's 300 is line 301; the prompt
-    // after it is the last line, on the viewer's last row.
+    // The command line is the history's line 1, so seq's 300 is line 301 and the mark
+    // 302; the prompt after it is the last line, on the viewer's last row.
     xdevcmd.wait_for("301 \u{2502}300");
-    xdevcmd.wait_for("302 \u{2502}$");
+    xdevcmd.wait_for("302 \u{2502}seq-done-42");
+    xdevcmd.wait_for("303 \u{2502}$");
     xdevcmd.wait_for("in memory only");
     // Nothing of the shell's output was written anywhere xdevcmd keeps files.
     let written: Vec<_> = walk(&s.0)
@@ -2650,8 +2653,8 @@ fn history_is_never_written_outside_the_shell() {
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
     // Only the output holds MARK_42 and seq's run of lines; the command line does not.
-    xdevcmd.send(b"echo MARK_$((6*7)); seq 1 300\r");
-    xdevcmd.wait_for("300");
+    xdevcmd.send(b"echo MARK_$((6*7)); seq 1 300; echo seq-done-$((6*7))\r");
+    xdevcmd.wait_for("seq-done-42");
     xdevcmd.send(SHIFT_F12);
     xdevcmd.wait_for("in memory only");
     xdevcmd.send(b"\x1b");
@@ -2820,8 +2823,10 @@ fn a_shell_keeps_the_history_scrollback_says() {
     );
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
-    xdevcmd.send(b"seq 1 500\r");
-    xdevcmd.wait_for("500");
+    // Wait for a mark only the output has: "500" is in the typed command too, and
+    // matching it raced the output on a slow runner.
+    xdevcmd.send(b"seq 1 500; echo seq-done-$((6*7))\r");
+    xdevcmd.wait_for("seq-done-42");
     xdevcmd.send(SHIFT_F12);
     xdevcmd.wait_for("in memory only");
     let screen = xdevcmd.screen();

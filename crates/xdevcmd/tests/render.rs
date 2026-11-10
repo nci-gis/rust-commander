@@ -3784,7 +3784,8 @@ fn about_draws_its_logo_without_half_blocks() {
         );
         assert!(!s.contains('\u{2580}'), "a half block at {size}\n{s}");
         // The text starts 14 + 2 columns after the dialog's border: the logo's room.
-        let (bx, _) = locate(&s, "xdevcmd 0.2");
+        // The title names the version: read it, so a release does not break the test.
+        let (bx, _) = locate(&s, &format!("xdevcmd {}", env!("CARGO_PKG_VERSION")));
         let (tx, _) = locate(&s, "No network");
         assert!(
             tx >= bx + 14,

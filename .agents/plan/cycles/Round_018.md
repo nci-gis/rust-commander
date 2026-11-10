@@ -61,6 +61,16 @@ screenshot: "Shift+F12 historystarted from the terminal panel…").
     without the fix ("historytoo small").
   - `tests/windows_panel.rs` (Windows only): Enter → exit 1; `y` → it draws and `q` ends it.
 - CHANGELOG Unreleased: Added, Changed, Fixed.
+- **Windows CI, first run (42879412666)**: `ctrl_z_says_what_cannot_be_undone_and_refuses_what_changed`
+  failed. It was not this change: the test passed on Windows for PRs #15 and #16.
+  `--screenshot` waits only 30 ms between keys, so on the runner the copy (F5) was still
+  running when Ctrl+Z came, and its "1 copied" replaced Ctrl+Z's answer. The fix is a
+  `wait` token for `--keys` (until running jobs end, as before the frame) and
+  `…,F5,Enter,wait,Ctrl+z` in the test. Not reproducible on Linux, which is too fast;
+  only Windows CI shows it. `windows_panel.rs` did not run there, because cargo stops at
+  the first failing test binary.
+- Owner's call: `.agents/reference/testing.md:51` lists the `--keys` tokens and could add
+  `wait`; it is canon, so it is not edited here.
 
 ## Check
 

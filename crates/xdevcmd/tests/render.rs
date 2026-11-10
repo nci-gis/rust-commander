@@ -2925,7 +2925,9 @@ fn ctrl_z_says_what_cannot_be_undone_and_refuses_what_changed() {
     let s = shot_keys("110x24", "Ctrl+z", &a, &b);
     assert!(s.contains("nothing to undo"), "{s}");
     // A copy is not undone, and an older rename is not undone behind it.
-    let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,Ctrl+z", &a, &b);
+    // `wait`: the copy ends first, or its "1 copied" replaces the answer to Ctrl+Z
+    // (seen on a Windows runner).
+    let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,wait,Ctrl+z", &a, &b);
     assert!(
         s.contains("the last operation, a copy, cannot be undone"),
         "{s}"

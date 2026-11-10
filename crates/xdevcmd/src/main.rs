@@ -82,7 +82,7 @@ Usage:
   xdevcmd --screenshot[=WxH]   render one frame as plain text and exit
           --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
                                click:X:Y rclick:X:Y ctrl-click:X:Y drag:X1:Y1:X2:Y2
-                               wheel:X:Y:N move:X:Y
+                               wheel:X:Y:N move:X:Y; wait (for running jobs to end)
   xdevcmd --version            print the version and exit
   xdevcmd --help               print this and exit
 
@@ -469,10 +469,18 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     app.tick();
     // Draw once before any input: clicks hit-test against where things were drawn.
     terminal.draw(|f| app.draw(f))?;
+    let finish_jobs = |app: &mut App| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while app.job_working() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            app.tick();
+        }
+    };
     for input in parse_inputs(keys) {
         match input {
             Input::Key(k) => app.feed_key(k),
             Input::Mouse(m) => app.feed_mouse(m),
+            Input::Wait => finish_jobs(&mut app),
         }
         // Let a job that an input started make progress, then redraw so the next
         // click lands on what is now on screen.
@@ -482,11 +490,7 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     }
     // A job the last key started finishes before the frame is taken (a slow machine
     // took longer than the pause above), unless it waits on a question to show.
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while app.job_working() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-        app.tick();
-    }
+    finish_jobs(&mut app);
     terminal.draw(|f| app.draw(f))?;
 
     let buf = terminal.backend().buffer();
@@ -621,14 +625,22 @@ fn emit(text: &str) {
 enum Input {
     Key(KeyEvent),
     Mouse(MouseEvent),
+    /// Until the running jobs end (or ask something), as before the frame is taken.
+    Wait,
 }
 
 /// `F5`, `S-F8`, `A-s`, `PageDown`, `Enter`, `x` — the same names the config accepts,
 /// plus `S-` / `C-` / `A-` shorthands — and mouse tokens: `click:X:Y`, `rclick:X:Y`,
-/// `ctrl-click:X:Y`, `shift-click:X:Y`, `drag:X1:Y1:X2:Y2`, `wheel:X:Y:N`, `move:X:Y`.
+/// `ctrl-click:X:Y`, `shift-click:X:Y`, `drag:X1:Y1:X2:Y2`, `wheel:X:Y:N`, `move:X:Y`; and
+/// `wait`, for the jobs started so far to end before the next input (a copy's own
+/// "1 copied" otherwise lands on whatever the next key says, on a slow machine).
 fn parse_inputs(spec: &str) -> Vec<Input> {
     let mut out = Vec::new();
     for tok in spec.split(',').filter(|s| !s.is_empty()) {
+        if tok == "wait" {
+            out.push(Input::Wait);
+            continue;
+        }
         if let Some(events) = parse_mouse(tok) {
             out.extend(events.into_iter().map(Input::Mouse));
             continue;

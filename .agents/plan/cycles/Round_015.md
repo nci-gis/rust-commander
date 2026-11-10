@@ -1,10 +1,10 @@
 # Round 015: The terminal's history in the viewer
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 26; Steps 1–4 of "Plan for the terminal
 panel" in [Round 014](Round_014.md)
 **Date started**: 2026-11-10
-**Date completed**: —
+**Date completed**: 2026-11-10, at the owner's word (see Round 014's header); in 0.3.0
 
 ## Goal
 

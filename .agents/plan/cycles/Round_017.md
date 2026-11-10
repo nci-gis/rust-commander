@@ -1,9 +1,9 @@
 # Round 017: Getting 0.3.0 ready to release
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), items 8 and 28
 **Date started**: 2026-11-10
-**Date completed**: —
+**Date completed**: 2026-11-10, at the owner's word (Do); released as 0.3.0
 
 ## Goal
 
@@ -257,6 +257,20 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
     `stop_step` replace the 5 s sleep in the handler; the status line counts the jobs;
     keys are ignored meanwhile. Pty test of the path (none before); the stuck-worker case
     has none (nothing here makes a write hang).
+- 2026-11-10, from the owner's test of the release build on Linux:
+  - **Long lines wrap** (`ecc2f85`): About's description lost its middle to "…" under
+    ~115 columns, F1 ran off the right edge. `wrap.rs` (word wrap by width, styles kept,
+    hanging indent); dialogs wrap prose at 72 columns, paths still elided; F1's rows
+    continue under their description. Render tests at 80 columns fail with the old drawing.
+  - **Settings → Save showed `\\?\C:\…`** on Windows (`d23b7dd`): `save_settings` used
+    std's canonicalize; now `paths::canonical`. Checked by the settings render test on
+    Windows only (CI).
+- 2026-11-10, **closed at the owner's word**, Rounds 014–017 together: "Tất cả tính năng ổn
+  định ở v0.3.0 (mình test và sử dụng)"; "Merge feat/release-v0.3.0 -> dev -> main release
+  on github"; the other `feat/…` branches skipped (all are in this one). CI runs on the pull
+  request into `dev`. Before it: README's links made absolute (crates.io resolves no
+  relative link), Scoop and winget said "planned; not available yet", the release steps'
+  tag example made generic.
 
 ## Check
 
@@ -281,8 +295,11 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
       tests read it through vt100 and pass unchanged); `ttyname` on macOS (CI); the
       late-reply read; the screen during a stuck worker's 5 s.
 - [ ] By the owner: CI on three systems; README on crates.io; Scoop install; winget submission.
+- [x] The owner tested the release build on Linux and uses it (2026-11-10).
+- [ ] CI on the pull request into `dev` (the first run since `e672c90` on Windows and macOS).
 
-Set aside for the owner's hand tests; publishing is the owner's.
+Closed at the owner's word (Do, 2026-11-10); publishing on crates.io, Scoop and winget stay
+the owner's.
 
 ## Act
 

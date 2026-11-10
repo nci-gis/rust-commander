@@ -114,7 +114,7 @@ so **every `cargo release` before step 5 says `--no-publish`**.
    ```bash
    git checkout main && git pull --ff-only
    cargo release tag --execute
-   git push origin v0.2.0
+   git push origin v0.3.0            # the tag cargo release made: v<version>
    ```
 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a

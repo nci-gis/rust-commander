@@ -1,9 +1,10 @@
 # Round 014: Sharp image previews
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 20
 **Date started**: 2026-11-08 (owner: "Yes, next round", after 0.2.1 was published)
-**Date completed**: —
+**Date completed**: 2026-11-10, at the owner's word with Rounds 015–017: "Tất cả tính năng
+ổn định ở v0.3.0 (mình test và sử dụng)"; released in 0.3.0 from `feat/release-0.3.0`
 
 ## Goal
 

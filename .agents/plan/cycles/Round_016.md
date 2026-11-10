@@ -1,9 +1,9 @@
 # Round 016: Between the shell and the panes
 
-**Status**: Review
+**Status**: Complete
 **Part of**: [ROADMAP.md](../ROADMAP.md), item 27
 **Date started**: 2026-11-10
-**Date completed**: —
+**Date completed**: 2026-11-10, at the owner's word (see Round 014's header); in 0.3.0
 
 ## Goal
 

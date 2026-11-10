@@ -10,6 +10,24 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **The menu bar shows which xdevcmd this is**, at its right in the dim colour:
+  `xdevcmd 18144`, its process number, which Help → Usage also shows. Hidden where the
+  menus need the room.
+
+### Changed
+- **On Windows, xdevcmd started from its terminal panel asks first**: "Start another
+  xdevcmd here? [y/N]", naming the xdevcmd whose panel it is; Enter is no and ends it.
+  Windows cannot tell that panel from a new window opened from it (`start cmd`), so it
+  asks in both; before, it started and only said so on the status line. Without a
+  terminal to ask on, it starts. Linux and macOS are unchanged: refused in the panel
+  itself, started in any other window.
+
+### Fixed
+- **A status message no longer runs into the terminal's keys**: with the terminal in
+  focus and a long message, the status line read "…Shift+F12 historytoo small to split";
+  the two keep their gap now.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added

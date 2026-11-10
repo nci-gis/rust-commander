@@ -2177,11 +2177,6 @@ impl App {
         self.on_mouse(m);
     }
 
-    /// A line for the status bar at start-up, in place of where xdevcmd is running.
-    pub fn say(&mut self, text: String) {
-        self.status = text;
-    }
-
     /// Pictures may be drawn by the terminal itself: worth asking it, at start-up, what
     /// it draws and how big its cells are (also when a protocol is chosen by hand, for
     /// the cell size).
@@ -7003,6 +6998,20 @@ impl App {
             self.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
             x += w + 1;
         }
+        // Which xdevcmd this is, at the right: a shell started from the terminal panel
+        // names the xdevcmd it came from by this number (main.rs, `own_panel`). Dim, and
+        // only where the menus leave room.
+        let me = format!("xdevcmd {} ", std::process::id());
+        let w = me.chars().count() as u16;
+        let end = area.x + area.width;
+        if x + 2 + w <= end {
+            buf.set_line(
+                end - w,
+                area.y,
+                &Line::from(Span::styled(me, Style::new().fg(th.fg_dim))),
+                w,
+            );
+        }
     }
 
     fn holding(&self) -> crate::usage::Holding {
@@ -7218,10 +7227,11 @@ impl App {
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::new().bg(theme::t().bg_bar));
         let avail = area.width as usize;
-        // The right half (messages) wins space, but a gap of two is always kept: with
-        // both halves long they otherwise ran together, "…back to filestoo small".
+        // The right half (messages) wins space, but a gap of two is always kept between
+        // them: with both halves long they otherwise ran together, "…historytoo small".
         let rw = right.chars().count().min(avail.saturating_sub(3));
         let lw = avail.saturating_sub(rw + 2);
+        let gap = avail.saturating_sub(lw + rw).min(2);
         buf.set_line(
             area.x,
             area.y,
@@ -7232,7 +7242,7 @@ impl App {
             lw as u16,
         );
         buf.set_line(
-            area.x + lw as u16,
+            area.x + (lw + gap) as u16,
             area.y,
             &Line::from(Span::styled(
                 elide_middle(&right, rw),

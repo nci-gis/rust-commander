@@ -383,10 +383,11 @@ fn main() -> Result<()> {
             );
             std::process::exit(1);
         }
-        Nested::Note(pid) => app.say(format!(
-            "started from the terminal panel of xdevcmd {pid}: if this is that panel, \
-             F12 there goes back to it"
-        )),
+        Nested::Ask(pid) => {
+            if !start_anyway(pid) {
+                std::process::exit(1);
+            }
+        }
         Nested::No => {}
     }
 
@@ -508,9 +509,9 @@ enum Nested {
     No,
     /// This is that panel's terminal: it would run inside itself.
     Refuse(u32),
-    /// Started from a panel, but which terminal this is cannot be told (Windows): start,
-    /// and say so.
-    Note(u32),
+    /// Started from a panel, but which terminal this is cannot be told (Windows): ask
+    /// before starting.
+    Ask(u32),
 }
 
 /// [`own_panel`] with what this process has: its variables, its terminal's name and,
@@ -548,8 +549,8 @@ fn own_panel_here() -> Nested {
 /// (`code .`, `kitty &`, `wt`) and a tmux started there included; only the same terminal
 /// is the panel. Unix compares the names; a panel's xdevcmd that has ended, or a value
 /// that is not a pid, does not count. Without names (Windows, or a shell from a build
-/// that did not set the tty) a live pid is all there is: Unix refuses as before, Windows,
-/// which cannot ask, starts and says so.
+/// that did not set the tty) a live pid is all there is: Unix refuses as before; Windows,
+/// which cannot ask the system, asks the user ([`start_anyway`]).
 fn own_panel(
     pid: Option<&str>,
     tty: Option<&str>,
@@ -568,8 +569,38 @@ fn own_panel(
         (_, Some(t), Some(m)) if t == m => Nested::Refuse(pid),
         (_, Some(_), _) => Nested::No,
         (Some(true), None, _) => Nested::Refuse(pid),
-        (None, None, _) => Nested::Note(pid),
+        (None, None, _) => Nested::Ask(pid),
     }
+}
+
+/// Windows, started from the terminal panel of xdevcmd `pid`: that panel, or a new window
+/// opened from it (`start cmd`), which Windows does not tell apart. Asks on the terminal
+/// before anything is drawn; Enter is no. With no one to ask (input not a terminal),
+/// starts.
+fn start_anyway(pid: u32) -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return true;
+    }
+    let mut err = std::io::stderr().lock();
+    let _ = write!(
+        err,
+        "This shell runs inside xdevcmd {pid}: in its terminal panel, or in a window \
+         opened from that panel.\nF12 in that panel goes back to its files.\n\
+         Start another xdevcmd here? [y/N] "
+    );
+    let _ = err.flush();
+    let mut answer = String::new();
+    if stdin.lock().read_line(&mut answer).is_err() {
+        return false;
+    }
+    said_yes(&answer)
+}
+
+/// `y` or `yes`, in any case, around spaces; anything else, Enter included, is no.
+fn said_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 /// Write to stdout. A reader that stops early (`xdevcmd --screenshot | head`) ends xdevcmd
@@ -803,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn without_terminal_names_unix_refuses_and_windows_says_so() {
+    fn without_terminal_names_unix_refuses_and_windows_asks() {
         // A shell from a build that set only the pid: as before.
         assert_eq!(
             own_panel(Some("41"), None, Some(PTS), 99, |_| Some(true)),
@@ -813,10 +844,20 @@ mod tests {
             own_panel(Some("41"), Some(""), Some(PTS), 99, |_| Some(true)),
             Nested::Refuse(41)
         );
-        // Windows: no names, no asking.
+        // Windows: no names, and the system cannot be asked: the user is.
         assert_eq!(
             own_panel(Some("41"), None, None, 99, |_| None),
-            Nested::Note(41)
+            Nested::Ask(41)
         );
+    }
+
+    #[test]
+    fn only_yes_starts_another() {
+        for yes in ["y\r\n", "Y\n", "yes", " YES \r\n"] {
+            assert!(said_yes(yes), "{yes:?}");
+        }
+        for no in ["", "\r\n", "n\r\n", "no", "yy", "ye", "sure"] {
+            assert!(!said_yes(no), "{no:?}");
+        }
     }
 }

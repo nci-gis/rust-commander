@@ -1724,11 +1724,33 @@ fn dropping_onto_a_pane_showing_the_same_directory_says_so() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// The menu bar names this xdevcmd at its right, by the number a shell started from its
+/// panel is told; the menus win where there is no room for both.
+#[test]
+fn the_menu_bar_shows_which_xdevcmd_this_is() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys("120x10", "", &a, &b);
+    let top = s.lines().next().unwrap().trim_end();
+    let pid = top.rsplit(' ').next().unwrap();
+    assert!(
+        top.ends_with(&format!("xdevcmd {pid}")) && pid.parse::<u32>().is_ok(),
+        "{s}"
+    );
+    assert!(top.starts_with("  File   View   Help"), "{s}");
+    let s = shot_keys("30x10", "", &a, &b);
+    let top = s.lines().next().unwrap();
+    assert!(top.contains("Help") && !top.contains("xdevcmd"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn a_terminal_split_too_small_to_use_is_refused() {
     let (a, b) = files(&["alpha.txt"]);
     let s = shot_keys("80x24", "F12,A-x,A-d", &a, &b);
     assert!(s.contains("too small to split"), "{s}");
+    // The message keeps its gap from the terminal's keys; it was drawn right after
+    // them, "…Shift+F12 historytoo small".
+    assert!(status(&s).contains("  too small to split"), "{s}");
     assert!(!status(&s).contains("split 2/2"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

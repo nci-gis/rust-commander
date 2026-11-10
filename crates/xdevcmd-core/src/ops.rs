@@ -56,6 +56,11 @@ pub enum Existing {
     Skip,
     /// Replace every existing file.
     Replace,
+    /// Continuing an interrupted job: skip a file that is already there and identical
+    /// (same size, same date within a FAT drive's two seconds), ask about any other.
+    /// Not [`Existing::Update`]: a file the user chose to keep in the first run would
+    /// be replaced if its source is newer, a decision nobody made.
+    Resume,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +89,11 @@ pub struct Request {
     pub overwrite_confirmed: bool,
     /// Copy and move: what to do with files already at the destination.
     pub existing: Existing,
+    /// Safe operations for this job, taken from the setting when the request is made
+    /// and kept to the end: turning the setting over mid-job must not split one job
+    /// between two ways of writing, and tests set it here rather than in a global
+    /// other tests read.
+    pub safe: bool,
 }
 
 impl Request {
@@ -131,6 +141,7 @@ impl Request {
             pairs: Vec::new(),
             overwrite_confirmed: false,
             existing: Existing::Ask,
+            safe: safe(),
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -147,6 +158,7 @@ impl Request {
             pairs: Vec::new(),
             overwrite_confirmed: false,
             existing: Existing::Ask,
+            safe: safe(),
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -163,6 +175,7 @@ impl Request {
             pairs: Vec::new(),
             overwrite_confirmed: false,
             existing: Existing::Ask,
+            safe: safe(),
         }
     }
 }
@@ -208,6 +221,13 @@ pub struct Summary {
     pub errors: Vec<String>,
     /// A delete to the trash: where each item went, for undo.
     pub trashed: Vec<crate::trashed::Trashed>,
+    /// A continued move: sources left where they were, because an identical copy was
+    /// already at the destination (a move across drives killed between the copy and
+    /// the removal of its source). Never removed without a question.
+    pub left: u64,
+    /// Safe operations were on but this job's journal could not be made: why. The job ran
+    /// as with safe operations off; a kill now is not tidied up at the next start.
+    pub journal_off: Option<String>,
 }
 
 impl Summary {
@@ -226,8 +246,19 @@ impl Summary {
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
         }
+        if self.left > 0 {
+            s.push_str(&format!(
+                ", {} left where {} {}: already there",
+                self.left,
+                if self.left == 1 { "it" } else { "they" },
+                if self.left == 1 { "was" } else { "were" },
+            ));
+        }
         if self.cancelled {
             s.push_str(" (cancelled)");
+        }
+        if let Some(why) = &self.journal_off {
+            s.push_str(&format!("; safe operations off for this job: {why}"));
         }
         s
     }
@@ -285,6 +316,7 @@ pub fn start(req: Request) -> Handle {
             overwrite_all: false,
             skip_all: false,
             update: false,
+            resuming: false,
             cross_all: false,
             trash_all: false,
             planned: None,
@@ -294,6 +326,8 @@ pub fn start(req: Request) -> Handle {
             sum: Summary::default(),
             moving: false,
             approved: None,
+            journal: None,
+            safe: req.safe,
         };
         w.run(req);
     });
@@ -315,6 +349,8 @@ struct Worker {
     skip_all: bool,
     /// Replace only what is older than its source; skip what is the same or newer.
     update: bool,
+    /// [`Existing::Resume`]: skip what is identical, ask about the rest.
+    resuming: bool,
     cross_all: bool,
     trash_all: bool,
     /// Synchronising: the destinations the confirmed plan overwrites. Only these are
@@ -330,6 +366,12 @@ struct Worker {
     /// A destination the user already agreed to replace, so the copy a cross-device
     /// move falls back to does not ask about it a second time.
     approved: Option<PathBuf>,
+    /// Safe operations: what this job is in the middle of, for the next start if it is
+    /// killed. Removed when the job ends.
+    journal: Option<crate::journal::Journal>,
+    /// [`Request::safe`]: decides the journal and whether a new file is written under
+    /// a temporary name.
+    safe: bool,
 }
 
 impl Worker {
@@ -340,6 +382,30 @@ impl Worker {
             self.sum.errors.push(e.to_string());
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
+        }
+        if self.safe {
+            let kind = match req.kind {
+                Kind::Copy if !req.pairs.is_empty() => "sync",
+                Kind::Copy => "copy",
+                Kind::Move => "move",
+                Kind::Delete => "delete",
+                Kind::Extract => "extract",
+                Kind::Pack => "pack",
+            };
+            let sources: Vec<PathBuf> = if req.pairs.is_empty() {
+                req.sources.clone()
+            } else {
+                req.pairs.iter().map(|(s, _)| s.clone()).collect()
+            };
+            match crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash)
+            {
+                Some(Ok(j)) => self.journal = Some(j),
+                // The job runs all the same, as it would with safe operations off: but
+                // the summary says so, once, rather than leave the user believing a kill
+                // now would be tidied up.
+                Some(Err(e)) => self.sum.journal_off = Some(e.to_string()),
+                None => {}
+            }
         }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
@@ -353,6 +419,7 @@ impl Worker {
             Existing::Update => self.update = true,
             Existing::Skip => self.skip_all = true,
             Existing::Replace => self.overwrite_all = true,
+            Existing::Resume => self.resuming = true,
         }
         if req.overwrite_confirmed {
             self.planned = Some(
@@ -502,6 +569,13 @@ impl Worker {
         }
         if self.update {
             return Some(self.is_older(src, dst));
+        }
+        if self.resuming {
+            match identical(src, dst) {
+                Same::Dirs => return Some(true),
+                Same::Yes => return Some(false),
+                Same::No => {}
+            }
         }
         let existing = fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
         match self.ask(Question::Conflict {
@@ -668,6 +742,9 @@ impl Worker {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
+                    if self.moving && self.resuming && identical(Some(src), dst) == Same::Yes {
+                        self.sum.left += 1;
+                    }
                     self.advance(size);
                     return;
                 }
@@ -709,16 +786,24 @@ impl Worker {
     ///
     /// Replacing writes beside `dst` under a temporary name and renames it over `dst`
     /// only once complete: a cancel or an error part-way leaves the old file as it
-    /// was, rather than both old and new gone. Whatever was written and not kept is
-    /// removed here.
+    /// was, rather than both old and new gone. With safe operations a new file goes the
+    /// same way, so not even a killed run leaves a short file under a real name.
+    /// Whatever was written and not kept is removed here.
     fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
-        let target = if new_only {
+        let in_place = new_only && !self.safe;
+        let target = if in_place {
             dst.to_path_buf()
         } else {
             part_name(dst)
         };
+        writing_in_test(&target);
+        if !in_place {
+            if let Some(j) = self.journal.as_mut() {
+                j.part(&target);
+            }
+        }
         let mut w = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -733,8 +818,12 @@ impl Worker {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
                 drop(w);
-                if new_only {
+                if in_place {
                     Ok(true)
+                } else if new_only {
+                    // Taken only if still free: a file that appeared meanwhile is asked
+                    // about (the caller goes round again on AlreadyExists).
+                    crate::noreplace::rename_noreplace(&target, dst).map(|()| true)
                 } else {
                     fs::rename(&target, dst).map(|()| true)
                 }
@@ -790,6 +879,9 @@ impl Worker {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
+                    if self.resuming && identical(Some(src), &dst) == Same::Yes {
+                        self.sum.left += 1;
+                    }
                     return;
                 }
                 None => return,
@@ -910,6 +1002,13 @@ impl crate::archive::Hooks for Worker {
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
         self.resolve_conflict(None, dst, incoming)
     }
+    fn part(&mut self, p: &Path, made: bool) {
+        // Only what is made is written down: a later start removes only what is
+        // still there.
+        if let Some(j) = self.journal.as_mut().filter(|_| made) {
+            j.part(p);
+        }
+    }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
     }
@@ -928,6 +1027,49 @@ impl crate::archive::Hooks for Worker {
 }
 
 // ── free functions ─────────────────────────────────────────────────────────────────
+
+/// What [`Existing::Resume`] makes of a destination that is there.
+#[derive(Debug, PartialEq, Eq)]
+enum Same {
+    /// Two directories: they merge, as with every other rule.
+    Dirs,
+    /// The same file: what the interrupted run finished.
+    Yes,
+    /// Anything else, an unknown date included: the user is asked.
+    No,
+}
+
+/// Whether `dst` is what copying `src` would have made: the same size and date (a copy
+/// keeps the date), or a link to the same target. Without a source (an archive) or
+/// with a date the system will not give, it is not taken for the same.
+fn identical(src: Option<&Path>, dst: &Path) -> Same {
+    let (Some(src), Ok(d)) = (src, fs::symlink_metadata(dst)) else {
+        return Same::No;
+    };
+    let Ok(s) = fs::symlink_metadata(src) else {
+        return Same::No;
+    };
+    if s.is_dir() && d.is_dir() {
+        return Same::Dirs;
+    }
+    if s.file_type().is_symlink() && d.file_type().is_symlink() {
+        return match (fs::read_link(src), fs::read_link(dst)) {
+            (Ok(a), Ok(b)) if a == b => Same::Yes,
+            _ => Same::No,
+        };
+    }
+    let dated = s.modified().is_ok() && d.modified().is_ok();
+    if s.is_file()
+        && d.is_file()
+        && s.len() == d.len()
+        && dated
+        && crate::compare::newer_than(&s, &d) == std::cmp::Ordering::Equal
+    {
+        Same::Yes
+    } else {
+        Same::No
+    }
+}
 
 /// Count what the job is about to touch, so a progress bar means something.
 pub fn scan(sources: &[PathBuf]) -> (u64, u64) {
@@ -1010,8 +1152,24 @@ pub fn remove_tree(p: &Path) -> io::Result<()> {
     }
 }
 
+/// `[general] safe_operations`: every copy writes under a temporary name and renames at
+/// the end, and jobs keep a journal (journal.rs) so a run killed outright is tidied up
+/// at the next start. Off, a new file is written under its own name, as before; a
+/// replacement goes through a temporary name either way. Read once per job, into
+/// [`Request::safe`], never by a running worker.
+static SAFE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_safe(on: bool) {
+    SAFE.store(on, Ordering::Relaxed);
+}
+
+pub fn safe() -> bool {
+    SAFE.load(Ordering::Relaxed)
+}
+
 /// A temporary name beside `dst` to write a replacement under: hidden, and unique to
-/// this process and call, so two jobs never share one.
+/// this run (pid and start time, [`crate::journal::run_tag`]) and call, so two jobs
+/// never share one and a later process given the same pid never takes it for its own.
 pub(crate) fn part_name(dst: &Path) -> PathBuf {
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed);
@@ -1020,7 +1178,10 @@ pub(crate) fn part_name(dst: &Path) -> PathBuf {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let dir = dst.parent().unwrap_or(Path::new("."));
-    dir.join(format!(".{name}.xdevcmd-part-{}-{n}", std::process::id()))
+    dir.join(format!(
+        ".{name}.xdevcmd-part-{}-{n}",
+        crate::journal::run_tag()
+    ))
 }
 
 /// Tests put a path here to have a file appear at it between the check that found the
@@ -1039,6 +1200,18 @@ fn appear_in_test(dst: &Path) {
 
 #[cfg(not(test))]
 fn appear_in_test(_: &Path) {}
+
+/// Every name a copy opened to write, for tests to see which way a job wrote.
+#[cfg(test)]
+static WRITING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn writing_in_test(target: &Path) {
+    WRITING.lock().unwrap().push(target.to_path_buf());
+}
+
+#[cfg(not(test))]
+fn writing_in_test(_: &Path) {}
 
 fn is_cross_device(e: &io::Error) -> bool {
     #[cfg(unix)]
@@ -1674,6 +1847,65 @@ mod tests {
     }
 
     #[test]
+    fn resuming_skips_what_is_identical_and_asks_about_the_rest() {
+        let root = tmp("resume");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        // done: finished by the first run (same size, same date). kept: the user chose
+        // to keep their older, different file in the first run; Update would replace
+        // it, its source being newer. fresh: not there yet.
+        fs::write(root.join("done"), b"ours").unwrap();
+        age(&root.join("done"), 1_000_000);
+        fs::write(dst.join("done"), b"ours").unwrap();
+        age(&dst.join("done"), 1_000_001);
+        fs::write(root.join("kept"), b"new version").unwrap();
+        age(&root.join("kept"), 2_000_000);
+        fs::write(dst.join("kept"), b"theirs").unwrap();
+        age(&dst.join("kept"), 1_000_000);
+        fs::write(root.join("fresh"), b"ours").unwrap();
+        let names = ["done", "kept", "fresh"];
+        let mut req = Request::copy(names.iter().map(|n| root.join(n)).collect(), dst.clone());
+        req.existing = Existing::Resume;
+        let (s, asked) = run_with(req, Answer::Skip);
+        assert_eq!(
+            asked, 1,
+            "only kept is asked about; done is skipped silently"
+        );
+        assert_eq!(fs::read(dst.join("kept")).unwrap(), b"theirs", "kept stays");
+        assert_eq!(fs::read(dst.join("fresh")).unwrap(), b"ours");
+        assert_eq!((s.done, s.skipped, s.left), (1, 2, 0));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn resuming_a_move_leaves_a_source_whose_copy_is_already_there_and_says_so() {
+        // A move across drives killed after its copy and before removing the source.
+        let root = tmp("resume-move");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("a"), b"ours").unwrap();
+        age(&root.join("a"), 1_000_000);
+        fs::write(dst.join("a"), b"ours").unwrap();
+        age(&dst.join("a"), 1_000_000);
+        let mut req = Request::mv(vec![root.join("a")], dst.clone());
+        req.existing = Existing::Resume;
+        let (s, asked) = run_with(req, Answer::Abort);
+        assert_eq!(asked, 0);
+        assert!(
+            root.join("a").exists(),
+            "the source is never removed unasked"
+        );
+        assert_eq!(s.left, 1);
+        assert!(
+            s.describe(Kind::Move)
+                .contains("1 left where it was: already there"),
+            "{}",
+            s.describe(Kind::Move)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn answering_update_at_a_question_applies_it_to_the_rest() {
         let root = tmp("update-answer");
         let dst = root.join("dst");
@@ -1698,6 +1930,101 @@ mod tests {
             "older there: replaced"
         );
         assert_eq!((s.done, s.skipped), (1, 1));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_summary_says_when_its_job_ran_without_a_journal() {
+        let mut s = Summary {
+            done: 1,
+            ..Summary::default()
+        };
+        assert_eq!(s.describe(Kind::Copy), "1 copied");
+        s.journal_off = Some("permission denied".into());
+        assert_eq!(
+            s.describe(Kind::Copy),
+            "1 copied; safe operations off for this job: permission denied"
+        );
+    }
+
+    #[test]
+    fn with_safe_operations_a_cancelled_new_copy_leaves_nothing_under_any_name() {
+        let root = tmp("safe-cancel");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        // Big enough that the cancel lands before the copy ends even on a loaded machine:
+        // with 8 MiB the rest was sometimes copied before the test thread ran, and a
+        // copy that completes is rightly kept. Sparse, so it costs nothing to make.
+        let big = File::create(root.join("big")).unwrap();
+        big.set_len(1 << 30).unwrap();
+        drop(big);
+        let mut req = Request::copy(vec![root.join("big")], dst.clone());
+        req.safe = true;
+        let h = start(req);
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                // Stop it as soon as it starts writing.
+                Event::Progress { .. } => h.cancel(),
+                Event::Done(_) => break,
+                _ => {}
+            }
+        }
+        let left: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(
+            left.is_empty(),
+            "nothing under the real name or a temporary one: {left:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn two_jobs_at_once_each_write_the_way_their_request_says() {
+        let root = tmp("safe-per-job");
+        let (on, off) = (root.join("on"), root.join("off"));
+        fs::create_dir_all(&on).unwrap();
+        fs::create_dir_all(&off).unwrap();
+        let src: Vec<PathBuf> = (0..20)
+            .map(|i| {
+                let p = root.join(format!("f{i}"));
+                fs::write(&p, vec![b'x'; 64 << 10]).unwrap();
+                p
+            })
+            .collect();
+        let mut a = Request::copy(src.clone(), on.clone());
+        a.safe = true;
+        let mut b = Request::copy(src, off.clone());
+        b.safe = false;
+        let (ha, hb) = (start(a), start(b));
+        for h in [ha, hb] {
+            while !matches!(
+                h.events.recv_timeout(Duration::from_secs(20)).unwrap(),
+                Event::Done(_)
+            ) {}
+        }
+        let written = WRITING.lock().unwrap().clone();
+        let names = |dir: &Path| -> Vec<String> {
+            written
+                .iter()
+                .filter(|p| p.parent() == Some(dir))
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+        let (safe_names, plain_names) = (names(&on), names(&off));
+        assert_eq!((safe_names.len(), plain_names.len()), (20, 20));
+        assert!(
+            safe_names.iter().all(|n| n.contains(".xdevcmd-part-")),
+            "the safe job writes every file under a temporary name: {safe_names:?}"
+        );
+        assert!(
+            plain_names.iter().all(|n| !n.contains(".xdevcmd-part-")),
+            "the other writes in place: {plain_names:?}"
+        );
+        assert_eq!(fs::read_dir(&on).unwrap().count(), 20);
+        assert_eq!(fs::read_dir(&off).unwrap().count(), 20);
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1911,7 +2238,8 @@ mod tests {
         let dst = root.join("dst");
         fs::create_dir_all(&dst).unwrap();
         let big = root.join("big.bin");
-        fs::write(&big, vec![7u8; 24 * 1024 * 1024]).unwrap();
+        // Sparse and large, so the cancel lands mid-copy even on a loaded machine.
+        File::create(&big).unwrap().set_len(1 << 30).unwrap();
 
         let h = start(Request::copy(vec![big], dst.clone()));
         let mut cancelled_at_progress = false;

@@ -10,6 +10,150 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **Between the panes and the shell** (docs/shell.md). In the file panes: **Alt+G** takes
+  the pane to the shell's directory (the reverse of Alt+C); **Alt+Enter** or
+  **Ctrl+Enter** (and **Type into the shell** in the files' right-click menu) types the
+  marked names into the shell's command line, quoted for that shell, without Enter.
+  `[terminal] follow` (off by default) lets the file pane used last follow the shell's
+  `cd`, at the prompt only, never the other way.
+- **One check before anything is typed into a shell**, for Alt+C, typed names and the
+  user menu (Shift+F9): a
+  shell surely at its prompt gets it at once (`[terminal] send_when_idle`, on by
+  default); a program running there, or `ssh`, gets nothing and xdevcmd offers **Open a
+  new shell** in the pane's directory instead; when it cannot tell (Windows without
+  prompt marks) it asks, with **Send to this shell** as well.
+- **xdevcmd reads what the shell says about itself**: OSC 7 and OSC 9;9 (its directory)
+  and OSC 133 prompt marks, from snippets for bash, zsh, fish, PowerShell and cmd in
+  docs/shell.md (only bash's has been run). Linux reads the directory from `/proc` and
+  ignores OSC 7; macOS asks `/usr/sbin/lsof` when a key needs it; Windows has only
+  what the shell reports. What is trusted, and for what: docs/security.md.
+- **Clicks and drags inside the terminal go to a program that asked for the mouse**
+  (vim with `mouse=a`, htop, Claude Code), in the encoding it asked for, as the wheel
+  already did. Otherwise a click there is as before.
+- **Shift+F12: the shell's history in the viewer** (copy mode). Everything the focused
+  shell kept, and its screen, opens in the F3 viewer at its end: read, `/` search, drag
+  and `y` to copy (OSC 52). It is held in memory only; nothing of a shell's output is
+  written to disk. Works from inside the shell, and from the files on the shell last in
+  focus. Alt+X F12 where Shift+F12 does not arrive; macOS Terminal.app's Shift+F12 is
+  understood as it is. Esc goes back where you were.
+- **A right-click on a terminal tab** opens a small menu for that tab: View history,
+  Save history as…, Close tab, each with its key. Inside the shell a right-click stays
+  the program's.
+- **The viewer saves and goes to a line.** F2 is Save as…: a shell's history is offered
+  as `xdevcmd-history-<date>-<time>.txt` in the shell's directory and written readable
+  by you only (`0600`, Unix); a file is copied under the name given. A name that exists
+  is asked about first; read-only and restricted modes refuse. `:` or Ctrl+G goes to a
+  line (`40`) or a share (`50%`), and in hex to an offset (`0x1f00`); past the end goes
+  to the end and says so. A message on the viewer's last row now always shows, keys
+  making room for it.
+- **`[terminal] scrollback`**: how many lines of history each shell keeps, 100 to 9999
+  (5000 as before), for the wheel and Shift+F12. In Settings → Terminal with what a full
+  history costs at the window's width (vt100 keeps 32 bytes a cell: 9999 lines at 120
+  columns is about 37 MB a shell). Applies to shells started after the change.
+- **Sharp pictures in quick view** where the terminal draws them itself: the Kitty
+  graphics protocol (kitty, Ghostty), iTerm2's inline images (iTerm2, WezTerm) and sixel
+  (Windows Terminal, foot). Half blocks stay everywhere else, macOS Terminal.app and
+  tmux included. `[viewer] images` (also in Settings) chooses: auto, kitty, iterm2,
+  sixel or blocks. Sixel is drawn pixel for pixel, so only where the terminal gives its
+  cell size (Windows Terminal's is fixed); elsewhere half blocks, and Usage says so.
+- **Safe operations** (`[general] safe_operations`, on by default): every copy writes
+  under a hidden temporary name and renames when complete, so no file is ever left cut
+  short under its real name, whatever ends xdevcmd; a journal lets the next start clean
+  up after a killed run, put rename many's files back, and offer to continue the job:
+  what is already there and identical is skipped, anything else there is asked about.
+
+- **Shift+F10** (and the Menu key, where the terminal reports it) opens the right-click
+  menu for the row under the cursor, at that row.
+- **Alt+X, then an F key**, does what Shift and that key do (Alt+X F8 is Shift+F8,
+  Alt+X F10 the right-click menu): for terminals that send no Shift+F keys, such as
+  macOS Terminal.app.
+- **xdevcmd says which terminal it runs in** (from the environment, or by asking the
+  terminal its name and kind, which works over SSH) and how it draws pictures: on the
+  status line at start, in Usage (Shift+F1) and in About.
+- **A crash log**: if xdevcmd crashes it writes what happened to its state directory and
+  says where, to attach to an issue; nothing is sent. A failure in a background task
+  is logged the same way and xdevcmd goes on, saying where the details are.
+- **`--print-completions bash|zsh|fish|powershell` and `--print-man`**: tab completion
+  and a manual page, for packages to install.
+- About links the Releases page (xdevcmd never looks for updates itself).
+- **The wheel reaches full-screen programs in the terminal panel**: to a program that
+  asked for the mouse (Claude Code, vim, htop) as the mouse; as arrow keys to one that
+  did not (less, man). In a plain shell it still scrolls the history.
+
+### Changed
+- **The name, spelled out: xDev Commander.** The one-line description is now "xDev
+  Commander: a cross-platform, two-pane terminal file manager that extends your shell."
+  (`--help`, About, the README, GitHub, crates.io, Scoop and winget). On Windows, Task
+  Manager and the taskbar show "xDev Commander". The program is still `xdevcmd`.
+- **Installing**: `cargo install xdevcmd --locked`, from crates.io, from 0.3.0. The
+  package is now called `xdevcmd` (it was `xdevcmd-tui`, never published), and its engine
+  `xdevcmd-core` is published beside it, with no stable API of its own. The command is
+  still `xdevcmd`. From the repository: `cargo install --git
+  https://github.com/nci-gis/rust-commander xdevcmd --locked` (the last word was
+  `xdevcmd-tui`). Scoop and winget manifests are ready in `packaging/`, for after the
+  release.
+- **Alt+C and the user menu with a program running in the shell** no longer only say so
+  on the status line: they ask, offering to open a new shell in the pane's directory
+  instead. On Windows, where xdevcmd cannot tell without prompt marks, they ask too.
+- **Inside the terminal panel, xdevcmd takes only F12, Shift+F12 and Alt+X** (keymap
+  A). Every other key is the program's: Alt+N, Alt+S, Alt+D, Alt+W, Alt+O, Alt+T, Alt+C,
+  Alt+Z, the Alt+R group, Alt+Shift+arrows, Alt+1…9 and Ctrl+PgUp/PgDn no longer act
+  when typed into the shell, so readline's Alt+D, Alt+C, Alt+T, Alt+N and Alt+1…9 work
+  there. From the files they do what they did. To use one on the shell, press Alt+X
+  first (Alt+X Alt+S splits the shell); anything else after Alt+X goes to the program.
+  F1…F11 now reach the program too (mc, htop); before, no F-key did.
+- **xdevcmd will not start inside its own terminal panel**: it says it is already
+  running and that F12 goes back to it. Only that terminal counts: a new window started
+  from the panel (`code .`, `kitty &`) starts xdevcmd as usual. On Windows, where the
+  terminal cannot be told apart, xdevcmd starts and says on its status line that it was
+  started from a panel.
+- **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and
+  clean up, and the session is saved. Before, xdevcmd was killed on the spot.
+- **F10 with jobs running waits until they have cleaned up**, and asks again if one is
+  stuck after five seconds, instead of quitting under it. While it waits, the screen goes
+  on drawing and says how many jobs it is waiting for.
+
+### Security
+- **A few bytes of output could freeze xdevcmd.** The terminal panel's emulator, vt100
+  0.16, spent most of a second on a single `ESC [ 65535 @` (insert that many blanks),
+  and the whole interface waited on it: a file of them shown with `cat`, or a server's
+  banner over `ssh`, stopped xdevcmd for minutes. vt100 is now 0.18, where it takes
+  microseconds; the panel is drawn by xdevcmd's own code, and `tui-term` is no longer a
+  dependency.
+- **Crash logs and the safe-operations journal were readable by other users** on a shared
+  machine; both name files by their full paths. They are now the user's alone (`0600`,
+  and the journal's directory `0700`), and a crash log writes the home directory as `~`.
+- **Tidying up after a killed run went around read-only and `--root`** in the engine:
+  only the interface checked read-only, and nothing checked the root. The engine now
+  leaves every journal alone in read-only mode, and one that names a place outside the
+  root for a run that may go there.
+
+### Fixed
+- **Long lines in dialogs and F1 were cut off.** About's description lost its middle to
+  "…" in a window under about 115 columns, and F1's descriptions ran off the right edge.
+  A sentence now wraps at spaces (dialogs at 72 columns at most); F1's continue under
+  their own column. Paths are still shortened in the middle, as before.
+- **Settings → Save said where it saved in Windows' internal form**, `\\?\C:\…`, and F1's
+  Settings page showed the config file the same way. Both show `C:\…` now.
+- **Inside GNU screen, xdevcmd's start-up question about pictures became screen's status
+  line.** It is no longer asked inside screen (as inside tmux), also under `sudo`, where
+  `TMUX` and `STY` are dropped but `TERM` says it. A reply arriving after the start-up
+  wait is now read and kept, instead of reaching the shell as typed keys.
+- **The user menu's `%f`/`%s` could pass a file named like an option** (`-rf`) to the
+  command as an option. Such a name now gets `./` in front, as typed names do, and a
+  name that is not UTF-8 stops the command instead of being typed changed.
+- **A pipeline whose first program had ended** (`git log | less` once git is done) was
+  taken for a shell at its prompt on Linux, so Alt+C typed into it. It is a running
+  program now, and a `/proc` answer that cannot be read counts as "cannot tell".
+- **Ctrl+Space (and Ctrl+@) reached a program in the terminal panel as a space**, not
+  the NUL a terminal sends: emacs' and zsh's set-mark did nothing.
+- **A click on a directory in the title of a pane split off below (Alt+D) did nothing**:
+  that title sits on the boundary between the panes, and the click started a drag of
+  the boundary instead. The names now take the click; the rest of the row still drags.
+- **The scrollbar looked dashed in macOS Terminal.app**, which leaves space between
+  lines; the bar is now solid there too.
+
 ## [0.2.1] - 2026-11-07
 
 ### Added

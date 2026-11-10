@@ -4,11 +4,14 @@ version.workspace = true
 description = "xdevcmd's engine: listing, file operations, archives, find, compare. No terminal code."
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-publish = false
+publish = true
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
@@ -23,8 +26,9 @@ zune-jpeg = "0.5.15"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 # A rename that never replaces what is there (renameat2 on Linux, renameatx_np on
-# macOS), without unsafe code here. Already in the tree through crossterm.
-rustix = { version = "1", features = ["fs", "process"] }
+# macOS), without unsafe code here. Already in the tree through crossterm. Also the
+# journal's lock (flock) and this machine's name (uname, "system").
+rustix = { version = "1", features = ["fs", "process", "system"] }
 
 # Windows' Recycle Bin and macOS' Trash are OS APIs, not a directory you can rename
 # into, so they get a crate. Linux keeps the implementation in ops.rs: it is tested
@@ -39,6 +43,7 @@ trash = "5.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSFileManager", "NSURL", "NSError", "NSString"] }
 
-# Released with xdevcmd-tui, never on its own; see release.toml.
+# Released and published with xdevcmd, never on its own; see release.toml. No tag of its
+# own: the one tag, v{{version}}, comes from xdevcmd.
 [package.metadata.release]
-release = false
+tag = false

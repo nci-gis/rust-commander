@@ -65,7 +65,9 @@ xdevcmd for yours, or see [keys.md](keys.md).
 
 - **In the viewer** (F3): **/** searches, **n** / **N** next / previous, **h** switches
   text and hex, **w** wraps lines, **y** copies the selected lines (or the top one),
-  **Y** the screen, **q** or **Esc** closes.
+  **Y** the screen, **:** or **Ctrl+G** goes to a line (`40`, `50%`, or in hex an
+  offset such as `0x1f00`), **F2** saves a copy under another name (a shell's history
+  readable by you only), **q** or **Esc** closes.
 - **Enter on a program or script** asks "Run it?" (Cancel first). **Run in a terminal
   tab** shows its output and keeps it after the program ends; Enter or Esc closes the
   tab.
@@ -84,9 +86,17 @@ xdevcmd for yours, or see [keys.md](keys.md).
   skip the same ones (like robocopy); leave them all; or replace them all. At an
   overwrite question, **U** applies the "only if newer" rule to the rest of the job.
 - A file being replaced stays as it was until its new copy is complete: cancelling
-  part-way leaves the old one.
+  part-way leaves the old one. With **Safe operations** (Settings → General, on by
+  default) a new file is written the same way, and if xdevcmd is killed in the middle of
+  a job, the next start cleans up and offers to continue it (what is identical is
+  skipped; you are asked about anything else already there). Closing the terminal stops
+  jobs tidily and saves the session. Details in [security.md](security.md#safe-operations).
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.
+  Pictures are sharp where the terminal can draw them itself (kitty, Ghostty, iTerm2,
+  WezTerm, Windows Terminal, foot), and drawn in half blocks elsewhere (macOS
+  Terminal.app, VS Code, inside tmux). `images` under `[viewer]` chooses or turns it
+  off.
 
 ### Renaming many files
 
@@ -136,9 +146,27 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 ## The terminal
 
 - A shell runs under the panes. **F12** goes into it and back.
-- **Alt+N** opens a new terminal tab. **Alt+S** / **Alt+D** split it.
+- Inside the shell, xdevcmd takes only **F12**, **Shift+F12** and **Alt+X**; every other
+  key is the program's (readline's Alt+D, emacs' F-keys, mc's F10).
+- **Alt+N** opens a new terminal tab. Inside the shell, press **Alt+X** first:
+  **Alt+X Alt+S** / **Alt+X Alt+D** split it, **Alt+X Alt+W** closes it, **Alt+X Alt+1**
+  goes to tab 1. Anything else after Alt+X, Enter too, goes to the program with it;
+  Esc cancels.
+- **Shift+F12** opens the shell's history in the viewer, at its end: read it, search it
+  with `/`, drag over lines and press `y` to copy them, **Esc** to go back. It stays in
+  memory; nothing of it is written to disk. **Alt+X F12** does the same where Shift+F12
+  does not arrive. While a full-screen program (vim, htop) is up, it shows that
+  program's screen only, and says so.
+- A **right-click on a terminal tab** opens its menu: View history, Save history as…,
+  Close tab, for that tab whichever has focus. Inside the shell a right-click is left
+  to the program.
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
+- The wheel scrolls back through a shell's history. A full-screen program gets the
+  wheel instead: as the mouse if it asked for it (Claude Code, vim, htop), otherwise as
+  arrow keys (less, man).
+- Typing `xdevcmd` in the panel does not start a second one inside the first: F12 goes
+  back to the one running.
 - Want your shell to follow you when you quit xdevcmd? See [shell.md](shell.md).
 
 ## Mouse
@@ -149,7 +177,11 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - Click a directory's name in a pane's path, at the top, to go there.
 - Drag a border to resize; double-click it to share it evenly between the two panes on
   either side (any others keep their size): two file panes, the file area and the
-  terminal, or two shells. Right-click for a menu. The wheel scrolls.
+  terminal, or two shells. Right-click for a menu, or **Shift+F10** (the Menu key too,
+  where the terminal reports it) for the same menu at the cursor's row. The wheel
+  scrolls.
+- **Alt+X, then an F key** does what Shift and that key do (Alt+X F8 is Shift+F8), for
+  terminals that do not send Shift+F keys, like macOS Terminal.app.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).

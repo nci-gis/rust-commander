@@ -17,6 +17,20 @@ users want Enter to open files.
 - **xdevcmd's edge (rcmd until 2026-11-07) is a combination, not a feature**: MIT, the Total Commander model,
   native Windows, one static binary to drop on a server, no network, nothing destructive
   done silently. Nothing below thins it.
+- **The name, and who it is for** (owner, 2026-11-10). **xDev Commander**, `xdevcmd` to
+  type. **x** = *extend* (it extends the shell, never replaces it: the shell keeps its
+  keys, its history search and its completion) and *cross-platform* (Windows native, macOS,
+  Linux). **Dev** = developers and devops: people who live in the terminal, build and
+  deploy from it. **Commander** = the two-pane file manager family (Total Commander,
+  Double Commander, One Commander, mc). The one-line description, chosen from six
+  candidates scored on what each says (Round 017's Do): "xDev Commander: a cross-platform,
+  two-pane terminal file manager that extends your shell."
+- **What only xdevcmd can do is join the shell to the panes.** It holds the shell's output
+  (in memory), knows the shell's directory and has file panes and a viewer in one
+  process. v0.4 builds on that: the shell's output turned into files to act on (item 30).
+- **The boundary for every idea: it ends in an action on a file.** A path in the shell's
+  output is xdevcmd's business; a URL, a commit hash, a process id or log analytics are
+  not (a log viewer or a plugin's).
 - **Make it pleasant before making it bigger.** macOS is a third of the platforms and
   is broken in three ways; themes and a Settings screen are what a first-time user
   touches. These come before any large feature.
@@ -41,7 +55,9 @@ were done first:
 
 ## Next, in this order
 
-**0.2.0 is out** (published by the owner on 2026-11-07). Rounds 001 and 003–013 are
+**0.2.0 is out** (published by the owner on 2026-11-07), **and 0.2.1** (2026-11-08). The
+owner uses 0.2.1 for a week or two before any next release is planned ("dùng 1-2 weeks
+đã"). Rounds 001 and 003–013 are
 Complete (013 closed by the owner on 2026-11-08); 002 is Superseded. Written the same day at the owner's request ("tạo plan cho
 những việc kế tiếp"), in this order:
 
@@ -91,7 +107,11 @@ những việc kế tiếp"), in this order:
    and keeps the half blocks. To settle in the round: the picture redrawn only when it
    changes (these protocols do not fit ratatui's cell diffing), nothing drawn under an
    open dialog or over the terminal panel, resizing, detection over SSH and inside tmux,
-   and a setting to turn it off. Starts when Round 013 is Complete.
+   and a setting to turn it off. Opened as [Round 014](cycles/Round_014.md) on
+   `feat/image-preview` (2026-11-08), after 0.2.1 was published. The owner added items
+   24–25 (saving on every way out, running jobs when quitting or when the terminal is
+   closed; 23, quitting from the terminal, was dropped) to do before the next release, likely **0.3.0** since it adds
+   features.
 3. **Packages** (item 8, S each), so nobody has to build from source:
    - `cargo binstall` metadata pointing at the release archives.
    - ~~Linux ARM (`aarch64-unknown-linux-musl`) added to the release builds~~: done
@@ -182,9 +202,17 @@ Rounds 001 and 003–009; the read-only finding in
 | 17 | Directory watching with the system's events, polling as fallback | M | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 18 | Copy/move "replace only if older" (robocopy) | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
 | 19 | Fuzzy Ctrl+F filter, best first | S | [013](cycles/Round_013.md) | done on `feat/v0.2.1` |
-| 20 | Sharp image previews: Kitty, iTerm2, sixel via `ratatui-image`, half blocks as fallback | M | — | next round, after 013 (owner, 2026-11-08); Terminal.app has none |
+| 20 | Sharp image previews: Kitty, iTerm2, sixel, half blocks as fallback | M | [014](cycles/Round_014.md) | In progress, our own code (owner's choice); local only, no release planned yet |
 | 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
 | 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
+| ~~23~~ | ~~Quit from the terminal panel~~ | — | — | dropped by the owner: inconsistent keys confuse more than they help |
+| 24 | Save the session on every way out, signals included | S | [014](cycles/Round_014.md) | done on `feat/image-preview` (local) |
+| 25 | Safe operations (a setting, on): temp-then-rename for every copy, a journal, clean-up and resume at the next start; proper quit waits; a closed terminal cancels, cleans, saves | M | [014](cycles/Round_014.md) | done on `feat/image-preview` (local) |
+| 26 | Terminal copy mode: history in the viewer (Shift+F12), Save as… and Go to line in the viewer, `[terminal] scrollback`, the terminal tab's menu; keymap A (only the F12 family is xdevcmd's inside the shell) | M | [015](cycles/Round_015.md) | done on `feat/terminal-history` (local), at Review for the owner's hand tests |
+| 27 | Shell ↔ pane bridge: the shell's directory on every system, go there, type names into the command line, `[terminal] follow` | M | [016](cycles/Round_016.md) | review: done on `feat/shell-bridge`, at Review for the owner's hand tests (macOS, Windows, fish) |
+| 28 | Release prep for 0.3.0: package `xdevcmd`, crates publishable, Scoop and winget templates | S | [017](cycles/Round_017.md) | review: done on `feat/release-0.3.0`, at Review for the owner's hand tests; publishing stays the owner's |
+| 29 | One directory history for panes and shells | M | — | v0.4 (owner, 2026-11-09) |
+| 30 | The shell's output to files: in the history view, a path (with `:line[:col]`, Python's and JS's trace forms, MSBuild's `(line,col)`, Windows paths) that exists on disk is marked; Enter takes the pane to it, F3/F4 open it at that line; **panelize** turns chosen lines (or a command's whole output: `rg -l`, `git status`, `find`) into a panel for F5/F6/F8. Paths resolved against the shell's directory when the command ran (prompt marks), never trusted beyond moving a pane | M | — | v0.4, the lead feature (owner, 2026-11-10) |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |
@@ -245,3 +273,4 @@ của bro"). The one name was chosen on 2026-11-07: **xdevcmd**.
 - **Total Commander's native plugins** (WFX/WCX DLLs) and **embedded Lua**: the first
   needs `unsafe` and runs Windows-only binaries in-process; the second runs plugin code
   in-process with no boundary.
+- The owner's word of 2026-11-09: **no SFTP; no plugins for now.**

@@ -1,0 +1,29 @@
+{
+    "version": "0.3.0",
+    "description": "xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell.",
+    "homepage": "https://github.com/nci-gis/rust-commander",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/nci-gis/rust-commander/releases/download/v0.3.0/xdevcmd-v0.3.0-x86_64-pc-windows-msvc.zip",
+            "hash": "FILL-FROM-SHA256SUMS",
+            "extract_dir": "xdevcmd-v0.3.0-x86_64-pc-windows-msvc"
+        }
+    },
+    "bin": "xdevcmd.exe",
+    "checkver": {
+        "github": "https://github.com/nci-gis/rust-commander"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/nci-gis/rust-commander/releases/download/v$version/xdevcmd-v$version-x86_64-pc-windows-msvc.zip",
+                "extract_dir": "xdevcmd-v$version-x86_64-pc-windows-msvc",
+                "hash": {
+                    "url": "https://github.com/nci-gis/rust-commander/releases/download/v$version/SHA256SUMS",
+                    "regex": "([a-fA-F0-9]{64})\\s+$basename"
+                }
+            }
+        }
+    }
+}

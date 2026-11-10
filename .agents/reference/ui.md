@@ -6,7 +6,7 @@
 
 ## Keys
 
-The one source of truth is `BINDINGS` in `crates/xdevcmd-tui/src/keys.rs`: each row holds an
+The one source of truth is `BINDINGS` in `crates/xdevcmd/src/keys.rs`: each row holds an
 action's config name, its help-screen group and description, and its default keys. The
 parser, the defaults, the F1 screen, the key bar and `--print-config` all read that table.
 To see the live set, press **F1** or run `xdevcmd --print-config`.

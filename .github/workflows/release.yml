@@ -30,7 +30,7 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           bad=0
           cargo_v=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "xdevcmd-tui") | .version')
+            | jq -r '.packages[] | select(.name == "xdevcmd") | .version')
           if [ "$cargo_v" != "$v" ]; then
             echo "::error::tag $GITHUB_REF_NAME, but Cargo.toml says $cargo_v"; bad=1
           fi
@@ -79,7 +79,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --locked -p xdevcmd-tui --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p xdevcmd --target ${{ matrix.target }}
         env:
           # xdevcmd.exe without its icon is a broken release, not a warning.
           XDEVCMD_REQUIRE_ICON: ${{ contains(matrix.target, 'windows') && '1' || '' }}

@@ -92,18 +92,29 @@ pub struct Outcome {
     pub errors: Vec<String>,
 }
 
-/// Carry out a plan from [`plan`].
-pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
+/// Carry out a plan from [`plan`]. `safe`: safe operations for this batch (a journal
+/// of the temporary names), taken from the setting by the caller.
+pub fn apply(moves: &[(PathBuf, PathBuf)], safe: bool) -> Outcome {
     let mut out = Outcome::default();
     if let Err(e) = crate::policy::guard_write() {
         out.errors.push(e.to_string());
         return out;
     }
-    let tag = std::process::id();
+    let tag = crate::journal::run_tag();
+    // Safe operations: between the two steps the files are under temporary names; a run
+    // killed there has them put back at the next start.
+    let mut journal = if safe {
+        crate::journal::Journal::begin("rename", &[], None, false).and_then(Result::ok)
+    } else {
+        None
+    };
     let mut parked: Vec<(PathBuf, &PathBuf, &PathBuf)> = Vec::new();
     for (i, (from, to)) in moves.iter().enumerate() {
         let dir = from.parent().unwrap_or(Path::new("."));
         let tmp = dir.join(format!(".xdevcmd-rename-{tag}-{i}"));
+        if let Some(j) = journal.as_mut() {
+            j.renamed(&tmp, from);
+        }
         if let Err(e) = crate::noreplace::rename_noreplace(from, &tmp) {
             out.errors.push(format!("{}: {e}", show(from)));
             // Put back what had already moved: half a batch is worse than none.
@@ -115,6 +126,8 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
         parked.push((tmp, from, to));
     }
     for (tmp, from, to) in parked {
+        // Crossed out of the journal once this step is over, however it went.
+        let _crossed = Unrename(journal.as_mut(), &tmp);
         // The system refuses a name that is taken in the same step as the rename, so a
         // file that appeared since the plan was made is never overwritten.
         match crate::noreplace::rename_noreplace(&tmp, to) {
@@ -144,6 +157,18 @@ pub fn apply(moves: &[(PathBuf, PathBuf)]) -> Outcome {
     out
 }
 
+/// Crosses a temporary name out of the journal when its step is over: renamed on, put
+/// back, or left (and reported).
+struct Unrename<'a>(Option<&'a mut crate::journal::Journal>, &'a Path);
+
+impl Drop for Unrename<'_> {
+    fn drop(&mut self) {
+        if let Some(j) = self.0.as_mut() {
+            j.unrenamed(self.1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,7 +196,7 @@ mod tests {
         let (d, paths) = dir("basic", &["a.txt", "b.txt", "c.txt"]);
         let moves = plan(&paths, "a.txt\nbee.txt\nc.txt\n").unwrap();
         assert_eq!(moves, vec![(d.join("b.txt"), d.join("bee.txt"))]);
-        assert_eq!(apply(&moves).renamed, 1);
+        assert_eq!(apply(&moves, false).renamed, 1);
         assert_eq!(body(&d.join("bee.txt")), "b.txt");
         let _ = fs::remove_dir_all(&d);
     }
@@ -181,7 +206,7 @@ mod tests {
         let (d, paths) = dir("swap", &["a", "b"]);
         let moves = plan(&paths, "b\na\n").unwrap();
         assert_eq!(
-            apply(&moves),
+            apply(&moves, false),
             Outcome {
                 renamed: 2,
                 errors: vec![]
@@ -229,7 +254,7 @@ mod tests {
         let moves = vec![(p[0].clone(), d.join("x")), (p[1].clone(), d.join("y"))];
         // Another program creates x between the plan and the renaming.
         fs::write(d.join("x"), "theirs").unwrap();
-        let out = apply(&moves);
+        let out = apply(&moves, false);
         assert_eq!(out.renamed, 1, "{:?}", out.errors);
         assert!(
             out.errors[0].contains("appeared meanwhile"),

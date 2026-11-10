@@ -44,6 +44,25 @@ fn nothing_writes_once_read_only_is_installed() {
         assert!(s.errors[0].contains("read-only"), "{:?}", s.errors);
     }
     assert!(xdevcmd_core::rename::rename(&d.join("f.txt"), "g.txt").is_err());
+    // Save as… of a shell's history, new name and replacement alike.
+    let saved = d.join("dst").join("history.txt");
+    let e = xdevcmd_core::document::save_bytes(&saved, b"h", false, true).unwrap_err();
+    assert!(e.to_string().contains("read-only"), "{e}");
+    assert!(xdevcmd_core::document::save_bytes(&d.join("f.txt"), b"h", true, true).is_err());
+
+    // A killed run's journal and its part file: tidying them is a write too.
+    let jdir = d.join("journal");
+    fs::create_dir_all(&jdir).unwrap();
+    let part = d.join(".f.txt.xdevcmd-part-2147483646-0");
+    fs::write(&part, b"half").unwrap();
+    let journal = jdir.join("2147483646-0.journal");
+    fs::write(&journal, format!("kind copy\npart {}\n", hex(&part))).unwrap();
+    xdevcmd_core::journal::init(jdir.clone());
+    assert!(xdevcmd_core::journal::recover().is_empty());
+    assert!(
+        journal.exists() && part.exists(),
+        "left for a run that may write"
+    );
 
     assert_eq!(fs::read(d.join("f.txt")).unwrap(), b"keep", "untouched");
     assert!(
@@ -51,4 +70,25 @@ fn nothing_writes_once_read_only_is_installed() {
         "nothing arrived"
     );
     let _ = fs::remove_dir_all(&d);
+}
+
+/// A path as a journal writes it: its bytes in hex (Unix), its UTF-16 units (Windows).
+fn hex(p: &std::path::Path) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        p.as_os_str()
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        p.as_os_str()
+            .encode_wide()
+            .map(|u| format!("{u:04x}"))
+            .collect()
+    }
 }

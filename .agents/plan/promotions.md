@@ -57,3 +57,14 @@ environment variables must say what is true. Only the name changed, mechanically
 and this log keep the old name, as history.
 **Promoted by**: XDevTeam (asked to allow it: "Cho sửa"). Written by Claude Code through
 the shell.
+
+## 2026-11-10: The package xdevcmd-tui → xdevcmd in `context/project.md`, `reference/testing.md`, `reference/ui.md`
+
+**Source**: [Round 017](cycles/Round_017.md), step 1; the owner's decision to rename the
+package and move `crates/xdevcmd-tui` to `crates/xdevcmd` (2026-11-09)
+**Rationale**: Canon must name the crate and its path as they are. Only the name/path
+mentions changed, mechanically: `project.md` (the layout line and `cargo run -p xdevcmd`),
+`testing.md` (the unit-test layer's crate name), `ui.md` (the path to `keys.rs`). No rule
+added or altered. Rounds, memory and this log keep the old name, as history.
+**Promoted by**: XDevTeam (authorised editing those mentions for this round, 2026-11-10).
+Written by Claude Code through the shell.

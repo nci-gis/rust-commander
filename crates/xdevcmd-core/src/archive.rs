@@ -284,6 +284,9 @@ pub trait Hooks {
     fn done(&mut self);
     fn skipped(&mut self, path: &Path, why: &str);
     fn failed(&mut self, path: &Path, e: &io::Error);
+    /// A temporary file is about to be made (`made`), or is gone: for safe
+    /// operations' journal.
+    fn part(&mut self, _p: &Path, _made: bool) {}
 }
 
 /// Where `rel` goes under `dest`, refusing a path whose existing directories include a
@@ -459,6 +462,7 @@ fn write_entry(
     hooks: &mut dyn Hooks,
 ) -> io::Result<bool> {
     let part = crate::ops::part_name(dst);
+    hooks.part(&part, true);
     let result = write_part(&part, size, mode, data, hooks).and_then(|complete| {
         if !complete {
             return Ok(false);
@@ -479,6 +483,7 @@ fn write_entry(
     if !matches!(result, Ok(true)) {
         let _ = fs::remove_file(&part);
     }
+    hooks.part(&part, false);
     result
 }
 
@@ -616,11 +621,10 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
             }
         }
     }
-    let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(".part");
-    let part = dest.with_file_name(name);
+    let part = crate::ops::part_name(dest);
+    hooks.part(&part, true);
     let result = write_archive(fmt, &part, &files, hooks);
-    match result {
+    let out = match result {
         Ok(true) => fs::rename(&part, dest),
         Ok(false) => {
             let _ = fs::remove_file(&part);
@@ -630,7 +634,9 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
             let _ = fs::remove_file(&part);
             Err(e)
         }
-    }
+    };
+    hooks.part(&part, false);
+    out
 }
 
 fn write_archive(

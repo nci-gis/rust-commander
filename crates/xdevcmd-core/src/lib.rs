@@ -19,6 +19,7 @@ pub mod format;
 pub mod fuzzy;
 pub mod glob;
 pub mod image;
+pub mod journal;
 pub mod listing;
 pub mod name_mask;
 pub mod noreplace;

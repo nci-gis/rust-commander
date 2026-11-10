@@ -71,6 +71,17 @@ arrive:
 → Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
 function keys**.
 
+**Shift+F keys do nothing in Terminal.app** (Shift+F8, Shift+F10, Shift+F2…).
+Terminal.app sends Shift+F5–F12 as other keys (F13–F20) and nothing at all for
+Shift+F1–F4. Use **Alt+X, then the F key** instead: Alt+X F8 is Shift+F8, Alt+X F10 the
+right-click menu, and so on for every Shift+F key; a badge shows Alt+X waiting. The one
+exception is **Shift+F12** (the shell's history): xdevcmd takes the key Terminal.app
+sends for it (a bare F17 or F20, depending on how it is counted) as Shift+F12. (Alt
+needs "Use Option as Meta key", above.) iTerm2, Ghostty and kitty send Shift+F keys as
+they are. To make Terminal.app send them itself: Settings → Profiles → Keyboard, **+**,
+the key with Shift, "Send Text": `\033[1;2P` `\033[1;2Q` `\033[1;2R` `\033[1;2S` for
+Shift+F1–F4.
+
 **Green or red backgrounds, hard-to-read text** in Terminal.app before macOS 26.
 Terminal.app there cannot show 24-bit colour and misreads it, so xdevcmd sends it 256
 colours. If you see this, `[theme] colors` or `XDEVCMD_COLORS` is probably set to
@@ -123,3 +134,11 @@ example a terminal viewer), or use F3.
 
 [Open an issue](https://github.com/nci-gis/rust-commander/issues) with your system,
 terminal and the `xdevcmd --show-keys` output.
+
+## xdevcmd crashed
+
+It writes what happened to a `crash-….log` file in its state directory
+(`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows) and
+says where, after the terminal is restored; it keeps the five newest. Please
+[open an issue](https://github.com/nci-gis/rust-commander/issues) and attach it — read it
+first: it may hold file names. Nothing is ever sent by xdevcmd itself.

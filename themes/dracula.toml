@@ -1,0 +1,21 @@
+# Dracula (https://draculatheme.com, MIT) for xdevcmd: an example theme file.
+# Copy it into themes/ beside your config.toml, or keep it in themes/ beside the
+# xdevcmd binary, then pick "dracula" in View > Theme... or with
+# [theme] name = "dracula". Start your own with: xdevcmd --print-theme dark
+base = "dark"
+background = "#21222c"
+panel = "#282a36"
+bar = "#191a21"
+border = "#44475a"
+border_active = "#bd93f9"
+accent = "#bd93f9"
+text = "#f8f8f2"
+text_dim = "#6272a4"
+directory = "#8be9fd"
+executable = "#50fa7b"
+symlink = "#ff79c6"
+archive = "#ffb86c"
+error = "#ff5555"
+marked = "#f1fa8c"
+cursor = "#343746"
+cursor_active = "#44475a"

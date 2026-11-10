@@ -18,7 +18,7 @@ Four layers:
 | | |
 |---|---|
 | `xdevcmd-core` unit tests | sorting, formatting, listing, `ops.rs`, `document.rs` |
-| `xdevcmd-tui` unit tests | layout, keymap, config, menu, base64 |
+| `xdevcmd` unit tests | layout, keymap, config, menu, base64 |
 | `tests/render.rs` | runs `--screenshot --keys=…` and asserts on the drawn frame; every platform |
 | `tests/pty.rs` | the real binary in a real pty, real key and mouse bytes in, the screen read back through vt100, assertions on the disk; Unix only |
 

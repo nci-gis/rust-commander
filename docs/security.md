@@ -40,14 +40,77 @@ your permissions. It was tested against attacks on all three before release.
   by a file created a moment earlier. Copying and moving write to a name found free
   only if it is still free; a file that appeared in between gets the usual overwrite
   question. Nothing is replaced without asking.
-- **Typing into the wrong program.** Alt+C and the user menu type a line into the
-  terminal only when a shell is at its prompt there, never into a program that owns
-  it — an editor, a password prompt, a program run in a terminal tab.
+- **Typing into the wrong program.** Alt+C, typing names (Alt+Enter) and the user menu
+  type into the terminal only when a shell is at its prompt there, never into a program
+  that owns it — an editor, a password prompt, `ssh`, a program run in a terminal tab.
+  When xdevcmd cannot tell, it asks first (see [The shell panel](#the-shell-panel)).
 - **A config file others can write.** xdevcmd refuses it on Unix, because it names the
   programs xdevcmd runs.
 
 No network access, no telemetry. Dependencies are checked for known vulnerabilities and
 licences (`cargo deny`) on every change and weekly.
+
+## Safe operations
+
+**What it is.** A setting, `[general] safe_operations` (Settings → General), on by
+default. With it, every copy writes the new file under a hidden temporary name beside
+its destination, `.name.xdevcmd-part-<run>-<n>`, and renames it into place only when it
+is complete; `<run>` is the process id and its start time, so a later process given
+the same id never takes another run's files for its own. Each job also keeps a small
+journal in xdevcmd's state directory (beside `session.toml`, in `journal/`): the
+machine, what the job is, and which directories it makes temporary files in. A job
+that ends while xdevcmd runs, finished, cancelled or failed, removes its journal.
+
+**How a dead run is told from a live one.** A job holds a lock on its journal for as
+long as it runs (on Windows, the journal is open with nobody else allowed to write to
+it), and the system lets go of it when the process ends, however it ends. At start-up
+xdevcmd tries each journal's lock: one it can take belongs to a run that is gone, and is
+tidied up; one it cannot is a job still running (another xdevcmd window) and is left
+alone. Where the file system has no locks (some network ones), the process id is
+asked instead. A journal written on another machine is always left alone: with a home
+directory shared over NFS, its job may be running there, and only that machine can
+tidy up after it.
+
+**What it covers.** F5 copy, F6 move (within a drive a move is a rename; across drives
+it is a copy, then the source removed once its copy is complete), Shift+F5 copy as,
+Alt+Y sync, extracting (F5 inside an archive, Alt+F9), Alt+F5 pack, and Shift+F2 rename
+many, whose files spend a moment under temporary names. Not covered, because nothing
+can be: Shift+F8 (there is nothing to keep), and F4 (your editor writes the file).
+
+**What it guarantees.** However xdevcmd ends — a crash, `kill -9`, a power cut — no file
+is ever left cut short under its real name: the real name holds either the old file
+or the complete new one. The next start finds the journal of the run that ended, removes
+its temporary files, puts rename many's files back under their names, and offers to
+continue the job. Continuing skips what is already there and identical (same size and
+date: what the first run finished), starts again the file that was cut short, and asks
+about any other file already there, never deciding for you: a file you chose to keep
+the first time is asked about again, not replaced because its source is newer. A move
+continues with the sources still there; a source whose identical copy is already at the
+destination (a move across drives stopped between the copy and the removal) is left
+where it is, and the summary says so. A delete continues with what is left.
+
+**What happens whatever the setting.** A file being *replaced* is always written under
+a temporary name first, so cancelling never loses the old one. Closing the terminal or
+losing SSH (SIGHUP), or SIGTERM, makes xdevcmd cancel its jobs, let them remove their
+temporary files (up to two seconds), save the session and end; a second signal ends it
+at once. F10 with jobs running asks first, cancels them and waits until they have
+cleaned up; if one is stuck after five seconds (a hung network drive) it asks again.
+
+**Limits.**
+- Nothing is resumed from the middle of a file: a file cut short starts again.
+  Extracting and packing are not resumed; they are started again.
+- A replacement needs room for the new file until it is renamed over the old one.
+- Some network and FUSE file systems do not allow a rename into place, or do not make it
+  atomic.
+- On Windows a leading dot hides nothing: temporary files show until cleaned up, and the
+  terminal's close button is not caught yet (the next start cleans up instead).
+- Temporary files are cleaned up by the next start of xdevcmd on that machine and
+  account; a run that never starts again leaves them. With a home directory shared
+  between machines, each machine tidies up only after its own runs.
+- Off, a new file is written under its own name, as before: fastest, but a killed run
+  can leave it short.
+- Measured on Linux (2026-11-08): copying 10,000 files of 1 KiB took about 9 µs more
+  per file (the rename); one large file, no difference.
 
 ## Safe modes
 
@@ -71,6 +134,37 @@ flag can make the config stricter, never looser.
 These modes protect against mistakes and hostile files. They do not stop someone who
 can start xdevcmd without the flag. For a real boundary, use the operating system's own
 sandboxing.
+
+## The shell panel
+
+What xdevcmd learns about the shell, and how far it trusts each source
+([shell.md](shell.md#telling-xdevcmd-where-the-shell-is) has the details):
+
+- **From the system** (Linux `/proc`, macOS `/bin/ps`, and `/usr/sbin/lsof`, both by
+  their full paths, never through `PATH`; lsof only when a key asks, given two seconds):
+  trusted. When the system's answer cannot be read, the shell's state is unknown, never
+  idle: every send asks. On these
+  systems a directory reported in the shell's output is never used where the system can
+  say (Linux always; macOS when lsof answers).
+- **From the shell's output** (OSC 7, OSC 9;9, OSC 133 marks): any program printing
+  into the terminal — `cat` on a hostile file, a remote host over `ssh` — can print the
+  same sequences. So:
+  - A reported directory only ever **moves a file pane** (Alt+G, `follow`), and only to
+    a directory that exists on this machine and lies inside the root xdevcmd is confined
+    to. It is never typed, run or written to: typed names are bare only when the
+    system gave the shell's directory (full paths otherwise), and the history's Save
+    as… does not offer it. A host other than this machine's is ignored.
+  - A mark that says "running" (`C`) is believed everywhere, once the shell has sent a
+    prompt mark: it can only stop xdevcmd from typing. A mark that says "at the prompt" makes a shell idle **only on Windows**,
+    where the system does not say; on Linux and macOS a program the system sees always
+    wins. On Windows, then, a program that prints a prompt mark can make itself look
+    idle. If that matters to you there, set `[terminal] send_when_idle = false`, and
+    every send asks.
+- **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
+  character, or one that shell cannot be given safely, is refused whole. Names are
+  wrapped in bracketed paste when the shell asked for it, so its line editor takes them
+  as text, not keys. Nothing xdevcmd types ends with Enter except `cd` (Alt+C) and the
+  user menu's commands.
 
 ## The config file is trusted
 

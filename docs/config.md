@@ -30,6 +30,7 @@ confirm_transfer = true   # ask before copy and move start (delete always asks)
 delete_to_trash = true    # F8 uses the trash; Shift+F8 always deletes for good
 restore_session = true    # reopen last time's panes and tabs
 autosave_secs = 5         # save them this often when they change: 5-3600, or 0 = on quit
+safe_operations = true    # copies via a temporary name; a killed run is cleaned up (security.md)
 menu_bar = true           # the File | View | Help bar
 
 [files]
@@ -50,10 +51,20 @@ show = true
 height_percent = 30       # 10-90
 shell = ""                # empty: $SHELL, or %COMSPEC% (cmd.exe) on Windows
 max_terminals = 3         # shells across all tabs and splits (1-16)
+scrollback = 5000         # lines of history each shell keeps (100-9999), for the wheel
+                          # and Shift+F12; at most lines × columns × 32 bytes
+                          # (Settings shows it); applies to shells started after a change
+send_when_idle = true     # Alt+C, typed names and the user menu go to a shell surely
+                          # at its prompt without asking; false asks every time
+                          # (docs/shell.md)
+follow = false            # the file pane used last goes where the shell's cd goes, at
+                          # the prompt only; never the other way (docs/shell.md)
 
 [viewer]
 wrap = true
 tab_width = 4             # 1-16
+images = "auto"           # quick view's pictures: auto, kitty, iterm2, sixel or blocks
+                          # (sixel only where the terminal gives its cell size)
 
 [commands]
 editor = ""               # empty: $VISUAL, then $EDITOR, then vi (notepad on Windows)
@@ -107,9 +118,9 @@ blue-panel look of the DOS-era commanders; `high-contrast` is black and white wi
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). The release files come with three examples in `themes/`
-(Nord, Gruvbox dark, Solarized light), which work as they are when kept beside
-`xdevcmd`. To start your own, print a built-in theme with every colour listed:
+binary, for a portable copy). The release files come with seven examples in `themes/`
+(Dracula, Night Owl, Tokyo Night, Catppuccin Mocha, Nord, Gruvbox dark, Solarized light),
+which work as they are when kept beside `xdevcmd`. To start your own, print a built-in theme with every colour listed:
 
 ```bash
 mkdir -p ~/.config/xdevcmd/themes
@@ -181,6 +192,11 @@ Two actions given the same key here is an error, and so is a key that both runs 
 action and starts a group. Taking a key that xdevcmd uses by default is fine: that action
 loses it.
 
+`focus_terminal` and `terminal_history` work inside the shell, where xdevcmd takes only
+F12's family and every other key is the program's. They take only `F12`, `Shift+F12`,
+`Alt+x F12` and `Alt+x Shift+F12`; any other key for them (`Ctrl+t`, `Ctrl+x h`) is an
+error that says so, since it would take that key from the shell.
+
 ## Bookmarks
 
 ```toml
@@ -234,7 +250,8 @@ you name with `--cwd-file`, written on quit, it writes these and nothing more:
 
 | File | Where | What |
 |---|---|---|
-| `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit and every `autosave_secs`. Readable by you only. |
+| `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit, every `autosave_secs`, and when the terminal closes. Readable by you only. |
+| `journal/` | beside `session.toml` | Safe operations: one small file per running job, removed when it ends; what a killed run leaves is cleaned up at the next start. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside xdevcmd (Ctrl+D). Bookmarks in this config are not copied there. |
 | `xdevcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when xdevcmd ends; one left by a crash is removed at the next start, an hour on. |
 

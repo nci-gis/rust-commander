@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Rebuild assets/xdevcmd.ico and assets/about-logo.png from the SVGs. Needs `resvg` (cargo install --locked resvg).
-# The .ico is committed, so nobody needs this to build xdevcmd; run it after changing an SVG.
+# Rebuild crates/xdevcmd/assets/xdevcmd.ico and about-logo.png from the SVGs in assets/.
+# Needs `resvg` (cargo install --locked resvg).
+# Both are committed, so nobody needs this to build xdevcmd; run it after changing an SVG.
+# They live inside the crate because the build reads them and `cargo package` ships only
+# what is inside the crate.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+out=crates/xdevcmd/assets
 command -v resvg >/dev/null || { echo "resvg not found: cargo install --locked resvg" >&2; exit 1; }
 tmp=$(mktemp -d)
 trap 'rm -r -- "$tmp"' EXIT
@@ -12,7 +16,7 @@ for z in 24 32 48 64 128 256; do
   resvg -w "$z" -h "$z" assets/icon.svg "$tmp/$z.png"
 done
 # An .ico is a directory of images; PNG entries work on every Windows since Vista.
-python3 -I - "$tmp" assets/xdevcmd.ico <<'PY'
+python3 -I - "$tmp" "$out/xdevcmd.ico" <<'PY'
 import struct, sys
 src, out = sys.argv[1], sys.argv[2]
 sizes = [16, 24, 32, 48, 64, 128, 256]
@@ -26,8 +30,8 @@ for z, png in zip(sizes, pngs):
     data += png
 open(out, "wb").write(head + entries + data)
 PY
-echo "assets/xdevcmd.ico: $(wc -c < assets/xdevcmd.ico) bytes"
+echo "$out/xdevcmd.ico: $(wc -c < "$out/xdevcmd.ico") bytes"
 # The logo About draws (14 x 7 cells, one colour each), built into the binary; see
 # scripts/logo_pixels.py for why it is drawn by hand rather than shrunk from icon.svg.
-python3 -I scripts/logo_pixels.py assets/about-logo.png
-echo "assets/about-logo.png: $(wc -c < assets/about-logo.png) bytes"
+python3 -I scripts/logo_pixels.py "$out/about-logo.png"
+echo "$out/about-logo.png: $(wc -c < "$out/about-logo.png") bytes"

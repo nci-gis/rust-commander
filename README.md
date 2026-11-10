@@ -1,11 +1,13 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img alt="xdevcmd" src="assets/logo-light.svg" width="498">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nci-gis/rust-commander/main/assets/logo-dark.svg">
+    <img alt="xdevcmd" src="https://raw.githubusercontent.com/nci-gis/rust-commander/main/assets/logo-light.svg" width="498">
   </picture>
 </p>
 
-<p align="center">A terminal-style file commander, written in Rust.</p>
+<p align="center">xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell.</p>
+
+<p align="center"><sub>For developers and devops who live in the terminal.</sub></p>
 
 ```
   File   View   Help
@@ -43,16 +45,35 @@ F5 copy, F6 move, F8 delete. Runs on Linux, macOS and Windows.
 
 ## Install
 
+With Rust 1.88 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (from 0.3.0):
+
 ```bash
-cargo install --git https://github.com/nci-gis/rust-commander xdevcmd-tui --locked
+cargo install xdevcmd --locked
 ```
 
-Needs Rust 1.88 or newer. This installs the `xdevcmd` command.
+On Windows, with [Scoop](https://scoop.sh) or winget (planned; not available yet):
+
+```powershell
+scoop bucket add xdevcmd https://github.com/nci-gis/scoop-xdevcmd
+scoop install xdevcmd/xdevcmd
+```
+
+```powershell
+winget install XDevTeam.xdevcmd
+```
 
 Or download a ready-made build for Linux (x86_64 and ARM64), macOS or Windows from
-[Releases](https://github.com/nci-gis/rust-commander/releases). They are not signed, so
-macOS and Windows warn the first time: see
-[troubleshooting](docs/troubleshooting.md#macos).
+[Releases](https://github.com/nci-gis/rust-commander/releases): one program, nothing to
+install. They are not signed, so macOS and Windows warn the first time: see
+[troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md#macos).
+
+The newest code, from the repository:
+
+```bash
+cargo install --git https://github.com/nci-gis/rust-commander xdevcmd --locked
+```
+
+Each way installs the `xdevcmd` command.
 
 ## Quick start
 
@@ -85,7 +106,7 @@ xdevcmd ~/src /tmp       # or with two directories
 - Mouse: click, drag and drop, right-click menu
 - Read-only and restricted modes; no network, no telemetry
 
-The [guide](docs/guide.md) explains each one.
+The [guide](https://github.com/nci-gis/rust-commander/blob/main/docs/guide.md) explains each one.
 
 ## Configure
 
@@ -94,21 +115,21 @@ mkdir -p ~/.config/xdevcmd
 xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # all settings, with defaults
 ```
 
-Keep only the lines you change. See [docs/config.md](docs/config.md).
+Keep only the lines you change. See [docs/config.md](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md).
 
 ## Docs
 
-- [Guide](docs/guide.md): what xdevcmd does, by topic
-- [Keys](docs/keys.md): every key
-- [Config](docs/config.md): settings, bookmarks, your own commands
-- [Shell](docs/shell.md): stay in the directory you were in when you quit
-- [Security](docs/security.md): what xdevcmd protects against, and safe modes
-- [Troubleshooting](docs/troubleshooting.md): known problems on each system, and fixes
-- [Development](docs/development.md): build, test, contribute
+- [Guide](https://github.com/nci-gis/rust-commander/blob/main/docs/guide.md): what xdevcmd does, by topic
+- [Keys](https://github.com/nci-gis/rust-commander/blob/main/docs/keys.md): every key
+- [Config](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md): settings, bookmarks, your own commands
+- [Shell](https://github.com/nci-gis/rust-commander/blob/main/docs/shell.md): stay in the directory you were in when you quit
+- [Security](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md): what xdevcmd protects against, and safe modes
+- [Troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md): known problems on each system, and fixes
+- [Development](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md): build, test, contribute
 
 ## Licence
 
-[MIT](LICENSE). Developed by XDevTeam.
+[MIT](https://github.com/nci-gis/rust-commander/blob/main/LICENSE). Developed by XDevTeam.
 
 xdevcmd is written from scratch: a two-pane file manager with a terminal-style look and
 feel.

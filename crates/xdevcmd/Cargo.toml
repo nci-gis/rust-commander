@@ -1,0 +1,82 @@
+[package]
+name = "xdevcmd"
+version.workspace = true
+description.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = true
+# The integration tests stay in the repository: render.rs reads the top-level README,
+# which is not where a downloaded crate has it, and both need the repository's
+# fixtures and themes. 260 KB nobody installing the program uses.
+exclude = ["tests/"]
+
+# What `cargo release` does to the CHANGELOG; see release.toml at the top.
+[package.metadata.release]
+pre-release-replacements = [
+  { file = "../../CHANGELOG.md", search = "Unreleased", replace = "{{version}}", exactly = 1 },
+  { file = "../../CHANGELOG.md", search = "ReleaseDate", replace = "{{date}}", exactly = 1 },
+  { file = "../../CHANGELOG.md", search = "<!-- next-header -->", replace = "<!-- next-header -->\n\n## [Unreleased] - ReleaseDate", exactly = 1 },
+]
+
+[[bin]]
+name = "xdevcmd"
+path = "src/main.rs"
+
+[dependencies]
+# The exact version: the engine has no stable API of its own, and the two are released
+# together (cargo-release rewrites this pin; see release.toml).
+xdevcmd-core = { path = "../xdevcmd-core", version = "=0.3.0" }
+anyhow = "1"
+# How many cells a character takes, for clicks on the title's path. Already in the
+# tree through ratatui.
+unicode-width = "0.2"
+# crossterm is NOT a direct dependency on purpose: ratatui pins its own, and mixing
+# versions gives you two incompatible Event enums that look identical in the error
+# message. Use ratatui::crossterm instead.
+ratatui = "0.30"
+portable-pty = "0.9"
+# The shells' terminal emulator, drawn by our own few lines (pane/term.rs, `draw_screen`).
+# 0.18 at least: 0.16 spent most of a second on one 8-byte CSI 65535 @, holding the
+# parser's lock, so any `cat` of a hostile file froze xdevcmd (vt100-rust issue #42).
+# tui-term, which drew it before, still requires 0.16.
+vt100 = "0.18.1"
+toml = "1.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+# Directory changes from the system (inotify, FSEvents, ReadDirectoryChangesW) instead of
+# polling every second; polling stays as the fallback for network drives. CC0-1.0.
+notify = "8"
+# Sixel for quick view's pictures (Windows Terminal, foot, xterm). The Kitty and iTerm2
+# protocols are a few escape sequences of our own (graphics.rs); this is the one part
+# worth a crate: quantising a picture to a palette. MIT OR Apache-2.0.
+icy_sixel = "0.7"
+
+# Asking the terminal what it can draw (graphics.rs): a poll with a timeout on stdin,
+# which crossterm has not started reading yet. Already in the tree through crossterm.
+[target.'cfg(unix)'.dependencies]
+# Also: whether the terminal is hung up (app.rs, `tty_gone`), by `tcgetattr`; and the
+# name of the terminal xdevcmd starts in (`ttyname`, which needs "fs"), to tell its own
+# terminal panel from another window started from it (main.rs, `own_panel`).
+rustix = { version = "1", features = ["event", "process", "stdio", "termios", "fs"] }
+# SIGHUP and SIGTERM (the terminal closed, SSH lost): stop jobs, clean up, save the
+# session before going. Already in the tree through crossterm.
+signal-hook = "0.3"
+
+[dev-dependencies]
+tar = { version = "0.4.46", default-features = false }
+# Reads the Scoop manifest in packaging/ (tests/packaging.rs). Tests only.
+serde_json = "1"
+
+# A pty pair for `tty_gone`'s test. Tests only.
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1", features = ["pty", "fs"] }
+
+[build-dependencies]
+# The icon and version details in xdevcmd.exe. Does nothing for other targets.
+winresource = { version = "0.1.34", default-features = false }

@@ -130,6 +130,10 @@ that heading and starts a new, empty one here. -->
   root for a run that may go there.
 
 ### Fixed
+- **Long lines in dialogs and F1 were cut off.** About's description lost its middle to
+  "…" in a window under about 115 columns, and F1's descriptions ran off the right edge.
+  A sentence now wraps at spaces (dialogs at 72 columns at most); F1's continue under
+  their own column. Paths are still shortened in the middle, as before.
 - **Settings → Save said where it saved in Windows' internal form**, `\\?\C:\…`, and F1's
   Settings page showed the config file the same way. Both show `C:\…` now.
 - **Inside GNU screen, xdevcmd's start-up question about pictures became screen's status

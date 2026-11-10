@@ -36,6 +36,7 @@ mod usage;
 mod usermenu;
 mod viewer;
 mod watch;
+mod wrap;
 
 /// Set in the terminal panel's shells to the pid of the xdevcmd they belong to.
 pub(crate) const PANEL_VAR: &str = "XDEVCMD_PANEL";

@@ -472,18 +472,24 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut Modal) {
     }
 }
 
+/// A sentence in a dialog wraps at this many columns; a line with no spaces in it (a
+/// path, a URL) keeps the room it needs, up to the dialog's widest, and is shortened in
+/// the middle beyond that.
+const PROSE_WIDTH: usize = 72;
+
 fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     let th = theme::t();
     let accent = if a.danger { th.err } else { th.accent };
     let shown = a.body.len().min(area.height.saturating_sub(6) as usize);
-    let text_w = a
-        .body
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0)
-        .clamp(40, 100) as u16
-        + 4;
+    let need = |l: &String| {
+        let n = l.chars().count();
+        if l.trim().contains(' ') {
+            n.min(PROSE_WIDTH)
+        } else {
+            n
+        }
+    };
+    let text_w = a.body.iter().map(need).max().unwrap_or(0).clamp(40, 100) as u16 + 4;
     // Room for a picture on the left, with two columns before the text.
     let size = |p: &xdevcmd_core::image::Picture| (p.width as u16 + 2, p.height.div_ceil(2) as u16);
     let fits = |p: &&xdevcmd_core::image::Picture| {
@@ -498,6 +504,15 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     let picture = a.pictures.iter().find(fits).or(a.pictures.last());
     let (pic_w, pic_h) = picture.map_or((0, 0), size);
     let w = text_w + pic_w;
+    // Each line wrapped to the room it gets once the dialog fits the window; a line
+    // indented keeps its indent on the lines it continues on.
+    let room = usize::from(w.min(area.width).saturating_sub(2 + pic_w));
+    let body: Vec<String> = a
+        .body
+        .iter()
+        .flat_map(|l| crate::wrap::plain(l, room, l.len() - l.trim_start().len()))
+        .collect();
+    let shown = body.len().min(area.height.saturating_sub(6) as usize);
     let h = (shown as u16).max(pic_h) + 4;
     let r = centered(area, w, h);
     let full = frame_box(frame, r, &a.title, accent);
@@ -514,10 +529,10 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
         full.width.saturating_sub(pic_w),
         full.height,
     );
-    for (i, line) in a.body.iter().take(shown).enumerate() {
-        let last = i + 1 == shown && shown < a.body.len();
+    for (i, line) in body.iter().take(shown).enumerate() {
+        let last = i + 1 == shown && shown < body.len();
         let text = if last {
-            format!("\u{2026} and {} more", a.body.len() - shown + 1)
+            format!("\u{2026} and {} more", body.len() - shown + 1)
         } else {
             line.clone()
         };

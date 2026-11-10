@@ -25,27 +25,49 @@ const TROUBLESHOOTING: &str = concat!(
 
 const TABS: [&str; 2] = ["Keys", "Settings"];
 
+/// A line of a page and where its continuation lines start when it is wrapped: under
+/// the description, for a key's row; under the line's own indent otherwise.
+pub struct Row(Line<'static>, usize);
+
+impl From<Line<'static>> for Row {
+    fn from(line: Line<'static>) -> Self {
+        let text = line.to_string();
+        let indent = text.len() - text.trim_start_matches(' ').len();
+        Row(line, indent)
+    }
+}
+
 pub struct Help {
     tab: usize,
     scroll: [usize; 2],
-    pages: [Vec<Line<'static>>; 2],
+    pages: [Vec<Row>; 2],
+    /// The pages wrapped to the width they were last drawn at, and that width: what is
+    /// shown, scrolled and counted.
+    shown: [Vec<Line<'static>>; 2],
+    shown_width: u16,
     height: usize,
     tab_rects: [Rect; 2],
 }
 
 impl Help {
     pub fn new(settings: &Settings, outcome: &Outcome) -> Self {
+        let pages = [keys_page(settings), settings_page(settings, outcome)];
+        let shown = pages
+            .each_ref()
+            .map(|p| p.iter().map(|r| r.0.clone()).collect());
         Self {
             tab: 0,
             scroll: [0, 0],
-            pages: [keys_page(settings), settings_page(settings, outcome)],
+            pages,
+            shown,
+            shown_width: 0,
             height: 20,
             tab_rects: [Rect::ZERO; 2],
         }
     }
 
     fn scroll_by(&mut self, delta: isize) {
-        let max = self.pages[self.tab].len().saturating_sub(self.height) as isize;
+        let max = self.shown[self.tab].len().saturating_sub(self.height) as isize;
         let s = &mut self.scroll[self.tab];
         *s = (*s as isize + delta).clamp(0, max) as usize;
     }
@@ -66,7 +88,7 @@ impl Help {
     }
 
     pub fn on_key(&mut self, k: KeyEvent) -> Close {
-        let max = self.pages[self.tab].len().saturating_sub(self.height);
+        let max = self.shown[self.tab].len().saturating_sub(self.height);
         let s = &mut self.scroll[self.tab];
         match k.code {
             KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('q') => return Close::Close,
@@ -129,7 +151,22 @@ impl Help {
 
         let body = Rect::new(inner.x, inner.y + 2, inner.width, inner.height - 3);
         self.height = body.height as usize;
-        let page = &self.pages[self.tab];
+        if self.shown_width != body.width {
+            // The first line on screen stays first, as near as wrapping allows.
+            let tops = self.scroll.map(|s| s as f64);
+            let before = self.shown.each_ref().map(|p| p.len().max(1) as f64);
+            self.shown_width = body.width;
+            let width = usize::from(body.width);
+            self.shown = self.pages.each_ref().map(|p| {
+                p.iter()
+                    .flat_map(|Row(line, hang)| crate::wrap::line(line, width, *hang))
+                    .collect()
+            });
+            for t in 0..2 {
+                self.scroll[t] = (tops[t] / before[t] * self.shown[t].len() as f64) as usize;
+            }
+        }
+        let page = &self.shown[self.tab];
         let max = page.len().saturating_sub(self.height);
         self.scroll[self.tab] = self.scroll[self.tab].min(max);
         for (i, line) in page
@@ -193,7 +230,7 @@ fn heading(text: &str) -> Line<'static> {
 /// The key column of F1: wide enough for "Alt+Shift+Right · Alt+r Right".
 const KEYS_WIDTH: usize = 30;
 
-fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
+fn keys_page(settings: &Settings) -> Vec<Row> {
     let th = theme::t();
     let mut out = Vec::new();
     let name_width = crate::keys::BINDINGS
@@ -207,17 +244,17 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
         .map(|c| crate::keys::key_name(c.0, c.1));
     // Keymap A in one line, from the live keymap: what xdevcmd takes inside the shell.
     for sentence in crate::keys::shell_rule(&settings.keymap) {
-        out.push(Line::from(Span::styled(
+        out.push(Row::from(Line::from(Span::styled(
             format!("  {sentence}"),
             Style::new().fg(th.fg_dim),
-        )));
+        ))));
     }
-    out.push(Line::raw(""));
+    out.push(Row::from(Line::raw("")));
     for (i, (group, rows)) in crate::keys::grouped().into_iter().enumerate() {
         if i > 0 {
-            out.push(Line::raw(""));
+            out.push(Row::from(Line::raw("")));
         }
-        out.push(heading(group));
+        out.push(Row::from(heading(group)));
         for b in rows {
             let keys = settings.keymap.keys_for(b.action);
             // Nine Alt+digit keys would push the row off the screen: first … last.
@@ -268,7 +305,7 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
                 };
                 spans.push(Span::styled(hint, Style::new().fg(th.fg_dim)));
             }
-            out.push(Line::from(spans));
+            out.push(Row(Line::from(spans), 4 + KEYS_WIDTH + 1 + name_width + 1));
         }
     }
 
@@ -376,28 +413,31 @@ fn keys_page(settings: &Settings) -> Vec<Line<'static>> {
         ),
     ];
     for (title, rows) in fixed {
-        out.push(Line::raw(""));
-        out.push(heading(title));
+        out.push(Row::from(Line::raw("")));
+        out.push(Row::from(heading(title)));
         for (k, what) in *rows {
-            out.push(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(
-                    format!("{k:<KEYS_WIDTH$} "),
-                    Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(what.to_string(), Style::new().fg(th.fg)),
-            ]));
+            out.push(Row(
+                Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(
+                        format!("{k:<KEYS_WIDTH$} "),
+                        Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(what.to_string(), Style::new().fg(th.fg)),
+                ]),
+                4 + KEYS_WIDTH + 1,
+            ));
         }
     }
-    out.push(Line::raw(""));
-    out.push(Line::from(Span::styled(
+    out.push(Row::from(Line::raw("")));
+    out.push(Row::from(Line::from(Span::styled(
         "  \u{2022} marks a key you changed in config.toml. Rebind under [keys], using the name after the keys.",
         Style::new().fg(th.fg_dim),
-    )));
+    ))));
     out
 }
 
-fn settings_page(settings: &Settings, outcome: &Outcome) -> Vec<Line<'static>> {
+fn settings_page(settings: &Settings, outcome: &Outcome) -> Vec<Row> {
     let th = theme::t();
     let mut out = Vec::new();
 
@@ -418,29 +458,29 @@ fn settings_page(settings: &Settings, outcome: &Outcome) -> Vec<Line<'static>> {
             Style::new().fg(th.err).add_modifier(Modifier::BOLD),
         ),
     };
-    out.push(heading("Config file"));
-    out.push(Line::from(vec![
+    out.push(Row::from(heading("Config file")));
+    out.push(Row::from(Line::from(vec![
         Span::raw("    "),
         Span::styled(status, style),
-    ]));
-    out.push(Line::from(Span::styled(
+    ])));
+    out.push(Row::from(Line::from(Span::styled(
         "    xdevcmd --print-config   writes every setting;   xdevcmd --check-config   validates the file",
         Style::new().fg(th.fg_dim),
-    )));
-    out.push(Line::raw(""));
+    ))));
+    out.push(Row::from(Line::raw("")));
 
     // What is in effect, which a command-line flag may have made stricter than the file.
-    out.push(heading("In effect"));
+    out.push(Row::from(heading("In effect")));
     let mode_style = if settings.mode.read_only() {
         Style::new().fg(th.err).add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(th.fg)
     };
-    out.push(Line::from(vec![
+    out.push(Row::from(Line::from(vec![
         Span::styled("    mode      ", Style::new().fg(th.fg_dim)),
         Span::styled(settings.mode.label().to_string(), mode_style),
-    ]));
-    out.push(Line::from(vec![
+    ])));
+    out.push(Row::from(Line::from(vec![
         Span::styled("    root      ", Style::new().fg(th.fg_dim)),
         Span::styled(
             settings
@@ -449,8 +489,8 @@ fn settings_page(settings: &Settings, outcome: &Outcome) -> Vec<Line<'static>> {
                 .map_or_else(|| "none".to_string(), |r| r.display().to_string()),
             Style::new().fg(th.fg),
         ),
-    ]));
-    out.push(Line::raw(""));
+    ])));
+    out.push(Row::from(Line::raw("")));
 
     // The values as loaded, in the file's own syntax. Keys are on the other tab.
     let render = |c: &Config| {
@@ -463,12 +503,12 @@ fn settings_page(settings: &Settings, outcome: &Outcome) -> Vec<Line<'static>> {
     for raw in render(&settings.config).lines() {
         let line = raw.trim_end();
         if line.is_empty() {
-            out.push(Line::raw(""));
+            out.push(Row::from(Line::raw("")));
             continue;
         }
         if line.starts_with('[') {
             section = line.to_string();
-            out.push(heading(line));
+            out.push(Row::from(heading(line)));
             continue;
         }
         let changed = !defaults.contains(&(section.clone(), line.to_string()));
@@ -494,13 +534,13 @@ fn settings_page(settings: &Settings, outcome: &Outcome) -> Vec<Line<'static>> {
                 }
             }
         }
-        out.push(Line::from(spans));
+        out.push(Row::from(Line::from(spans)));
     }
-    out.push(Line::raw(""));
-    out.push(Line::from(Span::styled(
+    out.push(Row::from(Line::raw("")));
+    out.push(Row::from(Line::from(Span::styled(
         "  \u{2022} marks a value that differs from the default.",
         Style::new().fg(th.fg_dim),
-    )));
+    ))));
     out
 }
 

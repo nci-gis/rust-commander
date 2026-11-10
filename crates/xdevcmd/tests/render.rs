@@ -3726,6 +3726,49 @@ fn f9_opens_the_menu_bar_and_left_right_move_along_it() {
     );
 }
 
+/// A sentence too long for the dialog wraps at spaces instead of losing its middle to
+/// "…": About's description, 89 characters, in an 80-column window.
+#[test]
+fn about_wraps_its_description_instead_of_cutting_it() {
+    let (a, b) = fixture();
+    let s = shot_keys("80x30", "F9,Left,Up,Enter", &a, &b);
+    assert!(s.contains("xDev Commander: a cross-platform,"), "{s}");
+    assert!(s.contains("extends your shell."), "the end is there\n{s}");
+    let line = s
+        .lines()
+        .find(|l| l.contains("xDev Commander"))
+        .expect("the description");
+    assert!(!line.contains('\u{2026}'), "not cut in the middle\n{s}");
+}
+
+/// F1 at 80 columns: a key's description too long for its row goes on below, under the
+/// description column, instead of running off the edge.
+#[test]
+fn f1_wraps_long_descriptions_under_their_column() {
+    let (a, b) = fixture();
+    let s = shot_keys("80x40", "F1", &a, &b);
+    let lines: Vec<&str> = s.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains("quit_no_cd"))
+        .expect("the quit_no_cd row");
+    let desc = lines[at].find("Quit, leaving").expect("its description");
+    let next = lines[at + 1];
+    let col = |l: &str, i: usize| l.chars().skip(i).collect::<String>();
+    // Columns by characters: the borders are one character each, like the spaces.
+    let desc_chars = lines[at][..desc].chars().count();
+    assert!(
+        col(next, desc_chars).starts_with("where it was"),
+        "continued under the description\n{s}"
+    );
+    assert!(
+        next.chars().take(desc_chars).skip(1).all(|c| c == ' '),
+        "nothing left of it\n{s}"
+    );
+    // The intro sentence ends on the page too.
+    assert!(s.contains("is the program's."), "{s}");
+}
+
 #[test]
 fn about_draws_its_logo_without_half_blocks() {
     let (a, b) = fixture();

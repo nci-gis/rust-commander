@@ -110,6 +110,14 @@ that heading and starts a new, empty one here. -->
 - **F10 with jobs running waits until they have cleaned up**, and asks again if one is
   stuck after five seconds, instead of quitting under it.
 
+### Security
+- **A few bytes of output could freeze xdevcmd.** The terminal panel's emulator, vt100
+  0.16, spent most of a second on a single `ESC [ 65535 @` (insert that many blanks),
+  and the whole interface waited on it: a file of them shown with `cat`, or a server's
+  banner over `ssh`, stopped xdevcmd for minutes. vt100 is now 0.18, where it takes
+  microseconds; the panel is drawn by xdevcmd's own code, and `tui-term` is no longer a
+  dependency.
+
 ### Fixed
 - **The user menu's `%f`/`%s` could pass a file named like an option** (`-rf`) to the
   command as an option. Such a name now gets `./` in front, as typed names do, and a

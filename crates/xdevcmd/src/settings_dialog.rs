@@ -314,8 +314,9 @@ const FIELDS: &[Field] = &[
     ),
 ];
 
-/// What a full history costs a shell, for the Settings row: vt100 keeps every cell of
-/// every line, so it is lines × columns × the size of its cell. `cols` is the panel's
+/// What a full history costs a shell at most, for the Settings row: lines × columns ×
+/// the size of vt100's cell, when every line is as wide as the window (vt100 trims the
+/// trailing blanks of a line in history, so short lines cost less). `cols` is the panel's
 /// width now (the screen's, less its border); a wider window costs more.
 pub fn scrollback_help(lines: usize, cols: u16) -> String {
     let bytes = lines as u64 * u64::from(cols) * std::mem::size_of::<vt100::Cell>() as u64;

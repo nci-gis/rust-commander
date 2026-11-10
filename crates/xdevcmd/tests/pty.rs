@@ -149,7 +149,11 @@ impl Session {
         // Without dropping our copy of the slave, the reader never sees EOF.
         drop(pair.slave);
 
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(
+            ROWS.try_into().expect("rows"),
+            COLS.try_into().expect("cols"),
+            0,
+        )));
         let raw = Arc::new(Mutex::new(Vec::new()));
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =

@@ -206,9 +206,10 @@ pub struct Terminal {
     /// How many shells may run at once, across every tab and split. 1-16.
     pub max_terminals: usize,
     /// Lines of history each shell keeps, for the wheel and Shift+F12. 100-9999 (the
-    /// owner's ceiling, 2026-11-09): vt100 keeps every cell of it, so a full history
-    /// costs lines × columns × a cell's size (Settings shows the figure). Read when a
-    /// shell starts; vt100 cannot change a history's length in place.
+    /// owner's ceiling, 2026-11-09): a full history of lines as wide as the window costs
+    /// lines × columns × a cell's size (Settings shows the figure); vt100 0.18 trims a
+    /// line's trailing blanks once it scrolls into history, so short lines cost less.
+    /// Read when a shell starts; vt100 cannot change a history's length in place.
     pub scrollback: usize,
     /// Alt+C, typing names (Alt+Enter) and the user menu send to the shell without asking when it is
     /// surely at its prompt; false asks every time (owner, 2026-11-09: default true).

@@ -208,6 +208,10 @@ impl vt100::Callbacks for ShellReports {
 mod tests {
     use super::*;
 
+    fn nz(n: u16) -> std::num::NonZeroU16 {
+        std::num::NonZeroU16::new(n).expect("a size")
+    }
+
     fn split(s: &[u8]) -> Vec<&[u8]> {
         s.split(|&b| b == b';').collect()
     }
@@ -331,8 +335,12 @@ mod tests {
 
     #[test]
     fn the_callback_keeps_the_last_report_across_split_reads() {
-        let mut p =
-            vt100::Parser::new_with_callbacks(5, 40, 0, ShellReports::new("box".into(), false));
+        let mut p = vt100::Parser::new_with_callbacks(
+            nz(5),
+            nz(40),
+            0,
+            ShellReports::new("box".into(), false),
+        );
         // One OSC cut in three reads, BEL-terminated, then one with ST.
         p.process(b"$ \x1b]7;file://box/tm");
         p.process(b"p/a%20");
@@ -374,8 +382,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_bash_snippet_in_the_docs_is_understood() {
-        let mut p =
-            vt100::Parser::new_with_callbacks(5, 80, 0, ShellReports::new("vm".into(), false));
+        let mut p = vt100::Parser::new_with_callbacks(
+            nz(5),
+            nz(80),
+            0,
+            ShellReports::new("vm".into(), false),
+        );
         p.process(b"\x1b]133;C\x07\x1b]133;D\x07\x1b]7;file://vm/tmp/sn/a%20b%25c\x1b\\");
         assert_eq!(p.callbacks().mark, Some(Mark::Prompt));
         p.process(b"\x1b]133;A\x07$ cd \xc3\xa9\r\n\x1b]133;C\x07");

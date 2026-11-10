@@ -37,14 +37,16 @@ anyhow = "1"
 # How many cells a character takes, for clicks on the title's path. Already in the
 # tree through ratatui.
 unicode-width = "0.2"
-# crossterm and vt100 are NOT direct dependencies on purpose: ratatui pins its own
-# crossterm and tui-term pins its own vt100, and mixing versions gives you two
-# incompatible Event enums that look identical in the error message.
-# Use ratatui::crossterm and tui_term::vt100 instead.
+# crossterm is NOT a direct dependency on purpose: ratatui pins its own, and mixing
+# versions gives you two incompatible Event enums that look identical in the error
+# message. Use ratatui::crossterm instead.
 ratatui = "0.30"
-tui-term = "0.3"
 portable-pty = "0.9"
-vt100 = "0.16"
+# The shells' terminal emulator, drawn by our own few lines (pane/term.rs, `draw_screen`).
+# 0.18 at least: 0.16 spent most of a second on one 8-byte CSI 65535 @, holding the
+# parser's lock, so any `cat` of a hostile file froze xdevcmd (vt100-rust issue #42).
+# tui-term, which drew it before, still requires 0.16.
+vt100 = "0.18.1"
 toml = "1.2.0"
 serde = { version = "1.0.229", features = ["derive"] }
 # Directory changes from the system (inotify, FSEvents, ReadDirectoryChangesW) instead of

@@ -20,7 +20,6 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Block;
 use ratatui::Frame;
-use tui_term::widget::PseudoTerminal;
 
 use crate::pane::shell_report::{Mark, ShellReports};
 use crate::theme;
@@ -36,6 +35,12 @@ pub type Parser = vt100::Parser<ShellReports>;
 /// taller than the pane showing it; it may never be one row.
 const MIN_ROWS: u16 = 2;
 const MIN_COLS: u16 = 2;
+
+/// A size for vt100, which takes no zero; callers already keep to [`MIN_ROWS`] and
+/// [`MIN_COLS`], so the floor of 1 is only a guard.
+fn nz(n: u16) -> std::num::NonZeroU16 {
+    std::num::NonZeroU16::new(n).unwrap_or(std::num::NonZeroU16::MIN)
+}
 
 /// Set by any shell's output thread when the screen it feeds has changed; the main loop
 /// redraws only when something changed, so this is how a shell's output gets drawn.
@@ -463,7 +468,10 @@ impl TermPane {
 
         let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows));
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
-            rows, cols, scrollback, reports,
+            nz(rows),
+            nz(cols),
+            scrollback,
+            reports,
         )));
         let (tx, rx) = channel::<Vec<u8>>();
         let last_output = Arc::new(std::sync::Mutex::new(None));
@@ -878,8 +886,7 @@ impl TermPane {
             pixel_height: 0,
         });
         if let Ok(mut p) = self.parser.write() {
-            // In vt100 0.16 the resize lives on the screen, not the parser.
-            p.screen_mut().set_size(rows, cols);
+            p.set_size(nz(rows), nz(cols));
         }
     }
 
@@ -935,7 +942,7 @@ impl TermPane {
         let Ok(guard) = self.parser.read() else {
             return;
         };
-        frame.render_widget(PseudoTerminal::new(guard.screen()), inner);
+        draw_screen(guard.screen(), inner, frame.buffer_mut());
         drop(guard);
         // A program run in its own tab has ended: say so on its last row, and how to
         // close it, rather than leaving a screen that looks alive.
@@ -1098,6 +1105,72 @@ fn short_dir(p: &Path) -> String {
 /// Everything a shell's screen holds, history first, as plain text: the lines the user
 /// would read if they scrolled all the way up and then down again.
 ///
+/// Draw a vt100 screen into `area`: every cell with its colours and attributes, then
+/// the cursor where the program left it (a grey block on an empty cell, the cell
+/// reversed on a full one), unless the program hid it. While looking back through
+/// history the cursor's row moves down with the lines shown above it, and is not drawn
+/// once it has gone past the bottom.
+fn draw_screen(screen: &vt100::Screen, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+    use ratatui::style::{Color, Modifier};
+    fn colour(c: vt100::Color) -> Color {
+        match c {
+            vt100::Color::Default => Color::Reset,
+            vt100::Color::Idx(i) => Color::Indexed(i),
+            vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        }
+    }
+    ratatui::widgets::Widget::render(ratatui::widgets::Clear, area, buf);
+    for row in 0..area.height {
+        for col in 0..area.width {
+            let Some(cell) = screen.cell(row, col) else {
+                continue;
+            };
+            let out = &mut buf[(area.x + col, area.y + row)];
+            if cell.has_contents() {
+                out.set_symbol(cell.contents());
+            }
+            let mut m = Modifier::empty();
+            for (on, bit) in [
+                (cell.bold(), Modifier::BOLD),
+                (cell.italic(), Modifier::ITALIC),
+                (cell.underline(), Modifier::UNDERLINED),
+                (cell.inverse(), Modifier::REVERSED),
+                (cell.dim(), Modifier::DIM),
+            ] {
+                if on {
+                    m |= bit;
+                }
+            }
+            out.set_style(
+                Style::reset()
+                    .fg(colour(cell.fgcolor()))
+                    .bg(colour(cell.bgcolor()))
+                    .add_modifier(m),
+            );
+        }
+    }
+    if screen.hide_cursor() {
+        return;
+    }
+    let (row, col) = screen.cursor_position();
+    let back = u16::try_from(screen.scrollback()).unwrap_or(u16::MAX);
+    let row = row.saturating_add(back);
+    if row >= area.height || col >= area.width {
+        return;
+    }
+    let out = &mut buf[(area.x + col, area.y + row)];
+    match screen.cell(row, col) {
+        Some(cell) if cell.has_contents() => {
+            out.set_style(Style::new().add_modifier(ratatui::style::Modifier::REVERSED));
+        }
+        Some(_) => {
+            out.set_symbol("\u{2588}");
+            out.set_style(Style::new().fg(ratatui::style::Color::Gray));
+        }
+        None => {}
+    }
+}
+
 /// vt100 shows its history only a screen at a time (`set_scrollback`), so this walks
 /// the offset from the top of the history down to 0 and takes each page's rows. Row
 /// `i` of the page at offset `o` is row `history - o + i` of the whole, so each row is
@@ -1113,7 +1186,7 @@ pub fn history_text<CB: vt100::Callbacks>(p: &mut vt100::Parser<CB>) -> String {
     let before = p.screen().scrollback();
     let history = history_of(p);
     let (rows, cols) = p.screen().size();
-    let rows = usize::from(rows.max(1));
+    let (rows, cols) = (usize::from(rows.get()), cols.get());
     let mut out = String::new();
     let mut next = 0usize; // the next row of the whole to take
     let mut offset = history;
@@ -1463,7 +1536,7 @@ mod tests {
     }
 
     fn fed(rows: u16, cols: u16, keep: usize, bytes: &[u8]) -> vt100::Parser {
-        let mut p = vt100::Parser::new(rows, cols, keep);
+        let mut p = vt100::Parser::new(nz(rows), nz(cols), keep);
         p.process(bytes);
         p
     }
@@ -1511,6 +1584,22 @@ mod tests {
         );
     }
 
+    /// `CSI 65535 @` (insert that many blanks) cost vt100 0.16 about 0.7 s each, under
+    /// the parser's lock, so 100 of them — 800 bytes in a file someone `cat`s — froze
+    /// xdevcmd for over a minute. 0.18 takes microseconds; the bound is generous so a
+    /// loaded machine does not fail it, and still far below what 0.16 took.
+    #[test]
+    fn a_huge_insert_count_does_not_stall_the_parser() {
+        let mut p = vt100::Parser::new(nz(40), nz(120), 5000);
+        p.process(b"$ cat hostile.txt\r\n");
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            p.process(b"\x1b[65535@\x1b[65535P\x1b[65535L\x1b[65535M\x1b[65535X");
+        }
+        let took = start.elapsed();
+        assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+    }
+
     #[test]
     fn history_text_of_an_empty_screen_is_empty() {
         let mut p = fed(5, 20, 100, b"");
@@ -1540,7 +1629,7 @@ mod tests {
 
     #[test]
     fn history_is_measured_without_moving_the_view() {
-        let mut p = vt100::Parser::new(5, 20, 100);
+        let mut p = vt100::Parser::new(nz(5), nz(20), 100);
         assert_eq!(history_of(&mut p), 0);
         for i in 0..30 {
             p.process(format!("line {i}\r\n").as_bytes());

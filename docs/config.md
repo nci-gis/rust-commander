@@ -52,7 +52,7 @@ height_percent = 30       # 10-90
 shell = ""                # empty: $SHELL, or %COMSPEC% (cmd.exe) on Windows
 max_terminals = 3         # shells across all tabs and splits (1-16)
 scrollback = 5000         # lines of history each shell keeps (100-9999), for the wheel
-                          # and Shift+F12; a full one costs lines × columns × 32 bytes
+                          # and Shift+F12; at most lines × columns × 32 bytes
                           # (Settings shows it); applies to shells started after a change
 send_when_idle = true     # Alt+C, typed names and the user menu go to a shell surely
                           # at its prompt without asking; false asks every time

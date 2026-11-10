@@ -111,7 +111,8 @@ that heading and starts a new, empty one here. -->
 - **Closing the terminal (or losing SSH) ends xdevcmd tidily**: jobs are cancelled and
   clean up, and the session is saved. Before, xdevcmd was killed on the spot.
 - **F10 with jobs running waits until they have cleaned up**, and asks again if one is
-  stuck after five seconds, instead of quitting under it.
+  stuck after five seconds, instead of quitting under it. While it waits, the screen goes
+  on drawing and says how many jobs it is waiting for.
 
 ### Security
 - **A few bytes of output could freeze xdevcmd.** The terminal panel's emulator, vt100

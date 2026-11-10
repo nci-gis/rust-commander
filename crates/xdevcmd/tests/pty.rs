@@ -823,6 +823,42 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
     assert!(left.is_empty(), "nothing left of the copy: {left:?}");
 }
 
+/// Quitting with a copy running: "cancel them and quit" cancels it, waits in the main
+/// loop for it to remove what it was writing, then ends, with nothing of the copy left.
+#[cfg(unix)]
+#[test]
+fn quitting_with_a_copy_running_cancels_it_cleans_up_and_ends() {
+    let s = Scratch::new("quit-jobs");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    // Sparse, as in the lost-terminal test: still copying when q comes, at most 2 GiB.
+    let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
+    big.set_len(2 << 30).unwrap();
+    drop(big);
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(ENTER); // into sub
+    x.wait_for("/left/sub");
+    x.send(DOWN);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    // Go, to the background (b), and quit (q) in one write: a fast disk copies 2 GiB of
+    // nothing in a second or two.
+    x.send(b"\rbq");
+    x.wait_for("cancel them and quit");
+    x.send(ENTER);
+    let start = Instant::now();
+    while x.child.try_wait().unwrap().is_none() {
+        assert!(start.elapsed() < PATIENCE, "still running:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let left: Vec<_> = std::fs::read_dir(s.right())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(left.is_empty(), "nothing left of the copy: {left:?}");
+}
+
 /// Safe operations on, but the journal cannot be made (its directory's name is taken by a
 /// file): the copy is done, and the summary says it ran without safe operations.
 #[test]

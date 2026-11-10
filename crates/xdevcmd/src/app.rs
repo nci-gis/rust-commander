@@ -327,6 +327,8 @@ const TICK: Duration = Duration::from_millis(40);
 /// changes without telling (the usage view's clock, a listing's age). Drawing every
 /// tick cost about 5 % of a core while idle (2026-11-07); a frame is about 2 ms.
 const HEARTBEAT: Duration = Duration::from_secs(1);
+/// How long quitting waits for cancelled jobs to clean up before asking again.
+const STOP_WAIT: Duration = Duration::from_secs(5);
 
 /// A picture quick view has decoded: the file, the cell size it was shrunk for, the
 /// file's modification time then (a changed file is decoded again), and the picture or
@@ -509,6 +511,9 @@ pub struct App {
     hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The "running in …" note shown at start, cleared by the first key or click.
     boot_note: Option<String>,
+    /// Quitting with jobs running: they were cancelled, and until this moment xdevcmd
+    /// waits for them to clean up, drawing as usual and taking no keys ([`App::stop_step`]).
+    stopping: Option<Instant>,
     /// The picture this frame wants drawn by the terminal, and the one it shows now.
     graphic_want: Option<Graphic>,
     graphic_shown: Option<Graphic>,
@@ -639,6 +644,7 @@ impl App {
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             input: None,
             boot_note: None,
+            stopping: None,
             graphic_want: None,
             graphic_shown: None,
             under_graphic: Vec::new(),
@@ -966,8 +972,63 @@ impl App {
 
     /// One turn of the event loop: background work in, a frame out if anything changed,
     /// at most one event handled. An error is the terminal failing.
+    /// One step of quitting with jobs (`Cmd::QuitAnyway`): pump them, answer any
+    /// question with Abort, drop the finished. All gone: quit. Past [`STOP_WAIT`] with
+    /// one still there (a worker stuck in a write, a hung network drive): stop waiting
+    /// and ask, rather than walk away from it unasked. Whether the screen changed.
+    fn stop_step(&mut self) -> bool {
+        let Some(deadline) = self.stopping else {
+            return false;
+        };
+        for j in &mut self.jobs {
+            j.pump();
+            if j.question.take().is_some() {
+                j.answer(xdevcmd_core::Answer::Abort);
+            }
+        }
+        self.jobs.retain(|j| j.done.is_none());
+        let n = self.jobs.len();
+        if n == 0 {
+            self.stopping = None;
+            self.quit = true;
+            self.quit_cd = true;
+        } else if Instant::now() >= deadline {
+            self.stopping = None;
+            let safe = self.settings.config.general.safe_operations;
+            self.modal = Some(Modal::Ask(modal::Ask {
+                title: "Still stopping".into(),
+                body: vec![
+                    format!(
+                        "{n} job{} has not stopped after {} seconds.",
+                        if n == 1 { "" } else { "s" },
+                        STOP_WAIT.as_secs()
+                    ),
+                    if safe {
+                        "Quitting now leaves its temporary file; the next start removes it."
+                    } else {
+                        "Quitting now may leave a file half written."
+                    }
+                    .into(),
+                ],
+                danger: true,
+                yes: Some(("quit anyway".into(), Cmd::QuitNow)),
+                buttons: Vec::new(),
+                also: None,
+                footnote: None,
+                pictures: Vec::new(),
+            }));
+        } else {
+            self.status = format!(
+                "stopping: waiting for {n} job{} to clean up\u{2026}",
+                if n == 1 { "" } else { "s" }
+            );
+        }
+        true
+    }
+
     fn turn(&mut self, terminal: &mut Term, dirty: &mut bool, drawn: &mut Instant) -> Result<()> {
         self.pump_job();
+        *dirty |= self.stop_step();
         *dirty |= self.reap_terminals();
         *dirty |= self.background();
         *dirty |= crate::pane::term::take_output();
@@ -995,6 +1056,8 @@ impl App {
                 }
             }
             match event {
+                // Quitting: the jobs are being stopped; nothing else is started.
+                Event::Key(_) | Event::Mouse(_) if self.stopping.is_some() => {}
                 Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
                 Event::Mouse(m) => self.on_mouse(m),
                 // A resize clears the screen: whatever picture was there is gone, and
@@ -3498,52 +3561,13 @@ impl App {
             }
             Cmd::QuitAnyway => {
                 // Cancelled, and waited for: a worker stops between writes and removes
-                // its half-written file, which is what makes quitting now safe.
+                // its half-written file, which is what makes quitting now safe. The wait
+                // is the main loop's (`stop_step`), so the screen says what is going on.
                 for j in &self.jobs {
                     j.handle.cancel();
                 }
-                let deadline = Instant::now() + Duration::from_secs(5);
-                while !self.jobs.is_empty() && Instant::now() < deadline {
-                    for j in &mut self.jobs {
-                        j.pump();
-                        if let Some(q) = j.question.take() {
-                            let _ = q;
-                            j.answer(xdevcmd_core::Answer::Abort);
-                        }
-                    }
-                    self.jobs.retain(|j| j.done.is_none());
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                if self.jobs.is_empty() {
-                    self.quit = true;
-                    self.quit_cd = true;
-                } else {
-                    // A worker stuck in a write (a hung network drive): do not walk away
-                    // from it unasked.
-                    let n = self.jobs.len();
-                    let safe = self.settings.config.general.safe_operations;
-                    self.modal = Some(Modal::Ask(modal::Ask {
-                        title: "Still stopping".into(),
-                        body: vec![
-                            format!(
-                                "{n} job{} has not stopped after 5 seconds.",
-                                if n == 1 { "" } else { "s" }
-                            ),
-                            if safe {
-                                "Quitting now leaves its temporary file; the next start removes it."
-                            } else {
-                                "Quitting now may leave a file half written."
-                            }
-                            .into(),
-                        ],
-                        danger: true,
-                        yes: Some(("quit anyway".into(), Cmd::QuitNow)),
-                        buttons: Vec::new(),
-                        also: None,
-                        footnote: None,
-                        pictures: Vec::new(),
-                    }));
-                }
+                self.stopping = Some(Instant::now() + STOP_WAIT);
+                self.stop_step();
             }
             Cmd::QuitNow => {
                 self.quit = true;

@@ -220,6 +220,44 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
   there reads badly. ROADMAP's Direction records the name's meaning and the boundary
   ("it ends in an action on a file"); item 30 (the shell's output to files) is v0.4's lead.
 
+- 2026-11-10, **fixes before the release** (owner: "Sửa trước release", on this branch
+  rather than a new one, no round of their own). From the review recorded in
+  `.agents/memory/2026-11-09-round-014-plan-review.md`, rechecked at `6dedc73`: the vt100
+  freeze, and R4–R8, which Round 014's close-out had not covered. One commit each, each
+  with a test, in this order:
+  - **vt100 0.16.2 → 0.18.1** (`3c11665`). Measured here: one `CSI 65535 @` took 676 ms
+    in 0.16.2, 2 µs in 0.18.1, under the parser's write lock (vt100-rust #42), so a
+    800-byte file shown with `cat` froze xdevcmd for over a minute. tui-term 0.3.4 (the
+    latest) still requires vt100 0.16, and its `Cell` trait hands out `&Self::C`, so a
+    newtype over 0.18's cell would need `unsafe` (orphan rule): tui-term is dropped and the
+    panel drawn by `draw_screen` in pane/term.rs (cells, attributes, colours, the cursor
+    as tui-term drew it). `NonZeroU16` sizes through `nz`; resize by `Parser::set_size`.
+    Test: 100 rounds of the five huge-count edits within 2 s (0.16.2: 3 rounds took 2.06 s).
+    `.agents/reference/gotchas.md` still says tui-term pins vt100: **read-only to agents,
+    for the owner to change.**
+  - **Shift+F12 through vt100's capture** (`28d3bc2`): `write_contents_formatted_basic(Full)`
+    and `basic_formatted_to_plain`, under a read lock, instead of paging with
+    `set_scrollback` under the write lock (which also widened every history row back to
+    full width, vt100-rust PR #49). Round 015's history tests pass unchanged. 9999 × 200:
+    11 ms (release).
+  - **R5, crash logs and journals 0600** (`ae1a3b0`), the journal directory 0700, the home
+    directory written `~` in crash logs. Tests fail with 0644 when the fix is taken out.
+  - **R6, recovery through the engine's policy** (`1fa5bf8`): read-only leaves journals
+    alone in core too; a journal naming a place outside `--root` is left whole
+    (`may_tidy`). read_only.rs fails without the guard.
+  - **R7, no start-up probe inside GNU screen** (`2dd425e`): `graphics::multiplexer` (TMUX,
+    STY, `TERM=screen*`/`tmux*`) for both the probe and detection; a reply after the wait
+    is read until 200 ms quiet (at most 1 s). The pty test fails with the TMUX-only gate.
+    The late-reply read has no test (the pty helper answers at once).
+  - **R4, nested start only in the panel's own terminal** (`d9cc6ca`):
+    `XDEVCMD_PANEL_TTY` (Unix) compared with `ttyname` of stdin; a dead pid or garbage never
+    refuses; Windows starts and says so on the status line. rustix gets "fs" (ttyname).
+    Pty test: a live pid with another terminal's name starts (fails with the old rule).
+  - **R8, quitting with jobs waits in the main loop** (`e7b1e23`): `stopping` and
+    `stop_step` replace the 5 s sleep in the handler; the status line counts the jobs;
+    keys are ignored meanwhile. Pty test of the path (none before); the stuck-worker case
+    has none (nothing here makes a write hang).
+
 ## Check
 
 - [x] `cargo package --workspace` passes locally (clean tree, `--locked`). CI's new step:
@@ -233,6 +271,15 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
 - [x] `cargo fmt --all --check`; `cargo clippy --all-targets --all-features -- -D warnings`
       (Linux only; Windows target not installable here); `cargo test --workspace` twice:
       595 passed, 2 ignored, 0 failed each time.
+- [x] After the fixes before the release (2026-11-10): `cargo fmt --check`; clippy
+      `--all-targets -D warnings` on Linux, `x86_64-pc-windows-gnu` and
+      `x86_64-apple-darwin` (targets installed on this machine); `cargo test --workspace`:
+      core 170 + 1, xdevcmd 184 unit (1 ignored) + 163 render + 85 pty (1 ignored) + 3, all
+      pass; `cargo deny check` ok; `cargo package --workspace --locked` ok. Windows and
+      macOS were compiled, not run: CI.
+- [ ] Not verified: the panel drawn by `draw_screen` on a real terminal (render and pty
+      tests read it through vt100 and pass unchanged); `ttyname` on macOS (CI); the
+      late-reply read; the screen during a stuck worker's 5 s.
 - [ ] By the owner: CI on three systems; README on crates.io; Scoop install; winget submission.
 
 Set aside for the owner's hand tests; publishing is the owner's.

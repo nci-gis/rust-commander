@@ -11,6 +11,8 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **`cargo binstall xdevcmd`** installs the ready-made build from the GitHub release,
+  with no compiling: the crate says where each target's archive is.
 - **The menu bar shows which xdevcmd this is**, at its right in the dim colour:
   `xdevcmd 18144`, its process number, which Help → Usage also shows. Hidden where the
   menus need the room.

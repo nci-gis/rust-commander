@@ -126,3 +126,64 @@ fn the_winget_installer_points_at_the_archive_release_yml_makes() {
         assert!(text.contains("PackageVersion: <VERSION>\n"), "{f}");
     }
 }
+
+/// Every target release.yml builds, as its matrix names them.
+const TARGETS: &[&str] = &[
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    WINDOWS,
+];
+
+/// `cargo binstall xdevcmd` reads `[package.metadata.binstall]` in this crate's
+/// Cargo.toml. Filled in as binstall fills it, for each target, it must name the archive
+/// release.yml uploads and the program inside it.
+#[test]
+fn cargo_binstall_finds_the_archive_release_yml_makes() {
+    let text =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let cargo: toml::Table = toml::from_str(&text).unwrap();
+    let meta = &cargo["package"]["metadata"]["binstall"];
+    for target in TARGETS {
+        let Some(folder) = released_archive("v0.3.0", target) else {
+            eprintln!("no release.yml here; skipped");
+            return;
+        };
+        let (suffix, format, ext) = if *target == WINDOWS {
+            (".zip", "zip", ".exe")
+        } else {
+            (".tar.gz", "tgz", "")
+        };
+        let key = |k: &str| {
+            meta.get("overrides")
+                .and_then(|o| o.get(*target))
+                .and_then(|o| o.get(k))
+                .or_else(|| meta.get(k))
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("no {k} for {target}"))
+                .to_string()
+        };
+        let fill = |s: String| {
+            s.replace("{ repo }", env!("CARGO_PKG_REPOSITORY"))
+                .replace("{ version }", "0.3.0")
+                .replace("{ name }", env!("CARGO_PKG_NAME"))
+                .replace("{ target }", target)
+                .replace("{ archive-suffix }", suffix)
+                .replace("{ bin }", "xdevcmd")
+                .replace("{ binary-ext }", ext)
+        };
+        assert_eq!(key("pkg-fmt"), format, "{target}");
+        assert_eq!(
+            fill(key("pkg-url")),
+            download("v0.3.0", &format!("{folder}{suffix}")),
+            "{target}"
+        );
+        assert_eq!(
+            fill(key("bin-dir")),
+            format!("{folder}/xdevcmd{ext}"),
+            "{target}"
+        );
+    }
+}

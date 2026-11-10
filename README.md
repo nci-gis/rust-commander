@@ -51,6 +51,13 @@ With Rust 1.88 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (fro
 cargo install xdevcmd --locked
 ```
 
+Or the ready-made build, with no compiling, through
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall) (from 0.4.0):
+
+```bash
+cargo binstall xdevcmd
+```
+
 On Windows, with [Scoop](https://scoop.sh) or winget (planned; not available yet):
 
 ```powershell

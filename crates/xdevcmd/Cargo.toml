@@ -17,6 +17,18 @@ publish = true
 # fixtures and themes. 260 KB nobody installing the program uses.
 exclude = ["tests/"]
 
+# Where `cargo binstall xdevcmd` finds the ready-made build: the archive release.yml
+# makes for each target, the program in its folder. tests/packaging.rs fills these in for
+# every target release.yml builds and checks they name what it uploads. Linux on ARM is
+# musl only; binstall falls back to musl on its own.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 # What `cargo release` does to the CHANGELOG; see release.toml at the top.
 [package.metadata.release]
 pre-release-replacements = [

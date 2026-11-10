@@ -191,6 +191,35 @@ winget; binstall/Homebrew/AUR; signing; workflows holding tokens; raising `rust-
     found), 42719848686 (scratch, after `e672c90`: **all green**, ubuntu x86_64 + ARM,
     windows, macos, cross-check, cargo-deny), 42721141031 (this branch at `e672c90`, real CI flags: **all green**).
 
+- 2026-11-10, **the description, chosen by score** (owner: "x = extend và cross platform";
+  "thử 1 vài mẫu và research/chấm thử"). How others say it: yazi leads with speed
+  ("Blazing fast terminal file manager"), Double Commander with "two panels side by side,
+  inspired by Total Commander", One Commander with "modern file manager for Windows".
+  The pattern that reads best: the category first, then the one thing that sets it apart.
+  Six candidates, each scored 0–5 on five points, weighted — category clear (file manager,
+  two-pane, terminal) ×6, what sets it apart (extends the shell) ×5, the name's *x*
+  (cross-platform, extend) ×4, the audience ×2, short enough for `--help`, About and a
+  package list ×3; out of 100:
+
+  | Candidate | Chars | Score |
+  |---|---|---|
+  | A terminal-style file commander, written in Rust. (0.2.x) | 49 | 33 |
+  | xDev Commander: the two-pane terminal file manager for developers and devops. | 77 | 52 |
+  | xDev Commander: two panes, a real shell, one binary. For developers and devops. | 79 | 57 |
+  | A cross-platform, two-pane terminal file manager built around your shell. | 73 | 75 |
+  | A two-pane terminal file manager that extends your shell, on Windows, macOS and Linux. | 86 | 86 |
+  | **xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell.** | 89 | 86, and the only one that spells the name out |
+
+  Chosen: the last. "Written in Rust" goes: it says nothing about what the user gets. The
+  audience moves to a second README line ("For developers and devops who live in the
+  terminal."), which the one-liner could not carry without growing past 100 characters.
+  Same text in Cargo.toml (one source: `--help`, About, `--print-man`, `sync-about.sh`),
+  the README (its test ties them), Scoop and winget (`PackageName: xDev Commander`;
+  `Moniker` stays `xdevcmd`). Windows' `FileDescription` and `ProductName` become "xDev
+  Commander": Task Manager shows FileDescription as the program's name, and a sentence
+  there reads badly. ROADMAP's Direction records the name's meaning and the boundary
+  ("it ends in an action on a file"); item 30 (the shell's output to files) is v0.4's lead.
+
 ## Check
 
 - [x] `cargo package --workspace` passes locally (clean tree, `--locked`). CI's new step:

@@ -5,7 +5,9 @@
   </picture>
 </p>
 
-<p align="center">A terminal-style file commander, written in Rust.</p>
+<p align="center">xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell.</p>
+
+<p align="center"><sub>For developers and devops who live in the terminal.</sub></p>
 
 ```
   File   View   Help

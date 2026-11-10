@@ -1,6 +1,6 @@
 {
     "version": "0.3.0",
-    "description": "A terminal-style file commander, written in Rust.",
+    "description": "xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell.",
     "homepage": "https://github.com/nci-gis/rust-commander",
     "license": "MIT",
     "architecture": {

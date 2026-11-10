@@ -82,6 +82,10 @@ that heading and starts a new, empty one here. -->
   did not (less, man). In a plain shell it still scrolls the history.
 
 ### Changed
+- **The name, spelled out: xDev Commander.** The one-line description is now "xDev
+  Commander: a cross-platform, two-pane terminal file manager that extends your shell."
+  (`--help`, About, the README, GitHub, crates.io, Scoop and winget). On Windows, Task
+  Manager and the taskbar show "xDev Commander". The program is still `xdevcmd`.
 - **Installing**: `cargo install xdevcmd --locked`, from crates.io, from 0.3.0. The
   package is now called `xdevcmd` (it was `xdevcmd-tui`, never published), and its engine
   `xdevcmd-core` is published beside it, with no stable API of its own. The command is

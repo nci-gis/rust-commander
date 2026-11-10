@@ -17,6 +17,20 @@ users want Enter to open files.
 - **xdevcmd's edge (rcmd until 2026-11-07) is a combination, not a feature**: MIT, the Total Commander model,
   native Windows, one static binary to drop on a server, no network, nothing destructive
   done silently. Nothing below thins it.
+- **The name, and who it is for** (owner, 2026-11-10). **xDev Commander**, `xdevcmd` to
+  type. **x** = *extend* (it extends the shell, never replaces it: the shell keeps its
+  keys, its history search and its completion) and *cross-platform* (Windows native, macOS,
+  Linux). **Dev** = developers and devops: people who live in the terminal, build and
+  deploy from it. **Commander** = the two-pane file manager family (Total Commander,
+  Double Commander, One Commander, mc). The one-line description, chosen from six
+  candidates scored on what each says (Round 017's Do): "xDev Commander: a cross-platform,
+  two-pane terminal file manager that extends your shell."
+- **What only xdevcmd can do is join the shell to the panes.** It holds the shell's output
+  (in memory), knows the shell's directory and has file panes and a viewer in one
+  process. v0.4 builds on that: the shell's output turned into files to act on (item 30).
+- **The boundary for every idea: it ends in an action on a file.** A path in the shell's
+  output is xdevcmd's business; a URL, a commit hash, a process id or log analytics are
+  not (a log viewer or a plugin's).
 - **Make it pleasant before making it bigger.** macOS is a third of the platforms and
   is broken in three ways; themes and a Settings screen are what a first-time user
   touches. These come before any large feature.
@@ -198,6 +212,7 @@ Rounds 001 and 003–009; the read-only finding in
 | 27 | Shell ↔ pane bridge: the shell's directory on every system, go there, type names into the command line, `[terminal] follow` | M | [016](cycles/Round_016.md) | review: done on `feat/shell-bridge`, at Review for the owner's hand tests (macOS, Windows, fish) |
 | 28 | Release prep for 0.3.0: package `xdevcmd`, crates publishable, Scoop and winget templates | S | [017](cycles/Round_017.md) | review: done on `feat/release-0.3.0`, at Review for the owner's hand tests; publishing stays the owner's |
 | 29 | One directory history for panes and shells | M | — | v0.4 (owner, 2026-11-09) |
+| 30 | The shell's output to files: in the history view, a path (with `:line[:col]`, Python's and JS's trace forms, MSBuild's `(line,col)`, Windows paths) that exists on disk is marked; Enter takes the pane to it, F3/F4 open it at that line; **panelize** turns chosen lines (or a command's whole output: `rg -l`, `git status`, `find`) into a panel for F5/F6/F8. Paths resolved against the shell's directory when the command ran (prompt marks), never trusted beyond moving a pane | M | — | v0.4, the lead feature (owner, 2026-11-10) |
 | 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
 | 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
 | 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |

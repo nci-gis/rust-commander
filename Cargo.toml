@@ -7,7 +7,7 @@ resolver = "2"
 # box, so a change here is a change everywhere.
 [workspace.package]
 version = "0.2.1"
-description = "A terminal-style file commander, written in Rust."
+description = "xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell."
 authors = ["XDevTeam"]
 license = "MIT"
 repository = "https://github.com/nci-gis/rust-commander"

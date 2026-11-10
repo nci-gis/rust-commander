@@ -5,11 +5,11 @@ PackageVersion: <VERSION>
 PackageLocale: en-US
 Publisher: XDevTeam
 PublisherUrl: https://github.com/nci-gis
-PackageName: xdevcmd
+PackageName: xDev Commander
 PackageUrl: https://github.com/nci-gis/rust-commander
 License: MIT
 LicenseUrl: https://github.com/nci-gis/rust-commander/blob/main/LICENSE
-ShortDescription: A terminal-style file commander, written in Rust.
+ShortDescription: xDev Commander: a cross-platform, two-pane terminal file manager that extends your shell.
 Description: >-
   A two-pane (orthodox) file manager for the terminal, in the manner of Total Commander,
   with a terminal panel below the panes. One program, no network calls, and nothing

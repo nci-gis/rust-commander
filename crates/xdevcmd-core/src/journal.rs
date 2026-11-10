@@ -293,6 +293,11 @@ pub fn recover() -> Vec<Interrupted> {
 
 fn recover_in(dir: &Path) -> Vec<Interrupted> {
     let mut out = Vec::new();
+    // The engine's own wall, behind the UI's: tidying removes and renames files.
+    // Read-only leaves every journal as it is, for a run that may write.
+    if crate::policy::guard_write().is_err() {
+        return out;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return out;
     };
@@ -334,6 +339,11 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         let Some(_held) = claim(&path, &run, Some((&mut text, &host))) else {
             continue;
         };
+        // A run confined to a root (`--root`) touches nothing outside it: a journal
+        // naming a place outside is left whole for a run that may go there.
+        if !may_tidy(&text, crate::policy::get()) {
+            continue;
+        }
         out.push(tidy(&text, &run));
         #[cfg(test)]
         while_held_in_test();
@@ -438,6 +448,20 @@ fn pid_alive(run: &str) -> bool {
 }
 
 /// Undo what one journal, left by run `run`, says was left half done.
+/// Whether every place tidying would touch — the directories searched for part files,
+/// the part files, both names of each rename — is inside `policy`'s root. A file that is
+/// gone is judged by its directory.
+fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
+    let inside = |p: &Path| policy.allows(p) || p.parent().is_some_and(|d| policy.allows(d));
+    text.lines().all(|line| {
+        let mut w = line.split(' ');
+        match w.next() {
+            Some("dir" | "part" | "ren") => w.filter_map(dec).all(|p| inside(&p)),
+            _ => true,
+        }
+    })
+}
+
 fn tidy(text: &str, run: &str) -> Interrupted {
     let mut it = Interrupted {
         kind: String::new(),
@@ -811,6 +835,45 @@ mod tests {
         assert!(recover_in(&d).is_empty());
         drop(j);
         assert_eq!(fs::read_dir(&d).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_journal_reaching_outside_the_root_is_not_tidied() {
+        let d = dir("root");
+        let inside = d.join("in");
+        let outside = d.join("out");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let root = crate::policy::Policy {
+            read_only: false,
+            root: Some(crate::paths::canonical(&inside).unwrap()),
+        };
+        let journal = |at: &Path| {
+            format!(
+                "kind copy\ndir {}\npart {}\nren {} {}\n",
+                enc(at),
+                enc(&at.join(".a.xdevcmd-part-9-0")),
+                enc(&at.join(".xdevcmd-rename-9-0")),
+                enc(&at.join("a")),
+            )
+        };
+        assert!(
+            may_tidy(&journal(&inside), &root),
+            "all inside, gone files too"
+        );
+        assert!(!may_tidy(&journal(&outside), &root));
+        // One rename whose old name is outside is enough.
+        let mixed = format!(
+            "kind copy\nren {} {}\n",
+            enc(&inside.join(".xdevcmd-rename-9-0")),
+            enc(&outside.join("a"))
+        );
+        assert!(!may_tidy(&mixed, &root));
+        assert!(may_tidy(
+            &journal(&outside),
+            &crate::policy::Policy::default()
+        ));
         let _ = fs::remove_dir_all(&d);
     }
 

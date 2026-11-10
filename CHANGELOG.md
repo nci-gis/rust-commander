@@ -120,6 +120,10 @@ that heading and starts a new, empty one here. -->
 - **Crash logs and the safe-operations journal were readable by other users** on a shared
   machine; both name files by their full paths. They are now the user's alone (`0600`,
   and the journal's directory `0700`), and a crash log writes the home directory as `~`.
+- **Tidying up after a killed run went around read-only and `--root`** in the engine:
+  only the interface checked read-only, and nothing checked the root. The engine now
+  leaves every journal alone in read-only mode, and one that names a place outside the
+  root for a run that may go there.
 
 ### Fixed
 - **The user menu's `%f`/`%s` could pass a file named like an option** (`-rf`) to the

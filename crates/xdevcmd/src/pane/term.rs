@@ -850,16 +850,13 @@ impl TermPane {
     /// the text is that screen only.
     pub fn history_text(&self) -> (String, bool) {
         self.parser
-            .write()
-            .map(|mut p| (history_text(&mut p), p.screen().alternate_screen()))
+            .read()
+            .map(|p| (history_text(&p), p.screen().alternate_screen()))
             .unwrap_or_default()
     }
 
     fn history(&self) -> usize {
-        self.parser
-            .write()
-            .map(|mut p| history_of(&mut p))
-            .unwrap_or(0)
+        self.parser.read().map(|p| history_of(&p)).unwrap_or(0)
     }
 
     fn scrolled(&self) -> usize {
@@ -1171,46 +1168,23 @@ fn draw_screen(screen: &vt100::Screen, area: Rect, buf: &mut ratatui::buffer::Bu
     }
 }
 
-/// vt100 shows its history only a screen at a time (`set_scrollback`), so this walks
-/// the offset from the top of the history down to 0 and takes each page's rows. Row
-/// `i` of the page at offset `o` is row `history - o + i` of the whole, so each row is
-/// taken once by that number: the last page overlaps the one before it unless the
-/// history is a whole number of screens, and the overlap is where lines would be
-/// doubled. A row that `row_wrapped` says went on is joined to the next without a line
-/// break, so a long line comes back as the one line it was. Blank rows at the end
-/// (below the prompt) are cut. The view's own offset is put back.
+/// The whole history and the screen below it as plain text: vt100's own capture of
+/// every row (`Full`), its colours taken out. A row that wrapped onto the next comes back
+/// joined to it, so a long line is the one line it was; blank cells at the end of a row
+/// are not written; blank rows at the end (below the prompt) are cut.
 ///
-/// Pure over the parser; the caller holds the write lock, which pauses that shell's
-/// output for as long as this runs (measured in Round 015's Do).
-pub fn history_text<CB: vt100::Callbacks>(p: &mut vt100::Parser<CB>) -> String {
-    let before = p.screen().scrollback();
-    let history = history_of(p);
-    let (rows, cols) = p.screen().size();
-    let (rows, cols) = (usize::from(rows.get()), cols.get());
-    let mut out = String::new();
-    let mut next = 0usize; // the next row of the whole to take
-    let mut offset = history;
-    loop {
-        p.screen_mut().set_scrollback(offset);
-        let screen = p.screen();
-        let first = history - offset;
-        for (i, text) in screen.rows(0, cols).enumerate() {
-            if first + i != next {
-                continue;
-            }
-            next += 1;
-            out.push_str(&text);
-            let wrapped = u16::try_from(i).is_ok_and(|r| screen.row_wrapped(r));
-            if !wrapped {
-                out.push('\n');
-            }
-        }
-        if offset == 0 {
-            break;
-        }
-        offset = offset.saturating_sub(rows);
-    }
-    p.screen_mut().set_scrollback(before);
+/// It only reads, so the caller needs no write lock, and the history's rows keep the
+/// width vt100 trimmed them to (paging with `set_scrollback`, as 0.16 needed, widened
+/// every row it showed back to the full width, for good).
+pub fn history_text<CB: vt100::Callbacks>(p: &vt100::Parser<CB>) -> String {
+    let mut basic = String::new();
+    let mut state = vt100::capture::BasicFormattedCaptureState::new();
+    // Writing into a String cannot fail.
+    let _ = p.screen().write_contents_formatted_basic(
+        &mut basic,
+        vt100::capture::BasicFormattedCaptureRange::Full(&mut state),
+    );
+    let mut out: String = vt100::capture::basic_formatted_to_plain(&basic).collect();
     let kept = out.trim_end_matches(['\n', ' ']).len();
     out.truncate(kept);
     if !out.is_empty() {
@@ -1219,14 +1193,9 @@ pub fn history_text<CB: vt100::Callbacks>(p: &mut vt100::Parser<CB>) -> String {
     out
 }
 
-/// How many lines of history vt100 holds. It does not say, but it clamps a scrollback
-/// offset to that length, so ask for everything and put the offset back.
-fn history_of<CB: vt100::Callbacks>(p: &mut vt100::Parser<CB>) -> usize {
-    let now = p.screen().scrollback();
-    p.screen_mut().set_scrollback(usize::MAX);
-    let all = p.screen().scrollback();
-    p.screen_mut().set_scrollback(now);
-    all
+/// How many lines of history vt100 holds.
+fn history_of<CB: vt100::Callbacks>(p: &vt100::Parser<CB>) -> usize {
+    p.screen().scrollback_len()
 }
 
 /// The bytes a terminal sends for `k`, as the program in the panel expects them; `None`
@@ -1546,7 +1515,7 @@ mod tests {
         let body: String = (1..=300).map(|i| format!("{i}\r\n")).collect();
         let mut p = fed(10, 80, 1000, body.as_bytes());
         p.screen_mut().set_scrollback(17);
-        let text = history_text(&mut p);
+        let text = history_text(&p);
         let lines: Vec<&str> = text.lines().collect();
         let want: Vec<String> = (1..=300).map(|i| i.to_string()).collect();
         assert_eq!(lines, want, "none missing or doubled where the pages meet");
@@ -1559,8 +1528,8 @@ mod tests {
         // number of screens; every remainder is where a join could double or drop.
         for n in 1..=45 {
             let body: String = (1..=n).map(|i| format!("L{i}\r\n")).collect();
-            let mut p = fed(7, 20, 1000, body.as_bytes());
-            let text = history_text(&mut p);
+            let p = fed(7, 20, 1000, body.as_bytes());
+            let text = history_text(&p);
             let want: String = (1..=n).map(|i| format!("L{i}\n")).collect();
             assert_eq!(text, want, "{n} lines");
         }
@@ -1572,14 +1541,14 @@ mod tests {
             .map(|i| char::from(b'a' + (i % 26) as u8))
             .collect();
         let body = format!("before\r\n{long}\r\nafter\r\n");
-        let mut p = fed(10, 80, 100, body.as_bytes());
-        let text = history_text(&mut p);
+        let p = fed(10, 80, 100, body.as_bytes());
+        let text = history_text(&p);
         assert_eq!(text, format!("before\n{long}\nafter\n"));
         // The same with the long line pushed into the history and cut by a page.
         let pad: String = (0..13).map(|i| format!("p{i}\r\n")).collect();
-        let mut p = fed(4, 80, 100, format!("{pad}{body}").as_bytes());
+        let p = fed(4, 80, 100, format!("{pad}{body}").as_bytes());
         assert_eq!(
-            history_text(&mut p),
+            history_text(&p),
             format!("{}before\n{long}\nafter\n", pad.replace("\r\n", "\n"))
         );
     }
@@ -1602,13 +1571,13 @@ mod tests {
 
     #[test]
     fn history_text_of_an_empty_screen_is_empty() {
-        let mut p = fed(5, 20, 100, b"");
-        assert_eq!(history_text(&mut p), "");
-        let mut p = fed(5, 20, 100, b"$ ");
-        assert_eq!(history_text(&mut p), "$\n", "trailing blanks cut");
+        let p = fed(5, 20, 100, b"");
+        assert_eq!(history_text(&p), "");
+        let p = fed(5, 20, 100, b"$ ");
+        assert_eq!(history_text(&p), "$\n", "trailing blanks cut");
     }
 
-    /// Not a check: how long the walk holds the write lock on the largest history the
+    /// Not a check: how long the capture holds the read lock on the largest history the
     /// setting allows, 9999 lines of 200 columns. `cargo test --release -- --ignored
     /// --nocapture history_text_timing`.
     #[test]
@@ -1616,9 +1585,9 @@ mod tests {
     fn history_text_timing() {
         let line: String = "x".repeat(194); // 199 columns with the number: one row each
         let body: String = (0..10_050).map(|i| format!("{i:05}{line}\r\n")).collect();
-        let mut p = fed(50, 200, 9999, body.as_bytes());
+        let p = fed(50, 200, 9999, body.as_bytes());
         let t = std::time::Instant::now();
-        let text = history_text(&mut p);
+        let text = history_text(&p);
         let took = t.elapsed();
         eprintln!(
             "history_text: {} lines, {} bytes, {took:?}",
@@ -1630,14 +1599,14 @@ mod tests {
     #[test]
     fn history_is_measured_without_moving_the_view() {
         let mut p = vt100::Parser::new(nz(5), nz(20), 100);
-        assert_eq!(history_of(&mut p), 0);
+        assert_eq!(history_of(&p), 0);
         for i in 0..30 {
             p.process(format!("line {i}\r\n").as_bytes());
         }
         // 30 lines and the empty one the cursor sits on, 5 of them on screen.
-        assert_eq!(history_of(&mut p), 26);
+        assert_eq!(history_of(&p), 26);
         p.screen_mut().set_scrollback(7);
-        assert_eq!(history_of(&mut p), 26);
+        assert_eq!(history_of(&p), 26);
         assert_eq!(p.screen().scrollback(), 7, "the view stays where it was");
     }
 

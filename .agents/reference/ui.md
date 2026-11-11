@@ -20,7 +20,7 @@ the bar follows a rebind.
 (`platforms.md`), the keys arrive on Windows and Linux, and on macOS Terminal.app only
 history and resize could not be typed. So those actions got second keys that arrive
 everywhere — `Alt+J` history, `Alt+R` then arrows resize, `Alt+1`…`Alt+9` tab N
-(`go_tab`, global, so it works from the shell too), `Alt+B` / `Alt+F` parent / enter
+(`go_tab`; inside the shell, after Alt+X, see keymap A below), `Alt+B` / `Alt+F` parent / enter
 (what Terminal.app sends for ⌥← / ⌥→) — instead of a keymap per system. Named presets
 (`[keys] preset`, `keymaps/*.toml`, `XDEVCMD_KEYS`) are deferred until a second set is
 really wanted; Round 004's design §2 is the plan for then.
@@ -31,8 +31,9 @@ A binding is one key, or two separated by a space: `"Alt+r Left"` (`Keys::{One, 
 `parse_binding`; three is an error). Two-key bindings that share a first key form a group
 (`Keymap::seqs`, `starts_group`, `in_group`). In `App::on_key`:
 
-- The first key opens the group and runs nothing. With a shell focused it opens only if
-  every action in the group is global (resize is); otherwise the key is the shell's.
+- The first key opens the group and runs nothing. With a shell focused, only Alt+X opens
+  one (keymap A, under Mouse below; `App::in_shell_prefix`); every other first key is
+  the program's.
 - **No timeout.** The group waits until Enter or Esc (closes, nothing else happens),
   another key (closes, then that key does its own job), or any mouse event (arrows typed
   after a click are arrows). A two-second timeout was built first and dropped: a key
@@ -79,7 +80,12 @@ second implementation.
 | `exit` | closes that terminal, as in an editor |
 
 Split, close and resize are **context-sensitive**: the same keys act on file panes or on
-shells depending on focus, so there is one set to learn.
+shells depending on focus, so there is one set to learn. **Inside the shell these keys
+are the program's** (keymap A): press Alt+X first (Alt+X Alt+S splits the shell). From a
+file pane they work as listed.
+
+**Shift+F12 is the shell's history in the viewer** (copy mode, Round 015): everything
+the shell kept, in memory only; Alt+X F12 where Shift+F12 does not arrive.
 
 **Tab names say what the shell is doing**: the program in the foreground (`vim`,
 `cargo`, `sleep`) or, at a prompt, its working directory (`~` for home). Linux reads
@@ -186,9 +192,24 @@ on it.
 sitting at, across SSH too. Windows Terminal, iTerm2, kitty and WezTerm allow it; tmux
 needs `set -g set-clipboard on`; some terminals refuse silently.
 
-Layout and terminal actions (`Action::is_global`) work from inside the shell pane too.
-Every other key typed there goes to the shell, which is why `Ctrl+q` quits from a file
-pane but not from the shell — in the shell it is XON and belongs to the shell.
+**Keymap A** (owner, 2026-11-09): inside the shell xdevcmd takes only **F12, Shift+F12
+and Alt+X** (`Action::is_global`); every other key is the program's, so readline, emacs,
+mc, htop or Claude Code get every key they expect, F1…F11 included. Actions that act on
+the shell (`Action::acts_on_shell`: split, close, tabs, Alt+1…9) are reached with Alt+X,
+then their key; any other key after Alt+X goes to the program, with the Alt+X, as if
+xdevcmd had not looked (`App::in_shell_prefix`). From a file pane every key does what it
+always did. This is why `Ctrl+q` quits from a file pane but not from the shell, where it
+is XON.
+
+**Alt+X, then an F key, is Shift and that key** (Alt+X F8 is Shift+F8, Alt+X F10 the
+right-click menu): for terminals that send no Shift+F keys, such as macOS Terminal.app.
+**Shift+F10** (and the Menu key, where the terminal reports it) opens the right-click
+menu for the row under the cursor, at that row.
+
+**Between the panes and the shell** (Round 016): Alt+C sends `cd` to the shell, Alt+G
+takes the pane to the shell's directory, Alt+Enter or Ctrl+Enter types the marked names
+into the shell's command line, quoted for that shell. Nothing is typed into a shell that
+is not surely at its prompt: xdevcmd offers a new shell instead, or asks (docs/shell.md).
 
 `F12` was chosen as the escape from the shell pane because every other candidate collides
 with something a shell uses: `Ctrl+\`` is not reported reliably by older terminals,
@@ -222,6 +243,11 @@ what its key does, shows that key from the live keymap, and is greyed out by the
 (`Outcome::Side`), a click on a title switches, and menus taller than the screen scroll.
 Turning the bar on moved every row down by one: tests that read "the first line" now
 read the second, and mouse tests were unaffected because they locate what they click.
+
+**The bar's right end says which xdevcmd this is**: `xdevcmd <pid>`, dim, where the
+menus leave room (Round 018). A shell started from a terminal panel inherits
+`XDEVCMD_PANEL=<pid>`, and the question Windows asks before starting there names the same
+number, so the two can be matched on screen. Usage (Shift+F1) shows it too.
 
 **Usage (Shift+F1)** samples resident memory every two seconds for twenty minutes and
 fits a least-squares line. It says *growing* only with a minute of samples and a slope

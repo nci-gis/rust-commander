@@ -90,15 +90,21 @@
   frame; `set_offset` brings the cursor along instead.
 - **`Ctrl+\` arrives as `Ctrl+4`** from a legacy terminal (byte 0x1C); `normalise` maps
   it back, as it folds `Ctrl+letter` case.
-- **`vt100::Parser` has no `set_size`** — it lives on the screen:
-  `parser.screen_mut().set_size(rows, cols)`.
+- **vt100 0.18 takes sizes as `NonZeroU16`** and has `Parser::set_size` (0.15 had it only
+  on the screen). Keep it at **0.18.1 or later**: earlier versions spend seconds on one
+  `CSI 65535 @` (insert characters) from a program in the panel, which freezes xdevcmd.
+  `pane/term.rs` has `nz()`; tests use `try_into().unwrap()`.
 
-- **Never add `crossterm` or `vt100` as direct dependencies.** `ratatui` pins its own
-  crossterm (via `ratatui-crossterm`) and `tui-term` pins its own vt100. Adding either
-  directly resolves a second copy, and you get two `Event` enums with identical names in
-  an error message that does not mention versions. Use `ratatui::crossterm`, and take the
-  vt100 version from `cargo tree -i vt100`. Adding `unicode-width` directly broke
-  resolution outright, because ratatui pins it exactly.
+- **Never add `crossterm` as a direct dependency.** `ratatui` pins its own crossterm (via
+  `ratatui-crossterm`). Adding it directly resolves a second copy, and you get two `Event`
+  enums with identical names in an error message that does not mention versions. Use
+  `ratatui::crossterm`.
+- **vt100 is a direct dependency since 0.3.0**, because `tui-term` was dropped. Its
+  `Cell` trait hands out `&Self::C`, so wrapping vt100's cells needed `unsafe`; xdevcmd
+  draws vt100's screen itself instead (`pane/term.rs`, `draw_screen`).
+- **`unicode-width` is a direct dependency `"0.2"`** of both crates. That is whatever
+  ratatui resolves; pinning another exact version breaks resolution, because ratatui pins
+  it.
 - **Enabling mouse capture is on us.** `ratatui::init()` does not do it, and if the
   process dies without `DisableMouseCapture` the user's shell prints escape codes on
   every click. `main.rs` chains a panic hook for exactly this.
@@ -118,3 +124,20 @@
   showing through default-colour cells. Each was diagnosed wrong first: ask for
   `xdevcmd --show-keys` output (the terminal's variables, colour depth, every key, click and
   wheel event) before guessing.
+
+- **A CJK character takes two columns; `format!("{:<w$}")` and `.chars().count()` count
+  one.** Fitting names by characters let a row with a Japanese name run past the others
+  and push every column after it (0.3.0, Windows). Fit text into columns with
+  `xdevcmd_core::format::{elide_middle, fit_start, fit_end, text_cells}`; `elided()` says
+  how `elide_middle` cut, for anything that maps clicks to what was drawn (`crumbs`).
+- **`--screenshot` reads the frame it drew** (`terminal.draw(..)?.buffer`), not
+  `TestBackend::buffer()`. The backend receives only what the diff sends, and the diff
+  never sends the cell a wide character covers, so that cell kept a letter from an
+  earlier frame (`【E LIFE】d…`). In a screenshot a wide character is followed by a space
+  for the cell it covers: a character's place in the line is its column.
+- **A file in `app/` cannot share a name with something `app.rs` imports.** `mod session;`
+  beside `use crate::session::{self, …}` is "defined multiple times"; the split used
+  `persist.rs` and `file_ops.rs` (for `xdevcmd_core::ops`).
+- **ConPTY asks where the cursor is (`ESC[6n`) at start and waits for the answer** before
+  the program runs. `pane/term.rs` answers it; the Windows tests' harness
+  (`tests/winpty/mod.rs`) does too, or a test hangs at start.

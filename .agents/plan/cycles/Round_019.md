@@ -181,7 +181,20 @@ binstall yes, no canon edits, no CI until the pull request into `dev`.
     the result with `release.yml`'s archive names. Breaking the Windows `pkg-fmt` failed
     it.
   - README: `cargo binstall xdevcmd` (from 0.4.0). CHANGELOG: one line.
-- **Step 4** is not done: the canon edits wait for the owner.
+- **Step 4, done 2026-11-11** at the owner's word ("Sửa các file canon"): ROADMAP,
+  `reference/ui.md`, `reference/gotchas.md` and `reference/testing.md`, logged in
+  `promotions.md`.
+- **The owner's find, 2026-11-11**: on Windows, Japanese file names pushed Ext, Size and
+  Modified out of line and cut the date (`d41d311`).
+  - Cause: names were fitted by characters (`elide_middle`, `format!("{:<w$}")`), and a
+    CJK character takes two columns.
+  - Fix: `xdevcmd-core` measures with unicode-width (`elided`, `fit_start`, `fit_end`,
+    `text_cells`); `crumbs` uses `elided`. `--screenshot` reads the drawn frame, because
+    the backend's copy kept stale letters in wide characters' second cells.
+  - Tests: unit, and a render test at three widths. Both fail without the fix.
+  - The owner also asked how to see a long name whole. Answered in the session, not done
+    yet: the status line already shows the cursor's full name; options for more are left
+    for the owner to choose.
 
 ## Check
 

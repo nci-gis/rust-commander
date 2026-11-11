@@ -62,6 +62,11 @@ that heading and starts a new, empty one here. -->
   menus need the room.
 
 ### Changed
+- **Names sort as people read them, in any script.** Case, accents and width no longer
+  split letters (`Éclair` with `eclair`, `Ölfeld` with `öl`, full-width `ｆｉｌｅ２` with
+  `file2`, its `２` a number); katakana sort with hiragana and voiced kana with plain
+  ones; Vietnamese letters with marks sort with their letter, `đ` after `d`; a name a
+  Mac stored decomposed sorts with its composed form. ASCII names sort as before.
 - **The default theme is xdevtheme, xdevcmd's own look**: its teal turns into a light
   that runs across the screen to violet, with rounded frames and the titles in a notch,
   a lit cursor row with a bar on the frame, the F keys and the selected tab as slanted

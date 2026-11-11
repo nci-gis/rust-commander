@@ -25,6 +25,11 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - **Ctrl+U** swaps two panes. **Alt+=** shows this pane's directory in the other one.
 - xdevcmd remembers your panes, tabs and directories, and opens them again next time.
   Start with `--no-restore`, or name directories on the command line, to start fresh.
+- **Names sort as you read them**, in any script: `file2` before `file10`; case,
+  accents and width do not split letters apart (`Éclair` with `eclair`, `ｆｉｌｅ２` with
+  `file2`); katakana with hiragana and `が` with `か`; and a name copied from a Mac sorts
+  where it does here, though macOS stores `é` and `が` in two pieces. Kanji keep the
+  order of their code points: only a reading dictionary could do better.
 
 ## Moving around
 

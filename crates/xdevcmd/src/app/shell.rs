@@ -206,7 +206,71 @@ impl App {
             )
         };
         viewer.note(&note);
+        let viewer = viewer.with_links(crate::links::Links::new(h.commands, h.dir_now));
         self.modal = Some(Modal::View(Box::new(viewer)));
+    }
+
+    /// Enter, F3 or F4 on a path chosen in a shell's history. What the output said is
+    /// not trusted: the path is checked as from a file pane, and the status line names
+    /// it in full.
+    pub(super) fn history_link(&mut self, act: viewer::LinkAct, link: crate::links::Link) {
+        let canonical =
+            xdevcmd_core::paths::canonical(&link.path).unwrap_or_else(|_| link.path.clone());
+        let refuse = |s: &mut Self, why: &str| {
+            if let Some(Modal::View(v)) = s.modal.as_mut() {
+                v.note(why);
+            }
+        };
+        if !xdevcmd_core::policy::get().allows(&canonical) {
+            return refuse(self, "that path is outside the root xdevcmd is confined to");
+        }
+        match act {
+            viewer::LinkAct::Go => {
+                let Some(id) = self.last_files_id() else {
+                    return refuse(self, "no file pane to go there");
+                };
+                let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) else {
+                    return;
+                };
+                if link.dir {
+                    f.set_cwd(&canonical);
+                } else if let Some(parent) = canonical.parent() {
+                    f.set_cwd(parent);
+                    f.select_path(&canonical);
+                }
+                self.modal = None;
+                self.return_to = None;
+                self.focus = id;
+                self.note_focus();
+                self.status = tidy(&canonical);
+            }
+            viewer::LinkAct::View => match Document::open(&canonical) {
+                Ok(doc) => {
+                    let v = &self.settings.config.viewer;
+                    let mut viewer = Viewer::open(doc, v.wrap, v.tab_width);
+                    if let Some(n) = link.line {
+                        viewer.show_line(n);
+                    }
+                    viewer.note(&format!(
+                        "{} \u{2014} Esc back to the history",
+                        tidy(&canonical)
+                    ));
+                    if let Some(Modal::View(h)) = self.modal.take() {
+                        self.return_to = Some(h);
+                    }
+                    self.modal = Some(Modal::View(Box::new(viewer)));
+                }
+                Err(e) => refuse(self, &format!("cannot view {}: {e}", tidy(&canonical))),
+            },
+            viewer::LinkAct::Edit => {
+                if let Some(why) = self.refused(Action::Edit) {
+                    return refuse(self, &why);
+                }
+                // The history stays open: it is where the user comes back to.
+                self.pending_edit = Some(canonical);
+                self.edit_at = link.line.map(|n| (n, link.col));
+            }
+        }
     }
 
     /// Where the tab a menu was opened on is now, or a message that it has gone (its

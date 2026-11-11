@@ -52,6 +52,7 @@ impl App {
                     return;
                 }
                 viewer::Action::SaveAs => return self.begin_save_as(),
+                viewer::Action::Link(a, l) => act = ModalAct::Link(a, l),
                 viewer::Action::Stay => {}
             },
             Some(Modal::Help(h)) => {
@@ -140,12 +141,15 @@ impl App {
 
     pub(super) fn modal_act_inner(&mut self, act: ModalAct) {
         match act {
+            ModalAct::Link(a, l) => self.history_link(a, l),
             ModalAct::Run(c) => {
                 self.modal = None;
                 self.perform_cmd(c);
             }
             ModalAct::Close => {
-                self.modal = None;
+                // A file viewed from a shell's history: back to that history.
+                let viewing = matches!(self.modal, Some(Modal::View(_)));
+                self.modal = self.return_to.take().filter(|_| viewing).map(Modal::View);
                 // Not while Save as… holds the viewer: it still shows that file.
                 if self.save_from.is_none() {
                     if let Some(t) = self.view_temp.take() {

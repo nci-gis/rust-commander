@@ -34,7 +34,8 @@ The bash version is tested. The fish and PowerShell versions have not been run y
 - It runs your shell (`$SHELL`, or `[terminal] shell` in the config).
 - **F12** moves between the panes and the terminal.
 - **Shift+F12** shows the shell's history in the viewer, to read, search and copy; it is
-  never written to disk.
+  never written to disk. The paths in it can be opened: see
+  [Paths in the output](#paths-in-the-output).
 - **Inside the terminal, xdevcmd takes only F12, Shift+F12 and Alt+X**; every other key
   is the program's. Alt+X, then a terminal key (Alt+S split, Alt+W close, Alt+N new tab,
   Alt+1…9 tab N) acts on the shell; anything else after Alt+X, Enter too, goes to the
@@ -89,6 +90,38 @@ sh, cmd) silently drops a line longer than about 4 KB.
 "Surely at its prompt" comes from the system on Linux (`/proc`) and macOS (`ps`). On
 Windows the system does not say; only the prompt marks below can tell, and without them
 every send asks.
+
+## Paths in the output
+
+In the history (Shift+F12), the paths that exist on disk are underlined: compiler and
+grep locations (`src/main.rs:42:9`, `main.c:7:`), Python's `File "x.py", line 12`,
+MSBuild's `Program.cs(12,5)`, `ls` listings, `~/…`, `C:\…`, `.\…`, and a quoted name
+with spaces. URLs, version numbers and paths on another machine (`\\server\…`,
+`//host/…`) are left alone.
+
+| Key | Does |
+|---|---|
+| Tab · Shift+Tab | The next / previous path; the line under the viewer says its full path, line, and the directory it was taken from |
+| Enter, or a click on the chosen path | The file pane goes there, the cursor on the file |
+| F3 | View the file at its line; Esc comes back to the history |
+| F4 | Edit the file at its line |
+| Esc | Let go of the path (a second Esc closes the history) |
+
+**A relative path** is taken from the directory its command ran in, when the shell
+sends prompt marks (OSC 133, below): `cd a; make` then `cd b` still finds `make`'s
+`src/x.c` in `a`. Without prompt marks, or for lines before the first one, it is taken
+from the shell's directory now, and the line under the viewer says so; a path that is
+not there from that directory is not offered.
+
+**The line goes to the editor** for those whose way of saying it is known: vi, vim,
+nvim, nano, emacs, micro, kak, mg, joe (`+N file`); hx, subl, zed (`file:N:C`); code,
+codium, cursor, windsurf (`-g file:N:C`); notepad++ (`-nN file`). Any other editor gets
+the file alone, and the status line says the line was not passed.
+
+What a line of output says is not trusted: any program can print any path. So a path
+is only offered, never opened by itself; each key shows its full path first, and it is
+checked as a file pane's would be (the root xdevcmd is confined to; F4 is off in the
+read-only modes).
 
 ## Telling xdevcmd where the shell is
 

@@ -11,6 +11,14 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Paths in the shell's output can be opened.** In the history (Shift+F12), paths
+  that exist are underlined: compiler and grep locations (`src/main.rs:42:9`), Python
+  tracebacks, MSBuild's `x.cs(12,5)`, `ls` listings. Tab and Shift+Tab choose one, and
+  the line under the viewer gives its full path; Enter (or a click) takes the file pane
+  there, F3 views the file at its line, F4 edits it at its line (vim, nano, emacs,
+  helix, VS Code, Sublime, Zed, Notepad++ and others told the line their own way). A
+  relative path is taken from the directory its command ran in when the shell sends
+  prompt marks, else from the shell's directory now, and it says which.
 - **Two more looks in xdevtheme's family**, in `themes/`: **xdevtheme-neon** (the light
   runs teal, violet, pink, and the focused frame glows into the cells around it) and
   **xdevtheme-glass** (no lines: panes are cards, the focused path and the cursor row

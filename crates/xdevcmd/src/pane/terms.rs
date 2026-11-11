@@ -62,6 +62,12 @@ pub struct History {
     pub cwd: Option<std::path::PathBuf>,
     /// A full-screen program has the other screen up, so `text` is that screen only.
     pub full_screen: bool,
+    /// The commands the shell reported: the line of `text` each one's output starts
+    /// on, and the directory it ran in. Empty for a shell that sends no prompt marks.
+    pub commands: Vec<(usize, Option<std::path::PathBuf>)>,
+    /// The shell's directory now, however it is known: the base for the paths in its
+    /// output where no command says better.
+    pub dir_now: Option<std::path::PathBuf>,
 }
 
 /// A terminal tab's identity, never reused within a panel.
@@ -374,13 +380,16 @@ impl TermPanel {
         let t = self.tabs.get(i)?;
         let shell = t.terms.get(&t.focus)?;
         let title = format!("history \u{b7} {} \u{b7} tab {}", shell.shell_name(), i + 1);
-        let (text, full_screen) = shell.history_text();
+        let (text, commands, full_screen) = shell.history_commands();
+        let dir = shell.shell_dir();
         Some(History {
             title,
             text,
             // Only a directory the system gave: a Save as… default is written to.
-            cwd: shell.shell_dir().filter(|d| d.trusted).map(|d| d.path),
+            cwd: dir.clone().filter(|d| d.trusted).map(|d| d.path),
             full_screen,
+            commands,
+            dir_now: dir.map(|d| d.path),
         })
     }
 

@@ -3212,3 +3212,131 @@ fn show_keys_prints_each_key_and_click_and_what_it_would_do() {
         }
     }
 }
+
+const SHIFT_TAB: &[u8] = b"\x1b[Z";
+const F3: &[u8] = b"\x1bOR";
+
+/// Paths in a shell's history (Round 020): Shift+Tab chooses the last one shown, the
+/// status names it in full and says what it was resolved against (this sh sends no
+/// prompt marks: the shell's directory now); F3 views the file at its line and Esc
+/// comes back to the history; F4 gives the editor the line; Enter takes the file pane
+/// there, the cursor on the file.
+#[test]
+fn a_path_in_the_history_is_viewed_edited_and_gone_to() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("links");
+    std::fs::create_dir_all(s.left().join("src")).unwrap();
+    let body: String = (1..=60).map(|n| format!("line {n} of lib\n")).collect();
+    s.file("left/src/lib.rs", &body);
+    s.file("left/notes.txt", "notes\n");
+    // An editor xdevcmd knows by name, which writes down what it was given.
+    std::fs::create_dir_all(s.0.join("bin")).unwrap();
+    let log = s.0.join("editor.log");
+    let editor = s.file(
+        "bin/vim",
+        &format!("#!/bin/sh\nprintf '%s|' \"$@\" > '{}'\n", log.display()),
+    );
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut xdevcmd = Session::start(&s, Some(&editor));
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let left = s.left().display().to_string();
+    xdevcmd.send(format!("cd '{left}'\r").as_bytes());
+    // The command lines name neither file as it exists, so only the output does.
+    xdevcmd.send(b"printf 'src/%s:30:2: warning\\n' lib.rs; echo see notes.tx''t.\r");
+    xdevcmd.wait_for("see notes.txt.");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.wait_for("Tab paths");
+
+    xdevcmd.send(SHIFT_TAB);
+    // What it was resolved against ("no prompt marks") follows, cut at this width.
+    xdevcmd.wait_for("left/notes.txt \u{2014} Enter goes there, F3 views, F4 edits \u{b7} from");
+    xdevcmd.send(SHIFT_TAB);
+    xdevcmd.wait_for("left/src/lib.rs:30:2 \u{2014} Enter goes there");
+
+    // F3: the file, its line at the top; Esc: the history again, the path still chosen.
+    xdevcmd.send(F3);
+    xdevcmd.wait_for("30 \u{2502}line 30 of lib");
+    xdevcmd.wait_for("Esc back to the history");
+    assert!(
+        !xdevcmd.screen().contains("29 \u{2502}line 29"),
+        "line 30 at the top"
+    );
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_for("history \u{b7} sh");
+
+    // F4: the editor gets `+30 file`; the history is there when it closes.
+    xdevcmd.send(F4);
+    xdevcmd.wait_for("vim closed");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !log.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let got = std::fs::read_to_string(&log).unwrap_or_default();
+    let want = format!(
+        "+30|{}|",
+        s.left()
+            .join("src/lib.rs")
+            .canonicalize()
+            .unwrap()
+            .display()
+    );
+    assert_eq!(got, want);
+    xdevcmd.wait_for("history \u{b7} sh");
+
+    // Enter: the file pane goes there, the cursor on the file, the history closed.
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_gone("history \u{b7} sh");
+    xdevcmd.wait_for("lib.rs");
+    xdevcmd.wait_for("src/lib.rs");
+    xdevcmd.quit();
+}
+
+/// A shell that sends prompt marks (OSC 133, written here by hand): a path in a
+/// command's output is taken from the directory that command ran in, though the shell
+/// has gone elsewhere since. A Python traceback gives its line.
+#[test]
+fn a_path_is_taken_from_the_directory_its_command_ran_in() {
+    let s = Scratch::new("links-marked");
+    std::fs::create_dir_all(s.left().join("a")).unwrap();
+    std::fs::create_dir_all(s.left().join("b")).unwrap();
+    s.file("left/a/x.py", "one\ntwo\nthree\nfour\n");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    // A prompt, a command, and the shell gone elsewhere at once: the directory is the
+    // one at the prompt, however far behind the shell the output is read.
+    let a = s.left().join("a").display().to_string();
+    xdevcmd.send(format!("cd '{a}'; printf '\\033]133;A\\007PROMPTED\\n'\r").as_bytes());
+    xdevcmd.wait_for("PROMPTED");
+    xdevcmd.send(
+        b"printf '\\033]133;C\\007  File \"%s\", line 3, in f\\n' x.py; cd ../b; \
+          printf '\\033]133;A\\007'\r",
+    );
+    xdevcmd.wait_for("line 3, in f");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.send(SHIFT_TAB);
+    // a/, where the command ran, not b/, where the shell is now. (What it says it was
+    // resolved against, "from its command's directory", is cut at this width.)
+    xdevcmd.wait_for("left/a/x.py:3 \u{2014} Enter goes there, F3 views, F4 edits");
+    xdevcmd.send(F3);
+    xdevcmd.wait_for("3 \u{2502}three");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_for("history \u{b7} sh");
+    // Esc lets go of the path; a click chooses it again, and a click on it goes there.
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("Enter goes there");
+    let (x, y) = xdevcmd.locate("x.py\", line 3");
+    xdevcmd.click(x + 1, y, 0);
+    xdevcmd.wait_for("left/a/x.py:3 \u{2014} Enter goes there");
+    // A second click, slower than a double-click: the path was shown in between.
+    std::thread::sleep(Duration::from_millis(500));
+    xdevcmd.click(x + 1, y, 0);
+    xdevcmd.wait_gone("history \u{b7} sh");
+    xdevcmd.wait_for("left/a/x.py");
+    // The file pane has the focus: q is xdevcmd's.
+    xdevcmd.quit();
+}

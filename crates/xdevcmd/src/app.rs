@@ -105,6 +105,8 @@ enum ModalAct {
     Background,
     /// Left/Right in a menu-bar menu.
     Bar(isize),
+    /// Enter, F3 or F4 on a path in a shell's history.
+    Link(viewer::LinkAct, crate::links::Link),
 }
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -405,6 +407,8 @@ pub struct App {
     /// Set by F4. Handled in `run`, which is the only place that can hand the real
     /// terminal over to another program and take it back.
     pending_edit: Option<PathBuf>,
+    /// The line (and column) F4 on a path in a shell's history asks the editor for.
+    edit_at: Option<(u32, Option<u32>)>,
     settings: Settings,
     config_outcome: Outcome,
     drag: Option<Drag>,
@@ -484,6 +488,9 @@ pub struct App {
     /// Save as… was started from a terminal tab's menu, not the viewer: once its
     /// dialogs close, the viewer holding the history is dropped, not shown.
     save_only: bool,
+    /// A shell's history, while F3 on a path in it views that file: it comes back,
+    /// where it was, when that viewer closes.
+    return_to: Option<Box<Viewer>>,
     /// Where the history shown in the viewer came from: its shell's directory where the
     /// system says (Linux), else the file pane's. Save as… offers it.
     history_dir: Option<PathBuf>,
@@ -607,6 +614,7 @@ impl App {
             last_click: None,
             modal: None,
             pending_edit: None,
+            edit_at: None,
             settings,
             config_outcome: outcome,
             drag: None,
@@ -642,6 +650,7 @@ impl App {
             view_temp: None,
             save_from: None,
             save_only: false,
+            return_to: None,
             history_dir: None,
             pending_type: None,
             follow_seen: None,

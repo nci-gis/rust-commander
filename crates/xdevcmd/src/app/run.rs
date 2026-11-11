@@ -216,6 +216,10 @@ impl App {
                 input.quiet()?;
             }
             self.edit_externally(terminal, &path)?;
+            // F4 from a shell's history: the history is still up, over the status line.
+            if let Some(Modal::View(v)) = self.modal.as_mut() {
+                v.note(&self.status);
+            }
             if let Some((files, list)) = self.pending_batch.take() {
                 self.finish_batch(files, &list);
             }

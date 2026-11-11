@@ -160,6 +160,13 @@ What xdevcmd learns about the shell, and how far it trusts each source
     wins. On Windows, then, a program that prints a prompt mark can make itself look
     idle. If that matters to you there, set `[terminal] send_when_idle = false`, and
     every send asks.
+- **Paths printed in the shell's output** (the history's Tab, Enter, F3, F4) are found
+  in text any program can print. They are only offered: nothing opens until a key is
+  pressed on one, its full path is shown first, it must exist on this machine (paths
+  on another, `\\server\…` or `//host/…`, are never looked up, so a lookup cannot
+  hang), and it is checked as from a file pane: inside the root, and F4 off in the
+  read-only modes. A directory taken from the prompt marks only ever resolves a
+  relative path; it is read from the system where it can be (Linux), at the prompt.
 - **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
   character, or one that shell cannot be given safely, is refused whole. Names are
   wrapped in bracketed paste when the shell asked for it, so its line editor takes them

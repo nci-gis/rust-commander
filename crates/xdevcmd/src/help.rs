@@ -327,6 +327,14 @@ fn keys_page(settings: &Settings) -> Vec<Row> {
                 ("Drag", "Select lines with the mouse"),
                 ("y \u{b7} Y", "Copy the selection or top line / the screen"),
                 ("Esc \u{b7} q", "Close the viewer"),
+                (
+                    "Tab \u{b7} Shift+Tab",
+                    "A shell's history: the next / previous path in it",
+                ),
+                (
+                    "Enter \u{b7} F3 \u{b7} F4",
+                    "On a chosen path: go there / view / edit, at its line",
+                ),
             ],
         ),
         (

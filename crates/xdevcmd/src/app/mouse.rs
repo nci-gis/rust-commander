@@ -723,7 +723,11 @@ impl App {
                     act = ModalAct::Background;
                 }
             }
-            Some(Modal::View(v)) => v.on_mouse(m),
+            Some(Modal::View(v)) => {
+                if let viewer::Action::Link(a, l) = v.on_mouse(m) {
+                    act = ModalAct::Link(a, l);
+                }
+            }
             Some(Modal::Rename(d)) if left => {
                 act = if hit(&d.buttons, 0) {
                     match d.confirm() {

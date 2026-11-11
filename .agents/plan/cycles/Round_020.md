@@ -192,13 +192,63 @@ Sizes: about a week (M) in all. Risks:
 
 ## Do
 
-(Not started.)
+The owner (2026-11-11): "bắt đầu round B nhé", with the recommended answer to each of
+§6's five decisions. Work on `feat/v0.4.0`, pushed, no CI.
+
+- **Step 1, the recogniser**: `xdevcmd-core/src/found.rs`, `paths_in(line)`. Quoted
+  names with spaces first, then words split at whitespace, quotes, brackets, `|`, `,`,
+  `;` and `=` (so `--manifest-path=Cargo.toml` gives the file). A drive's colon is not
+  a line's; a sentence's trailing `.` or `,` is cut. Python's `", line N"` and MSBuild's
+  `(N,M)` are read after the path. A table test of 18 forms, and one of 7 refusals.
+- **Step 2, the commands**: `ShellReports` counts line breaks in the rows vt100 hands
+  `on_scroll` (as a capture writes them, so a wrapped line counts once), and at each
+  `133;C` records the line its output starts on (the breaks so far, plus those in a
+  capture of the screen made with a copy of the stream's state, minus the blank rows
+  below the cursor). 200 kept. `history()` gives the text and its first line's number,
+  so each command maps to a line of the text or is dropped.
+  - **Deviation (found by the pty test):** the directory is read at the prompt
+    (`133;A`), not at `C`. The output is parsed behind the shell: with
+    `printf C…; cd ../b`, `/proc` already said `b` when `C` was read. At the prompt the
+    shell is waiting for a line, so its directory holds still.
+- **Step 3, the link view**: `links.rs` (resolve, existence cache, UNC and `//host`
+  skipped, `~` expanded) and a layer in `viewer.rs`: links underlined in the accent,
+  the chosen one lit; Tab/Shift+Tab look up to 2,000 lines on, lazily, and bring the
+  path into view; Esc lets go first; Enter goes; F3/F4 view/edit (on a directory they
+  say Enter goes there); the hint row gains "Tab paths". `app/shell.rs::history_link`
+  checks the policy root on the canonical path for every action; F4 goes through
+  `refused(Action::Edit)`, so it is off in the read-only modes.
+  - **F3** keeps the history in `App::return_to`; closing that viewer brings the
+    history back where it was, the path still chosen.
+  - **Deviation:** the mouse is "a click chooses, a click on the chosen path goes"
+    rather than "a double-click goes". A double-click is still Enter (its first click
+    chooses, its second goes), and two slower clicks show the full path in between.
+  - The status for a chosen path is path, keys, then the base: on a narrow screen the
+    base is what is cut.
+- **Step 4, the editor at a line**: `editor_args` in `app/open.rs`, by the program's
+  file stem, lower-cased (so `Code.exe` and `/usr/bin/vim` match): `+N file` (vi, vim,
+  nvim, gvim, view, nano, emacs, emacsclient, micro, kak, mg, joe); `file:N:C` (hx,
+  helix, subl, sublime_text, zed); `-g file:N:C` (code, code-insiders, codium, cursor,
+  windsurf); `-nN file` (notepad++). Anything else gets the file alone, and the status
+  says the line was not passed. After the editor, the history's message line shows how
+  it ended (the status line is under the viewer).
+- **Step 5, tests**: unit tests for 1, 2 and 4 (`found`, `shell_report`, `links`,
+  `editor_args`); pty tests `a_path_in_the_history_is_viewed_edited_and_gone_to`
+  (Shift+Tab, F3 at line 30 and back, F4 with a stand-in `vim` given `+30 file`, Enter
+  to the pane) and `a_path_is_taken_from_the_directory_its_command_ran_in` (hand-written
+  marks, a Python traceback, `cd` away, F3 at the line, click, click).
+  - **Deviation:** no separate render tests. Every behaviour the plan listed for them
+    is in the pty tests or unit tests, through the real shell.
+- **Step 6, docs**: docs/shell.md "Paths in the output"; docs/security.md (the shell
+  panel); F1's viewer rows; CHANGELOG Unreleased → Added.
+- Cleanups: `TermPane::history_text` (replaced by `history_commands`) removed.
 
 ## Check
 
-- [ ] Recogniser table green, false positives included
-- [ ] Command records survive a full history (test)
-- [ ] Render: marks, Tab, status line; pty: grep/traceback → Enter → pane, F3 at the line
-- [ ] Clippy for three targets, the full suite, `cargo deny`
+- [x] Recogniser table green, false positives included
+- [x] Command records survive a full history (test)
+- [x] pty: Python traceback → Shift+Tab → F3 at the line, click → pane; output
+  `path:line:col` → F3, F4 (`+30`), Enter → pane with the cursor on the file
+- [x] Clippy `-D warnings` for Linux, windows-gnu and darwin; the full suite, 641 passed, 0 failed
+- [ ] `cargo deny` (no new dependencies this round)
 - [ ] The owner: bash with the snippet, then without; Windows `cmd`/`pwsh` (MSBuild and
   `C:\` paths)

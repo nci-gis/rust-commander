@@ -471,7 +471,8 @@ impl TermPane {
             });
         }
 
-        let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows));
+        let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows))
+            .with_pid(pid.clone());
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
             nz(rows),
             nz(cols),
@@ -850,14 +851,31 @@ impl TermPane {
         }
     }
 
-    /// The whole history and screen as text, for the viewer (Shift+F12), and whether a
-    /// full-screen program has the other screen up: vt100 keeps no history there, so
-    /// the text is that screen only.
-    pub fn history_text(&self) -> (String, bool) {
-        self.parser
-            .read()
-            .map(|p| (history_text(&p), p.screen().alternate_screen()))
-            .unwrap_or_default()
+    /// The whole history and screen as text, for the viewer (Shift+F12), with the commands the shell
+    /// reported (OSC 133): the line each one's output starts on in that text, and the
+    /// directory it ran in (none for a shell that sends no prompt marks); and whether
+    /// a full-screen program has the other screen up, its screen being the text then.
+    pub fn history_commands(&self) -> (String, Vec<(usize, Option<std::path::PathBuf>)>, bool) {
+        let Ok(p) = self.parser.read() else {
+            return Default::default();
+        };
+        if p.screen().alternate_screen() {
+            return (history_text(&p), Vec::new(), true);
+        }
+        let (mut text, first) = p.callbacks().history(p.screen());
+        let kept = text.trim_end_matches(['\n', ' ']).len();
+        text.truncate(kept);
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        let commands = p
+            .callbacks()
+            .commands
+            .iter()
+            .filter(|c| c.line >= first)
+            .map(|c| ((c.line - first) as usize, c.dir.clone()))
+            .collect();
+        (text, commands, false)
     }
 
     fn history(&self) -> usize {

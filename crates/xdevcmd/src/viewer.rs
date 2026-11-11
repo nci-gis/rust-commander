@@ -24,6 +24,19 @@ pub enum Action {
     Copy(String),
     /// F2: write what is shown to a file the user names (the app asks where).
     SaveAs,
+    /// A path chosen in a shell's history: go there, view it or edit it.
+    Link(LinkAct, crate::links::Link),
+}
+
+/// What to do with a path chosen in a shell's history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkAct {
+    /// Enter: the file pane goes there.
+    Go,
+    /// F3: view the file at its line.
+    View,
+    /// F4: edit the file at its line.
+    Edit,
 }
 
 /// What is being typed on the viewer's last row.
@@ -65,6 +78,11 @@ pub struct Viewer {
     /// Show the last screenful at the next draw, once the screen's height is known: a
     /// shell's history opens where the shell was, at its end.
     to_end: bool,
+    /// A shell's history: the paths in it that exist, and the one chosen.
+    pub links: Option<crate::links::Links>,
+    /// Where the text starts on screen, and the character each row starts at.
+    text_x: u16,
+    row_starts: Vec<usize>,
 }
 
 impl Viewer {
@@ -94,7 +112,97 @@ impl Viewer {
             selection: None,
             held: None,
             to_end: false,
+            links: None,
+            text_x: 0,
+            row_starts: Vec::new(),
         }
+    }
+
+    /// The paths in a shell's history, offered by Tab.
+    pub fn with_links(mut self, links: crate::links::Links) -> Self {
+        self.links = Some(links);
+        self
+    }
+
+    /// Put line `n` (from 1) at the top, as F3 from a history does for a path's line.
+    pub fn show_line(&mut self, n: u32) {
+        self.top = (n as usize).saturating_sub(1).min(self.last());
+        self.message = format!("line {n}");
+    }
+
+    /// Line `i` as it is drawn: tabs spread out, control characters made visible.
+    fn shown(&mut self, i: usize) -> String {
+        display_line(&self.doc.line(i).unwrap_or_default(), self.tab_width)
+    }
+
+    /// Tab and Shift+Tab: the next path that exists, after (or before) the chosen one,
+    /// or from the top of the screen. Lines are looked at as needed, a few screens at a
+    /// time, so a long history costs nothing until Tab goes through it.
+    fn next_link(&mut self, forward: bool) {
+        const LOOK: usize = 2000;
+        let total = self.doc.line_count();
+        if total == 0 || self.links.is_none() {
+            return;
+        }
+        let (mut i, mut k) = match self.links.as_ref().and_then(|l| l.selected) {
+            Some((i, k)) => (i, Some(k)),
+            None if forward => (self.top, None),
+            None => ((self.top + self.page).min(total - 1), None),
+        };
+        for _ in 0..LOOK {
+            let shown = self.shown(i);
+            let Some(links) = self.links.as_mut() else {
+                return;
+            };
+            let n = links.on_line(i, &shown).len();
+            let next = match (k, forward) {
+                (None, true) if n > 0 => Some(0),
+                (None, false) if n > 0 => Some(n - 1),
+                (Some(j), true) if j + 1 < n => Some(j + 1),
+                (Some(j), false) if j > 0 => Some(j - 1),
+                _ => None,
+            };
+            if let Some(j) = next {
+                links.selected = Some((i, j));
+                let said = links
+                    .chosen()
+                    .map(crate::links::describe)
+                    .unwrap_or_default();
+                self.message = said;
+                // Into view, a few lines from the edge.
+                let page = self.page.max(1);
+                if i < self.top || i >= self.top + page {
+                    self.top = i.saturating_sub(page / 3);
+                }
+                return;
+            }
+            k = None;
+            match forward {
+                true if i + 1 < total => i += 1,
+                false if i > 0 => i -= 1,
+                _ => break,
+            }
+        }
+        self.message = if forward {
+            "no more paths below \u{2014} Shift+Tab goes back"
+        } else {
+            "no more paths above"
+        }
+        .into();
+    }
+
+    /// The link under (`x`, `y`), as (line, which of its links).
+    fn link_at(&mut self, x: u16, y: u16) -> Option<(usize, usize)> {
+        let row = usize::from(y.checked_sub(self.body.y)?);
+        let line = *self.row_lines.get(row)?;
+        let at = self.row_starts.get(row)? + usize::from(x.checked_sub(self.text_x)?);
+        let shown = self.shown(line);
+        let links = self.links.as_mut()?;
+        let k = links
+            .on_line(line, &shown)
+            .iter()
+            .position(|l| l.chars.contains(&at))?;
+        Some((line, k))
     }
 
     /// Open at the end: the last line on the last row, as the shell showed it.
@@ -115,8 +223,27 @@ impl Viewer {
     /// The mouse: the wheel scrolls, the scrollbar drags, and in text a drag selects
     /// whole lines for `y` to copy. Your terminal's own selection (usually Shift+drag)
     /// still works for part of a line.
-    pub fn on_mouse(&mut self, m: MouseEvent) {
+    pub fn on_mouse(&mut self, m: MouseEvent) -> Action {
         let (x, y) = (m.column, m.row);
+        // A path in a shell's history: a click chooses it, a click on the chosen one
+        // goes there.
+        if m.kind == MouseEventKind::Down(MouseButton::Left) && self.mode == Mode::Text {
+            if let Some(hit) = self.link_at(x, y) {
+                let links = self.links.as_mut().expect("a link was hit");
+                if links.selected == Some(hit) {
+                    if let Some(l) = links.chosen().cloned() {
+                        return Action::Link(LinkAct::Go, l);
+                    }
+                }
+                links.selected = Some(hit);
+                self.message = links
+                    .chosen()
+                    .map(crate::links::describe)
+                    .unwrap_or_default();
+                self.selection = None;
+                return Action::Stay;
+            }
+        }
         match m.kind {
             MouseEventKind::ScrollDown => self.scroll(3),
             MouseEventKind::ScrollUp => self.scroll(-3),
@@ -125,7 +252,7 @@ impl Viewer {
                     let grab = b.grab(y);
                     self.top = b.offset_at(y, grab);
                     self.held = Some(Held::Bar(grab));
-                    return;
+                    return Action::Stay;
                 }
                 let inside = x >= self.body.x && x < self.body.x + self.body.width;
                 match self
@@ -175,6 +302,7 @@ impl Viewer {
             }
             _ => {}
         }
+        Action::Stay
     }
 
     fn last(&self) -> usize {
@@ -300,6 +428,39 @@ impl Viewer {
         }
 
         let page = self.page.max(1) as isize;
+        // A shell's history: Tab goes through its paths, and the chosen one is acted on.
+        if self.links.is_some() && self.mode == Mode::Text {
+            let chosen = self.links.as_ref().and_then(|l| l.chosen().cloned());
+            match (k.code, chosen) {
+                (KeyCode::Tab, _) => {
+                    self.next_link(true);
+                    return Action::Stay;
+                }
+                (KeyCode::BackTab, _) => {
+                    self.next_link(false);
+                    return Action::Stay;
+                }
+                (KeyCode::Esc, Some(_)) => {
+                    if let Some(l) = self.links.as_mut() {
+                        l.selected = None;
+                    }
+                    self.message.clear();
+                    return Action::Stay;
+                }
+                (KeyCode::Enter, Some(l)) => return Action::Link(LinkAct::Go, l),
+                (KeyCode::F(3 | 4), Some(l)) if l.dir => {
+                    self.message = "a directory \u{2014} Enter goes there".into();
+                    return Action::Stay;
+                }
+                (KeyCode::F(3), Some(l)) => return Action::Link(LinkAct::View, l),
+                (KeyCode::F(4), Some(l)) => return Action::Link(LinkAct::Edit, l),
+                (KeyCode::Enter, None) => {
+                    self.message = "Tab chooses a path in the output".into();
+                    return Action::Stay;
+                }
+                _ => {}
+            }
+        }
         match k.code {
             KeyCode::Esc if self.selection.is_some() => {
                 self.selection = None;
@@ -457,12 +618,24 @@ impl Viewer {
         }
 
         let selected = self.selected();
+        self.text_x = area.x + gutter + 1;
+        self.row_starts.clear();
         let mut row = 0u16;
         let mut i = self.top;
         while row < area.height && i < total {
             let raw = self.doc.line(i).unwrap_or_default();
             let shown = display_line(&raw, self.tab_width);
             let chars: Vec<char> = shown.chars().collect();
+            let chosen = self.links.as_ref().and_then(|l| l.selected);
+            let links: Vec<(std::ops::Range<usize>, bool)> = match self.links.as_mut() {
+                Some(l) => l
+                    .on_line(i, &shown)
+                    .iter()
+                    .enumerate()
+                    .map(|(k, link)| (link.chars.clone(), chosen == Some((i, k))))
+                    .collect(),
+                None => Vec::new(),
+            };
 
             let pieces: Vec<String> = if self.wrap {
                 if chars.is_empty() {
@@ -496,6 +669,30 @@ impl Viewer {
                         .buffer_mut()
                         .set_style(text, Style::new().bg(theme::t().row_cursor_active));
                 }
+                // The paths on this piece of the line: underlined, the chosen one lit.
+                let start = if self.wrap { n * text_w } else { self.col };
+                for (span, chosen) in &links {
+                    let from = span.start.max(start);
+                    let to = span.end.min(start + piece.chars().count());
+                    if from >= to {
+                        continue;
+                    }
+                    let style = if *chosen {
+                        Style::new()
+                            .fg(theme::t().bg)
+                            .bg(theme::t().accent)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new()
+                            .fg(theme::t().accent)
+                            .add_modifier(Modifier::UNDERLINED)
+                    };
+                    let x = self.text_x + (from - start) as u16;
+                    frame
+                        .buffer_mut()
+                        .set_style(Rect::new(x, y, (to - from) as u16, 1), style);
+                }
+                self.row_starts.push(start);
                 self.row_lines.push(i);
                 row += 1;
             }
@@ -615,8 +812,10 @@ impl Viewer {
             return;
         }
 
-        let keys: &[(&str, &str)] = &[
-            ("Esc", "close"),
+        let paths: &[(&str, &str)] = &[("Esc", "close"), ("Tab", "paths")];
+        let plain: &[(&str, &str)] = &[("Esc", "close")];
+        let keys_lead = if self.links.is_some() { paths } else { plain };
+        let rest: &[(&str, &str)] = &[
             ("h", "hex"),
             ("w", "wrap"),
             ("y/Y", "copy"),
@@ -626,6 +825,7 @@ impl Viewer {
             (":", "line"),
             ("F2", "save"),
         ];
+        let keys: Vec<(&str, &str)> = keys_lead.iter().chain(rest).copied().collect();
         // A message is what just happened (a refusal, "past the end"): it must be read,
         // so keys are dropped from the end, down to Esc, until it fits beside them.
         let width = |n: usize| -> usize {

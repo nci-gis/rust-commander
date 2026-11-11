@@ -66,7 +66,12 @@ impl App {
             self.status = "EDITOR is set to an empty string".into();
             return Ok(());
         };
-        let args: Vec<&str> = parts.collect();
+        let mut args: Vec<std::ffi::OsString> = parts.map(Into::into).collect();
+        // F4 on a path in a shell's history: at its line, for the editors whose way of
+        // saying so is known.
+        let at = self.edit_at.take();
+        let (file, passed) = editor_args(program, path, at);
+        args.extend(file);
 
         // Step out of the alternate screen by hand and step back into it, rather than
         // calling ratatui::restore() and ratatui::init() again. Re-initialising asks
@@ -77,10 +82,7 @@ impl App {
         let _ = execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen);
         let _ = disable_raw_mode();
 
-        let outcome = std::process::Command::new(program)
-            .args(&args)
-            .arg(path)
-            .status();
+        let outcome = std::process::Command::new(program).args(&args).status();
 
         let _ = enable_raw_mode();
         let _ = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture);
@@ -98,8 +100,14 @@ impl App {
         self.graphic_shown = None;
         self.kitty_held = None;
 
+        let line = match at {
+            Some((n, _)) if !passed => {
+                format!(" \u{2014} line {n} not passed: xdevcmd knows no line flag for {program}")
+            }
+            _ => String::new(),
+        };
         self.status = match outcome {
-            Ok(s) if s.success() => format!("{program} closed"),
+            Ok(s) if s.success() => format!("{program} closed{line}"),
             Ok(s) => format!("{program} exited with {s}"),
             Err(e) => format!("cannot run {program}: {e}"),
         };
@@ -443,5 +451,77 @@ impl App {
             paste: false,
             what: format!("ran {}", item.label),
         });
+    }
+}
+
+/// The arguments that open `path` in `program` at a line (and column), and whether the
+/// line was passed: editors each say it their own way, and one not in this table gets
+/// the file alone (its status says so) rather than a flag it may take for a file name.
+fn editor_args(
+    program: &str,
+    path: &Path,
+    at: Option<(u32, Option<u32>)>,
+) -> (Vec<std::ffi::OsString>, bool) {
+    let file = path.as_os_str().to_os_string();
+    let Some((line, col)) = at else {
+        return (vec![file], true);
+    };
+    let name = Path::new(program)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let joined = |with_col: bool| {
+        let mut s = file.clone();
+        s.push(format!(":{line}"));
+        if let (true, Some(c)) = (with_col, col) {
+            s.push(format!(":{c}"));
+        }
+        s
+    };
+    match name.as_str() {
+        "vi" | "vim" | "nvim" | "gvim" | "view" | "nano" | "emacs" | "emacsclient" | "micro"
+        | "kak" | "mg" | "joe" => (vec![format!("+{line}").into(), file], true),
+        "hx" | "helix" | "subl" | "sublime_text" | "zed" => (vec![joined(true)], true),
+        "code" | "code-insiders" | "codium" | "cursor" | "windsurf" => {
+            (vec!["-g".into(), joined(true)], true)
+        }
+        "notepad++" => (vec![format!("-n{line}").into(), file], true),
+        _ => (vec![file], false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::editor_args;
+    use std::path::Path;
+
+    fn args(program: &str, at: Option<(u32, Option<u32>)>) -> (Vec<String>, bool) {
+        let (a, passed) = editor_args(program, Path::new("/s/a.rs"), at);
+        (
+            a.iter().map(|s| s.to_string_lossy().into_owned()).collect(),
+            passed,
+        )
+    }
+
+    #[test]
+    fn each_editor_is_told_the_line_its_own_way() {
+        let at = Some((42, Some(7)));
+        assert_eq!(
+            args("nvim", at),
+            (vec!["+42".into(), "/s/a.rs".into()], true)
+        );
+        assert_eq!(args("/usr/bin/vim", at).0[0], "+42");
+        assert_eq!(args("hx", at), (vec!["/s/a.rs:42:7".into()], true));
+        assert_eq!(
+            args("code", at),
+            (vec!["-g".into(), "/s/a.rs:42:7".into()], true)
+        );
+        assert_eq!(args("Code.exe", at).0[0], "-g");
+        assert_eq!(args("notepad++.exe", at).0[0], "-n42");
+        assert_eq!(args("code", Some((3, None))).0[1], "/s/a.rs:3");
+        // Unknown: the file alone, and said so.
+        assert_eq!(args("notepad", at), (vec!["/s/a.rs".into()], false));
+        // No line asked for: the file alone, nothing to say.
+        assert_eq!(args("notepad", None), (vec!["/s/a.rs".into()], true));
     }
 }

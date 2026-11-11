@@ -31,6 +31,8 @@ pub struct Query {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Found(PathBuf),
+    /// A path in a list ([`list`]) that is not there any more.
+    Gone(PathBuf),
     /// How far it has got: files looked at so far.
     Progress {
         scanned: u64,
@@ -70,6 +72,57 @@ pub fn start(q: Query) -> Search {
         });
     });
     Search { rx, stop }
+}
+
+/// Check a list of paths on a thread of its own: [`Event::Found`] for each that is
+/// there, [`Event::Gone`] for each that is not, in the list's order, each path once.
+///
+/// A list is made of what a shell printed, so it can be long (a `find /`) and can name
+/// anything. Nothing is looked up on another machine (`\\server\…`, `//host/…`): a
+/// lookup there can hang, and the user would see a frozen screen. Those count as gone.
+pub fn list(paths: Vec<PathBuf>) -> Search {
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    thread::spawn(move || {
+        let scanned = check(&paths, &flag, &mut |e| tx.send(e).is_ok());
+        let _ = tx.send(Event::Done {
+            scanned,
+            unreadable: 0,
+        });
+    });
+    Search { rx, stop }
+}
+
+/// Whether `p` names a place on another machine.
+pub fn remote_name(p: &Path) -> bool {
+    let s = p.to_string_lossy();
+    s.starts_with("\\\\") || s.starts_with("//")
+}
+
+/// [`list`]'s work, synchronous, for tests. Returns the paths looked at.
+pub fn check(paths: &[PathBuf], stop: &AtomicBool, emit: &mut dyn FnMut(Event) -> bool) -> u64 {
+    let mut seen = std::collections::HashSet::new();
+    let mut scanned = 0u64;
+    for p in paths {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        if !seen.insert(p) {
+            continue;
+        }
+        scanned += 1;
+        let there = !remote_name(p) && fs::symlink_metadata(p).is_ok();
+        let e = if there {
+            Event::Found(p.clone())
+        } else {
+            Event::Gone(p.clone())
+        };
+        if !emit(e) || (scanned.is_multiple_of(512) && !emit(Event::Progress { scanned })) {
+            break;
+        }
+    }
+    scanned
 }
 
 fn is_hidden(name: &str) -> bool {
@@ -272,6 +325,50 @@ mod tests {
             true
         });
         assert_eq!(n, 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_list_is_checked_once_each_in_its_order() {
+        let d = tree("list");
+        let paths = vec![
+            d.join("src/main.rs"),
+            d.join("gone.rs"),
+            d.join("src/main.rs"),
+            d.join("src"),
+            PathBuf::from("//host/share/a"),
+            PathBuf::from("\\\\server\\share\\a"),
+        ];
+        let mut got = Vec::new();
+        let n = check(&paths, &AtomicBool::new(false), &mut |e| {
+            got.push(e);
+            true
+        });
+        assert_eq!(n, 5, "the duplicate is looked at once");
+        assert_eq!(
+            got,
+            vec![
+                Event::Found(d.join("src/main.rs")),
+                Event::Gone(d.join("gone.rs")),
+                Event::Found(d.join("src")),
+                Event::Gone(PathBuf::from("//host/share/a")),
+                Event::Gone(PathBuf::from("\\\\server\\share\\a")),
+            ]
+        );
+        // Stopped: nothing more.
+        let mut got = 0;
+        check(&paths, &AtomicBool::new(true), &mut |_| {
+            got += 1;
+            true
+        });
+        assert_eq!(got, 0);
+        // Through the thread, as the pane uses it.
+        let s = list(paths);
+        let events: Vec<Event> = s.rx.iter().collect();
+        assert!(matches!(
+            events.last(),
+            Some(Event::Done { scanned: 5, .. })
+        ));
         let _ = fs::remove_dir_all(&d);
     }
 }

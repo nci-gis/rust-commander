@@ -259,7 +259,7 @@ impl App {
                     changed |= f.poll_opening();
                     let was = f.results.as_ref().is_some_and(|r| r.running());
                     changed |= f.poll_results();
-                    if let Some(r) = f.results.as_ref().filter(|r| was && !r.running()) {
+                    if let Some(r) = f.results.as_ref().filter(|r| was && !r.running() && r.find) {
                         let n = f.entries.iter().filter(|e| !e.is_parent()).count();
                         let skipped = match r.unreadable {
                             0 => String::new(),

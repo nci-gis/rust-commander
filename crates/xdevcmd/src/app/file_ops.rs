@@ -150,6 +150,25 @@ impl App {
         } else {
             body.push("Moved to the trash.".into());
         }
+        // A list's names may come from any text a shell printed: say where from, so a
+        // list made of the wrong output shows before anything is deleted.
+        let from = self
+            .panes
+            .get(&self.focus)
+            .and_then(Pane::as_files)
+            .and_then(|f| f.results.as_ref())
+            .map(|r| {
+                let what = xdevcmd_core::format::elide_middle(&r.what, 50);
+                if r.find {
+                    format!("Found by: find {what}")
+                } else {
+                    format!("From the list: {what}")
+                }
+            });
+        if let Some(from) = from {
+            body.push(String::new());
+            body.push(from);
+        }
         self.modal = Some(Modal::Confirm(Confirm {
             title: if permanent {
                 "Delete permanently".into()

@@ -47,6 +47,11 @@ pub struct Links {
     exists: HashMap<PathBuf, Option<bool>>,
     /// The link chosen: its line, and which of that line's.
     pub selected: Option<(usize, usize)>,
+    /// Which shell this is, for a list's source: "sh · tab 1".
+    pub label: String,
+    /// A program on another machine running in the shell now (ssh): its output names
+    /// that machine's files, which may happen to exist here too.
+    pub remote: Option<String>,
 }
 
 impl Links {
@@ -58,6 +63,63 @@ impl Links {
             found: HashMap::new(),
             exists: HashMap::new(),
             selected: None,
+            label: String::new(),
+            remote: None,
+        }
+    }
+
+    /// The lines of command `k`'s output: from where it starts to the line before the
+    /// next command's (its prompt), or to the end.
+    fn output_of(&self, k: usize, total: usize) -> Range<usize> {
+        let start = self.commands[k].0;
+        let end = self
+            .commands
+            .get(k + 1)
+            .map_or(total, |c| c.0.saturating_sub(1))
+            .max(start);
+        start..end.min(total)
+    }
+
+    /// The output of the command line `i` belongs to, and that command's line as typed
+    /// (the line before its output). `None` without prompt marks, or before the first.
+    pub fn command_at(&self, i: usize, total: usize) -> Option<(Range<usize>, Option<usize>)> {
+        let k = self.commands.partition_point(|c| c.0 <= i).checked_sub(1)?;
+        let r = self.output_of(k, total);
+        r.contains(&i)
+            .then(|| (r, self.commands[k].0.checked_sub(1)))
+    }
+
+    /// The last command's output, and its line as typed.
+    pub fn last_command(&self, total: usize) -> Option<(Range<usize>, Option<usize>)> {
+        let k = self.commands.len().checked_sub(1)?;
+        Some((self.output_of(k, total), self.commands[k].0.checked_sub(1)))
+    }
+
+    /// Every path on line `i` (shown as `shown`), resolved but not looked up: a list's
+    /// rows are checked on a thread, not here.
+    pub fn paths(&self, i: usize, shown: &str) -> Vec<PathBuf> {
+        xdevcmd_core::found::paths_in(shown)
+            .into_iter()
+            .filter_map(|f| self.resolve(i, &f.path).map(|(p, _)| p))
+            .collect()
+    }
+
+    /// The directory line `i`'s relative paths are taken from.
+    pub fn base_dir(&self, i: usize) -> Option<PathBuf> {
+        self.base_of(i).map(|(d, _)| d.to_path_buf())
+    }
+
+    /// What the status line says about the chosen link, with a warning while ssh runs.
+    pub fn describe_chosen(&self) -> String {
+        let Some(l) = self.chosen() else {
+            return String::new();
+        };
+        match &self.remote {
+            Some(p) => format!(
+                "{p} is running: this is looked up on this machine \u{2014} {}",
+                describe(l)
+            ),
+            None => describe(l),
         }
     }
 

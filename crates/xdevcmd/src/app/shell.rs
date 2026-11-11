@@ -206,7 +206,10 @@ impl App {
             )
         };
         viewer.note(&note);
-        let viewer = viewer.with_links(crate::links::Links::new(h.commands, h.dir_now));
+        let mut links = crate::links::Links::new(h.commands, h.dir_now);
+        links.label = h.label;
+        links.remote = h.remote;
+        let viewer = viewer.with_links(links);
         self.modal = Some(Modal::View(Box::new(viewer)));
     }
 
@@ -308,6 +311,12 @@ impl App {
                 save,
                 Cmd::TabSaveHistory(id),
                 writes,
+            ),
+            Item::cmd(
+                "List from the last command\u{2026}",
+                "",
+                Cmd::TabList(id),
+                true,
             ),
             Item::sep(),
             Item::cmd("Close tab", "\u{00d7}", Cmd::TabClose(id), true),

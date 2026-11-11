@@ -335,6 +335,10 @@ fn keys_page(settings: &Settings) -> Vec<Row> {
                     "Enter \u{b7} F3 \u{b7} F4",
                     "On a chosen path: go there / view / edit, at its line",
                 ),
+                (
+                    "p \u{b7} P",
+                    "A shell's history: a list of its paths / add them to a list",
+                ),
             ],
         ),
         (

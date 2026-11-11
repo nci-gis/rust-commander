@@ -39,7 +39,8 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Ctrl+g` `Ctrl+l` | Type a path to go to |
 | `Alt+,` | Back to the previous directory |
 | `Alt+.` | Forward again |
-| `Alt+Down` `Alt+j` | Directories visited in this tab |
+| `Alt+Down` `Alt+j` | Directories visited in this tab, and the lists kept |
+| `Alt+l` | The list used last (Alt+F7's results, paths from a shell's output), here |
 | `Ctrl+d` | Bookmarks: go to one, or bookmark this directory |
 
 ## Select

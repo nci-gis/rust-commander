@@ -70,6 +70,7 @@ pub enum Action {
     Back,
     Forward,
     History,
+    ShowList,
     Hotlist,
     OpenWith,
     OpenWithMenu,
@@ -557,9 +558,16 @@ pub const BINDINGS: &[Binding] = &[
         action: Action::History,
         name: "history",
         group: "Navigate",
-        about: "Directories visited in this tab",
+        about: "Directories visited in this tab, and the lists kept",
         // Alt+J too: macOS Terminal.app sends Option+Down as three separate keys.
         keys: &["Alt+Down", "Alt+j"],
+    },
+    Binding {
+        action: Action::ShowList,
+        name: "show_list",
+        group: "Navigate",
+        about: "The list used last (Alt+F7's results, paths from a shell's output), here",
+        keys: &["Alt+l"],
     },
     Binding {
         action: Action::Hotlist,
@@ -853,6 +861,7 @@ impl Action {
                 | Action::ResizeUp
                 | Action::ResizeDown
                 | Action::Zoom
+                | Action::ShowList
         )
     }
 }
@@ -1323,6 +1332,7 @@ mod tests {
             Action::Back,
             Action::Forward,
             Action::History,
+            Action::ShowList,
             Action::Hotlist,
             Action::OpenWith,
             Action::OpenWithMenu,

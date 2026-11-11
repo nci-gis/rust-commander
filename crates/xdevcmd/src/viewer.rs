@@ -26,6 +26,18 @@ pub enum Action {
     SaveAs,
     /// A path chosen in a shell's history: go there, view it or edit it.
     Link(LinkAct, crate::links::Link),
+    /// `p` (a new list) or `P` (add to one) in a shell's history: these paths.
+    MakeList(ListRequest, bool),
+}
+
+/// Paths taken from a shell's history for a list: resolved, not yet looked up.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListRequest {
+    pub paths: Vec<std::path::PathBuf>,
+    /// "sh · tab 1 · rg -l foo", or "… · lines 12–40".
+    pub source: String,
+    /// The directory the first line's relative paths were taken from.
+    pub base: Option<std::path::PathBuf>,
 }
 
 /// What to do with a path chosen in a shell's history.
@@ -83,6 +95,8 @@ pub struct Viewer {
     /// Where the text starts on screen, and the character each row starts at.
     text_x: u16,
     row_starts: Vec<usize>,
+    /// A press on a path, and where: its release on the same cell is a click on it.
+    pressed_link: Option<((usize, usize), (u16, u16))>,
 }
 
 impl Viewer {
@@ -115,7 +129,13 @@ impl Viewer {
             links: None,
             text_x: 0,
             row_starts: Vec::new(),
+            pressed_link: None,
         }
+    }
+
+    /// What the message line says now.
+    pub fn message(&self) -> &str {
+        &self.message
     }
 
     /// The paths in a shell's history, offered by Tab.
@@ -164,10 +184,7 @@ impl Viewer {
             };
             if let Some(j) = next {
                 links.selected = Some((i, j));
-                let said = links
-                    .chosen()
-                    .map(crate::links::describe)
-                    .unwrap_or_default();
+                let said = links.describe_chosen();
                 self.message = said;
                 // Into view, a few lines from the edge.
                 let page = self.page.max(1);
@@ -189,6 +206,65 @@ impl Viewer {
             "no more paths above"
         }
         .into();
+    }
+
+    /// `p` and `P`: the paths in the selected lines; with none selected, in the output
+    /// of the command the chosen path is in, else of the last command (prompt marks
+    /// say where each begins). Without either, nothing is guessed.
+    pub fn list_request(&mut self, add: bool) -> Action {
+        let total = self.doc.line_count();
+        let Some(links) = self.links.as_ref() else {
+            return Action::Stay;
+        };
+        if let Some(p) = &links.remote {
+            self.message = format!(
+                "{p} is running in this shell: its output names another machine's files \u{2014} no list made"
+            );
+            return Action::Stay;
+        }
+        let picked = match self.selected() {
+            Some((a, b)) => Some((a..b + 1, None, format!("lines {}\u{2013}{}", a + 1, b + 1))),
+            None => links
+                .selected
+                .and_then(|(i, _)| links.command_at(i, total))
+                .or_else(|| links.last_command(total))
+                .map(|(r, typed)| (r, typed, String::new())),
+        };
+        let Some((lines, typed, mut what)) = picked else {
+            self.message =
+                "drag over the lines to take paths from (no prompt marks here: docs/shell.md)"
+                    .into();
+            return Action::Stay;
+        };
+        if let Some(t) = typed {
+            what = command_text(&self.shown(t));
+        }
+        let mut paths = Vec::new();
+        for i in lines.clone() {
+            let shown = self.shown(i);
+            if let Some(l) = self.links.as_ref() {
+                paths.extend(l.paths(i, &shown));
+            }
+        }
+        if paths.is_empty() {
+            self.message = "no paths in those lines".into();
+            return Action::Stay;
+        }
+        let links = self.links.as_ref().expect("checked above");
+        let source = [links.label.as_str(), what.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ");
+        let base = links.base_dir(lines.start);
+        Action::MakeList(
+            ListRequest {
+                paths,
+                source,
+                base,
+            },
+            add,
+        )
     }
 
     /// The link under (`x`, `y`), as (line, which of its links).
@@ -226,23 +302,32 @@ impl Viewer {
     pub fn on_mouse(&mut self, m: MouseEvent) -> Action {
         let (x, y) = (m.column, m.row);
         // A path in a shell's history: a click chooses it, a click on the chosen one
-        // goes there.
-        if m.kind == MouseEventKind::Down(MouseButton::Left) && self.mode == Mode::Text {
-            if let Some(hit) = self.link_at(x, y) {
-                let links = self.links.as_mut().expect("a link was hit");
-                if links.selected == Some(hit) {
-                    if let Some(l) = links.chosen().cloned() {
-                        return Action::Link(LinkAct::Go, l);
-                    }
-                }
-                links.selected = Some(hit);
-                self.message = links
-                    .chosen()
-                    .map(crate::links::describe)
-                    .unwrap_or_default();
-                self.selection = None;
-                return Action::Stay;
+        // goes there. A click, not a press: a drag that starts on a path selects lines.
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) if self.mode == Mode::Text => {
+                self.pressed_link = self.link_at(x, y).map(|hit| (hit, (x, y)));
             }
+            MouseEventKind::Drag(_) => {
+                if self.pressed_link.is_some_and(|(_, at)| at != (x, y)) {
+                    self.pressed_link = None;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some((hit, _)) = self.pressed_link.take() {
+                    self.held = None;
+                    self.selection = None;
+                    let links = self.links.as_mut().expect("a link was hit");
+                    if links.selected == Some(hit) {
+                        if let Some(l) = links.chosen().cloned() {
+                            return Action::Link(LinkAct::Go, l);
+                        }
+                    }
+                    links.selected = Some(hit);
+                    self.message = links.describe_chosen();
+                    return Action::Stay;
+                }
+            }
+            _ => {}
         }
         match m.kind {
             MouseEventKind::ScrollDown => self.scroll(3),
@@ -458,6 +543,8 @@ impl Viewer {
                     self.message = "Tab chooses a path in the output".into();
                     return Action::Stay;
                 }
+                (KeyCode::Char('p'), _) => return self.list_request(false),
+                (KeyCode::Char('P'), _) => return self.list_request(true),
                 _ => {}
             }
         }
@@ -812,7 +899,7 @@ impl Viewer {
             return;
         }
 
-        let paths: &[(&str, &str)] = &[("Esc", "close"), ("Tab", "paths")];
+        let paths: &[(&str, &str)] = &[("Esc", "close"), ("Tab", "paths"), ("p", "list")];
         let plain: &[(&str, &str)] = &[("Esc", "close")];
         let keys_lead = if self.links.is_some() { paths } else { plain };
         let rest: &[(&str, &str)] = &[
@@ -877,4 +964,31 @@ fn number(digits: &str, radix: u32) -> Option<u64> {
         return None;
     }
     Some(u64::from_str_radix(digits, radix).unwrap_or(u64::MAX))
+}
+
+/// A command as typed, from its line in a history: what follows the prompt (`$ `,
+/// `# `, `> `, `% `, `❯ `), at most 40 characters.
+fn command_text(line: &str) -> String {
+    let after = ["$ ", "# ", "> ", "% ", "\u{276f} "]
+        .iter()
+        .filter_map(|p| line.find(p).map(|at| (at, p.len())))
+        .min_by_key(|(at, _)| *at)
+        .map_or(line, |(at, n)| &line[at + n..]);
+    xdevcmd_core::format::elide_middle(after.trim(), 40)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_text;
+
+    #[test]
+    fn a_command_is_what_follows_the_prompt() {
+        assert_eq!(command_text("$ rg -l foo"), "rg -l foo");
+        assert_eq!(command_text("user@box:~/src$ make"), "make");
+        assert_eq!(command_text("PS C:\\src> dir /b /s"), "dir /b /s");
+        let long = "$ printf '\\033]133;C\\007%s/%s\\n' a x.txt; printf '\\033]133;A\\007'";
+        let got = command_text(long);
+        assert!(got.starts_with("printf"), "{got}");
+        assert_eq!(got.chars().count(), 40);
+    }
 }

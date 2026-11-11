@@ -3340,3 +3340,190 @@ fn a_path_is_taken_from_the_directory_its_command_ran_in() {
     // The file pane has the focus: q is xdevcmd's.
     xdevcmd.quit();
 }
+
+const ALT_COMMA: &[u8] = b"\x1b,";
+const ALT_L: &[u8] = b"\x1bl";
+const ALT_J: &[u8] = b"\x1bj";
+
+/// A list from a shell's output (Round 021): drag over the lines in the history, `p`;
+/// the list is a tab in the file pane, F5 copies its rows; Enter goes to a row's
+/// directory, and Back comes back to the list, naming the row deleted meanwhile.
+#[test]
+fn a_list_from_the_history_is_worked_on_and_come_back_to() {
+    let s = Scratch::new("list");
+    std::fs::create_dir_all(s.left().join("a")).unwrap();
+    std::fs::create_dir_all(s.left().join("b")).unwrap();
+    s.file("left/a/x.txt", "x");
+    s.file("left/b/y.txt", "y");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let left = s.left().display().to_string();
+    xdevcmd.send(format!("cd '{left}'\r").as_bytes());
+    // The command line names no file as it is; the output names two, and one that is
+    // not there.
+    xdevcmd.send(b"printf '%s/%s\\n' a x.txt b y.txt n ope.txt\r");
+    xdevcmd.wait_for("n/ope.txt");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.wait_for("p list");
+    let (x, y) = xdevcmd.locate("\u{2502}a/x.txt");
+    xdevcmd.drag((x + 2, y), (x + 2, y + 2));
+    xdevcmd.wait_for("3 lines selected");
+    xdevcmd.send(b"p");
+    xdevcmd.wait_gone("history \u{b7} sh");
+    // Two rows: n/ope.txt was never a file, and goes quietly.
+    xdevcmd.wait_for("list 2 \u{b7} ");
+    assert!(!xdevcmd.screen().contains("gone since"));
+    // The terminal out of the way, for the rows.
+    xdevcmd.send(b"\x1bt");
+    xdevcmd.wait_for("\u{2502} a/x ");
+    xdevcmd.wait_for("\u{2502} b/y ");
+
+    // Every row, F5: into the other pane.
+    xdevcmd.send(b"*");
+    xdevcmd.send(F5);
+    xdevcmd.wait_for("Copy");
+    xdevcmd.send(ENTER);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !(s.right().join("x.txt").exists() && s.right().join("y.txt").exists())
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(s.right().join("x.txt").exists() && s.right().join("y.txt").exists());
+
+    // Enter on a row: its directory, the cursor on it. Back: the list again, with the
+    // row deleted meanwhile named and gone.
+    xdevcmd.send(b"\x1b[H"); // Home
+    xdevcmd.send(DOWN);
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_gone("list 2");
+    std::fs::remove_file(s.left().join("b/y.txt")).unwrap();
+    xdevcmd.send(ALT_COMMA);
+    xdevcmd.wait_for("list 1 \u{b7} ");
+    xdevcmd.wait_for("1 gone since: y.txt");
+    xdevcmd.quit();
+}
+
+/// With prompt marks, `p` with nothing selected takes the last command's output. Alt+L
+/// brings the list back from anywhere (Alt+X first in the shell); Alt+J lists it; `P`
+/// asks which list to add to, Esc goes back to the history, Enter adds to the active
+/// one, and what was there already is not added twice.
+#[test]
+fn the_last_commands_output_makes_a_list_and_alt_l_brings_it_back() {
+    let s = Scratch::new("list-marked");
+    std::fs::create_dir_all(s.left().join("a")).unwrap();
+    s.file("left/a/x.txt", "x");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let left = s.left().display().to_string();
+    xdevcmd.send(format!("cd '{left}'; printf '\\033]133;A\\007PROMPTED\\n'\r").as_bytes());
+    xdevcmd.wait_for("PROMPTED");
+    xdevcmd.send(b"printf '\\033]133;C\\007%s/%s\\n' a x.txt; printf '\\033]133;A\\007'\r");
+    xdevcmd.wait_for("a/x.txt");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.send(b"p");
+    xdevcmd.wait_for("list 1 \u{b7} ");
+
+    // Leave it; Alt+L brings it back.
+    xdevcmd.send(b"\x1b[H");
+    xdevcmd.send(ENTER); // `..`: up to the list's root
+    xdevcmd.wait_gone("list 1 \u{b7} ");
+    xdevcmd.send(ALT_L);
+    xdevcmd.wait_for("list 1 \u{b7} ");
+    // From the shell: Alt+X, then Alt+L.
+    xdevcmd.send(b"\x1b[H");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_gone("list 1 \u{b7} ");
+    xdevcmd.send(F12);
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_L);
+    xdevcmd.wait_for("list 1 \u{b7} ");
+    // Alt+J: the lists above the directories.
+    xdevcmd.send(b"\x1b[H");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_gone("list 1 \u{b7} ");
+    xdevcmd.send(ALT_J);
+    xdevcmd.wait_for("History and lists");
+    // The source is the command as typed.
+    xdevcmd.wait_for("list \u{b7} sh \u{b7} tab 1 \u{b7} printf");
+    xdevcmd.send(b"\x1b");
+
+    // P: which list? Esc is the history again; Enter adds to the active list.
+    xdevcmd.send(F12);
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.send(b"P");
+    xdevcmd.wait_for("Add 1 path to");
+    xdevcmd.wait_for("New list");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.send(b"P");
+    xdevcmd.wait_for("Add 1 path to");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("0 added, 1 already there");
+    xdevcmd.wait_for("list 1 \u{b7} ");
+    xdevcmd.quit();
+}
+
+/// While ssh runs in the shell, its output names the other machine's files, which may
+/// exist here too: no list is made of it, and a chosen path says it is looked up here.
+#[test]
+fn no_list_is_made_while_ssh_runs() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("list-ssh");
+    std::fs::create_dir_all(s.left().join("a")).unwrap();
+    s.file("left/a/x.txt", "x");
+    // A stand-in: a program called ssh that prints a path and waits.
+    std::fs::create_dir_all(s.0.join("bin")).unwrap();
+    let ssh = s.file("bin/ssh", "#!/bin/sh\nprintf '%s/%s\\n' a x.txt\nread x\n");
+    std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let left = s.left().display().to_string();
+    xdevcmd.send(format!("cd '{left}' && '{}'\r", ssh.display()).as_bytes());
+    xdevcmd.wait_for("a/x.txt");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.send(b"\t");
+    xdevcmd.wait_for("ssh is running: this is looked up on this machine");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.send(b"p");
+    xdevcmd.wait_for("ssh is running in this shell");
+    assert!(!xdevcmd.screen().contains("list 1"));
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("history \u{b7} sh");
+    xdevcmd.send(ENTER); // ends the stand-in
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// `--root`: a path outside it is left out of a list, and the title counts it.
+#[test]
+fn a_list_leaves_out_what_is_outside_the_root() {
+    let s = Scratch::new("list-root");
+    std::fs::create_dir_all(s.left().join("a")).unwrap();
+    s.file("left/a/x.txt", "x");
+    let root = format!("--root={}", s.0.display());
+    let mut xdevcmd = Session::start_flags(&s, &[root.as_str()]);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let left = s.left().display().to_string();
+    xdevcmd.send(format!("cd '{left}'\r").as_bytes());
+    xdevcmd.send(b"printf '%s%s\\n' a/x .txt /etc/ hosts\r");
+    xdevcmd.wait_for("/etc/hosts");
+    xdevcmd.send(SHIFT_F12);
+    xdevcmd.wait_for("history \u{b7} sh");
+    let (x, y) = xdevcmd.locate("\u{2502}a/x.txt");
+    xdevcmd.drag((x + 2, y), (x + 2, y + 1));
+    xdevcmd.wait_for("2 lines selected");
+    xdevcmd.send(b"p");
+    xdevcmd.wait_for("the root \u{2500}");
+    xdevcmd.wait_for("list 1 \u{b7} ");
+    xdevcmd.quit();
+}

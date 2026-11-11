@@ -123,6 +123,44 @@ is only offered, never opened by itself; each key shows its full path first, and
 checked as a file pane's would be (the root xdevcmd is confined to; F4 is off in the
 read-only modes).
 
+## A list from the output
+
+A command's output can become a list in a file pane, to work on with the panes' keys:
+`rg -l TODO`, `git status --porcelain`, `find . -name '*.orig'`, `grep -rn`, a build's
+errors. In the history (Shift+F12):
+
+| Key | Does |
+|---|---|
+| `p` | A new list of the paths in the lines dragged over; with nothing selected, in the output of the command the chosen path is in, else of the last command (this needs prompt marks, below) |
+| `P` | Add those paths to a list: a menu, the list used last first (Enter), the others by number, `n` for a new one. A path already there is not added twice |
+
+A terminal tab's right-click menu has **List from the last command…** too.
+
+In the list, every row is a real path: F3, F4, F5, F6, F8, marking and renaming work as
+in a directory, and Enter on a file goes to its directory with the cursor on it.
+Without prompt marks and with nothing dragged over, nothing is guessed: drag over the
+lines first.
+
+**Lists are kept** for the session, the last 10, in memory only (never written to
+disk, as the history is not):
+
+- **Back** (Alt+, or Backspace) after Enter on a row comes back to the list, the cursor
+  on that row. Alt+F7's results are kept the same way.
+- **Alt+L** shows the list used last, from anywhere; from inside the shell, Alt+X then
+  Alt+L.
+- **Alt+Down** (or **Alt+J**) lists them above the directories visited; the menu bar
+  has View → History and lists…, and View → Last list.
+- Coming back to a list checks each row again: a path deleted or moved away since is
+  named on the status line ("1 gone since: y.txt") and dropped.
+
+A list holds at most 10,000 rows, and none outside the root xdevcmd is confined to; the
+title says when either left rows out. While `ssh` (or mosh, telnet) runs in the shell,
+its output names the other machine's files, so no list is made of it, and a path
+chosen there says it is looked up on this machine.
+
+On macOS every Alt key needs "Use Option as Meta key" (Terminal → Settings → Profiles
+→ Keyboard; iTerm2: Option key "Esc+"). `p`, `P` and the menu bar need nothing.
+
 ## Telling xdevcmd where the shell is
 
 | System | The shell's directory | Whether a program runs |

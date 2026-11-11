@@ -384,6 +384,7 @@ impl App {
             }
             Action::History => self.open_history(),
             Action::Hotlist => self.open_hotlist(),
+            Action::ShowList => self.show_list(None),
             Action::OpenWith => self.open_with(),
             Action::SwapPanes => self.swap_panes(),
             Action::MirrorPane => self.mirror_pane(),
@@ -621,6 +622,8 @@ impl App {
                 );
             }
             Cmd::CopyPath => self.copy_path(),
+            Cmd::ShowList(id) => self.show_list(Some(id)),
+            Cmd::AddToList(id) => self.add_to_list(id),
             Cmd::GoTo(p) => {
                 if p.is_dir() {
                     self.with_files(|f| f.set_cwd(&p));
@@ -723,6 +726,26 @@ impl App {
             Cmd::TabHistory(id) => {
                 if let Some(i) = self.tab_still_there(id) {
                     self.view_history(Some(i));
+                }
+            }
+            Cmd::TabList(id) => {
+                // As `p` in the history with nothing chosen: the last command's output,
+                // through a viewer that is never shown.
+                if let Some(i) = self.tab_still_there(id) {
+                    self.view_history(Some(i));
+                    let Some(Modal::View(mut v)) = self.modal.take() else {
+                        return;
+                    };
+                    match v.list_request(false) {
+                        crate::viewer::Action::MakeList(req, _) => self.make_list(req, false),
+                        _ => {
+                            let key = self.footer_key(Action::TerminalHistory).unwrap_or_default();
+                            self.status = format!(
+                                "{} \u{2014} or {key}, drag over the lines, p",
+                                v.message()
+                            );
+                        }
+                    }
                 }
             }
             Cmd::TabSaveHistory(id) => {

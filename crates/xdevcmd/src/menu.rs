@@ -29,6 +29,10 @@ pub enum Cmd {
     },
     /// Show this directory in the focused pane (history, hotlist).
     GoTo(PathBuf),
+    /// Show this kept list in a file pane (the history and lists menu).
+    ShowList(crate::lists::Id),
+    /// `P` in a shell's history: add its paths to this list, or to a new one.
+    AddToList(Option<crate::lists::Id>),
     AddBookmark(PathBuf),
     RemoveBookmark(PathBuf),
     /// Open with the system's application, already confirmed.
@@ -53,6 +57,8 @@ pub enum Cmd {
     TabHistory(crate::pane::terms::TabId),
     /// The menu on a terminal tab: Save as… for its history, without the viewer.
     TabSaveHistory(crate::pane::terms::TabId),
+    /// The menu on a terminal tab: a list of the paths in its last command's output.
+    TabList(crate::pane::terms::TabId),
     /// The menu on a terminal tab: close it, every shell in it.
     TabClose(crate::pane::terms::TabId),
     /// A confirmed synchronisation plan: each source and the directory it goes into.

@@ -53,6 +53,7 @@ impl App {
                 }
                 viewer::Action::SaveAs => return self.begin_save_as(),
                 viewer::Action::Link(a, l) => act = ModalAct::Link(a, l),
+                viewer::Action::MakeList(req, add) => return self.make_list(req, add),
                 viewer::Action::Stay => {}
             },
             Some(Modal::Help(h)) => {
@@ -148,7 +149,9 @@ impl App {
             }
             ModalAct::Close => {
                 // A file viewed from a shell's history: back to that history.
-                let viewing = matches!(self.modal, Some(Modal::View(_)));
+                // So does the menu `P` opened over it, cancelled.
+                let viewing = matches!(self.modal, Some(Modal::View(_)))
+                    || self.pending_list.take().is_some();
                 self.modal = self.return_to.take().filter(|_| viewing).map(Modal::View);
                 // Not while Save as… holds the viewer: it still shows that file.
                 if self.save_from.is_none() {
@@ -340,18 +343,49 @@ impl App {
             return;
         };
         let list = f.history();
-        if list.is_empty() {
+        let kept = crate::lists::all();
+        if list.is_empty() && kept.is_empty() {
             self.status = "no history in this tab yet".into();
             return;
         }
-        let items = list
+        // The lists first (the active one at the top), then the directories.
+        let here = f.list_id();
+        let mut items: Vec<Item> = kept
             .iter()
-            .take(20)
+            .filter(|l| Some(l.id) != here)
+            .map(|l| {
+                let label = format!(
+                    "list \u{b7} {} \u{b7} {}",
+                    xdevcmd_core::format::elide_middle(&l.source, 50),
+                    l.rows.len()
+                );
+                (label, Cmd::ShowList(l.id))
+            })
+            .chain(
+                list.iter()
+                    .take(20)
+                    .map(|p| (tidy(p), Cmd::GoTo(p.clone()))),
+            )
             .enumerate()
-            .map(|(i, p)| Item::cmd(tidy(p), digit(i), Cmd::GoTo(p.clone()), true))
+            .map(|(i, (label, cmd))| Item::cmd(label, digit(i), cmd, true))
             .collect();
+        if items.is_empty() {
+            self.status = "no history in this tab yet".into();
+            return;
+        }
+        let lists = kept.iter().filter(|l| Some(l.id) != here).count();
+        if lists > 0 && lists < items.len() {
+            items.insert(lists, Item::sep());
+        }
         self.modal = Some(Modal::Menu(Menu::new(
-            Some("History".into()),
+            Some(
+                if lists > 0 {
+                    "History and lists"
+                } else {
+                    "History"
+                }
+                .into(),
+            ),
             items,
             self.pane_anchor(),
         )));

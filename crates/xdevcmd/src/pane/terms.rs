@@ -68,6 +68,10 @@ pub struct History {
     /// The shell's directory now, however it is known: the base for the paths in its
     /// output where no command says better.
     pub dir_now: Option<std::path::PathBuf>,
+    /// A program on another machine running in that shell (ssh), if any.
+    pub remote: Option<String>,
+    /// "sh · tab 1": which shell, for a list's source.
+    pub label: String,
 }
 
 /// A terminal tab's identity, never reused within a panel.
@@ -379,7 +383,12 @@ impl TermPanel {
         let i = tab.unwrap_or(self.active);
         let t = self.tabs.get(i)?;
         let shell = t.terms.get(&t.focus)?;
-        let title = format!("history \u{b7} {} \u{b7} tab {}", shell.shell_name(), i + 1);
+        let label = format!("{} \u{b7} tab {}", shell.shell_name(), i + 1);
+        let title = format!("history \u{b7} {label}");
+        let remote = match shell.state() {
+            crate::pane::term::ShellState::Remote(p) => Some(p),
+            _ => None,
+        };
         let (text, commands, full_screen) = shell.history_commands();
         let dir = shell.shell_dir();
         Some(History {
@@ -390,6 +399,8 @@ impl TermPanel {
             full_screen,
             commands,
             dir_now: dir.map(|d| d.path),
+            remote,
+            label,
         })
     }
 

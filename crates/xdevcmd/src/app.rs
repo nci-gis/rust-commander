@@ -56,6 +56,7 @@ mod draw;
 mod file_ops;
 mod input;
 mod jobs;
+mod lists;
 mod modals;
 mod mouse;
 mod open;
@@ -491,6 +492,8 @@ pub struct App {
     /// A shell's history, while F3 on a path in it views that file: it comes back,
     /// where it was, when that viewer closes.
     return_to: Option<Box<Viewer>>,
+    /// `P` in a shell's history: the paths waiting for the menu's answer.
+    pending_list: Option<crate::viewer::ListRequest>,
     /// Where the history shown in the viewer came from: its shell's directory where the
     /// system says (Linux), else the file pane's. Save as… offers it.
     history_dir: Option<PathBuf>,
@@ -651,6 +654,7 @@ impl App {
             save_from: None,
             save_only: false,
             return_to: None,
+            pending_list: None,
             history_dir: None,
             pending_type: None,
             follow_seen: None,

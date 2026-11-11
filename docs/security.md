@@ -167,6 +167,11 @@ What xdevcmd learns about the shell, and how far it trusts each source
   hang), and it is checked as from a file pane: inside the root, and F4 off in the
   read-only modes. A directory taken from the prompt marks only ever resolves a
   relative path; it is read from the system where it can be (Linux), at the prompt.
+- **A list from the output** (`p` in the history) holds only names found in that
+  text, which any program can print. Each row must exist on this machine and lie inside
+  the root; the list stays in memory; and deleting from a list says, in the
+  confirmation, which list the names came from. No list is made while ssh runs in the
+  shell, whose output names another machine's files.
 - **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
   character, or one that shell cannot be given safely, is refused whole. Names are
   wrapped in bracketed paste when the shell asked for it, so its line editor takes them

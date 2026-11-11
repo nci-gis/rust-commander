@@ -20,6 +20,7 @@ mod keys;
 mod layout;
 mod line_edit;
 mod links;
+mod lists;
 mod look;
 mod menu;
 mod modal;

@@ -3256,6 +3256,39 @@ fn alt_f7_finds_by_name_and_content_into_a_new_tab() {
     );
 }
 
+/// Round 021: a search's results are kept. Enter on one goes to its directory, and
+/// Back comes back to them, now a list; Alt+J offers it above the directories.
+#[test]
+fn alt_f7_results_are_kept_and_back_returns_to_them() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src/deep")).unwrap();
+    fs::write(a.join("src/main.rs"), "fn main() {}").unwrap();
+    fs::write(a.join("src/deep/lib.rs"), "").unwrap();
+    let find = "Alt+F7,*,.,r,s,Enter,End,Enter";
+    let s = shot_keys("110x24", &format!("{find},Alt+comma"), &a, &b);
+    assert!(
+        s.contains("list 2 \u{b7} find *.rs"),
+        "back in the results\n{s}"
+    );
+    assert!(s.contains("deep/lib") || s.contains("deep\\lib"), "{s}");
+    let s = shot_keys("110x24", &format!("{find},Alt+j"), &a, &b);
+    assert!(s.contains("list \u{b7} find *.rs \u{b7} 2"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A row in a results tab lives in another directory: renaming it in place renames it
+/// there, and the row follows.
+#[test]
+fn a_result_in_a_subdirectory_is_renamed_where_it_is() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src/deep")).unwrap();
+    fs::write(a.join("src/deep/lib.rs"), "").unwrap();
+    let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,F2,x,Enter", &a, &b);
+    assert!(a.join("src/deep/x.rs").exists(), "renamed where it is\n{s}");
+    assert!(!a.join("x.rs").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn alt_q_previews_the_file_under_the_cursor_in_the_other_pane() {
     let (a, b) = files(&["first.txt", "second.txt"]);

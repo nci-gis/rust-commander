@@ -46,9 +46,10 @@ pub struct FilePane {
     all: Vec<Entry>,
     /// The quick filter in force, as typed. Cleared on leaving the directory.
     pub filter: Option<String>,
-    /// Directories this tab was in, for back and forward. Most recent last.
-    back: Vec<PathBuf>,
-    forward: Vec<PathBuf>,
+    /// Places this tab was in, for back and forward: directories, and lists (Alt+F7's
+    /// results, a shell's output). Most recent last.
+    back: Vec<Place>,
+    forward: Vec<Place>,
     /// Directory sizes worked out so far, and the walks still running.
     sizes: HashMap<PathBuf, Total>,
     sizing: HashSet<PathBuf>,
@@ -107,13 +108,32 @@ impl ArchiveView {
     }
 }
 
-/// A tab of Find results (Alt+F7): every operation works on them as on a listing,
-/// since each row carries its full path.
+/// Where a tab has been: a directory, or a kept list ([`crate::lists`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+    Dir(PathBuf),
+    List(crate::lists::Id),
+}
+
+/// A tab of Find results (Alt+F7), or of a kept list: every operation works on them as
+/// on a listing, since each row carries its full path.
 pub struct Results {
     pub what: String,
     search: Option<find::Search>,
     pub scanned: u64,
     pub unreadable: u64,
+    /// The kept list this tab shows: a list from the start, a search once it ends (or
+    /// is left).
+    pub list: Option<crate::lists::Id>,
+    /// Alt+F7's search, rather than a list being checked.
+    pub find: bool,
+    /// A list: its rows, while they are checked; those found gone; the row to put the
+    /// cursor on once it arrives; and what was left out when it was made.
+    pub total: usize,
+    gone: Vec<PathBuf>,
+    select: Option<PathBuf>,
+    pub capped: bool,
+    pub outside: usize,
 }
 
 impl Results {
@@ -203,9 +223,131 @@ impl FilePane {
             search: Some(find::start(q)),
             scanned: 0,
             unreadable: 0,
+            list: None,
+            find: true,
+            total: 0,
+            gone: Vec::new(),
+            select: None,
+            capped: false,
+            outside: 0,
         });
         p.refilter(None);
         p
+    }
+
+    /// Show kept list `id` here, its rows checked again on a thread; those gone since
+    /// are named and dropped. `record` puts the place being left on the back list.
+    /// False, with a notice, if the list is no longer kept or outside the root.
+    pub fn open_list(&mut self, id: crate::lists::Id, record: bool) -> bool {
+        let Some(l) = crate::lists::get(id) else {
+            self.notice = Some("that list is no longer kept".into());
+            return false;
+        };
+        let root = xdevcmd_core::paths::canonical(&l.root).unwrap_or_else(|_| l.root.clone());
+        if !xdevcmd_core::policy::get().allows(&root) {
+            self.notice = Some("that list is outside the root xdevcmd is confined to".into());
+            return false;
+        }
+        let left = self.place();
+        self.leave_results();
+        self.archive = None;
+        self.opening = None;
+        self.cwd = root;
+        if record && left != Place::List(id) {
+            self.remember(left);
+        }
+        self.cursor = 0;
+        self.offset = 0;
+        self.marked.clear();
+        self.filter = None;
+        self.sizer.cancel();
+        self.sizing.clear();
+        self.sizes.clear();
+        self.git = None;
+        self.git_rx = None;
+        self.error = None;
+        self.all = vec![parent_entry(&self.cwd)];
+        self.results = Some(Results {
+            what: l.source.clone(),
+            search: Some(find::list(l.rows.clone())),
+            scanned: 0,
+            unreadable: 0,
+            list: Some(id),
+            find: false,
+            total: l.rows.len(),
+            gone: Vec::new(),
+            select: l.chosen.clone(),
+            capped: l.capped,
+            outside: l.outside,
+        });
+        crate::lists::touch(id);
+        self.checked = (Instant::now(), None);
+        self.refilter(None);
+        true
+    }
+
+    /// Where this tab is now. A search's results become a kept list here, if they are
+    /// not one yet, so that Back can come back to them.
+    pub fn place(&mut self) -> Place {
+        let cwd = self.cwd.clone();
+        if self.results.as_ref().is_some_and(|r| r.list.is_none()) {
+            let rows: Vec<PathBuf> = self
+                .all
+                .iter()
+                .filter(|e| !e.is_parent())
+                .map(|e| e.path.clone())
+                .collect();
+            let r = self.results.as_mut().expect("checked above");
+            if !rows.is_empty() {
+                let stopped = if r.running() { " (stopped)" } else { "" };
+                let (rows, capped, outside) = crate::lists::tidy_rows(rows);
+                let source = format!("find {}{stopped}", r.what);
+                r.list = Some(crate::lists::keep(
+                    source,
+                    cwd.clone(),
+                    rows,
+                    capped,
+                    outside,
+                    true,
+                ));
+            }
+        }
+        match self.list_id() {
+            Some(id) => Place::List(id),
+            None => Place::Dir(cwd),
+        }
+    }
+
+    /// The kept list this tab shows, if any.
+    pub fn list_id(&self) -> Option<crate::lists::Id> {
+        self.results.as_ref().and_then(|r| r.list)
+    }
+
+    /// Leaving a results tab: a search still running stops, and a list remembers the
+    /// row the cursor was on, for the way back.
+    fn leave_results(&mut self) {
+        let row = self
+            .current()
+            .filter(|e| !e.is_parent())
+            .map(|e| e.path.clone());
+        if let Some(mut r) = self.results.take() {
+            if let Some(s) = r.search.take() {
+                s.cancel();
+            }
+            if let Some(id) = r.list {
+                crate::lists::set_chosen(id, row);
+            }
+        }
+    }
+
+    /// Put `left` on the back list (once), and forget the way forward.
+    fn remember(&mut self, left: Place) {
+        self.back.retain(|p| *p != left);
+        self.back.push(left);
+        if self.back.len() > HISTORY {
+            self.back.remove(0);
+        }
+        self.forward.clear();
     }
 
     /// Take in what the search has found since the last call. True when anything
@@ -222,6 +364,7 @@ impl FilePane {
         for ev in search.rx.try_iter() {
             match ev {
                 find::Event::Found(p) => found.push(p),
+                find::Event::Gone(p) => r.gone.push(p),
                 find::Event::Progress { scanned } => r.scanned = scanned,
                 find::Event::Done {
                     scanned,
@@ -235,6 +378,25 @@ impl FilePane {
         }
         if finished {
             r.search = None;
+            if let (Some(id), false) = (r.list, r.find) {
+                // Not silent: a row that went is named, and the list forgets it. Names
+                // never checked before (taken from a shell's output) go quietly.
+                let went = crate::lists::checked(id, &r.gone);
+                let left = self.all.iter().any(|e| !e.is_parent()) || !found.is_empty();
+                if !went.is_empty() {
+                    self.notice = Some(format!(
+                        "{} gone since: {}",
+                        went.len(),
+                        crate::lists::some_names(&went)
+                    ));
+                } else if !left {
+                    self.notice = Some("none of those names is a file or directory here".into());
+                }
+            }
+        }
+        // A search that ended is kept as a list, for Back and Alt+L.
+        if finished && r.find && r.list.is_none() {
+            self.place();
         }
         if found.is_empty() {
             return finished;
@@ -247,7 +409,12 @@ impl FilePane {
                 .into_owned();
             self.all.push(entry_at(&p, name));
         }
-        let keep = self.current().map(|e| e.path.clone());
+        // Back to a list: the cursor on the row it was on when the list was left.
+        let want = self.results.as_mut().and_then(|r| {
+            let w = r.select.clone()?;
+            found_has(&self.all, &w).then(|| r.select.take()).flatten()
+        });
+        let keep = want.or_else(|| self.current().map(|e| e.path.clone()));
         sort_entries(&mut self.all, self.sort);
         self.refilter(keep);
         true
@@ -391,16 +558,7 @@ impl FilePane {
         if self.results.is_some() {
             // Results are re-checked, not re-searched: what was deleted or moved away
             // goes, what is still there gets its size and time again.
-            let mut v = vec![Entry {
-                name: "..".into(),
-                path: self.cwd.clone(),
-                kind: Kind::Parent,
-                size: 0,
-                modified: None,
-                hidden: false,
-                symlink: false,
-                error: None,
-            }];
+            let mut v = vec![parent_entry(&self.cwd)];
             v.extend(
                 self.all
                     .iter()
@@ -705,22 +863,16 @@ impl FilePane {
             }
             return false;
         }
+        // Leaving a results tab for a directory, the search is over; its results, and
+        // a list, are kept for Back.
+        let left = self.place();
+        let was_list = self.results.is_some();
+        self.leave_results();
         self.archive = None;
         self.opening = None;
-        // Leaving a results tab for a directory, the search is over.
-        if let Some(mut r) = self.results.take() {
-            if let Some(s) = r.search.take() {
-                s.cancel();
-            }
-        }
         let old = std::mem::replace(&mut self.cwd, canonical);
-        if record && old != self.cwd {
-            self.back.retain(|p| *p != old);
-            self.back.push(old.clone());
-            if self.back.len() > HISTORY {
-                self.back.remove(0);
-            }
-            self.forward.clear();
+        if record && (was_list || old != self.cwd) {
+            self.remember(left);
         }
         self.cursor = 0;
         self.offset = 0;
@@ -741,8 +893,8 @@ impl FilePane {
     /// Back to the directory before this one. False when there is none.
     pub fn go_back(&mut self) -> bool {
         while let Some(p) = self.back.pop() {
-            let here = self.cwd.clone();
-            if p.is_dir() && self.navigate(&p, false) {
+            let here = self.place();
+            if self.go(&p) {
                 self.forward.push(here);
                 return true;
             }
@@ -752,8 +904,8 @@ impl FilePane {
 
     pub fn go_forward(&mut self) -> bool {
         while let Some(p) = self.forward.pop() {
-            let here = self.cwd.clone();
-            if p.is_dir() && self.navigate(&p, false) {
+            let here = self.place();
+            if self.go(&p) {
                 self.back.push(here);
                 return true;
             }
@@ -761,12 +913,23 @@ impl FilePane {
         false
     }
 
+    /// Step to a place on the back or forward list, without recording it.
+    fn go(&mut self, p: &Place) -> bool {
+        match p {
+            Place::Dir(d) => d.is_dir() && self.navigate(d, false),
+            Place::List(id) => crate::lists::get(*id).is_some() && self.open_list(*id, false),
+        }
+    }
+
     /// Directories visited, most recent first, without repeats or the current one.
     pub fn history(&self) -> Vec<PathBuf> {
+        let here = self.results.is_none().then_some(&self.cwd);
         let mut out: Vec<PathBuf> = Vec::new();
         for p in self.back.iter().rev().chain(self.forward.iter().rev()) {
-            if *p != self.cwd && !out.contains(p) {
-                out.push(p.clone());
+            if let Place::Dir(d) = p {
+                if Some(d) != here && !out.contains(d) {
+                    out.push(d.clone());
+                }
             }
         }
         out
@@ -983,12 +1146,34 @@ impl FilePane {
         }
         if let Some(r) = &self.results {
             let n = self.all.iter().filter(|e| !e.is_parent()).count();
-            let state = if r.running() {
-                format!("searching\u{2026} {} looked at", r.scanned)
+            if r.find {
+                let state = if r.running() {
+                    format!("searching\u{2026} {} looked at", r.scanned)
+                } else {
+                    format!("{n} found")
+                };
+                filter = format!(" find {} \u{b7} {state} {filter}", r.what);
             } else {
-                format!("{n} found")
-            };
-            filter = format!(" find {} \u{b7} {state} {filter}", r.what);
+                let state = if r.running() {
+                    format!(
+                        "checking\u{2026} {} of {}",
+                        r.scanned.max(n as u64),
+                        r.total
+                    )
+                } else {
+                    n.to_string()
+                };
+                // What was left out goes last: a narrow pane cuts the middle of a title,
+                // so the count (first) and this (last) are what stay.
+                let mut left_out = String::new();
+                if r.capped {
+                    left_out.push_str(&format!(" \u{b7} capped at {}", crate::lists::ROWS));
+                }
+                if r.outside > 0 {
+                    left_out.push_str(&format!(" \u{b7} {} outside the root", r.outside));
+                }
+                filter = format!(" list {state} \u{b7} {}{left_out} {filter}", r.what);
+            }
         }
         let fw = filter
             .chars()
@@ -1358,6 +1543,25 @@ fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, Pa
     }
     out
 }
+
+/// The `..` row a results tab starts with: up to its root.
+fn parent_entry(dir: &Path) -> Entry {
+    Entry {
+        name: "..".into(),
+        path: dir.to_path_buf(),
+        kind: Kind::Parent,
+        size: 0,
+        modified: None,
+        hidden: false,
+        symlink: false,
+        error: None,
+    }
+}
+
+fn found_has(all: &[Entry], p: &Path) -> bool {
+    all.iter().any(|e| e.path == p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

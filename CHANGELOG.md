@@ -11,6 +11,16 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **A list from the shell's output.** In the history (Shift+F12), `p` makes a list of
+  the paths in the lines dragged over, or in the last command's output when the shell
+  sends prompt marks; it opens in a file pane, where F3, F4, F5, F6, F8, marking and
+  renaming work on the real files. `P` adds the paths to a list instead (a menu asks
+  which). A terminal tab's menu has "List from the last command…".
+- **Lists are kept for the session** (the last 10, in memory only): Back returns to a
+  list after Enter on a row, Alt+L shows the list used last from anywhere (Alt+X Alt+L
+  in the shell), and Alt+Down/Alt+J lists them above the directories. Alt+F7's results
+  are kept the same way. Coming back checks every row again and names what was deleted
+  or moved meanwhile.
 - **Paths in the shell's output can be opened.** In the history (Shift+F12), paths
   that exist are underlined: compiler and grep locations (`src/main.rs:42:9`), Python
   tracebacks, MSBuild's `x.cs(12,5)`, `ls` listings. Tab and Shift+Tab choose one, and

@@ -1788,6 +1788,48 @@ fn wide_characters_in_names_keep_the_columns_in_line() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A name the column cuts is shown whole on the cursor's row, over Ext, Size and
+/// Modified; the other rows keep their columns, and a short name's row is unchanged.
+#[test]
+fn the_cursor_row_shows_a_long_name_whole() {
+    let long = "LIFE_AI-SDLC_improvement_proposal_v0.1.md";
+    let wide =
+        "\u{3010} LIFE\u{3011}AI\u{6d3b}\u{7528}_\u{54c1}\u{8cea}\u{5411}\u{4e0a}_POC_v1.4.html";
+    let (a, b) = files(&[long, "README.md", wide]);
+    let left = |s: &str, has: &str| -> String {
+        let line = s.lines().find(|l| l.contains(has)).unwrap();
+        line[..line.find("\u{2502}\u{2502}").unwrap_or(line.len())].to_string()
+    };
+    // The cursor on the long name (.., then the long one): whole, with its extension.
+    let s = shot_keys("110x14", "Down", &a, &b);
+    assert!(s.contains(long), "{s}");
+    assert!(
+        !left(&s, "LIFE_AI-S").contains("2026-"),
+        "its row is the name\n{s}"
+    );
+    assert!(
+        left(&s, "README").contains(" md "),
+        "README keeps its columns\n{s}"
+    );
+    // A wide name: each wide character is followed by the cell it covers.
+    let s = shot_keys("110x14", "Down,Down,Down", &a, &b);
+    assert!(
+        s.contains("_POC_v1.4.html") && s.contains("\u{3010}  LIFE\u{3011} AI\u{6d3b} \u{7528} "),
+        "{s}"
+    );
+    assert!(
+        left(&s, "LIFE_AI-S").contains('\u{2026}'),
+        "the long name is cut again\n{s}"
+    );
+    // On a short name, the row is as it was.
+    let s = shot_keys("110x14", "Down,Down", &a, &b);
+    assert!(
+        left(&s, "README").contains(" md ") && left(&s, "README").contains("2026-"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// The menu bar names this xdevcmd at its right, by the number a shell started from its
 /// panel is told; the menus win where there is no room for both.
 #[test]

@@ -10,7 +10,9 @@ use ratatui::Frame;
 
 use xdevcmd_core::archive::{self, ItemKind, Listing};
 use xdevcmd_core::find::{self, Query};
-use xdevcmd_core::format::{elide_middle, elided, fit_end, fit_start, format_time, human_size};
+use xdevcmd_core::format::{
+    elide_middle, elided, fit_end, fit_start, format_time, human_size, text_cells,
+};
 use xdevcmd_core::glob::{has_wildcards, Pattern};
 use xdevcmd_core::size::{Sizer, Total};
 use xdevcmd_core::{entry_at, read_dir, sort_entries, Entry, Kind, Sort, SortKey};
@@ -1236,6 +1238,22 @@ impl FilePane {
                 spans.push(Span::styled(
                     format!("{:<w$}", format_time(e.modified), w = w_date as usize),
                     Style::new().fg(theme::t().fg_dim),
+                ));
+            }
+
+            // The cursor's row shows its whole name when the column cuts it: the name
+            // takes the row, over Ext, Size and Modified, which the status line still
+            // gives for that file. Every other row keeps the columns.
+            if is_cursor && text_cells(&name_text) > w_name as usize {
+                let whole = if look.icons {
+                    format!("{} {}", crate::look::icon(e), e.name)
+                } else {
+                    e.name.clone()
+                };
+                spans.truncate(1);
+                spans.push(Span::styled(
+                    fit_start(&whole, rows.width.saturating_sub(gutter) as usize),
+                    base,
                 ));
             }
 

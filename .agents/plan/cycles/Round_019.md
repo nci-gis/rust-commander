@@ -192,9 +192,11 @@ binstall yes, no canon edits, no CI until the pull request into `dev`.
     `text_cells`); `crumbs` uses `elided`. `--screenshot` reads the drawn frame, because
     the backend's copy kept stale letters in wide characters' second cells.
   - Tests: unit, and a render test at three widths. Both fail without the fix.
-  - The owner also asked how to see a long name whole. Answered in the session, not done
-    yet: the status line already shows the cursor's full name; options for more are left
-    for the owner to choose.
+  - The owner also asked how to see a long name whole. The status line already showed
+    the cursor's full name; of the options offered (the cursor row expands, Ext folded
+    into Name, a columns setting) the owner chose **the cursor row expands**. A name the
+    column cuts takes the cursor's row, over Ext, Size and Modified. The test
+    `the_cursor_row_shows_a_long_name_whole` fails without the change.
 
 ## Check
 

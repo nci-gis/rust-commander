@@ -13,6 +13,10 @@ that heading and starts a new, empty one here. -->
 ### Added
 - **`cargo binstall xdevcmd`** installs the ready-made build from the GitHub release,
   with no compiling: the crate says where each target's archive is.
+- **A long name is shown whole on the cursor's row.** When the Name column cuts a name,
+  the row under the cursor shows all of it, extension included, over Ext, Size and
+  Modified (the status line still gives that file's size). The other rows keep their
+  columns.
 - **The menu bar shows which xdevcmd this is**, at its right in the dim colour:
   `xdevcmd 18144`, its process number, which Help → Usage also shows. Hidden where the
   menus need the room.

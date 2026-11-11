@@ -148,15 +148,20 @@ line is optional, and leaving it out keeps today's look:
 base = "dark"
 
 [style]
-borders = "rounded"     # plain, rounded, thick or double
-titles = "notch"        # line, or notch: the title in a notch of the frame, ╭┤title├─
-gradient = "#a46bff"    # a light from the accent (left) to this colour (right), on the
-                        # frames, tabs, keys and menus in the accent's colour; or "none"
-cursor = "glow"         # block, or glow: the cursor row lit from its left edge
+borders = "rounded"     # plain, rounded, thick, double, or none: each pane a card
+titles = "notch"        # line, notch (╭┤title├─), or pill: the focused title on the light
+gradient = "#a46bff"    # a light from the accent to this colour, on the frames, tabs, keys
+                        # and menus in the accent's colours; two colours make three stops,
+                        # gradient = ["#a46bff", "#ff5fb0"]; or "none"
+gradient_runs = "across"  # across (left to right) or down (top to bottom)
+cursor = "glow"         # block, glow (lit from its left edge) or pill
 marker = true           # a ▌ on the frame at the cursor's row
 keys = "slant"          # the F keys: plain, caps (the number on the accent), or slant (◢1◤),
                         # which also draws the selected tab and the menu bar's number so
-shadow = "dim"          # none, or dim: a shadow under dialogs and menus
+shadow = "dim"          # none, dim, or glow: under dialogs and menus
+glow = false            # the focused frame lights the cells around it
+sky = false             # the backgrounds take a faint aurora, top to bottom
+stars = false           # a few fixed stars in the empty rows of the file panes
 ```
 
 The style uses only box-drawing, block and geometric characters, no Nerd Font. On a

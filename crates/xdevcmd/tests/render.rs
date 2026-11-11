@@ -4208,3 +4208,69 @@ fn xdevtheme_draws_its_style_and_leaves_it_off_at_16_colours() {
         "{s}"
     );
 }
+
+/// The other xdevtheme looks. Neon: the notch. Glass: no lines (the rows start with a
+/// space, not a frame), the cursor row as a pill, and a box that a program in the
+/// terminal panel draws is left as it drew it. Borealis: stars in the empty rows.
+#[cfg(unix)]
+#[test]
+fn neon_glass_and_borealis_draw_their_styles_and_leave_the_terminal_alone() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("looks-cfg");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+    // A shell that draws a box, then waits.
+    let shell = dir.join("boxer.sh");
+    fs::write(
+        &shell,
+        "#!/bin/sh\nprintf '\\342\\224\\214\\342\\224\\200\\342\\224\\220 boxed\\r\\n'\nsleep 5\n",
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&shell, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let shot = |name: &str| {
+        fs::copy(
+            repo.join(format!("{name}.toml")),
+            dir.join(format!("themes/{name}.toml")),
+        )
+        .unwrap();
+        let cfg = write_config(
+            &dir,
+            &format!(
+                "[theme]\nname = \"{name}\"\n[terminal]\nshell = \"{}\"\n",
+                shell.display()
+            ),
+        );
+        let out = isolated()
+            .env("XDEVCMD_CONFIG", &cfg)
+            .env("XDEVCMD_COLORS", "truecolor")
+            .env("XDEVCMD_SCREENSHOT_WAIT_MS", "600")
+            .args(["--screenshot=110x30", "--keys=Down"])
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let s = shot("xdevtheme-neon");
+    assert!(s.contains("\u{256d}\u{2524}"), "{s}");
+    let s = shot("xdevtheme-glass");
+    let header = s.lines().find(|l| l.contains("Name ")).unwrap();
+    assert!(header.starts_with("  Name"), "no frame on the left\n{s}");
+    assert!(
+        s.lines()
+            .any(|l| l.starts_with('\u{2590}') && l.contains('\u{258c}')),
+        "the cursor row as a pill\n{s}"
+    );
+    assert!(
+        s.contains("\u{250c}\u{2500}\u{2510} boxed"),
+        "the program's box is its own\n{s}"
+    );
+    let s = shot("xdevtheme-borealis");
+    assert!(
+        s.contains('\u{2726}') || s.matches('\u{b7}').count() > 6,
+        "stars\n{s}"
+    );
+}

@@ -6,6 +6,9 @@ high-contrast) need no file; these are extra, and a start for your own.
 - **xdevtheme** is xdevcmd's own look, and **xdevtheme-dawn** its light pair. Their
   `[style]` table draws rounded frames, a teal-to-violet light, slanted F keys and a
   lit cursor row (see [docs/config.md](../docs/config.md#colours)).
+- Three more in the same family: **xdevtheme-neon** (teal, violet and pink, the focused
+  frame glowing), **xdevtheme-glass** (no lines, panes as cards, pills) and
+  **xdevtheme-borealis** (an aurora down the screen, stars in the empty rows).
 - The others are well-known palettes: Dracula, Tokyo Night, Catppuccin Mocha, Nord,
   Gruvbox dark and Solarized light.
 

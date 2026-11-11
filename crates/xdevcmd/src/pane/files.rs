@@ -1268,6 +1268,18 @@ impl FilePane {
             }
             buf.set_line(rows.x, y, &Line::from(spans), rows.width);
         }
+        // The rows below the last entry, for a theme with stars.
+        let listed = self
+            .entries
+            .len()
+            .saturating_sub(self.offset)
+            .min(usize::from(rows.height)) as u16;
+        if listed < rows.height {
+            crate::decor::stars(
+                frame.buffer_mut(),
+                Rect::new(rows.x, rows.y + listed, rows.width, rows.height - listed),
+            );
+        }
         // Over the right border, beside the rows: how long the list is, and where.
         self.bar = crate::scrollbar::draw(
             frame.buffer_mut(),

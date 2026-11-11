@@ -15,10 +15,17 @@ that heading and starts a new, empty one here. -->
   `themes/`: xdevcmd's teal turns into a light that runs across the screen to violet,
   with rounded frames and the titles in a notch, a lit cursor row with a bar on the frame,
   the F keys and the selected tab as slanted segments, and a shadow under dialogs.
+- **Three more in that family**: **xdevtheme-neon** (the light runs teal, violet,
+  pink, and the focused frame glows into the cells around it), **xdevtheme-glass** (no
+  lines: panes are cards, the focused path and the cursor row are pills) and
+  **xdevtheme-borealis** (an aurora down the screen, a few fixed stars in the file
+  panes' empty rows).
 - **A theme file can say how it draws**, in a `[style]` table: `borders` (plain,
-  rounded, thick, double), `titles` (line, notch), `gradient`, `cursor` (block, glow),
-  `marker`, `keys` (plain, caps, slant) and `shadow`. Off unless a theme sets it, and off
-  on a 16-colour terminal. No Nerd Font needed.
+  rounded, thick, double, none), `titles` (line, notch, pill), `gradient` (one or two
+  colours after the accent), `gradient_runs` (across, down), `cursor` (block, glow,
+  pill), `marker`, `keys` (plain, caps, slant), `shadow` (none, dim, glow), `glow`, `sky`
+  and `stars`. Off unless a theme sets it, and off on a 16-colour terminal. No Nerd Font
+  needed, and the programs in the terminal panel keep their own colours and lines.
 - **`cargo binstall xdevcmd`** installs the ready-made build from the GitHub release,
   with no compiling: the crate says where each target's archive is.
 - **A long name is shown whole on the cursor's row.** When the Name column cuts a name,

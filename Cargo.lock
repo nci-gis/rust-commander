@@ -2546,6 +2546,7 @@ dependencies = [
  "rustix",
  "tar",
  "trash",
+ "unicode-width",
  "zip",
  "zune-jpeg",
 ]

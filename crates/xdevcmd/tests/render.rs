@@ -1724,6 +1724,70 @@ fn dropping_onto_a_pane_showing_the_same_directory_says_so() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A CJK character takes two columns. Names with them were fitted by counting
+/// characters, so their rows ran past the others and pushed Ext, Size and Modified to
+/// the right, cutting the date off. Every row's columns start where the header's do.
+#[test]
+fn wide_characters_in_names_keep_the_columns_in_line() {
+    let (a, b) = files(&[
+        "README.md",
+        "\u{3010} LIFE\u{3011}AI-SDLC_proposal_v0.2.html",
+        "\u{3010} LIFE\u{3011}AI\u{6d3b}\u{7528}_\u{54c1}\u{8cea}\u{5411}\u{4e0a}_\u{6bb5}\u{968e}POC\u{63d0}\u{6848}_v1.4.html",
+    ]);
+    for size in ["110x14", "90x14", "140x14"] {
+        let s = shot(size, &a, &b);
+        // In a screenshot a wide character is followed by the cell it covers, so a
+        // character's place in the line is its column.
+        let col = |line: &str, word: &str| {
+            line.find(word)
+                .map(|at| line.chars().count() - line[at..].chars().count())
+        };
+        let lines: Vec<&str> = s.lines().collect();
+        let header = lines.iter().find(|l| l.contains("Name ")).unwrap();
+        // At 90 columns there is no room for Modified; the rest still lines up.
+        let date = col(header, "Modified");
+        let rows: Vec<&&str> = lines
+            .iter()
+            .filter(|l| l.contains(" md ") || l.contains(" html "))
+            .collect();
+        assert_eq!(rows.len(), 3, "{s}");
+        for row in rows {
+            let left = &row[..row.find("\u{2502}\u{2502}").unwrap_or(row.len())];
+            let ext = if left.contains(" md ") {
+                " md "
+            } else {
+                " html "
+            };
+            assert_eq!(
+                col(left, ext).map(|c| c + 1),
+                col(header, "Ext"),
+                "{size}: Ext\n{s}"
+            );
+            if let Some(date) = date {
+                assert_eq!(
+                    left.chars().nth(date + 4),
+                    Some('-'),
+                    "{size}: Modified\n{s}"
+                );
+                assert!(
+                    left.chars().count() > date + 15,
+                    "{size}: the date is cut\n{s}"
+                );
+            }
+        }
+    }
+    // The status line has the cursor's whole name, which the column cuts. Each wide
+    // character is followed by the cell it covers, a space: the screenshot once showed
+    // a letter left there by an earlier frame ("\u{3010}E LIFE\u{3011}d…").
+    let s = shot_keys("110x14", "Down,Down,Down", &a, &b);
+    assert!(
+        status(&s).contains("AI\u{6d3b} \u{7528} _\u{54c1} ")
+            && status(&s).contains("POC\u{63d0} \u{6848} _v1.4.html"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// The menu bar names this xdevcmd at its right, by the number a shell started from its
 /// panel is told; the menus win where there is no room for both.
 #[test]

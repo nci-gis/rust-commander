@@ -20,6 +20,9 @@ png = "0.18.1"
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 zune-jpeg = "0.5.15"
+# How many columns a character takes on the terminal (a CJK one two), for fitting names
+# into columns (format.rs). Already in the tree through ratatui.
+unicode-width = "0.2"
 
 # O_NONBLOCK, to open a picture someone else may swap for a FIFO without hanging
 # (quick view). Already in the tree through ratatui.

@@ -26,6 +26,11 @@ that heading and starts a new, empty one here. -->
   itself, started in any other window.
 
 ### Fixed
+- **Names in Chinese, Japanese or Korean keep the columns in line**: such a character
+  takes two columns, and names were fitted by counting characters, so a row with one ran
+  past the others, pushed Ext, Size and Modified to the right and cut the date. Names are
+  now fitted, padded and shortened in columns as the terminal draws them; the same goes
+  for pane titles and the status line.
 - **A status message no longer runs into the terminal's keys**: with the terminal in
   focus and a long message, the status line read "…Shift+F12 historytoo small to split";
   the two keep their gap now.

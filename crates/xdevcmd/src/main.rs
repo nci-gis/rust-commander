@@ -491,9 +491,12 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     // A job the last key started finishes before the frame is taken (a slow machine
     // took longer than the pause above), unless it waits on a question to show.
     finish_jobs(&mut app);
-    terminal.draw(|f| app.draw(f))?;
+    // The frame as drawn, not the backend's copy: the backend gets only what changed,
+    // and the cell a wide character covers is never sent, so it kept a letter from an
+    // earlier frame ("【E LIFE】d…" on the status line).
+    let frame = terminal.draw(|f| app.draw(f))?;
 
-    let buf = terminal.backend().buffer();
+    let buf = frame.buffer;
     let mut out = String::new();
     for y in 0..h {
         let mut line = String::new();

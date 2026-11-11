@@ -10,7 +10,7 @@ use ratatui::Frame;
 
 use xdevcmd_core::archive::{self, ItemKind, Listing};
 use xdevcmd_core::find::{self, Query};
-use xdevcmd_core::format::{elide_middle, format_time, human_size};
+use xdevcmd_core::format::{elide_middle, elided, fit_end, fit_start, format_time, human_size};
 use xdevcmd_core::glob::{has_wildcards, Pattern};
 use xdevcmd_core::size::{Sizer, Total};
 use xdevcmd_core::{entry_at, read_dir, sort_entries, Entry, Kind, Sort, SortKey};
@@ -1214,33 +1214,16 @@ impl FilePane {
                 ),
                 (false, None) => Span::raw(" "),
             }];
-            spans.push(Span::styled(
-                format!(
-                    "{:<w$}",
-                    elide_middle(&name_text, w_name as usize),
-                    w = w_name as usize
-                ),
-                base,
-            ));
+            // Fitted in columns, not characters: a CJK name is wider than it is long.
+            spans.push(Span::styled(fit_start(&name_text, w_name as usize), base));
             if w_ext > 0 {
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(
-                    format!(
-                        "{:<w$}",
-                        elide_middle(&ext_text, w_ext as usize),
-                        w = w_ext as usize
-                    ),
-                    base,
-                ));
+                spans.push(Span::styled(fit_start(&ext_text, w_ext as usize), base));
             }
             if w_size > 0 {
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(
-                    format!(
-                        "{:>w$}",
-                        elide_middle(&size_text, w_size as usize),
-                        w = w_size as usize
-                    ),
+                    fit_end(&size_text, w_size as usize),
                     if e.is_dir() {
                         Style::new().fg(theme::t().fg_dim)
                     } else {
@@ -1288,13 +1271,11 @@ fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, Pa
     let n = full.chars().count();
     // Which character of the drawn text character `i` of `full` became, as
     // elide_middle lays it out.
+    let cut = elided(full, room);
     let at = |i: usize| -> Option<usize> {
-        if n <= room {
+        let Some((head, tail)) = cut else {
             return Some(i);
-        }
-        let keep = room.saturating_sub(1);
-        let head = keep.div_ceil(2);
-        let tail = keep - head;
+        };
         if i < head {
             Some(i)
         } else if i >= n - tail {

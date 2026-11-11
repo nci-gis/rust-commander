@@ -15,6 +15,11 @@ rename, F3 and F4 work as on any listing.
 This makes Round 020 a workflow: run a command in the shell, then act on the files it
 named with the panes' keys.
 
+**A list, once made, is not lost** (the owner, 2026-11-11). Leaving it to open a file
+or a directory, Back (Alt+,) brings it back, and Alt+Down lists the recent ones. On the
+way back each row is checked again: a path gone since is removed, and the user is told
+which. Alt+F7's results and lists from the history are kept the same way.
+
 ## Plan (kickoff review)
 
 ### 1. What changed since the plan entry
@@ -27,6 +32,14 @@ named with the panes' keys.
 - **The scope proposal trimmed C** to the history view, "run into a panel", and Alt+F7's
   results as a panel. §4 below trims it again: one of the three already exists, and one
   is a new kind of trust.
+- **The owner's answers after the first draft (2026-11-11):**
+  - remote is out of 0.4.0, plugins postponed; 0.4.0 is about being stable, with no
+    network and no telemetry;
+  - lists are kept, and come back (the Goal above);
+  - a slow read gets a progress bar under the pane. That is for Q (with directories
+    read off the UI thread); this round uses it only if Q's bar exists by then,
+    otherwise the title's count stays (§4);
+  - the binary stays at most 7 MB. Nothing here adds a dependency.
 
 ### 2. Map: what exists, and what is missing
 
@@ -128,54 +141,103 @@ named with the panes' keys.
 - **Rename and batch rename across directories.** Rows in one list sit in many
   directories. F6 in place and Shift+F2 act on the full path, so they should work, but
   no test covers a results tab with rows in different directories. One is added (step 5).
-- **Session**: a list tab reopens as its root directory, as a results tab does. Said in
-  the docs; keeping lists across runs is not asked for.
+- **A list is lost today on the first step out of it** (the owner's point). Checked in
+  the code:
+  - F3 or F4 on a row opens over the tab, and Esc comes back to the list. Fine.
+  - **Enter on a file** (to its directory), **Enter on a directory**, `..` and Alt+G all
+    go through `FilePane::navigate`, which drops `results`. Back (Alt+,) then goes to
+    the search's root directory: `back` and `forward` hold only `PathBuf`s
+    (`pane/files.rs:50`), and Alt+Down's menu (`app/modals.rs:338`) is built from them.
+  - So: **a place is a directory or a list.** `back`/`forward` hold `Place::Dir(path)`
+    or `Place::List(id)`. Leaving a list pushes it, as leaving a directory does, so
+    Alt+, after Enter on a row returns to the list, cursor on that row.
+  - **The lists themselves live in the app**, not the tab: the last 10 (`Lists`,
+    app-wide, by id), each with its rows, its source ("rg -l foo · tab 1", "find
+    *.rs"), its root and the row last chosen. Closing a list's tab (Ctrl+W) keeps it.
+    One pane's Back can reach a list made in another, which is what Alt+Down is for.
+  - **Alt+Down** shows the recent lists above the directories, marked as lists, with
+    their row counts. Choosing one opens it in the focused tab.
+  - **On the way back each row is checked again**, on the list thread (no stat on the
+    UI thread). Rows gone since are removed and **named**: "2 gone since: a.rs, b.rs"
+    (the first few, then "and N more"). Today a results refresh drops rows silently;
+    that changes too.
+  - **Alt+F7's results are kept the same way** once the search ends, or when it is
+    left: what it found so far, with "(stopped)" in the source.
+- **Kept in memory, not in a file.**
+  - The history's rule is "in memory only": a list is made of the shell's output, which
+    can name private files.
+  - A temporary file would need its own permissions, cleanup after a crash, and a place
+    under `--root` rules.
+  - The cost: lists are gone when xdevcmd quits. Keeping them in the session file (0600)
+    is a later option, if the owner asks (decision 6).
+- **Session**: a list tab reopens as its root directory, as a results tab does today.
+- **Progress while a list is checked**: the title's count ("checking… 1,200 of 4,000")
+  until Q's bar under the pane exists; then the bar.
 
 ### 5. Steps
 
-1. **The list thread** (`xdevcmd_core::find`): `find::list(paths, hidden) -> Search`
-   sends `Found` for each path that exists, deduplicated by path, skipping network
-   names, with `Progress` and `Done { scanned, unreadable }` as a search does. Unit
-   tests: missing, duplicate and network names; the cap; cancel. S.
-2. **A list tab** (`pane/files.rs`):
-   - `Results` gains its source: `Find` or `List { from }`;
-   - `FilePane::list(root, paths, from, sort)` opens on the list thread;
-   - the title is ` list {from} · N`, plus "capped at 10,000" and "N outside the root"
-     when they apply;
-   - the delete confirmation says where a list came from.
+1. **The list thread** (`xdevcmd_core::find`): `find::list(paths) -> Search`. It sends
+   `Found` for each path that exists, deduplicated by path, and skips names on another
+   machine. `Progress` and `Done { scanned, unreadable }` work as for a search, and
+   `Done` also gives the paths that were gone. The same thread re-checks a kept list.
+   Unit tests: missing, duplicate and network names; the cap; cancel; the gone ones. S.
+2. **Kept lists and places** (`pane/files.rs`, `app`):
+   - `Lists`, app-wide: the last 10, each with an id, its rows, its source, its root and
+     the row last chosen.
+   - `Results` gains its source (`Find` or `List`) and the list's id.
+   - `back` and `forward` hold `Place::Dir` or `Place::List`. Leaving a list pushes it,
+     and Back and Forward reopen it, re-checked, cursor on the row last chosen.
+   - Rows gone since are removed and named on the status line.
+   - Alt+Down: the recent lists first, then the directories.
+   - Alt+F7's results are kept when the search ends or is left.
+   - The title is ` list {source} · N`, with "capped at 10,000" and "N outside the
+     root" when they apply.
+   - The delete confirmation says where a list came from.
 
-   Everything else is the results tab's. S.
+   M.
 3. **From the history view** (`viewer.rs`, `app/shell.rs`):
-   - **`p`** makes a panel of the selection's lines, else of the command at the chosen
-     path, else of the last command (prompt marks), else says to drag first;
-   - each line's paths are resolved as Round 020 does (`Links`, a resolve without the
-     existence check), in the order printed;
-   - the new tab opens in the last file pane and takes the focus, and the history
-     closes;
-   - refused while `ssh` runs in that shell, and in the restricted mode (no terminal).
+   - **`p`** makes a list from the selected lines. With no selection, it takes the
+     command at the chosen path, else the last command (needs prompt marks). With
+     neither, it says to drag over the lines first.
+   - Each line's paths are resolved as in Round 020 (`Links`, without the existence
+     check), in the order printed.
+   - The new tab opens in the last file pane and takes the focus, and the history
+     closes.
+   - Refused while `ssh` runs in that shell, and in the restricted mode (it has no
+     terminal).
 
-   `Viewer` gains the selected range and a way to get the commands' line ranges. M.
-4. **From the tab menu**: "Panel from the last command's output", with prompt marks
-   only; without them, the item says to use Shift+F12 and drag. S.
+   `Viewer` gains the selected range, and a way to get each command's lines. M.
+4. **From the tab menu**: "List from the last command's output", with prompt marks only;
+   without them, the item says to use Shift+F12 and drag. S.
 5. **Tests**:
-   - unit: 1; the line ranges for a selection, the chosen path's command and the last
-     command; the source on the delete confirmation;
-   - render: a list tab from a fixed list, with relative, absolute and mixed names (mc
-     #2942) and its title; rename in place and Shift+F2 on rows in two directories;
+   - unit:
+     - step 1;
+     - `Place` in back/forward;
+     - the line ranges for a selection, for the chosen path's command, and for the last
+       command;
+     - the source on the delete confirmation.
+   - render:
+     - a list tab from a fixed list, with relative, absolute and mixed names (mc #2942),
+       and its title;
+     - Enter on a row then Alt+, back to the list, cursor on that row;
+     - a row deleted meanwhile is named and removed on the way back;
+     - Alt+Down lists the kept lists;
+     - Alt+F7's results, left and brought back;
+     - rename in place and Shift+F2 on rows in two directories.
    - pty:
      - `printf` paths → Shift+F12 → drag → `p` → F5 copies them to the other pane;
      - with hand-written prompt marks, `p` with nothing selected takes the last command;
-     - read-only: the panel opens, and F5 into it, F6 and F8 are refused;
+     - read-only: the list opens; F5 into it, F6 and F8 are refused;
      - `--root`: rows outside are dropped and counted;
      - a fake `ssh` (Remote): refused.
 6. **Docs**:
-   - docs/shell.md, "A panel from the output";
-   - docs/keys.md and F1: `p` in the history;
-   - docs/security.md: a list is only names, and what F8 says;
+   - docs/shell.md, "A list from the output";
+   - docs/keys.md and F1: `p` in the history; Alt+, and Alt+Down with lists;
+   - docs/security.md: a list holds only names, it stays in memory, and what F8 says;
    - CHANGELOG.
 
-Size: S–M, about 3–4 days. The panel exists, so this is a source and a key, not a new
-pane. The plan's M assumed a virtual panel to build.
+Size: M, about 4–5 days. Kept lists add about a day to the first draft's S–M. The panel
+exists; this is a source, a key and a store, not a new pane.
 
 Risks:
 - **A big history**: the stat thread and the cap.
@@ -183,18 +245,27 @@ Risks:
   in 0.5.
 - **Many files acted on from text anyone can print**: real paths only, and the
   confirmation names the source.
+- **Back/Forward changes type** (`PathBuf` → `Place`): every user of `back`, `forward`
+  and `history()` moves to it. The compiler finds them; the render test for Back and
+  Forward must stay green.
 
 ### 6. The owner's decisions
 
-1. **"Run a command into a panel" (a dialog; xdevcmd runs it and reads its output)**:
-   out of 0.4.0, the shell plus `p` instead (recommended), or in.
-2. **The key in the history view**: `p` (recommended; free in the viewer, the viewer's
-   keys are single letters) or another.
-3. **No selection and no prompt marks**: say to drag first (recommended), or every path
-   in the whole history.
-4. **The cap**: 10,000 rows (recommended), or another number.
-5. **ssh**: refuse making a panel while ssh runs, and add the warning to Round 020's
-   status (recommended now); record each command's program in 0.5.
+Settled (2026-11-11): remote out of 0.4.0; plugins postponed; lists kept and brought
+back with Back and Alt+Down, gone rows named and removed; the binary at most 7 MB.
+
+Open (recommendation first):
+1. **"Run a command into a list"** (a dialog; xdevcmd runs it and reads its output):
+   out of 0.4.0, the shell plus `p` instead; or in.
+2. **The key in the history view**: `p` (free in the viewer, whose keys are single
+   letters), or another.
+3. **No selection and no prompt marks**: say to drag first, or every path in the whole
+   history.
+4. **Caps**: 10,000 rows per list and 10 kept lists, or other numbers.
+5. **ssh**: refuse making a list while ssh runs, and add the warning to Round 020's
+   status, now; record each command's program in 0.5.
+6. **Where lists live**: in memory only, gone on quit; or also in the session file
+   (0600), so they come back after a restart.
 
 ## Do
 
@@ -202,8 +273,9 @@ Risks:
 
 ## Check
 
-- [ ] List thread: missing, duplicate, network names, cap, cancel (unit)
+- [ ] List thread: missing, duplicate, network names, cap, cancel, gone (unit)
 - [ ] A list tab: relative, absolute and mixed rows; title; rename across directories
+- [ ] Kept lists: Enter → Alt+, back to the list; gone rows named; Alt+Down; Alt+F7 kept
 - [ ] pty: drag → `p` → F5; marks → `p` takes the last command; read-only; `--root`; ssh
 - [ ] Clippy for three targets, the full suite
 - [ ] The owner: bash with `rg -l` and `git status --porcelain`; Windows `cmd`/`pwsh` with

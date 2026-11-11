@@ -319,7 +319,7 @@ impl Mode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ThemeSpec {
-    /// The theme: a built-in one (dark, light, ansi, blue, high-contrast) or a file
+    /// The theme: a built-in one (xdevtheme, dark, light, ansi, blue, high-contrast) or a file
     /// `themes/<name>.toml` beside this config. The colours below change it further.
     pub name: String,
     /// How many colours the terminal shows: "auto", "truecolor", "256" or "16".
@@ -348,7 +348,7 @@ impl Default for ThemeSpec {
         let t = Theme::default();
         let s = |c: Color| color_name(c);
         Self {
-            name: "dark".into(),
+            name: crate::theme::DEFAULT.into(),
             colors: "auto".into(),
             background: s(t.bg),
             panel: s(t.bg_panel),
@@ -389,6 +389,11 @@ pub struct Settings {
     pub mode: Mode,
     /// The canonical root directory, if navigation is confined.
     pub root: Option<PathBuf>,
+    /// The theme in use: `XDEVCMD_THEME`, else `[theme] name`, else the default when
+    /// that is not there.
+    pub theme_name: String,
+    /// `[theme] name` named a theme that is not there; the default is in use.
+    pub theme_note: Option<String>,
 }
 
 impl Default for Settings {
@@ -459,11 +464,37 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
 
     let colors = Depth::parse(&config.theme.colors)
         .map_err(|e| format!("[theme] colors = \"{}\": {e}", config.theme.colors))?;
-    let base = named_theme(&config.theme.name)?;
+    // XDEVCMD_THEME, for this run, then [theme] name. A theme that is not there (its
+    // file deleted, or a name mistyped) or that does not read is not a reason to drop
+    // the rest of the config: the default theme stands in, and says so. A name that is
+    // a path is an error, as always.
+    let theme_name = std::env::var("XDEVCMD_THEME")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| config.theme.name.clone());
+    if !is_theme_name(&theme_name) {
+        return Err(format!("[theme] name = \"{theme_name}\": not a theme name"));
+    }
+    let (base, theme_note) = match named_theme(&theme_name) {
+        Ok(t) => (t, None),
+        // Short, for the status line: --check-config gives the whole story.
+        Err(e) if e.contains("no such theme") => (
+            Theme::default(),
+            Some(format!(
+                "theme \"{theme_name}\" is not there \u{2014} {} in use; View \u{203a} Theme\u{2026} picks another",
+                crate::theme::DEFAULT
+            )),
+        ),
+        Err(e) => (
+            Theme::default(),
+            Some(format!("{e} \u{2014} {} in use", crate::theme::DEFAULT)),
+        ),
+    };
     let theme = build_theme(&config.theme, &base)?;
     // On a 16-colour terminal the default theme gives way to the one made of the 16
     // colours; a theme someone chose is kept, its colours fitted to the 16.
-    let theme16 = if config.theme.name == "dark" {
+    let theme16 = if theme_note.is_some() || plain_by_default(&theme_name) {
         build_theme(&config.theme, &Theme::ansi())?
     } else {
         theme
@@ -591,7 +622,19 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         sort,
         mode,
         root,
+        theme_name: if theme_note.is_some() {
+            crate::theme::DEFAULT.to_string()
+        } else {
+            theme_name
+        },
+        theme_note,
     })
+}
+
+/// The themes that give way to the 16-colour one on a terminal with 16 colours: the
+/// default and dark, which nobody chose for their own colours.
+fn plain_by_default(name: &str) -> bool {
+    name == crate::theme::DEFAULT || name == "dark"
 }
 
 /// A theme file, `themes/<name>.toml`: a built-in to start from and the colours that
@@ -681,11 +724,8 @@ pub fn available_themes() -> Vec<String> {
     names
 }
 
-/// The theme called `name`: built in, or read from a file in `theme_dirs`.
-pub fn named_theme(name: &str) -> Result<Theme, String> {
-    if let Some(t) = crate::theme::built_in(name) {
-        return Ok(t);
-    }
+/// Whether `name` can name a theme file: one name, never a path out of `themes/`.
+fn is_theme_name(name: &str) -> bool {
     // `:` too: on Windows `C:name` would make the join leave the theme directory.
     // Windows' device names: CON.toml is the console, and reading it waits forever.
     let device = {
@@ -695,7 +735,15 @@ pub fn named_theme(name: &str) -> Result<Theme, String> {
                 && n.len() == 4
                 && n.as_bytes()[3].is_ascii_digit())
     };
-    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') || device {
+    !(name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') || device)
+}
+
+/// The theme called `name`: built in, or read from a file in `theme_dirs`.
+pub fn named_theme(name: &str) -> Result<Theme, String> {
+    if let Some(t) = crate::theme::built_in(name) {
+        return Ok(t);
+    }
+    if !is_theme_name(name) {
         return Err(format!("[theme] name = \"{name}\": not a theme name"));
     }
     let Some(path) = theme_dirs()
@@ -793,16 +841,18 @@ pub fn render_theme(name: &str) -> Result<String, String> {
          # Colours: \"#rrggbb\", \"reset\" (the terminal's own), or \"0\"-\"255\".\n\
          base = \"{name}\"\n"
     );
+    let style = t.decor.to_toml();
     for (slot, field, _) in theme_slots(&mut t, &f) {
         out.push_str(&format!("{field} = \"{}\"\n", color_name(*slot)));
     }
+    out.push_str(&style);
     Ok(out)
 }
 
 /// The theme the user sees for `name`: the named theme with `[theme]`'s own colours on
 /// top, as start-up builds it; for View → Theme….
 pub fn theme_for(name: &str, spec: &ThemeSpec, depth: Depth) -> Result<Theme, String> {
-    let base = if depth == Depth::Ansi16 && name == "dark" {
+    let base = if depth == Depth::Ansi16 && plain_by_default(name) {
         Theme::ansi()
     } else {
         named_theme(name)?
@@ -870,7 +920,7 @@ pub fn parse_color(s: &str) -> Result<Color, String> {
     Err("expected \"#rrggbb\", \"reset\", or a palette index 0-255".into())
 }
 
-fn color_name(c: Color) -> String {
+pub(crate) fn color_name(c: Color) -> String {
     match c {
         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
         Color::Indexed(n) => n.to_string(),

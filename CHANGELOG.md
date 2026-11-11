@@ -11,21 +11,19 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
-- **xdevtheme, xdevcmd's own look**, and **xdevtheme-dawn**, its light pair, in
-  `themes/`: xdevcmd's teal turns into a light that runs across the screen to violet,
-  with rounded frames and the titles in a notch, a lit cursor row with a bar on the frame,
-  the F keys and the selected tab as slanted segments, and a shadow under dialogs.
-- **Three more in that family**: **xdevtheme-neon** (the light runs teal, violet,
-  pink, and the focused frame glows into the cells around it), **xdevtheme-glass** (no
-  lines: panes are cards, the focused path and the cursor row are pills) and
-  **xdevtheme-borealis** (an aurora down the screen, a few fixed stars in the file
-  panes' empty rows).
+- **Two more looks in xdevtheme's family**, in `themes/`: **xdevtheme-neon** (the light
+  runs teal, violet, pink, and the focused frame glows into the cells around it) and
+  **xdevtheme-glass** (no lines: panes are cards, the focused path and the cursor row
+  are pills).
 - **A theme file can say how it draws**, in a `[style]` table: `borders` (plain,
   rounded, thick, double, none), `titles` (line, notch, pill), `gradient` (one or two
   colours after the accent), `gradient_runs` (across, down), `cursor` (block, glow,
   pill), `marker`, `keys` (plain, caps, slant), `shadow` (none, dim, glow), `glow`, `sky`
   and `stars`. Off unless a theme sets it, and off on a 16-colour terminal. No Nerd Font
   needed, and the programs in the terminal panel keep their own colours and lines.
+  `--print-theme` writes it too.
+- **`XDEVCMD_THEME`** overrides `[theme] name` for one run, to try a theme without
+  editing the config.
 - **`cargo binstall xdevcmd`** installs the ready-made build from the GitHub release,
   with no compiling: the crate says where each target's archive is.
 - **A long name is shown whole on the cursor's row.** When the Name column cuts a name,
@@ -37,6 +35,12 @@ that heading and starts a new, empty one here. -->
   menus need the room.
 
 ### Changed
+- **The default theme is xdevtheme, xdevcmd's own look**: its teal turns into a light
+  that runs across the screen to violet, with rounded frames and the titles in a notch,
+  a lit cursor row with a bar on the frame, the F keys and the selected tab as slanted
+  segments, and a shadow under dialogs. The plain look is still there as `dark`:
+  `[theme] name = "dark"` keeps it, and a config that already names a theme keeps that
+  one. On a 16-colour terminal the default is the 16-colour theme, as before.
 - **On Windows, xdevcmd started from its terminal panel asks first**: "Start another
   xdevcmd here? [y/N]", naming the xdevcmd whose panel it is; Enter is no and ends it.
   Windows cannot tell that panel from a new window opened from it (`start cmd`), so it
@@ -45,6 +49,10 @@ that heading and starts a new, empty one here. -->
   itself, started in any other window.
 
 ### Fixed
+- **A theme that is not there no longer throws away the whole config.** A `[theme] name`
+  whose file was deleted or does not read made xdevcmd ignore every setting; now the
+  default theme stands in, the rest of the config holds, and the status line says which
+  theme was missing. `--check-config` still reports it.
 - **Names in Chinese, Japanese or Korean keep the columns in line**: such a character
   takes two columns, and names were fitted by counting characters, so a row with one ran
   past the others, pushed Ext, Size and Modified to the right and cut the date. Names are
@@ -63,9 +71,7 @@ that heading and starts a new, empty one here. -->
 ### Removed
 - **The Night Owl example theme**: it was nearly the built-in `dark` (the closest pair of
   all the themes), and close to Nord and Tokyo Night. A copy you keep in your own
-  `themes/` folder still works. If `[theme] name = "night-owl"` names a file that is no
-  longer there, xdevcmd says so and ignores the config file: pick another theme, or keep
-  the 0.3.0 file.
+  `themes/` folder still works; without it, xdevtheme stands in (see Fixed).
 
 ## [0.3.0] - 2026-11-10
 

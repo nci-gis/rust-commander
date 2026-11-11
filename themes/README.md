@@ -1,14 +1,12 @@
 # Example themes
 
-Theme files for xdevcmd. The five built-in themes (dark, light, ansi, blue,
-high-contrast) need no file; these are extra, and a start for your own.
+Theme files for xdevcmd. The built-in themes (xdevtheme, the default, and dark, light,
+ansi, blue, high-contrast) need no file; these are extra, and a start for your own.
 
-- **xdevtheme** is xdevcmd's own look, and **xdevtheme-dawn** its light pair. Their
-  `[style]` table draws rounded frames, a teal-to-violet light, slanted F keys and a
-  lit cursor row (see [docs/config.md](../docs/config.md#colours)).
-- Three more in the same family: **xdevtheme-neon** (teal, violet and pink, the focused
-  frame glowing), **xdevtheme-glass** (no lines, panes as cards, pills) and
-  **xdevtheme-borealis** (an aurora down the screen, stars in the empty rows).
+- Two more looks of xdevcmd's own, beside the built-in xdevtheme: **xdevtheme-neon**,
+  the loud one (teal, violet and pink, the focused frame glowing), and
+  **xdevtheme-glass**, the different one (no lines: panes are cards, pills). Their
+  `[style]` table is in [docs/config.md](../docs/config.md#colours).
 - The others are well-known palettes: Dracula, Tokyo Night, Catppuccin Mocha, Nord,
   Gruvbox dark and Solarized light.
 
@@ -24,7 +22,7 @@ Then pick it in **View > Theme…**, or set `[theme] name = "nord"` in `config.t
 To make your own, print a built-in theme as a file and change what you like:
 
 ```bash
-xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml
+xdevcmd --print-theme xdevtheme > ~/.config/xdevcmd/themes/mine.toml
 ```
 
 Every name a theme file takes is in [docs/config.md](../docs/config.md#colours).

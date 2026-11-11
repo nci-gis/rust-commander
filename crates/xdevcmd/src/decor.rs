@@ -253,6 +253,81 @@ impl Decor {
     }
 }
 
+impl Decor {
+    /// As a theme file's `[style]` table, the lines that differ from no style; empty
+    /// when there are none.
+    pub fn to_toml(self) -> String {
+        if self == Decor::default() {
+            return String::new();
+        }
+        let name = crate::config::color_name;
+        let mut out = String::from("\n[style]\n");
+        let mut line = |k: &str, v: String| out.push_str(&format!("{k} = {v}\n"));
+        let q = |s: &str| format!("\"{s}\"");
+        line(
+            "borders",
+            q(match self.borders {
+                Borders::Plain => "plain",
+                Borders::Rounded => "rounded",
+                Borders::Thick => "thick",
+                Borders::Double => "double",
+                Borders::Cards => "none",
+            }),
+        );
+        line(
+            "titles",
+            q(match self.titles {
+                Titles::Line => "line",
+                Titles::Notch => "notch",
+                Titles::Pill => "pill",
+            }),
+        );
+        line(
+            "gradient",
+            match self.gradient {
+                None => q("none"),
+                Some(Gradient { mid: None, end }) => q(&name(end)),
+                Some(Gradient { mid: Some(m), end }) => {
+                    format!("[{}, {}]", q(&name(m)), q(&name(end)))
+                }
+            },
+        );
+        line(
+            "gradient_runs",
+            q(if self.down { "down" } else { "across" }),
+        );
+        line(
+            "cursor",
+            q(match self.cursor {
+                Cursor::Block => "block",
+                Cursor::Glow => "glow",
+                Cursor::Pill => "pill",
+            }),
+        );
+        line("marker", self.marker.to_string());
+        line(
+            "keys",
+            q(match self.keys {
+                Keys::Plain => "plain",
+                Keys::Caps => "caps",
+                Keys::Slant => "slant",
+            }),
+        );
+        line(
+            "shadow",
+            q(match self.shadow {
+                Shadow::None => "none",
+                Shadow::Dim => "dim",
+                Shadow::Glow => "glow",
+            }),
+        );
+        line("glow", self.glow.to_string());
+        line("sky", self.sky.to_string());
+        line("stars", self.stars.to_string());
+        out
+    }
+}
+
 /// The terminal's colour depth, for [`get`]: the start-up code sets it once.
 static DEPTH: AtomicU8 = AtomicU8::new(0);
 

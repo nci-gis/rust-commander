@@ -70,7 +70,7 @@ pub const OPTIONS: &[(&str, Arg, &str)] = &[
     ("--help", Arg::None, "print the help and exit"),
 ];
 
-const THEMES: &str = "dark light ansi blue high-contrast";
+const THEMES: &str = "xdevtheme dark light ansi blue high-contrast";
 const SHELLS: &str = "bash zsh fish powershell";
 
 /// Completions for `shell`, or why not.

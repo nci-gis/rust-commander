@@ -97,7 +97,7 @@ Config file, first match wins:
 
   mkdir -p ~/.config/xdevcmd && xdevcmd --print-config > ~/.config/xdevcmd/config.toml
 
-Your own theme starts from a built-in one (dark, light, ansi, blue, high-contrast):
+Your own theme starts from a built-in one (xdevtheme, dark, light, ansi, blue, high-contrast):
   mkdir -p ~/.config/xdevcmd/themes
   xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml
 ";
@@ -247,6 +247,16 @@ fn main() -> Result<()> {
     let (mut settings, outcome) = config::load(cli.config.as_deref());
     if cli.check_config {
         match &outcome {
+            // The app starts with the default theme in its place, but a check says so.
+            Outcome::Loaded(_) if settings.theme_note.is_some() => {
+                // The whole reason, with the themes there are.
+                let why = config::named_theme(&settings.config.theme.name)
+                    .err()
+                    .or_else(|| settings.theme_note.clone())
+                    .unwrap_or_default();
+                eprintln!("{why}");
+                std::process::exit(1);
+            }
             Outcome::Loaded(p) => emit(&format!("ok: {}\n", p.display())),
             Outcome::NoFile => match config::default_path() {
                 Some(p) => emit(&format!("no config at {} — defaults in use\n", p.display())),

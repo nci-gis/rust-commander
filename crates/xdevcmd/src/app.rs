@@ -574,9 +574,9 @@ impl Drop for App {
 
 impl App {
     pub fn new(left: &Path, right: &Path, settings: Settings, outcome: Outcome) -> Self {
-        let notice = outcome.message();
+        let notice = outcome.message().or_else(|| settings.theme_note.clone());
         let settings_height = settings.config.terminal.height_percent;
-        let theme_name = settings.config.theme.name.clone();
+        let theme_name = settings.theme_name.clone();
         let mut panes = BTreeMap::new();
         panes.insert(
             0,

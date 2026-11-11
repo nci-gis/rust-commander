@@ -59,6 +59,8 @@ impl Run {
         cmd.env("XDEVCMD_CONFIG", dir.join("config.toml"));
         cmd.env("XDG_DATA_HOME", dir.join("data"));
         cmd.env("XDEVCMD_STATE", dir.join("session.toml"));
+        // The plain look the tests read.
+        cmd.env("XDEVCMD_THEME", "dark");
         match panel {
             Some(pid) => cmd.env("XDEVCMD_PANEL", pid.to_string()),
             None => cmd.env_remove("XDEVCMD_PANEL"),

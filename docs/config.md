@@ -106,26 +106,31 @@ View and Edit.
 
 ```toml
 [theme]
-name = "dark"             # dark, light, ansi, blue, high-contrast, or a file of yours
+name = "xdevtheme"        # xdevtheme, dark, light, ansi, blue, high-contrast, or a file
 accent = "#ff8800"        # "#rrggbb", "reset" (the terminal's own), or "0"-"255"
 background = "reset"      # let the terminal's background show through
 colors = "auto"           # how many colours the terminal shows: auto, truecolor, 256, 16
 ```
 
-**Themes.** `dark` is the default; `light` is for a light terminal; `ansi` uses only
+**Themes.** `xdevtheme` is the default: xdevcmd's teal turned into a light that runs across
+the screen to violet, with rounded frames, the titles in a notch, a lit cursor row and
+slanted F keys (its `[style]`, below). `dark` is the plain look it replaced, one teal
+accent and nothing more; `light` is for a light terminal; `ansi` uses only
 your terminal's 16 colours, so it follows your terminal's palette; `blue` is the
 blue-panel look of the DOS-era commanders; `high-contrast` is black and white with
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). The release files come with eight in `themes/`: xdevcmd's
-own **xdevtheme** and its light pair **xdevtheme-dawn**, and six examples (Dracula, Tokyo
-Night, Catppuccin Mocha, Nord, Gruvbox dark, Solarized light),
+binary, for a portable copy). The release files come with eight in `themes/`: two more
+looks of xdevcmd's own, **xdevtheme-neon** (the light runs teal, violet and pink, and the
+focused frame glows) and **xdevtheme-glass** (no lines: panes are cards, the path and the
+cursor row are pills), and six well-known palettes (Dracula, Tokyo Night, Catppuccin
+Mocha, Nord, Gruvbox dark, Solarized light),
 which work as they are when kept beside `xdevcmd`. To start your own, print a built-in theme with every colour listed:
 
 ```bash
 mkdir -p ~/.config/xdevcmd/themes
-xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml   # then [theme] name = "mine"
+xdevcmd --print-theme xdevtheme > ~/.config/xdevcmd/themes/mine.toml   # then [theme] name = "mine"
 ```
 
 A theme file starts from a built-in theme and changes what it lists, with the same
@@ -139,6 +144,13 @@ cursor_active = "#5a3000"
 ```
 
 Colours set in `[theme]` itself go on top of whichever theme is chosen.
+
+A `name` whose file is not there any more (deleted, renamed, or a typo), or whose file
+does not read, does not stop the rest of the config: xdevtheme stands in, and the status
+line says which theme was missing. `--check-config` still reports it and exits 1.
+
+`XDEVCMD_THEME` in the environment overrides `name` for that run, to try one without
+editing the config: `XDEVCMD_THEME=xdevtheme-neon xdevcmd`.
 
 A theme file may also say how it draws, beyond its colours, in a `[style]` table. Each
 line is optional, and leaving it out keeps today's look:

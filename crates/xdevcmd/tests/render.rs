@@ -52,7 +52,16 @@ fn isolated() -> Command {
     c.env_remove("SSH_TTY");
     // Run from xdevcmd's own terminal panel, the suite would be refused.
     c.env_remove("XDEVCMD_PANEL");
+    // The plain look these tests read (┌, │, " 1 Help"); a test about themes removes it.
+    c.env("XDEVCMD_THEME", "dark");
     c.env("DISPLAY", ":0");
+    c
+}
+
+/// [`isolated`] with the theme left to the config, for the tests about themes.
+fn themed() -> Command {
+    let mut c = isolated();
+    c.env_remove("XDEVCMD_THEME");
     c
 }
 
@@ -2681,7 +2690,7 @@ fn a_theme_file_beside_the_config_is_a_theme() {
     .unwrap();
     let cfg = write_config(&dir, "[theme]\nname = \"mine\"\n");
     let check = |cfg: &std::path::Path| {
-        isolated()
+        themed()
             .env("XDEVCMD_CONFIG", cfg)
             .arg("--check-config")
             .output()
@@ -2694,7 +2703,7 @@ fn a_theme_file_beside_the_config_is_a_theme() {
         String::from_utf8_lossy(&out.stdout)
     );
     // View → Theme… lists it after the built-in ones.
-    let out = isolated()
+    let out = themed()
         .env("XDEVCMD_CONFIG", &cfg)
         .args(["--screenshot=100x40", "--keys=F9,Right,Up,Enter"])
         .arg(&a)
@@ -2702,7 +2711,15 @@ fn a_theme_file_beside_the_config_is_a_theme() {
         .output()
         .unwrap();
     let s = String::from_utf8_lossy(&out.stdout);
-    for name in ["dark", "light", "ansi", "blue", "high-contrast", "mine"] {
+    for name in [
+        "xdevtheme",
+        "dark",
+        "light",
+        "ansi",
+        "blue",
+        "high-contrast",
+        "mine",
+    ] {
         assert!(s.contains(name), "{name}\n{s}");
     }
     // A bad colour in the file names the file.
@@ -2730,7 +2747,8 @@ fn a_theme_file_beside_the_config_is_a_theme() {
 #[test]
 fn view_theme_switches_while_running() {
     let (a, b) = fixture();
-    let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Enter", &a, &b);
+    // The list starts at the default, xdevtheme; then dark, then light.
+    let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Down,Enter", &a, &b);
     assert!(s.contains("theme: light"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
@@ -2817,7 +2835,7 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
         "{after}"
     );
     assert!(after.contains("delete_to_trash = false"), "{after}");
-    assert!(after.contains("[theme]\nname = \"light\""), "{after}");
+    assert!(after.contains("[theme]\nname = \"dark\""), "{after}");
     assert!(after.contains("[[menu]]\nkey = \"t\""), "{after}");
     // What was saved is what the next start reads.
     let out = isolated()
@@ -2914,20 +2932,20 @@ fn settings_works_with_the_mouse() {
     let s0 = shot_with(&cfg, open, &a, &b);
     let theme = format!("{open},{}", click(locate(&s0, "Theme ")));
     let s = shot_with(&cfg, &theme, &a, &b);
-    let (vx, vy) = locate(&s, "\u{2039} dark \u{203a}");
+    let (vx, vy) = locate(&s, "\u{2039} xdevtheme \u{203a}");
     let more = format!(
         "{theme},{}",
-        click((vx + "\u{2039} dark ".chars().count(), vy))
+        click((vx + "\u{2039} xdevtheme ".chars().count(), vy))
     );
     let s = shot_with(&cfg, &more, &a, &b);
     assert!(
-        s.contains("\u{2039} light \u{203a}"),
+        s.contains("\u{2039} dark \u{203a}"),
         "\u{203a} steps forward\n{s}"
     );
     let back = format!("{more},{}", click((vx, vy)));
     let s = shot_with(&cfg, &back, &a, &b);
     assert!(
-        s.contains("\u{2039} dark \u{203a}"),
+        s.contains("\u{2039} xdevtheme \u{203a}"),
         "\u{2039} steps back\n{s}"
     );
     // The wheel moves the selected row: the help line follows it.
@@ -4168,21 +4186,15 @@ fn a_tab_bar_on_one_pane_keeps_both_lists_in_line() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
-/// xdevtheme's `[style]`: rounded frames with the title in a notch, the F keys and the
-/// selected tab as slanted segments, a bar on the frame at the cursor's row. On a
-/// 16-colour terminal, none of it: plain frames and keys.
+/// xdevtheme, the default, and its style: rounded frames with the title in a notch, the
+/// F keys and the selected tab as slanted segments, a bar on the frame at the cursor's
+/// row. On a 16-colour terminal, none of it: plain frames and keys.
 #[test]
 fn xdevtheme_draws_its_style_and_leaves_it_off_at_16_colours() {
     let (a, b) = fixture();
-    let dir = a.parent().unwrap().join("xdevtheme-cfg");
-    fs::create_dir_all(dir.join("themes")).unwrap();
-    let theme =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes/xdevtheme.toml");
-    fs::copy(&theme, dir.join("themes/xdevtheme.toml")).unwrap();
-    let cfg = write_config(&dir, "[theme]\nname = \"xdevtheme\"\n");
+    // No config: the default theme.
     let at = |colors: &str| {
-        let out = isolated()
-            .env("XDEVCMD_CONFIG", &cfg)
+        let out = themed()
             .env("XDEVCMD_COLORS", colors)
             .args(["--screenshot=110x24", "--keys=Ctrl+t,Down"])
             .arg(&a)
@@ -4209,12 +4221,12 @@ fn xdevtheme_draws_its_style_and_leaves_it_off_at_16_colours() {
     );
 }
 
-/// The other xdevtheme looks. Neon: the notch. Glass: no lines (the rows start with a
-/// space, not a frame), the cursor row as a pill, and a box that a program in the
-/// terminal panel draws is left as it drew it. Borealis: stars in the empty rows.
+/// The two other looks. Neon: the notch. Glass: no lines (the rows start with a space,
+/// not a frame), the cursor row as a pill, and a box that a program in the terminal
+/// panel draws is left as it drew it.
 #[cfg(unix)]
 #[test]
-fn neon_glass_and_borealis_draw_their_styles_and_leave_the_terminal_alone() {
+fn neon_and_glass_draw_their_styles_and_leave_the_terminal_alone() {
     let (a, b) = fixture();
     let dir = a.parent().unwrap().join("looks-cfg");
     fs::create_dir_all(dir.join("themes")).unwrap();
@@ -4243,7 +4255,7 @@ fn neon_glass_and_borealis_draw_their_styles_and_leave_the_terminal_alone() {
                 shell.display()
             ),
         );
-        let out = isolated()
+        let out = themed()
             .env("XDEVCMD_CONFIG", &cfg)
             .env("XDEVCMD_COLORS", "truecolor")
             .env("XDEVCMD_SCREENSHOT_WAIT_MS", "600")
@@ -4268,9 +4280,43 @@ fn neon_glass_and_borealis_draw_their_styles_and_leave_the_terminal_alone() {
         s.contains("\u{250c}\u{2500}\u{2510} boxed"),
         "the program's box is its own\n{s}"
     );
-    let s = shot("xdevtheme-borealis");
-    assert!(
-        s.contains('\u{2726}') || s.matches('\u{b7}').count() > 6,
-        "stars\n{s}"
+}
+
+/// A config naming a theme whose file was deleted keeps the rest of its settings: the
+/// default theme stands in and the status line says so. `--check-config` still fails.
+#[test]
+fn a_deleted_theme_file_gives_the_default_theme_and_keeps_the_config() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("gone-cfg");
+    fs::create_dir_all(&dir).unwrap();
+    // A setting that shows: the menu bar off.
+    let cfg = write_config(
+        &dir,
+        "[general]\nmenu_bar = false\n[theme]\nname = \"was-here\"\n",
     );
+    let out = themed()
+        .env("XDEVCMD_CONFIG", &cfg)
+        .env("XDEVCMD_COLORS", "truecolor")
+        .args(["--screenshot=110x24", "--keys=Down"])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !s.contains("File   View"),
+        "the config's menu_bar = false holds\n{s}"
+    );
+    assert!(
+        status(&s).contains("\"was-here\" is not there") && status(&s).contains("xdevtheme in use"),
+        "{s}"
+    );
+    assert!(s.contains('\u{256d}'), "the default theme's frames\n{s}");
+    let out = themed()
+        .env("XDEVCMD_CONFIG", &cfg)
+        .arg("--check-config")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no such theme"));
 }

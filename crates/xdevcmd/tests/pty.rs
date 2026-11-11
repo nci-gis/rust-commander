@@ -136,6 +136,8 @@ impl Session {
         cmd.env_remove("SSH_TTY");
         // Run from xdevcmd's own terminal panel, the suite would be refused.
         cmd.env_remove("XDEVCMD_PANEL");
+        // The plain look the tests read.
+        cmd.env("XDEVCMD_THEME", "dark");
         // Run inside tmux or screen, xdevcmd would ask the terminal nothing at start-up.
         cmd.env_remove("TMUX");
         cmd.env_remove("STY");

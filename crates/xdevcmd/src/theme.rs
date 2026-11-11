@@ -1,4 +1,5 @@
-//! The palette. Dark, high-contrast, a single teal accent that marks what has focus.
+//! The palette, and the built-in themes. The default, xdevtheme, is dark with a teal
+//! accent that marks what has focus, turned into a light across the screen.
 //!
 //! Set at startup from `[theme]` in the config, then read everywhere through [`t`]. A
 //! process-wide value rather than a parameter threaded through every render function:
@@ -34,31 +35,74 @@ pub struct Theme {
     pub decor: crate::decor::Decor,
 }
 
+/// The theme a config that names none gets.
+pub const DEFAULT: &str = "xdevtheme";
+
 impl Default for Theme {
+    /// xdevtheme: xdevcmd's teal turned into a light that runs across the screen to
+    /// violet, rounded frames with the titles in a notch, a lit cursor row, slanted keys.
     fn default() -> Self {
+        use crate::decor::{Borders, Cursor, Decor, Gradient, Keys, Shadow, Titles};
+        let rgb = Color::Rgb;
         Self {
-            bg: Color::Rgb(10, 14, 20),
-            bg_panel: Color::Rgb(13, 18, 25),
-            bg_bar: Color::Rgb(17, 23, 32),
-            border: Color::Rgb(37, 49, 63),
-            border_active: Color::Rgb(0, 214, 190),
-            accent: Color::Rgb(0, 214, 190),
-            fg: Color::Rgb(199, 212, 227),
-            fg_dim: Color::Rgb(101, 119, 139),
-            dir: Color::Rgb(122, 186, 255),
-            exec: Color::Rgb(126, 231, 135),
-            link: Color::Rgb(197, 164, 255),
-            archive: Color::Rgb(255, 196, 99),
-            err: Color::Rgb(255, 110, 110),
-            mark: Color::Rgb(255, 214, 102),
-            row_cursor: Color::Rgb(28, 42, 58),
-            row_cursor_active: Color::Rgb(0, 74, 82),
-            decor: crate::decor::Decor::default(),
+            bg: rgb(7, 9, 15),
+            bg_panel: rgb(11, 14, 23),
+            bg_bar: rgb(16, 20, 42),
+            border: rgb(35, 43, 71),
+            border_active: rgb(46, 230, 208),
+            accent: rgb(46, 230, 208),
+            fg: rgb(215, 222, 240),
+            fg_dim: rgb(107, 118, 153),
+            dir: rgb(125, 162, 255),
+            exec: rgb(94, 240, 160),
+            link: rgb(192, 139, 255),
+            archive: rgb(255, 179, 92),
+            err: rgb(255, 95, 135),
+            mark: rgb(255, 224, 102),
+            row_cursor: rgb(21, 26, 44),
+            row_cursor_active: rgb(29, 42, 79),
+            decor: Decor {
+                borders: Borders::Rounded,
+                titles: Titles::Notch,
+                gradient: Some(Gradient {
+                    mid: None,
+                    end: rgb(164, 107, 255),
+                }),
+                cursor: Cursor::Glow,
+                marker: true,
+                keys: Keys::Slant,
+                shadow: Shadow::Dim,
+                ..Decor::default()
+            },
         }
     }
 }
 
 impl Theme {
+    /// The dark theme before xdevtheme: one teal accent, plain lines, nothing more.
+    pub fn dark() -> Self {
+        let rgb = Color::Rgb;
+        Self {
+            bg: rgb(10, 14, 20),
+            bg_panel: rgb(13, 18, 25),
+            bg_bar: rgb(17, 23, 32),
+            border: rgb(37, 49, 63),
+            border_active: rgb(0, 214, 190),
+            accent: rgb(0, 214, 190),
+            fg: rgb(199, 212, 227),
+            fg_dim: rgb(101, 119, 139),
+            dir: rgb(122, 186, 255),
+            exec: rgb(126, 231, 135),
+            link: rgb(197, 164, 255),
+            archive: rgb(255, 196, 99),
+            err: rgb(255, 110, 110),
+            mark: rgb(255, 214, 102),
+            row_cursor: rgb(28, 42, 58),
+            row_cursor_active: rgb(0, 74, 82),
+            decor: crate::decor::Decor::default(),
+        }
+    }
+
     /// The palette for a 16-colour terminal: the 16 ANSI colours, so it is the
     /// user's palette that decides what they look like, and the terminal's own
     /// background and text colour. Blue cursor rows, as in the Norton tradition.
@@ -125,14 +169,23 @@ pub(crate) fn ansi(i: u8) -> Color {
 }
 
 /// The themes xdevcmd has built in, by name. A theme file in `themes/` starts from one of
-/// these (`base = "dark"`); built-in names cannot be taken by a file.
-pub const BUILT_IN: &[&str] = &["dark", "light", "ansi", "blue", "high-contrast"];
+/// these (`base = "dark"`); built-in names cannot be taken by a file. The first is the
+/// default.
+pub const BUILT_IN: &[&str] = &[
+    "xdevtheme",
+    "dark",
+    "light",
+    "ansi",
+    "blue",
+    "high-contrast",
+];
 
 /// A built-in theme by name.
 pub fn built_in(name: &str) -> Option<Theme> {
     let rgb = Color::Rgb;
     Some(match name {
-        "dark" => Theme::default(),
+        "xdevtheme" => Theme::default(),
+        "dark" => Theme::dark(),
         "ansi" => Theme::ansi(),
         "light" => Theme {
             bg: rgb(246, 247, 249),

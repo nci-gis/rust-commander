@@ -11,6 +11,15 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **A slow directory no longer freezes the screen.** A directory that takes more than
+  150 ms to read (a network mount, a sleeping disk, a huge folder) is read in the
+  background: the pane keeps what it showed, a bar on its bottom edge names what is
+  being opened and counts the entries, the move happens when the listing arrives, and
+  Esc stops waiting. The periodic check for changes reads a directory once, not up to
+  three times, and never puts the bar up. Alt+F7 and a list being checked show the bar
+  too.
+- **docs/guide.md: remote files through a mount** (sshfs, rclone, SMB, NFS), since
+  xdevcmd itself opens no network connection.
 - **A list from the shell's output.** In the history (Shift+F12), `p` makes a list of
   the paths in the lines dragged over, or in the last command's output when the shell
   sends prompt marks; it opens in a file pane, where F3, F4, F5, F6, F8, marking and
@@ -67,6 +76,8 @@ that heading and starts a new, empty one here. -->
   itself, started in any other window.
 
 ### Fixed
+- A path in the shell's history was shown as joined, not resolved (`src/../lib/a.rs`);
+  it is shown, and acted on, as the file it is.
 - **A theme that is not there no longer throws away the whole config.** A `[theme] name`
   whose file was deleted or does not read made xdevcmd ignore every setting; now the
   default theme stands in, the rest of the config holds, and the status line says which

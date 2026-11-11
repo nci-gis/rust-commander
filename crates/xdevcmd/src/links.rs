@@ -152,6 +152,8 @@ impl Links {
                 let Some(dir) = self.look_up(&path) else {
                     continue;
                 };
+                // As it really is: `a/../b` is shown, and acted on, as `b`.
+                let path = xdevcmd_core::paths::canonical(&path).unwrap_or(path);
                 let start = shown[..f.span.start].chars().count();
                 let len = shown[f.span.clone()].chars().count();
                 links.push(Link {
@@ -236,7 +238,8 @@ mod tests {
         std::fs::create_dir_all(d.join("two")).unwrap();
         std::fs::write(d.join("one/src/a.rs"), "x").unwrap();
         std::fs::write(d.join("two/b.txt"), "x").unwrap();
-        d
+        // Links are shown as they really are (macOS's /var is /private/var).
+        xdevcmd_core::paths::canonical(&d).unwrap()
     }
 
     #[test]

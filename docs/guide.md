@@ -33,10 +33,35 @@ xdevcmd for yours, or see [keys.md](keys.md).
 - **~** goes to your home directory. **Ctrl+\\** goes to the root of the drive.
 - **/** jumps to a name as you type. **↑ ↓** go to the next match.
 - **Ctrl+L** or **Ctrl+G** goes to a path you type. **Tab** completes it.
-- **Alt+,** and **Alt+.** go back and forward. **Alt+↓** (or **Alt+J**) lists where you have been.
+- **Alt+,** and **Alt+.** go back and forward. **Alt+↓** (or **Alt+J**) lists where you have been,
+  and the lists kept (Alt+F7's results, paths from the shell: see [shell.md](shell.md#a-list-from-the-output)).
+  **Alt+L** shows the list used last.
 - **Ctrl+D** is the hotlist: your bookmarks. You can add the current directory there.
 - Panes refresh by themselves when files change on disk: the system tells xdevcmd, and
   on network drives it checks now and then.
+- **A slow directory never freezes the screen.** One that takes more than a moment to
+  read (a network drive, a disk waking up, a huge folder) is read in the background:
+  the pane keeps what it showed, a bar on its bottom edge says "opening photos… 12,400
+  · 3 s", and the move happens when the listing arrives. **Esc** stops waiting and
+  stays where you were. Keys keep working meanwhile.
+
+## Remote files through a mount
+
+xdevcmd opens no network connection itself: there is no SFTP or cloud panel. For
+files on another machine, let the system (or a tool you trust) mount them, and browse
+the mount like any directory:
+
+| Linux and macOS | Windows |
+|---|---|
+| `sshfs host:/srv /mnt/srv` (SSHFS; add `-o reconnect`) | SSHFS-Win with WinFsp: `\\sshfs\user@host` |
+| `rclone mount remote: ~/remote` (S3, Google Drive, …) | `rclone mount remote: X:` (with WinFsp) |
+| SMB: `mount -t cifs` (Linux), Finder → Connect to Server (macOS) | `net use Z: \\server\share` |
+| NFS: `mount -t nfs` | NFS client (Windows features) |
+
+A mount is as fast as its network. When it is slow or the server is gone, the bar
+above shows it and Esc gets you out; copies and moves run as jobs with Cancel. Each
+tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shift+F9,
+`[[menu]]` in the config) can hold those commands, typed into the terminal for you.
 
 ## Selecting
 

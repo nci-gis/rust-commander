@@ -257,6 +257,7 @@ impl App {
                     changed |= f.poll_sizes();
                     changed |= f.poll_git();
                     changed |= f.poll_opening();
+                    changed |= f.poll_reading();
                     let was = f.results.as_ref().is_some_and(|r| r.running());
                     changed |= f.poll_results();
                     if let Some(r) = f.results.as_ref().filter(|r| was && !r.running() && r.find) {

@@ -36,6 +36,6 @@ pub mod undo;
 
 pub use document::{Document, Mode};
 pub use entry::{special_kind, split_name, Entry, Kind};
-pub use listing::{entry_at, read_dir};
+pub use listing::{entry_at, read_dir, read_dir_counted};
 pub use ops::{Answer, Question, Request, Summary};
 pub use sort::{sort_entries, Sort, SortKey};

@@ -153,15 +153,84 @@ Open, with a recommendation; step 1 starts on these unless the owner says otherw
 
 ## Do
 
-(Not started.)
+The owner (2026-11-11): Q before L and D, "Go". The three open decisions are taken on
+the recommendations: 150 ms; the old listing stays until the new one arrives; F3 on a
+slow mount is left for later.
+
+- **Step 1, directories off the UI thread** (`pane/files.rs`):
+  - `read_on_thread` resolves the path, takes its time, and reads its entries with
+    `xdevcmd_core::read_dir_counted` (new; it counts as it goes).
+  - `read_bounded` waits up to `SLOW` (150 ms). Past that it leaves a `Reading` (what
+    it is for, the channel, the count, the start, and a cursor target).
+  - `navigate` is now a read plus `arrive`, the old body: policy, back list, new
+    listing. A move replaces one on its way. `select_path` during a pending move is
+    kept for when it arrives (Enter on a search result, Go to).
+  - `reload` reads directories the same way; results and archives are read as before.
+    A reload while a read is on its way is skipped.
+  - `check_now` makes **one** read: the time, and the entries for a directory of up to
+    2,000. Before, it was a stat, a full read to compare, and a third read to show the
+    change. `compare` shows the read it already has.
+  - `apply` / `show` / `after_listing` split the old `reload` body. `listing_changed`
+    leaves a directory's size out of the comparison (it is worked out, or not, and
+    is not the listing).
+  - Back and Forward no longer `is_dir()` each place on the UI thread. The read says
+    "not found", and Back tries the one before.
+  - `poll_reading` runs in the run loop; Esc stops a read ("stopped reading … — still
+    here"). A list or an archive opened meanwhile cancels the read.
+  - The test hook `XDEVCMD_TEST_SLOW_DIR=<text>` delays the read of a directory whose
+    path contains `<text>` by two seconds. It only ever delays.
+- **Step 2, the bar**: `FilePane::progress` and `draw_progress`, on the pane's bottom
+  border:
+  - `▱▱▰▰▰▱` runs back and forth while the total is unknown, and fills when it is
+    known;
+  - the text: "opening slowdir… 12,400 · 3 s · Esc stops", or "reading" for a re-read;
+  - "searching… N looked at" for Alt+F7, "checking N of M" for a list.
+  - **Deviation:** the periodic check never shows the bar. With a slow directory open,
+    the first version put "reading…" up at every check, a bar every few seconds for
+    nothing anyone asked. The pty test caught it through the hook.
+  - The count and the seconds show only once they are above 0.
+- **Step 3, budgets** (`tests/budgets.rs`):
+  - `the_release_binary_is_at_most_7_mb` checks `target/release/xdevcmd` when it
+    exists, and says so when not: 4.89 MiB (5.13 MB) today;
+  - `a_100000_entry_directory_is_listed_and_sorted_in_under_a_second` is ignored by
+    default; run by hand it took **0.85 s** in a debug build.
+- **Step 4, the flake: caught, and it was the tests.** Six full runs of the pty suite
+  failed once: `a_path_is_taken_from_the_directory_its_command_ran_in` timed out, its
+  history holding 3 lines.
+  - The test waited for "line 3, in f", which the **typed command** also contains, so
+    Shift+F12 could come before the output was printed.
+  - The same pattern was in two tests' "PROMPTED". That one is worse: the test could
+    go on before xdevcmd had read the prompt mark at which it takes the directory.
+  - Fixed so each marker appears only in the output (`line %d … 3`, `PROMP%s … TED`).
+    After that, six full runs out of six passed.
+  - Round 021's "rintf" screen (one cell off) was not seen again. It is noted there.
+- **Found by the flake's screen, fixed: `a/../b` in a link's path.** Round 020 showed a
+  relative path joined, not resolved ("left/a/../b"). A link is now its canonical path
+  (`Links::on_line`, after the existence check). The links unit tests canonicalise
+  their trees, which macOS needs (`/var` is `/private/var`).
+- **Step 5, docs**:
+  - docs/guide.md: what a slow directory looks like; "Remote files through a mount"
+    (sshfs / SSHFS-Win, rclone, SMB, NFS), and the lists keys;
+  - CHANGELOG.
+- **Tests**:
+  - pty: `a_slow_directory_shows_a_bar_and_esc_stops_it`: the old listing stays with
+    the bar, the move completes, and Esc stops a second one; a read arriving after Esc
+    goes nowhere.
+  - The full render suite passed unchanged after step 1 (174).
+  - **Not written:** a test of a second move replacing a pending one. The hook is read
+    once per process, so unit tests cannot set it per test; the code path is the first
+    line of `navigate`.
 
 ## Check
 
-- [ ] A late read: old listing stays, the bar shows, it moves on arrival; Esc stops; a
-  second move replaces it (unit)
-- [ ] The full render and pty suites unchanged
-- [ ] The bar: reading, list checking, Alt+F7 (render)
-- [ ] Binary-size test; the 100,000-entry benchmark run and its time recorded
-- [ ] The flake: caught and fixed, or written down
+- [x] A late read: the old listing stays, the bar shows, the move completes on
+  arrival; Esc stops it; a read after Esc goes nowhere (pty). A second move replacing a
+  pending one is not tested (see Do).
+- [x] The full render suite unchanged (174); the pty suite 6/6 after the flake fix
+- [x] The bar: reading (pty). Alt+F7 and list checking use the same `progress()`, and
+  have no test of their own on the bar.
+- [x] Binary-size test (4.89 MiB); the 100,000-entry benchmark: 0.85 s (debug)
+- [x] The flake: caught and fixed (a test racing its own typed command)
+- [x] Clippy `-D warnings` for Linux, windows-gnu and darwin; the full suite, 655 passed, 0 failed
 - [ ] The owner: a real slow mount (sshfs with the server stopped, or an SMB share with
   the network off) on Linux and Windows; Esc there

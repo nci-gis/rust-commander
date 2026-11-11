@@ -3309,10 +3309,12 @@ fn a_path_is_taken_from_the_directory_its_command_ran_in() {
     // A prompt, a command, and the shell gone elsewhere at once: the directory is the
     // one at the prompt, however far behind the shell the output is read.
     let a = s.left().join("a").display().to_string();
-    xdevcmd.send(format!("cd '{a}'; printf '\\033]133;A\\007PROMPTED\\n'\r").as_bytes());
+    xdevcmd.send(format!("cd '{a}'; printf '\\033]133;A\\007PROMP%s\\n' TED\r").as_bytes());
     xdevcmd.wait_for("PROMPTED");
+    // The line number only in the output: the command line must not satisfy the wait
+    // (it did once, and the history was opened before the output was there).
     xdevcmd.send(
-        b"printf '\\033]133;C\\007  File \"%s\", line 3, in f\\n' x.py; cd ../b; \
+        b"printf '\\033]133;C\\007  File \"%s\", line %d, in f\\n' x.py 3; cd ../b; \
           printf '\\033]133;A\\007'\r",
     );
     xdevcmd.wait_for("line 3, in f");
@@ -3419,7 +3421,7 @@ fn the_last_commands_output_makes_a_list_and_alt_l_brings_it_back() {
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
     let left = s.left().display().to_string();
-    xdevcmd.send(format!("cd '{left}'; printf '\\033]133;A\\007PROMPTED\\n'\r").as_bytes());
+    xdevcmd.send(format!("cd '{left}'; printf '\\033]133;A\\007PROMP%s\\n' TED\r").as_bytes());
     xdevcmd.wait_for("PROMPTED");
     xdevcmd.send(b"printf '\\033]133;C\\007%s/%s\\n' a x.txt; printf '\\033]133;A\\007'\r");
     xdevcmd.wait_for("a/x.txt");
@@ -3525,5 +3527,46 @@ fn a_list_leaves_out_what_is_outside_the_root() {
     xdevcmd.send(b"p");
     xdevcmd.wait_for("the root \u{2500}");
     xdevcmd.wait_for("list 1 \u{b7} ");
+    xdevcmd.quit();
+}
+
+/// Round 022: a slow directory (a test hook delays its read two seconds, as a dead
+/// mount would far longer) never freezes the screen. Entering it, the old listing
+/// stays up with a bar on the pane's edge, and the move completes when the read does;
+/// Esc stops waiting and leaves the pane where it was.
+#[test]
+fn a_slow_directory_shows_a_bar_and_esc_stops_it() {
+    let s = Scratch::new("bar");
+    std::fs::create_dir_all(s.left().join("slowdir")).unwrap();
+    s.file("left/slowdir/inside.txt", "x");
+    s.file("left/here.txt", "x");
+    let dirs = [s.left(), s.right()];
+    let mut xdevcmd = Session::start_env(&s, None, &dirs, &[("XDEVCMD_TEST_SLOW_DIR", "slowdir")]);
+    xdevcmd.wait_for("slowdir");
+    xdevcmd.send(DOWN); // `..` first, then slowdir
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("opening slowdir\u{2026}");
+    xdevcmd.wait_for("Esc stops");
+    // Still the old listing, and still answering keys.
+    assert!(xdevcmd.screen().contains("here"), "{}", xdevcmd.screen());
+    xdevcmd.wait_for("inside");
+    xdevcmd.wait_gone("Esc stops");
+
+    // Up again, in, and Esc before it arrives: still here.
+    xdevcmd.send(b"\x1b[H");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("here");
+    // Up out of it, the cursor is on it already.
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("opening slowdir\u{2026}");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_for("stopped reading");
+    xdevcmd.wait_for("still here");
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(
+        !xdevcmd.screen().contains("inside"),
+        "the read that came late went nowhere\n{}",
+        xdevcmd.screen()
+    );
     xdevcmd.quit();
 }

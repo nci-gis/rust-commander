@@ -62,9 +62,93 @@ pub struct FilePane {
     pub archive: Option<ArchiveView>,
     /// A big archive being listed on another thread: Esc gives up on it.
     opening: Option<Opening>,
+    /// A directory being read on another thread, past [`SLOW`]: Esc gives up on it.
+    reading: Option<Reading>,
     /// `[files] git_status`: the letters for this directory, and the run in flight.
     git: Option<crate::git::Marks>,
     git_rx: Option<std::sync::mpsc::Receiver<crate::git::Marks>>,
+}
+
+/// How long a directory's read is waited for before the pane carries on without it and
+/// shows a bar. Under this a read looks instant, so a local directory never shows one.
+pub const SLOW: Duration = Duration::from_millis(150);
+
+/// A directory as a thread read it: where it really is, its time, and its entries
+/// (`None` when only the time was asked for).
+struct Read {
+    dir: PathBuf,
+    mtime: Option<SystemTime>,
+    entries: Option<std::io::Result<Vec<Entry>>>,
+}
+
+/// What a read in flight is for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ReadFor {
+    /// Moving there; `record` as for [`FilePane::navigate`].
+    Move { record: bool },
+    /// Reading this directory again.
+    Reload,
+    /// The periodic look for changes.
+    Check,
+}
+
+/// A read that took longer than [`SLOW`]. The thread cannot be stopped if the system
+/// call it is in hangs (a dead mount); dropping this only stops waiting for it, and its
+/// answer, whenever it comes, goes nowhere.
+struct Reading {
+    target: PathBuf,
+    why: ReadFor,
+    rx: std::sync::mpsc::Receiver<Read>,
+    started: Instant,
+    count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// Where the cursor goes once a move arrives (Enter on a search result, Go to).
+    select: Option<PathBuf>,
+}
+
+/// Read `path` on a thread: its real path when `resolve`, its time, and its entries
+/// unless `time_only`.
+fn read_on_thread(
+    path: &Path,
+    resolve: bool,
+    time_only: bool,
+    hidden: bool,
+) -> (
+    std::sync::mpsc::Receiver<Read>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (path, counter) = (path.to_path_buf(), count.clone());
+    std::thread::spawn(move || {
+        test_delay(&path);
+        let dir = if resolve {
+            xdevcmd_core::paths::canonical(&path).unwrap_or(path)
+        } else {
+            path
+        };
+        let mtime = dir_mtime(&dir);
+        let entries = (!time_only).then(|| xdevcmd_core::read_dir_counted(&dir, hidden, &counter));
+        let _ = tx.send(Read {
+            dir,
+            mtime,
+            entries,
+        });
+    });
+    (rx, count)
+}
+
+/// `XDEVCMD_TEST_SLOW_DIR=<text>`: a directory whose path holds `<text>` is read two
+/// seconds late, as from a slow mount. For the tests of the bar and of Esc; it only
+/// ever delays.
+fn test_delay(path: &Path) {
+    static SLOW_DIR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let slow = SLOW_DIR.get_or_init(|| std::env::var("XDEVCMD_TEST_SLOW_DIR").ok());
+    if slow
+        .as_deref()
+        .is_some_and(|s| !s.is_empty() && path.to_string_lossy().contains(s))
+    {
+        std::thread::sleep(Duration::from_secs(2));
+    }
 }
 
 struct Opening {
@@ -207,6 +291,7 @@ impl FilePane {
             results: None,
             archive: None,
             opening: None,
+            reading: None,
             git: None,
             git_rx: None,
         };
@@ -252,6 +337,7 @@ impl FilePane {
         self.leave_results();
         self.archive = None;
         self.opening = None;
+        self.reading = None;
         self.cwd = root;
         if record && left != Place::List(id) {
             self.remember(left);
@@ -435,6 +521,7 @@ impl FilePane {
     /// Browse `file` as a directory: at once if it is small, else from a thread, with a
     /// notice meanwhile.
     pub fn enter_archive(&mut self, file: &Path) {
+        self.reading = None;
         // A link inside the root to an archive outside it: its contents are outside.
         if !xdevcmd_core::policy::get().allows(file) {
             self.notice = Some("that archive is outside the root xdevcmd is confined to".into());
@@ -587,8 +674,50 @@ impl FilePane {
     /// sorts — a refresh that left it on whatever slid into its row would make the
     /// next key act on the wrong file.
     pub fn reload(&mut self) {
+        if self.results.is_none() && self.archive.is_none() {
+            // A directory: on a thread, as a move is. One already on its way stays.
+            if self.reading.is_some() {
+                return;
+            }
+            let cwd = self.cwd.clone();
+            if let Some(read) = self.read_bounded(&cwd, false, false, ReadFor::Reload) {
+                self.apply(read);
+            }
+            return;
+        }
         let keep = self.current().map(|e| e.path.clone());
-        match self.read() {
+        let read = self.read();
+        self.show(read);
+        self.checked = (Instant::now(), dir_mtime(&self.cwd));
+        self.refilter(keep);
+        self.after_listing();
+    }
+
+    /// Show a directory's listing that a thread read.
+    fn apply(&mut self, read: Read) {
+        let keep = self.current().map(|e| e.path.clone());
+        let Some(entries) = read.entries else { return };
+        // At the root there is no way up, so no `..` to offer one; a size already
+        // worked out for a directory stays.
+        let entries = entries.map(|mut v| {
+            if xdevcmd_core::policy::get().is_root(&self.cwd) {
+                v.retain(|e| !e.is_parent());
+            }
+            for e in v.iter_mut().filter(|e| e.is_dir()) {
+                if let Some(t) = self.sizes.get(&e.path) {
+                    e.size = t.bytes;
+                }
+            }
+            v
+        });
+        self.show(entries);
+        self.checked = (Instant::now(), read.mtime);
+        self.refilter(keep);
+        self.after_listing();
+    }
+
+    fn show(&mut self, read: std::io::Result<Vec<Entry>>) {
+        match read {
             Ok(mut v) => {
                 sort_entries(&mut v, self.sort);
                 self.all = v;
@@ -596,8 +725,10 @@ impl FilePane {
             }
             Err(e) => self.error = Some(format!("{}: {e}", self.cwd.display())),
         }
-        self.checked = (Instant::now(), dir_mtime(&self.cwd));
-        self.refilter(keep);
+    }
+
+    /// What follows a new listing: git's letters for it.
+    fn after_listing(&mut self) {
         if crate::look::get().git && self.archive.is_none() && self.results.is_none() {
             self.git_rx = Some(crate::git::start(&self.cwd));
         } else {
@@ -678,32 +809,56 @@ impl FilePane {
 
     /// Look now whether the directory changed, and re-read it if so. True when it did.
     pub fn check_now(&mut self) -> bool {
-        if self.results.is_some() || self.archive.is_some() {
+        if self.results.is_some() || self.archive.is_some() || self.reading.is_some() {
             return false;
         }
-        let mtime = dir_mtime(&self.cwd);
-        let changed = mtime != self.checked.1
-            || (self.all.len() <= FULL_CHECK_LIMIT && self.listing_changed());
-        if changed {
-            self.reload();
+        // One read on a thread: the time, and (for a directory small enough) the
+        // entries to compare, which are then the new listing if anything changed.
+        let full = self.all.len() <= FULL_CHECK_LIMIT;
+        let cwd = self.cwd.clone();
+        match self.read_bounded(&cwd, false, !full, ReadFor::Check) {
+            Some(read) => self.compare(read),
+            None => false,
+        }
+    }
+
+    /// A check's read against what is shown; shown instead if anything changed.
+    fn compare(&mut self, read: Read) -> bool {
+        let changed = read.mtime != self.checked.1
+            || read
+                .entries
+                .as_ref()
+                .is_some_and(|now| self.listing_changed(now));
+        if !changed {
+            self.checked = (Instant::now(), read.mtime);
+        } else if read.entries.is_some() {
+            self.apply(read);
         } else {
-            self.checked = (Instant::now(), mtime);
+            self.reload();
         }
         changed
     }
 
-    fn listing_changed(&self) -> bool {
-        let Ok(mut now) = self.read() else {
+    fn listing_changed(&self, now: &std::io::Result<Vec<Entry>>) -> bool {
+        let Ok(now) = now else {
             return self.error.is_none();
         };
+        let mut now: Vec<&Entry> = now
+            .iter()
+            .filter(|e| !(e.is_parent() && xdevcmd_core::policy::get().is_root(&self.cwd)))
+            .collect();
         if now.len() != self.all.len() {
             return true;
         }
-        let key = |e: &Entry| (e.path.clone(), e.size, e.modified, e.kind);
+        // A directory's size is not the listing's (it is worked out, or not): left out.
+        let key = |e: &Entry| {
+            let size = if e.is_dir() { 0 } else { e.size };
+            (e.path.clone(), size, e.modified, e.kind)
+        };
         now.sort_by(|a, b| a.path.cmp(&b.path));
         let mut was: Vec<_> = self.all.iter().map(key).collect();
         was.sort_by(|a, b| a.0.cmp(&b.0));
-        now.iter().map(key).ne(was)
+        now.iter().map(|e| key(e)).ne(was)
     }
 
     // ── directory sizes ────────────────────────────────────────────────────────────
@@ -852,7 +1007,108 @@ impl FilePane {
     /// Go to `path`. `record` puts the directory being left on the back list, which
     /// every move does except stepping through that list itself.
     fn navigate(&mut self, path: &Path, record: bool) -> bool {
-        let canonical = xdevcmd_core::paths::canonical(path).unwrap_or_else(|_| path.to_path_buf());
+        // A move replaces one still on its way.
+        self.reading = None;
+        match self.read_bounded(path, true, false, ReadFor::Move { record }) {
+            Some(read) => self.arrive(read, record),
+            // Slow: the old listing stays up, and the bar names where it is going.
+            None => true,
+        }
+    }
+
+    /// Read `path`, waiting up to [`SLOW`]. `None` when it is slower: the read goes on,
+    /// [`Self::poll_reading`] takes it in, and the bar shows meanwhile.
+    fn read_bounded(
+        &mut self,
+        path: &Path,
+        resolve: bool,
+        time_only: bool,
+        why: ReadFor,
+    ) -> Option<Read> {
+        let (rx, count) = read_on_thread(path, resolve, time_only, self.show_hidden);
+        match rx.recv_timeout(SLOW) {
+            Ok(read) => Some(read),
+            Err(_) => {
+                self.reading = Some(Reading {
+                    target: path.to_path_buf(),
+                    why,
+                    rx,
+                    started: Instant::now(),
+                    count,
+                    select: None,
+                });
+                None
+            }
+        }
+    }
+
+    /// A read that was slow has come, or not. True when the pane changed (or the bar
+    /// should move on).
+    pub fn poll_reading(&mut self) -> bool {
+        let Some(r) = &self.reading else { return false };
+        match r.rx.try_recv() {
+            Ok(read) => {
+                let Some(r) = self.reading.take() else {
+                    return false;
+                };
+                match r.why {
+                    ReadFor::Move { record } => {
+                        if self.arrive(read, record) {
+                            if let Some(p) = r.select {
+                                self.select_path(&p);
+                            }
+                        }
+                    }
+                    ReadFor::Reload if read.dir == self.cwd => self.apply(read),
+                    ReadFor::Check if read.dir == self.cwd => {
+                        self.compare(read);
+                    }
+                    _ => {}
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.reading = None;
+                true
+            }
+        }
+    }
+
+    /// Stop waiting for a slow read. The directory it was for, if there was one.
+    pub fn stop_reading(&mut self) -> Option<PathBuf> {
+        self.reading.take().map(|r| r.target)
+    }
+
+    /// A slow read the user is waiting for, for the bar: what it is ("opening" a
+    /// directory moved to, "reading" this one again), the directory, the entries read
+    /// so far, and how long it has taken. The periodic check is not one: on a slow
+    /// mount it would put the bar up every few seconds for nothing anyone asked.
+    pub fn reading(&self) -> Option<(&'static str, &Path, usize, Duration)> {
+        let r = self.reading.as_ref()?;
+        let what = match r.why {
+            ReadFor::Move { .. } => "opening",
+            ReadFor::Reload => "reading",
+            ReadFor::Check => return None,
+        };
+        Some((
+            what,
+            r.target.as_path(),
+            r.count.load(std::sync::atomic::Ordering::Relaxed),
+            r.started.elapsed(),
+        ))
+    }
+
+    /// The move to `read.dir`, now that it has been read: the policy, the back list,
+    /// the new listing. False if refused, or if a directory stepped back to is gone.
+    fn arrive(&mut self, read: Read, record: bool) -> bool {
+        let canonical = read.dir.clone();
+        // Back and Forward skip a directory that has gone since.
+        if !record
+            && matches!(&read.entries, Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        {
+            return false;
+        }
         let policy = xdevcmd_core::policy::get();
         if !policy.allows(&canonical) {
             if let Some(root) = &policy.root {
@@ -881,7 +1137,7 @@ impl FilePane {
         self.sizer.cancel();
         self.sizing.clear();
         self.sizes.clear();
-        self.reload();
+        self.apply(read);
         // Coming up out of a directory lands on the directory you came from, however
         // you came up: `..`, Backspace, Back, or a bookmark.
         if old.parent() == Some(self.cwd.as_path()) {
@@ -916,7 +1172,9 @@ impl FilePane {
     /// Step to a place on the back or forward list, without recording it.
     fn go(&mut self, p: &Place) -> bool {
         match p {
-            Place::Dir(d) => d.is_dir() && self.navigate(d, false),
+            // Not `is_dir()` first: that is a stat on this thread, and a dead mount
+            // answers it no sooner than the read. The read says if it has gone.
+            Place::Dir(d) => self.navigate(d, false),
             Place::List(id) => crate::lists::get(*id).is_some() && self.open_list(*id, false),
         }
     }
@@ -992,6 +1250,15 @@ impl FilePane {
     /// just renamed is still the one under the cursor rather than whatever sorted into
     /// its old position.
     pub fn select_path(&mut self, path: &Path) {
+        // A move still on its way: the cursor goes there once it arrives.
+        if let Some(r) = self
+            .reading
+            .as_mut()
+            .filter(|r| matches!(r.why, ReadFor::Move { .. }))
+        {
+            r.select = Some(path.to_path_buf());
+            return;
+        }
         if let Some(i) = self.entries.iter().position(|e| e.path == path) {
             self.cursor = i;
         }
@@ -1124,6 +1391,84 @@ impl FilePane {
             .find_map(|(k, r)| (x >= r.x && x < r.x + r.width && y == r.y).then_some(*k))
     }
 
+    /// What this tab is waiting for, for the bar under it: a label, and how far along
+    /// it is when the total is known. `None` when it waits for nothing.
+    pub fn progress(&self) -> Option<(String, Option<f64>)> {
+        if let Some((what, dir, n, took)) = self.reading() {
+            let name = dir.file_name().map_or_else(
+                || dir.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let mut label = format!("{what} {name}\u{2026}");
+            if n > 0 {
+                label.push_str(&format!(" {}", digits(n as u64)));
+            }
+            if took.as_secs() > 0 {
+                label.push_str(&format!(" \u{b7} {} s", took.as_secs()));
+            }
+            label.push_str(" \u{b7} Esc stops");
+            return Some((label, None));
+        }
+        let r = self.results.as_ref().filter(|r| r.running())?;
+        if r.find {
+            Some((
+                format!(
+                    "searching\u{2026} {} looked at \u{b7} Esc stops",
+                    digits(r.scanned)
+                ),
+                None,
+            ))
+        } else {
+            let done = r.scanned.min(r.total as u64);
+            Some((
+                format!("checking {} of {}", digits(done), digits(r.total as u64)),
+                Some(done as f64 / r.total.max(1) as f64),
+            ))
+        }
+    }
+
+    /// The bar on the pane's bottom edge: a block that runs back and forth while the
+    /// total is not known, one that fills when it is, and what it is waiting for.
+    fn draw_progress(&self, frame: &mut Frame, area: Rect) {
+        let Some((label, done)) = self.progress() else {
+            return;
+        };
+        if area.width < 12 || area.height < 3 {
+            return;
+        }
+        const BAR: usize = 10;
+        let cells: String = match done {
+            Some(f) => {
+                let full = ((f.clamp(0.0, 1.0) * BAR as f64).round() as usize).min(BAR);
+                "\u{25b0}".repeat(full) + &"\u{25b1}".repeat(BAR - full)
+            }
+            None => {
+                // Three lit cells that run to the end and back.
+                let t = (crate::pane::files::ticks() / 90) as usize % (2 * (BAR - 3));
+                let at = if t < BAR - 3 { t } else { 2 * (BAR - 3) - t };
+                (0..BAR)
+                    .map(|i| {
+                        if (at..at + 3).contains(&i) {
+                            '\u{25b0}'
+                        } else {
+                            '\u{25b1}'
+                        }
+                    })
+                    .collect()
+            }
+        };
+        let th = theme::t();
+        let line = Line::from(vec![
+            Span::styled(" ", Style::new().fg(th.fg_dim)),
+            Span::styled(cells, Style::new().fg(th.accent)),
+            Span::styled(format!(" {label} "), Style::new().fg(th.fg_dim)),
+        ]);
+        let y = area.y + area.height - 1;
+        frame
+            .buffer_mut()
+            .set_line(area.x + 1, y, &line, area.width.saturating_sub(2));
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, active: bool, drop_target: bool) {
         // While files are dragged over this pane it changes colour, so a release is
         // never a guess about where they will land.
@@ -1204,6 +1549,7 @@ impl FilePane {
             .title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        self.draw_progress(frame, area);
         crate::decor::notch(frame.buffer_mut(), area);
 
         if inner.width < 8 || inner.height < 2 {
@@ -1560,6 +1906,25 @@ fn parent_entry(dir: &Path) -> Entry {
 
 fn found_has(all: &[Entry], p: &Path) -> bool {
     all.iter().any(|e| e.path == p)
+}
+
+/// Milliseconds since the program started, for things that move.
+pub fn ticks() -> u128 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis()
+}
+
+/// `12400` as `12,400`.
+fn digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[cfg(test)]

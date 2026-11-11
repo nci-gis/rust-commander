@@ -238,6 +238,10 @@ impl App {
                 self.status = "stopped opening the archive".into();
                 return;
             }
+            if let Some(dir) = self.focused_files().and_then(|f| f.stop_reading()) {
+                self.status = format!("stopped reading {} \u{2014} still here", tidy(&dir));
+                return;
+            }
             if let Some(f) = self.focused_files().filter(|f| f.filter.is_some()) {
                 f.set_filter(None);
                 self.status = "filter off".into();

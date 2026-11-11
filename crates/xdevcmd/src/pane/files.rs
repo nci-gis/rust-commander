@@ -5,7 +5,6 @@ use std::time::{Duration, Instant, SystemTime};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
 use ratatui::Frame;
 
 use xdevcmd_core::archive::{self, ItemKind, Listing};
@@ -1014,12 +1013,13 @@ impl FilePane {
             ));
         }
         let title = Line::from(title);
-        let block = Block::bordered()
+        let block = crate::decor::bordered()
             .border_style(border)
             .style(Style::new().bg(theme::t().bg_panel))
             .title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        crate::decor::notch(frame.buffer_mut(), area);
 
         if inner.width < 8 || inner.height < 2 {
             return;

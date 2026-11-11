@@ -118,8 +118,9 @@ blue-panel look of the DOS-era commanders; `high-contrast` is black and white wi
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). The release files come with six examples in `themes/`
-(Dracula, Tokyo Night, Catppuccin Mocha, Nord, Gruvbox dark, Solarized light),
+binary, for a portable copy). The release files come with eight in `themes/`: xdevcmd's
+own **xdevtheme** and its light pair **xdevtheme-dawn**, and six examples (Dracula, Tokyo
+Night, Catppuccin Mocha, Nord, Gruvbox dark, Solarized light),
 which work as they are when kept beside `xdevcmd`. To start your own, print a built-in theme with every colour listed:
 
 ```bash
@@ -138,6 +139,30 @@ cursor_active = "#5a3000"
 ```
 
 Colours set in `[theme]` itself go on top of whichever theme is chosen.
+
+A theme file may also say how it draws, beyond its colours, in a `[style]` table. Each
+line is optional, and leaving it out keeps today's look:
+
+```toml
+# themes/glow.toml — then [theme] name = "glow"
+base = "dark"
+
+[style]
+borders = "rounded"     # plain, rounded, thick or double
+titles = "notch"        # line, or notch: the title in a notch of the frame, ╭┤title├─
+gradient = "#a46bff"    # a light from the accent (left) to this colour (right), on the
+                        # frames, tabs, keys and menus in the accent's colour; or "none"
+cursor = "glow"         # block, or glow: the cursor row lit from its left edge
+marker = true           # a ▌ on the frame at the cursor's row
+keys = "slant"          # the F keys: plain, caps (the number on the accent), or slant (◢1◤),
+                        # which also draws the selected tab and the menu bar's number so
+shadow = "dim"          # none, or dim: a shadow under dialogs and menus
+```
+
+The style uses only box-drawing, block and geometric characters, no Nerd Font. On a
+16-colour terminal it is left off, since the glyphs may be missing (the old Windows
+console) and there are no colours to blend; at 256 colours the gradient is coarser.
+Programs in the terminal panel keep their own colours: the gradient never reaches them.
 
 **`colors = "auto"`** sends 24-bit colour only where the terminal is known to take it:
 `COLORTERM=truecolor` (or `24bit`), iTerm2, WezTerm, kitty, Ghostty, Alacritty, VS Code,

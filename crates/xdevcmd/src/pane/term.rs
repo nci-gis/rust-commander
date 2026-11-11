@@ -18,7 +18,6 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
 use ratatui::Frame;
 
 use crate::pane::shell_report::{Mark, ShellReports};
@@ -929,12 +928,13 @@ impl TermPane {
             ),
             Span::raw(" "),
         ]);
-        let block = Block::bordered()
+        let block = crate::decor::bordered()
             .border_style(theme::border_style(active))
             .style(Style::new().bg(theme::t().bg))
             .title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        crate::decor::notch(frame.buffer_mut(), area);
 
         if inner.width == 0 || inner.height == 0 {
             return;

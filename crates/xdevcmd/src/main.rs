@@ -10,6 +10,7 @@ mod cli_docs;
 mod config;
 mod config_edit;
 mod crash;
+mod decor;
 mod find_dialog;
 mod git;
 mod graphics;
@@ -277,6 +278,7 @@ fn main() -> Result<()> {
     }
     .unwrap_or_else(|| xdevcmd_core::color::detect(|k| std::env::var(k).ok(), cfg!(windows)));
     settings.depth = depth;
+    decor::set_depth(depth);
     theme::init(if depth == xdevcmd_core::color::Depth::Ansi16 {
         settings.theme16
     } else {

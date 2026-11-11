@@ -11,6 +11,14 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **xdevtheme, xdevcmd's own look**, and **xdevtheme-dawn**, its light pair, in
+  `themes/`: xdevcmd's teal turns into a light that runs across the screen to violet,
+  with rounded frames and the titles in a notch, a lit cursor row with a bar on the frame,
+  the F keys and the selected tab as slanted segments, and a shadow under dialogs.
+- **A theme file can say how it draws**, in a `[style]` table: `borders` (plain,
+  rounded, thick, double), `titles` (line, notch), `gradient`, `cursor` (block, glow),
+  `marker`, `keys` (plain, caps, slant) and `shadow`. Off unless a theme sets it, and off
+  on a 16-colour terminal. No Nerd Font needed.
 - **`cargo binstall xdevcmd`** installs the ready-made build from the GitHub release,
   with no compiling: the crate says where each target's archive is.
 - **A long name is shown whole on the cursor's row.** When the Name column cuts a name,

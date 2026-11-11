@@ -161,6 +161,28 @@ impl App {
                 &Line::from(Span::styled(me, Style::new().fg(th.fg_dim))),
                 w,
             );
+            // Slanted keys: the number as a segment, with a fade leading into it where
+            // there is room.
+            if crate::decor::get().keys == crate::decor::Keys::Slant {
+                let pill = Style::new()
+                    .fg(th.bg)
+                    .bg(th.accent)
+                    .add_modifier(Modifier::BOLD);
+                let lead = "\u{2591}\u{2591}\u{2592}\u{2592}\u{2593}\u{2593}\u{25e2} ";
+                let lw = if x + 2 + w + 8 <= end { 8 } else { 2 };
+                let lead: String = lead.chars().skip(8 - lw as usize).collect();
+                let at = end - w - lw;
+                let n = lead.chars().count();
+                for (i, ch) in lead.chars().enumerate() {
+                    let st = if i + 1 == n {
+                        pill
+                    } else {
+                        Style::new().fg(th.accent)
+                    };
+                    buf.set_string(at + i as u16, area.y, ch.to_string(), st);
+                }
+                buf.set_style(Rect::new(end - w, area.y, w, 1), pill);
+            }
         }
     }
 
@@ -311,6 +333,18 @@ impl App {
             let holding = self.holding();
             crate::usage::render(frame, area, &self.usage, &holding);
         }
+
+        // The theme's light over the whole frame, but not over what the programs in the
+        // terminal panels drew.
+        let screens: Vec<Rect> = self
+            .rects
+            .iter()
+            .filter_map(|(id, _)| match self.panes.get(id) {
+                Some(Pane::Term(t)) => Some(t.screens()),
+                _ => None,
+            })
+            .collect();
+        crate::decor::decorate(frame.buffer_mut(), &screens);
     }
 
     pub(super) fn draw_status(&self, frame: &mut Frame, area: Rect) {
@@ -486,16 +520,32 @@ impl App {
             }
             hits.push((*action, Rect::new(cx, area.y, w, 1)));
             cx += w;
-            spans.push(Span::styled(
-                format!(" {k}"),
-                Style::new()
-                    .fg(theme::t().accent)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                format!(" {label} "),
-                Style::new().fg(theme::t().fg_dim),
-            ));
+            let th = theme::t();
+            let number = Style::new().fg(th.accent).add_modifier(Modifier::BOLD);
+            let cap = Style::new()
+                .fg(th.bg)
+                .bg(th.accent)
+                .add_modifier(Modifier::BOLD);
+            let dim = Style::new().fg(th.fg_dim);
+            // The same width in each look: " 1 Help ", " 1 Help " with the 1 on the
+            // accent, "◢1◤Help ".
+            match crate::decor::get().keys {
+                crate::decor::Keys::Plain => spans.extend([
+                    Span::styled(format!(" {k}"), number),
+                    Span::styled(format!(" {label} "), dim),
+                ]),
+                crate::decor::Keys::Caps => spans.extend([
+                    Span::raw(" "),
+                    Span::styled(k.to_string(), cap),
+                    Span::styled(format!(" {label} "), dim),
+                ]),
+                crate::decor::Keys::Slant => spans.extend([
+                    Span::styled("\u{25e2}", Style::new().fg(th.accent)),
+                    Span::styled(k.to_string(), cap),
+                    Span::styled("\u{25e4}", Style::new().fg(th.accent)),
+                    Span::styled(format!("{label} "), dim),
+                ]),
+            }
         }
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::new().bg(theme::t().bg_bar));

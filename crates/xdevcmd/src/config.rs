@@ -616,6 +616,20 @@ struct ThemeFile {
     marked: Option<String>,
     cursor: Option<String>,
     cursor_active: Option<String>,
+    style: Option<StyleFile>,
+}
+
+/// A theme file's `[style]`: how it draws beyond its colours ([`crate::decor`]).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct StyleFile {
+    borders: Option<String>,
+    titles: Option<String>,
+    gradient: Option<String>,
+    cursor: Option<String>,
+    marker: Option<bool>,
+    keys: Option<String>,
+    shadow: Option<String>,
 }
 
 /// The directory of the config file in use, once `load` has chosen it: with
@@ -742,6 +756,18 @@ pub fn theme_from_text(text: &str, shown: &str) -> Result<Theme, String> {
     for (slot, field, v) in theme_slots(&mut t, &f) {
         set(slot, field, v)?;
     }
+    if let Some(st) = &f.style {
+        t.decor = crate::decor::Decor::parse(
+            st.borders.as_deref(),
+            st.titles.as_deref(),
+            st.gradient.as_deref(),
+            st.cursor.as_deref(),
+            st.marker,
+            st.keys.as_deref(),
+            st.shadow.as_deref(),
+            shown,
+        )?;
+    }
     Ok(t)
 }
 
@@ -844,6 +870,7 @@ fn build_theme(spec: &ThemeSpec, base: &Theme) -> Result<Theme, String> {
             &d.cursor_active,
             base.row_cursor_active,
         )?,
+        decor: base.decor,
     })
 }
 

@@ -187,6 +187,17 @@ impl FileTabs {
             };
             let label = format!(" {} {} ", i + 1, tab_label(&tab.cwd));
             let w = put(frame, cx, &label, style);
+            // The selected tab of the focused pane as a slanted segment, in that look.
+            let slanted =
+                i == self.active && active && crate::decor::get().keys == crate::decor::Keys::Slant;
+            if slanted {
+                crate::decor::slant(frame.buffer_mut(), cx, cx + w - 1, bar.y);
+            }
+            let style = if slanted {
+                Style::new().bg(th.bg_bar)
+            } else {
+                style
+            };
             self.tab_hits.push((i, Rect::new(cx, bar.y, w, 1)));
             cx += w;
             // The last tab cannot be closed, so it has no ×.

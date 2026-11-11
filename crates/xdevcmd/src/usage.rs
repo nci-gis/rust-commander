@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Sparkline};
+use ratatui::widgets::Sparkline;
 use ratatui::Frame;
 
 use xdevcmd_core::format::human_size;
@@ -256,7 +256,7 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         ht,
     );
     crate::modal::clear_overlay(frame, r);
-    let block = Block::bordered()
+    let block = crate::decor::bordered()
         .border_style(Style::new().fg(th.accent))
         .style(Style::new().bg(th.bg_panel).fg(th.fg))
         .title(Line::from(Span::styled(
@@ -265,6 +265,7 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         )));
     let inner = block.inner(r);
     frame.render_widget(block, r);
+    crate::decor::notch(frame.buffer_mut(), r);
 
     let mut lines: Vec<(String, Style)> = Vec::new();
     let dim = Style::new().fg(th.fg_dim);

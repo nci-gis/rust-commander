@@ -4167,3 +4167,44 @@ fn a_tab_bar_on_one_pane_keeps_both_lists_in_line() {
     assert!(s.lines().nth(1).unwrap().starts_with('\u{250c}'), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
+
+/// xdevtheme's `[style]`: rounded frames with the title in a notch, the F keys and the
+/// selected tab as slanted segments, a bar on the frame at the cursor's row. On a
+/// 16-colour terminal, none of it: plain frames and keys.
+#[test]
+fn xdevtheme_draws_its_style_and_leaves_it_off_at_16_colours() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("xdevtheme-cfg");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    let theme =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes/xdevtheme.toml");
+    fs::copy(&theme, dir.join("themes/xdevtheme.toml")).unwrap();
+    let cfg = write_config(&dir, "[theme]\nname = \"xdevtheme\"\n");
+    let at = |colors: &str| {
+        let out = isolated()
+            .env("XDEVCMD_CONFIG", &cfg)
+            .env("XDEVCMD_COLORS", colors)
+            .args(["--screenshot=110x24", "--keys=Ctrl+t,Down"])
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let s = at("truecolor");
+    assert!(
+        s.contains("\u{256d}\u{2524}"),
+        "a notch in a rounded frame\n{s}"
+    );
+    assert!(s.contains("\u{25e2}1\u{25e4}Help"), "slanted keys\n{s}");
+    assert!(s.contains("\u{25e2}2 "), "the selected tab, slanted\n{s}");
+    assert!(
+        s.lines().any(|l| l.starts_with('\u{258c}')),
+        "the cursor row's bar on the frame\n{s}"
+    );
+    let s = at("16");
+    assert!(
+        !s.contains('\u{256d}') && !s.contains('\u{25e2}') && s.contains(" 1 Help"),
+        "{s}"
+    );
+}

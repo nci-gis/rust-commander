@@ -10,7 +10,6 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, Mous
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
 use ratatui::Frame;
 
 use xdevcmd_core::ops;
@@ -300,7 +299,7 @@ impl Menu {
         self.frame = r;
 
         crate::modal::clear_overlay(frame, r);
-        let mut block = Block::bordered()
+        let mut block = crate::decor::bordered()
             .border_style(Style::new().fg(th.accent))
             .style(Style::new().bg(th.bg_panel).fg(th.fg));
         if let Some(t) = &self.title {
@@ -311,6 +310,7 @@ impl Menu {
         }
         let inner = block.inner(r);
         frame.render_widget(block, r);
+        crate::decor::notch(frame.buffer_mut(), r);
 
         // Taller than the screen: scroll so the selected item is always on it.
         let visible = inner.height as usize;

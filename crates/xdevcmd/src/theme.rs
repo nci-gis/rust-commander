@@ -30,6 +30,8 @@ pub struct Theme {
     pub mark: Color,
     pub row_cursor: Color,
     pub row_cursor_active: Color,
+    /// How it draws beyond its colours: frames, gradient, keys ([`crate::decor`]).
+    pub decor: crate::decor::Decor,
 }
 
 impl Default for Theme {
@@ -51,6 +53,7 @@ impl Default for Theme {
             mark: Color::Rgb(255, 214, 102),
             row_cursor: Color::Rgb(28, 42, 58),
             row_cursor_active: Color::Rgb(0, 74, 82),
+            decor: crate::decor::Decor::default(),
         }
     }
 }
@@ -77,6 +80,7 @@ impl Theme {
             mark: Color::LightYellow,
             row_cursor: Color::DarkGray,
             row_cursor_active: Color::Blue,
+            decor: crate::decor::Decor::default(),
         }
     }
 }
@@ -147,6 +151,7 @@ pub fn built_in(name: &str) -> Option<Theme> {
             mark: rgb(176, 110, 0),
             row_cursor: rgb(224, 229, 236),
             row_cursor_active: rgb(188, 226, 222),
+            decor: crate::decor::Decor::default(),
         },
         // Blue panels, cyan text, yellow marks: the DOS-era commanders' look.
         "blue" => Theme {
@@ -166,6 +171,7 @@ pub fn built_in(name: &str) -> Option<Theme> {
             mark: rgb(255, 255, 85),
             row_cursor: rgb(0, 0, 100),
             row_cursor_active: rgb(0, 110, 110),
+            decor: crate::decor::Decor::default(),
         },
         "high-contrast" => Theme {
             bg: rgb(0, 0, 0),
@@ -184,6 +190,7 @@ pub fn built_in(name: &str) -> Option<Theme> {
             mark: rgb(255, 255, 0),
             row_cursor: rgb(64, 64, 64),
             row_cursor_active: rgb(0, 80, 160),
+            decor: crate::decor::Decor::default(),
         },
         _ => return None,
     })

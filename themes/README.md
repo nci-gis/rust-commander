@@ -3,6 +3,12 @@
 Theme files for xdevcmd. The five built-in themes (dark, light, ansi, blue,
 high-contrast) need no file; these are extra, and a start for your own.
 
+- **xdevtheme** is xdevcmd's own look, and **xdevtheme-dawn** its light pair. Their
+  `[style]` table draws rounded frames, a teal-to-violet light, slanted F keys and a
+  lit cursor row (see [docs/config.md](../docs/config.md#colours)).
+- The others are well-known palettes: Dracula, Tokyo Night, Catppuccin Mocha, Nord,
+  Gruvbox dark and Solarized light.
+
 To use one, put it in a `themes` folder in either place:
 
 - beside your `config.toml` (`~/.config/xdevcmd/themes/` on Linux and macOS,

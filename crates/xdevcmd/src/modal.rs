@@ -10,7 +10,7 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Gauge};
+use ratatui::widgets::{Clear, Gauge};
 use ratatui::Frame;
 
 use xdevcmd_core::format::{elide_middle, human_size};
@@ -359,6 +359,7 @@ pub fn centered(area: Rect, w: u16, h: u16) -> Rect {
 /// box's left border. Such a character becomes a space.
 pub(crate) fn clear_overlay(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, area);
+    crate::decor::shadow(frame.buffer_mut(), area);
     if area.x == 0 {
         return;
     }
@@ -379,7 +380,7 @@ pub(crate) fn frame_box(
     accent: ratatui::style::Color,
 ) -> Rect {
     clear_overlay(frame, area);
-    let block = Block::bordered()
+    let block = crate::decor::bordered()
         .border_style(Style::new().fg(accent))
         .style(Style::new().bg(theme::t().bg_panel).fg(theme::t().fg))
         .title(Line::from(vec![
@@ -392,6 +393,7 @@ pub(crate) fn frame_box(
         ]));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    crate::decor::notch(frame.buffer_mut(), area);
     inner
 }
 

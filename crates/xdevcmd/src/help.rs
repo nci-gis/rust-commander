@@ -10,7 +10,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, Mous
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear};
+use ratatui::widgets::Clear;
 use ratatui::Frame;
 
 use crate::config::{self, Config, Outcome, Settings};
@@ -111,7 +111,7 @@ impl Help {
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let th = theme::t();
         frame.render_widget(Clear, area);
-        let block = Block::bordered()
+        let block = crate::decor::bordered()
             .border_style(Style::new().fg(th.border_active))
             .style(Style::new().bg(th.bg).fg(th.fg))
             .title(Line::from(vec![
@@ -124,6 +124,7 @@ impl Help {
             ]));
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        crate::decor::notch(frame.buffer_mut(), area);
         if inner.height < 4 || inner.width < 20 {
             return;
         }

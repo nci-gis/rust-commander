@@ -9,7 +9,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear};
+use ratatui::widgets::Clear;
 use ratatui::Frame;
 
 use xdevcmd_core::document::{Document, Mode, HEX_COLS};
@@ -409,12 +409,13 @@ impl Viewer {
                 Style::new().fg(theme::t().fg_dim),
             ),
         ]);
-        let block = Block::bordered()
+        let block = crate::decor::bordered()
             .border_style(Style::new().fg(theme::t().border_active))
             .style(Style::new().bg(theme::t().bg))
             .title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        crate::decor::notch(frame.buffer_mut(), area);
         if inner.height < 2 || inner.width < 8 {
             return;
         }

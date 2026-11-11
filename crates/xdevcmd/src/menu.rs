@@ -10,7 +10,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, Mous
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear};
+use ratatui::widgets::Block;
 use ratatui::Frame;
 
 use xdevcmd_core::ops;
@@ -299,7 +299,7 @@ impl Menu {
         let r = Rect::new(x, y, w, h);
         self.frame = r;
 
-        frame.render_widget(Clear, r);
+        crate::modal::clear_overlay(frame, r);
         let mut block = Block::bordered()
             .border_style(Style::new().fg(th.accent))
             .style(Style::new().bg(th.bg_panel).fg(th.fg));

@@ -497,17 +497,79 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     let frame = terminal.draw(|f| app.draw(f))?;
 
     let buf = frame.buffer;
+    // XDEVCMD_SCREENSHOT_COLOR=1 keeps the colours, as SGR sequences: for looking at a
+    // theme without a terminal (`less -R`, or converted to a page).
+    let colour = std::env::var_os("XDEVCMD_SCREENSHOT_COLOR").is_some_and(|v| v == "1");
     let mut out = String::new();
     for y in 0..h {
         let mut line = String::new();
+        let mut last = None;
+        // The cells a wide character covers: the buffer keeps a blank in each. The plain
+        // frame keeps it, so a character's place in the line is its column (the tests
+        // count on it); the colour one is for looking at, so it drops it as a terminal
+        // would.
+        let mut covered = 0;
         for x in 0..w {
-            line.push_str(buf.cell(Position::new(x, y)).map_or(" ", |c| c.symbol()));
+            if covered > 0 {
+                covered -= 1;
+                continue;
+            }
+            let Some(cell) = buf.cell(Position::new(x, y)) else {
+                line.push(' ');
+                continue;
+            };
+            if colour {
+                covered = unicode_width::UnicodeWidthStr::width(cell.symbol()).saturating_sub(1);
+            }
+            if colour {
+                let sgr = sgr_of(cell);
+                if last.as_ref() != Some(&sgr) {
+                    line.push_str(&sgr);
+                    last = Some(sgr);
+                }
+            }
+            line.push_str(cell.symbol());
         }
-        out.push_str(line.trim_end());
+        if colour {
+            line.push_str("\x1b[0m");
+        } else {
+            line.truncate(line.trim_end().len());
+        }
+        out.push_str(&line);
         out.push('\n');
     }
     emit(&out);
     Ok(())
+}
+
+/// One cell's colours and weight as an SGR sequence, for a colour screenshot.
+fn sgr_of(cell: &ratatui::buffer::Cell) -> String {
+    use ratatui::style::{Color, Modifier};
+    fn colour(c: Color, base: u8) -> String {
+        match c {
+            Color::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", base + 8),
+            Color::Indexed(i) => format!("{};5;{i}", base + 8),
+            Color::Reset => format!("{}", base + 9),
+            named => {
+                let i = (0..16u8).find(|&i| theme::ansi(i) == named).unwrap_or(7);
+                format!("{};5;{i}", base + 8)
+            }
+        }
+    }
+    let mut s = format!("\x1b[0;{};{}", colour(cell.fg, 30), colour(cell.bg, 40));
+    for (m, code) in [
+        (Modifier::BOLD, ";1"),
+        (Modifier::DIM, ";2"),
+        (Modifier::ITALIC, ";3"),
+        (Modifier::UNDERLINED, ";4"),
+        (Modifier::REVERSED, ";7"),
+    ] {
+        if cell.modifier.contains(m) {
+            s.push_str(code);
+        }
+    }
+    s.push('m');
+    s
 }
 
 /// Whether xdevcmd is starting inside its own terminal panel.

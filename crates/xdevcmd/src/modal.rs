@@ -352,13 +352,33 @@ pub fn centered(area: Rect, w: u16, h: u16) -> Rect {
     )
 }
 
+/// Clear `area` for a box drawn over what is there.
+///
+/// A wide character (CJK) just left of the box reaches into its first column. The
+/// terminal is never sent the cell a wide character covers, so it would print over the
+/// box's left border. Such a character becomes a space.
+pub(crate) fn clear_overlay(frame: &mut Frame, area: Rect) {
+    frame.render_widget(Clear, area);
+    if area.x == 0 {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    for y in area.y..area.y + area.height {
+        if let Some(cell) = buf.cell_mut((area.x - 1, y)) {
+            if unicode_width::UnicodeWidthStr::width(cell.symbol()) > 1 {
+                cell.set_symbol(" ");
+            }
+        }
+    }
+}
+
 pub(crate) fn frame_box(
     frame: &mut Frame,
     area: Rect,
     title: &str,
     accent: ratatui::style::Color,
 ) -> Rect {
-    frame.render_widget(Clear, area);
+    clear_overlay(frame, area);
     let block = Block::bordered()
         .border_style(Style::new().fg(accent))
         .style(Style::new().bg(theme::t().bg_panel).fg(theme::t().fg))
@@ -779,4 +799,31 @@ fn render_question(frame: &mut Frame, area: Rect, q: &Question) -> Vec<(Answer, 
         opts.iter().map(|(k, l, _)| (*k, *l, th.accent)).collect();
     let rects = buttons(frame, inner.x, y, inner.width, &labels);
     opts.into_iter().map(|(_, _, a)| a).zip(rects).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// "設計書" from column 2: 書 covers columns 6 and 7. A box from column 7 would lose
+    /// its left border to it on a real terminal, so 書 goes.
+    #[test]
+    fn a_wide_character_under_a_box_edge_is_blanked() {
+        let mut t = Terminal::new(TestBackend::new(20, 3)).unwrap();
+        let frame = t
+            .draw(|f| {
+                f.buffer_mut().set_string(2, 1, "設計書", Style::new());
+                clear_overlay(f, Rect::new(7, 0, 6, 3));
+            })
+            .unwrap();
+        let sym = |x| frame.buffer.cell((x, 1)).unwrap().symbol().to_string();
+        assert_eq!(sym(6), " ");
+        assert_eq!(
+            (sym(2), sym(4)),
+            ("設".into(), "計".into()),
+            "the rest stay"
+        );
+    }
 }

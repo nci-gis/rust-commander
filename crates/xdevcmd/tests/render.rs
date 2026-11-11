@@ -2124,9 +2124,12 @@ fn starting_without_directories_reopens_the_last_session() {
         status(&s).contains("tab 2/2"),
         "the second was the active one\n{s}"
     );
-    // The left pane's tab bar puts its border a row lower, so measure the right pane
-    // by its own top-left corner on the first row.
-    let right_pane = first.find('\u{250c}').map(|b| first[..b].chars().count());
+    // Both panes have a tab bar (the right one shows it to stay in line), so measure
+    // the right pane by the second top-left corner on the border row.
+    let border = s.lines().nth(2).unwrap();
+    let right_pane = border
+        .rfind('\u{250c}')
+        .map(|b| border[..b].chars().count());
     assert!(
         right_pane.is_some_and(|x| x < 50),
         "the 30% split is kept, not reset to half\n{s}"
@@ -4144,4 +4147,23 @@ fn y_and_cap_y_copy_from_the_viewer_and_control_characters_are_refused() {
     assert!(s.contains("not copied"), "a Ctrl+U in the text\n{s}");
     let s = shot_flags(&["--restricted"], "/,n,o,t,Enter,F3,y", &a, &b);
     assert!(s.contains("restricted mode: no clipboard"), "{s}");
+}
+
+/// A second tab on one pane gives it a tab bar. The pane beside it shows its own bar
+/// too, with its one tab, so the two lists start on the same row.
+#[test]
+fn a_tab_bar_on_one_pane_keeps_both_lists_in_line() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys("100x14", "Ctrl+t", &a, &b);
+    let bars = s.lines().nth(1).unwrap();
+    assert!(
+        bars.contains(" 2 a ") && bars.contains(" 1 b ") && bars.matches('+').count() == 2,
+        "a bar on each pane\n{s}"
+    );
+    let header = s.lines().nth(3).unwrap();
+    assert_eq!(header.matches("Name ").count(), 2, "{s}");
+    // Alone, a pane has no bar.
+    let s = shot("100x14", &a, &b);
+    assert!(s.lines().nth(1).unwrap().starts_with('\u{250c}'), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }

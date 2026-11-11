@@ -38,6 +38,19 @@ that heading and starts a new, empty one here. -->
 - **A status message no longer runs into the terminal's keys**: with the terminal in
   focus and a long message, the status line read "…Shift+F12 historytoo small to split";
   the two keep their gap now.
+- **A second tab on one pane no longer puts its list a row below the other pane's.** The
+  pane beside it shows its tab bar too, with its one tab, so both lists start on the
+  same row. A lone tab has no × now, since the last tab cannot be closed.
+- **A dialog over a Chinese, Japanese or Korean name keeps its left border.** When the
+  dialog's edge fell on the second half of a wide character, the terminal printed the
+  character over the border; that character is now blanked.
+
+### Removed
+- **The Night Owl example theme**: it was nearly the built-in `dark` (the closest pair of
+  all the themes), and close to Nord and Tokyo Night. A copy you keep in your own
+  `themes/` folder still works. If `[theme] name = "night-owl"` names a file that is no
+  longer there, xdevcmd says so and ignores the config file: pick another theme, or keep
+  the 0.3.0 file.
 
 ## [0.3.0] - 2026-11-10
 

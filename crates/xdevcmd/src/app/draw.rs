@@ -250,6 +250,21 @@ impl App {
             self.quick_view = None;
         }
         let previewing = self.quick_view.as_ref().map(|(q, _)| *q);
+        // The rows where a pane starts with a tab bar: terminal panels always have one,
+        // file panes when they hold more than one tab. A file pane starting on the same
+        // row shows its bar too, or its list would sit a row higher than its neighbour's.
+        let barred: Vec<u16> = rects
+            .iter()
+            .filter(|(id, r)| {
+                previewing != Some(*id)
+                    && match self.panes.get(id) {
+                        Some(Pane::Files(f)) => f.wants_bar(*r),
+                        Some(Pane::Term(_)) => true,
+                        None => false,
+                    }
+            })
+            .map(|(_, r)| r.y)
+            .collect();
         for (id, r) in rects {
             let active = id == self.focus;
             if previewing == Some(id) {
@@ -262,7 +277,7 @@ impl App {
                         .drag
                         .as_ref()
                         .is_some_and(|d| d.mode == DragMode::Files && d.hover == Some(id));
-                    f.render(frame, r, active, target)
+                    f.render(frame, r, active, target, barred.contains(&r.y))
                 }
                 Some(Pane::Term(p)) => p.render(frame, r, active),
                 None => {}

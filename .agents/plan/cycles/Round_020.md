@@ -47,8 +47,19 @@ This is xdevcmd's own ground: the shell's output and the file panes in one proce
     moves panes.
 - **vt100 0.18**: `Screen::scrollback_len()` and `cursor_position()` give a line's place
   in the history when a mark arrives.
-  - **Caveat:** once the history is full (`[terminal] scrollback`), lines drop off the
-    top and those places drift. vt100 does not count dropped lines.
+  - Once the history is full (`[terminal] scrollback`), lines drop off the top and those
+    places drift. **But vt100 calls `Callbacks::on_scroll` for every row that leaves the
+    history**: dropped when it is full, and every row erased by `CSI 3 J`. Counting
+    those calls gives each line an absolute number that never drifts. This was found
+    while answering the owner's question about `clear`, below.
+  - **`clear` and Ctrl+L, tried against vt100 0.18.1 (2026-11-11):**
+    - `clear` sends `\e[H\e[2J\e[3J` under `TERM=xterm-256color`, the panel's TERM. It
+      erases the whole history (8 lines → 0), and each erased row passes through
+      `on_scroll`.
+    - `clear -x` and Ctrl+L (`\e[H\e[2J`) keep the history. The lines that were on the
+      screen at that moment are wiped, not pushed into it.
+    - Windows `cls` (cmd) and `Clear-Host` (pwsh) through ConPTY: not tried; probably
+      `\e[3J` too. The owner can check this on Windows.
 - **The editor**: `edit_externally` runs `$EDITOR file`. There is no line argument.
 
 ### 3. Outside check (2026-11-11)
@@ -74,7 +85,9 @@ This is xdevcmd's own ground: the shell's output and the file panes in one proce
   not exist yet.**
   - New: at each OSC 133 `C`, `ShellReports` records a command:
     - the line it starts on (`scrollback_len + cursor row`);
-    - **the text of that line**, to find it again after the history has dropped lines;
+    - its absolute number (the rows `on_scroll` has seen so far, plus its place now), so
+      it is found again however many lines have dropped; a command whose lines were
+      erased (`clear`) is dropped with them;
     - the directory it ran in.
   - Where the directory comes from:
     - Linux: `/proc/<shell pid>/cwd`, read in the callback (one read per command);
@@ -130,8 +143,9 @@ This is xdevcmd's own ground: the shell's output and the file panes in one proce
    - at `C`, record (line, text of the line, directory), with the shell's pid passed in
      at spawn for Linux;
    - keep the last 200 commands, oldest dropped;
-   - `TermPanel::history` returns them with the text, each command's line found by its
-     text near its recorded place (or dropped if it is gone).
+   - `ShellReports` counts the rows `on_scroll` reports. `TermPanel::history` returns
+     the commands with the text, each at its line now (its absolute number minus the
+     rows dropped), or leaves it out if its line has gone.
    - Unit tests through vt100 with marks, including a full history that has dropped
      lines. S–M.
 3. **The history view as a link view** (`viewer.rs`). The viewer gets an optional link
@@ -162,7 +176,8 @@ Sizes: about a week (M) in all. Risks:
 - **Slow `stat`**: mitigated by checking only what is on screen, the cache, and the
   network-path skip.
 - **A wrong base without marks**: mitigated by the status line naming the base.
-- **History drift once full**: mitigated by finding each command line by its text.
+- **History drift once full**: mitigated by absolute line numbers counted through
+  `on_scroll`.
 
 ### 6. The owner's decisions
 

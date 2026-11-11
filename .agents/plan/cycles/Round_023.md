@@ -99,7 +99,9 @@ Taken on these unless the owner says otherwise ("Move next"):
 ## Do
 
 Coded on the recommendations ("Move next"). Decision 5 (Vietnamese) was found while
-testing and is open; the code follows Unicode's default order.
+testing; the owner chose **Unicode's default order** (2026-11-11: "Unicode mặc định"),
+as coded: `ă â ê ô ơ ư` sort with their letter, `đ` after `d`, the same in every
+language.
 
 - `natural_cmp` became three levels over `Fold`, an iterator of units: a digit run (as
   `Unit::Num`, length and the first 38 digits) or a letter's key, with a second-level
@@ -132,5 +134,5 @@ testing and is open; the code follows Unicode's default order.
 - [x] Old natural-order tests unchanged; the order total and deterministic
 - [x] 100,000 entries in under 1 s: 0.41 s (debug), from 0.85 s
 - [x] Clippy for three targets, the full suite, 660 passed, 0 failed
-- [ ] The owner: a folder of Japanese names on Windows, and the same copied from a Mac;
-  decision 5
+- [x] Decision 5: Unicode's default order (the owner)
+- [ ] The owner: a folder of Japanese names on Windows, and the same copied from a Mac

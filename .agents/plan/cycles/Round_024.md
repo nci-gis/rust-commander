@@ -384,6 +384,33 @@ objects**, and nothing waits on them.
   - Proved by putting the bug back: without closing the viewer first,
     `f1_over_the_viewer_…` fails; writing recents in read-only mode fails
     `f1_remembers_…`.
+- **2026-11-12, step 4: keys and config** (`keys.rs`, `app/input.rs`, `commands.rs`).
+  - `help` = `F1`, `Alt+x F1`; `usage` = `Shift+F1` only (decision 1). A user's own
+    `usage = ["Alt+x F1"]` still wins (a unit test). `apply` refuses a `[keys] help`
+    without F1: "[keys] help: F1 is always kept; add keys beside it (help = ["F1",
+    …])"; `--check-config` exits 1 saying so (render test).
+  - From the shell: `in_shell_prefix` runs `is_global() || opens_from_shell()` after
+    the prefix, and `group_hint` offers F1 there ("then: F1 F12 Shift+F12 · …"). F1
+    alone in the shell still reaches the program, byte for byte (pty, `dd` of the
+    three bytes). keymap A's pty tests (`inside_the_shell_only_f12s_family_is_xdevcmds`,
+    `alt_x_is_the_prefix…`) pass unchanged.
+  - keymap A's rule gains a third sentence, "Alt+x F1 opens Commands (F1) from the
+    shell, where F1 is the program's", from the live keymap; `docs/keys.md`
+    regenerated (help's and usage's rows changed). Help's row notes "in the shell:
+    Alt+x F1".
+  - **Ranking change found by the shell's pty test**: from the shell, "copy" put
+    "Mouse: Copy or move there…" (read-only, and "here" everywhere) above Files: Copy.
+    Within a tier, rows that can run now come before read-only ones.
+  - The shell-side tests of step 3: Alt+X F1, split right (acts on the shell, "Next
+    time: Alt+x Alt+s"), then copy (focus moves to the files, the file is copied).
+    Proved by putting the bug back: without `opens_from_shell` in the prefix both
+    fail; without the focus move the second does.
+  - **Flake found and fixed in the tests**: in 1 of 3 full pty runs (2 CPUs, the
+    suite in parallel), both F1-copy tests pressed q while the copy job was still
+    finishing and timed out on exit. They now wait for "1 copied" before q, as the
+    older copy test waits for its marks to clear; 3 clean full runs since.
+  - Not done: Terminal.app sends nothing for Shift+F1, so Usage there is reached by
+    F1 or Help → Usage, no longer by key; docs say so in step 6.
 
 ## Check
 

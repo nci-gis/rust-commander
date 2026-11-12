@@ -2276,6 +2276,8 @@ fn f1_copy_enter_copies_the_file_under_the_cursor() {
     wait_file(&s.right().join("report.txt"), "copied", |c| {
         c.as_deref() == Some("R")
     });
+    // The job over and said, before q: a quit mid-job is another test's subject.
+    x.wait_for("1 copied");
     x.quit();
 }
 
@@ -2315,6 +2317,69 @@ fn a_menu_row_in_f1_types_its_command_into_the_shell() {
     x.send(ENTER);
     x.wait_for("GOT it's here.txt DONE");
     x.send(F12);
+    x.quit();
+}
+
+/// Keymap A keeps F1 for the program in the shell; xdevcmd's F1 there is Alt+X F1.
+#[test]
+fn from_the_shell_f1_is_the_programs_and_alt_x_f1_opens_commands() {
+    let s = Scratch::new("f1-shell");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT_F1\r");
+    std::thread::sleep(Duration::from_millis(300));
+    x.send(F1);
+    x.wait_for("GOT_F1");
+    assert_eq!(std::fs::read(s.left().join("keys.bin")).unwrap(), F1);
+    assert!(!x.screen().contains("type to find a command"));
+    x.send(ALT_X);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"\x1b");
+    x.wait_gone("type to find a command");
+    assert!(
+        x.screen().contains("F12 back to files"),
+        "the shell kept focus"
+    );
+    x.send(F12);
+    x.quit();
+}
+
+/// From the shell, F1's shell commands act on the shell and a file pane's commands on
+/// the file pane the shell was entered from, which takes the focus (decision 3).
+#[test]
+fn f1_from_the_shell_runs_shell_commands_there_and_file_commands_on_the_files() {
+    let s = Scratch::new("f1-shell-run");
+    s.file("left/report.txt", "R");
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(ALT_X);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"split right");
+    x.wait_for("Panes: Split right");
+    x.send(ENTER);
+    x.wait_for("split 2/2");
+    x.wait_for("Next time: Alt+x Alt+s");
+    x.send(ALT_X);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"copy");
+    x.wait_for("Files: Copy");
+    x.send(ENTER);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    wait_file(&s.right().join("report.txt"), "copied", |c| {
+        c.as_deref() == Some("R")
+    });
+    // Focus is on the files now, the job over: q quits.
+    x.wait_for("1 copied");
+    x.until("the files to have focus", |scr| {
+        !scr.contains("F12 back to files")
+    });
     x.quit();
 }
 

@@ -38,7 +38,7 @@ impl App {
             .keymap
             .group(first)
             .iter()
-            .filter(|(_, a)| !in_shell || a.is_global())
+            .filter(|(_, a)| !in_shell || a.is_global() || a.opens_from_shell())
             .map(|((c, m), _)| crate::keys::key_name(*c, *m))
             .collect();
         // A group whose keys all repeat is a mode, left with Enter or Esc; any other
@@ -113,9 +113,10 @@ impl App {
     pub(super) fn in_shell_prefix(&mut self, first: crate::keys::Chord, k: KeyEvent) -> bool {
         self.status.clear();
         let keymap = &self.settings.keymap;
+        // F12's family, and F1 (Alt+X F1): F1 alone stays the program's.
         let run = keymap
             .in_group(first, k)
-            .filter(|a| a.is_global())
+            .filter(|a| a.is_global() || a.opens_from_shell())
             .or_else(|| {
                 keymap
                     .action_for(k)

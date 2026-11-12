@@ -1391,6 +1391,55 @@ fn f1_remembers_recent_commands_across_restarts() {
     assert!(!kept.contains("sort_name"), "{kept}");
 }
 
+/// `help` keeps F1: a `[keys] help` without it is refused, and `--check-config` says
+/// why; keys beside it are fine.
+#[test]
+fn a_config_that_takes_f1_from_help_is_refused() {
+    let (a, _) = fixture();
+    let cfg = write_config(a.parent().unwrap(), "[keys]\nhelp = [\"Alt+g k\"]\n");
+    let out = xdevcmd(&[
+        "--check-config".as_ref(),
+        "--config".as_ref(),
+        cfg.as_os_str(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("[keys] help: F1 is always kept"), "{err}");
+    let cfg = write_config(
+        a.parent().unwrap(),
+        "[keys]\nhelp = [\"F1\", \"Alt+g k\"]\n",
+    );
+    let out = xdevcmd(&[
+        "--check-config".as_ref(),
+        "--config".as_ref(),
+        cfg.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// From the shell F1 is Alt+X F1 (owner's decision 1): the prefix's hint offers it,
+/// and F1 opens on the shell's commands. In a pane Alt+X F1 is F1 too; Usage keeps
+/// Shift+F1.
+#[test]
+fn alt_x_f1_opens_commands_from_the_shell_and_the_panes() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys(SIZE, "F12,A-x", &a, &b);
+    assert!(status(&s).contains("then: F1 F12"), "{s}");
+    let s = shot_keys(SIZE, "F12,A-x,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(first.contains("Terminal: "), "the shell's rows first\n{s}");
+    let s = shot_keys(SIZE, "A-x,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+    let s = shot_keys(SIZE, "S-F1", &a, &b);
+    assert!(commands_box(&s).is_none() && s.contains("Usage"), "{s}");
+}
+
 // ── mouse ──────────────────────────────────────────────────────────────────────────
 //
 // Coordinates are found by locating text in a first screenshot rather than hardcoded,

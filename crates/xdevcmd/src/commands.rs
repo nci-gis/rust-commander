@@ -112,6 +112,13 @@ pub fn rows(
             let rebound = live.iter().cloned().collect::<HashSet<_>>() != defaults;
             let note = if b.action.is_global() {
                 Some("works in the shell".to_string())
+            } else if b.action.opens_from_shell() {
+                // Alt+X F1: F1 alone is the program's there.
+                shell_prefix.as_ref().and_then(|p| {
+                    live.iter()
+                        .find(|k| k.starts_with(&format!("{p} ")))
+                        .map(|k| format!("in the shell: {k}"))
+                })
             } else {
                 // After the prefix only single keys work: Alt+X Alt+R is not a group in
                 // a group, so `Alt+r Left` is not reachable from the shell. Say which is.
@@ -429,14 +436,20 @@ fn as_key(query: &str) -> Option<keys::Keys> {
 /// 2. only the description matched, so: below every such name match;
 /// 3. the name's letters matched scattered ("trash" in "Terminal: Show…"), last.
 ///
-/// Within a tier by score; ties: recently run first, then the rows for where F1 was
-/// pressed, then table order. A description matched only by scattered letters is not a
+/// Within a tier, what can run before what is only to read (a mouse gesture that says
+/// "Copy or move there" is not the Copy someone typing "copy" wants); then by score;
+/// ties: recently run first, then the rows for where F1 was pressed, then table order. A description matched only by scattered letters is not a
 /// match: in a sentence, almost anything is.
 pub fn rank(rows: &[Row], query: &str, ctx: Place, recent: &[String]) -> Vec<Item> {
     use xdevcmd_core::fuzzy;
     let key = as_key(query);
     let q = fuzzy::Query::new(query);
-    let mut found: Vec<(u8, i32, usize, bool, usize, Vec<usize>)> = Vec::new();
+    // Sorted by (tier, read-only, best score, recency, not here, table order).
+    type Found = (
+        (u8, bool, std::cmp::Reverse<i32>, usize, bool, usize),
+        Vec<usize>,
+    );
+    let mut found: Vec<Found> = Vec::new();
     for (i, r) in rows.iter().enumerate() {
         let by_key = key.is_some_and(|k| r.parsed.contains(&k));
         let (tier, score, hits) = if let Some((s, hits)) = q.score_positions(&r.name) {
@@ -458,12 +471,20 @@ pub fn rank(rows: &[Row], query: &str, ctx: Place, recent: &[String]) -> Vec<Ite
         } else {
             continue;
         };
-        found.push((tier, score, recency(recent, &r.id), !r.here(ctx), i, hits));
+        let key = (
+            tier,
+            r.read_only(),
+            std::cmp::Reverse(score),
+            recency(recent, &r.id),
+            !r.here(ctx),
+            i,
+        );
+        found.push((key, hits));
     }
-    found.sort_by_key(|f| (f.0, std::cmp::Reverse(f.1), f.2, f.3, f.4));
+    found.sort_by_key(|f| f.0);
     found
         .into_iter()
-        .map(|(_, _, _, _, row, hits)| Item::Row {
+        .map(|((.., row), hits)| Item::Row {
             row,
             hits,
             tagged: true,
@@ -1399,6 +1420,18 @@ mod tests {
     }
 
     #[test]
+    fn a_command_ranks_above_a_read_only_row_that_matches_as_well() {
+        let r = all(&Keymap::default());
+        for ctx in [Place::Files, Place::Terminal, Place::Viewer] {
+            assert_eq!(
+                first_title(&r, &rank(&r, "copy", ctx, &[])),
+                "Copy",
+                "{ctx:?}"
+            );
+        }
+    }
+
+    #[test]
     fn case_is_smart_as_in_the_quick_filter() {
         let r = all(&Keymap::default());
         assert!(!rank(&r, "copy", Place::Files, &[]).is_empty());
@@ -1482,6 +1515,8 @@ mod tests {
         );
         // A pane key says nothing: inside the shell it is the program's.
         assert_eq!(note("go_shell_dir"), None);
+        // F1 itself: Alt+X F1 there.
+        assert_eq!(note("help").as_deref(), Some("in the shell: Alt+x F1"));
     }
 
     #[test]

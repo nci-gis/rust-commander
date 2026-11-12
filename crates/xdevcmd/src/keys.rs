@@ -138,7 +138,9 @@ pub const BINDINGS: &[Binding] = &[
         title: "Commands",
         group: "General",
         about: "This screen: every key and setting",
-        keys: &["F1"],
+        // F1 is always kept (`apply` refuses a [keys] help without it). Alt+X F1 opens it
+        // from the shell, where F1 alone is the program's (owner, decision 1).
+        keys: &["F1", "Alt+x F1"],
     },
     Binding {
         action: Action::Refresh,
@@ -832,7 +834,9 @@ pub const BINDINGS: &[Binding] = &[
         title: "Usage",
         group: "General",
         about: "What xdevcmd is using: memory and its trend, CPU, threads, draw time",
-        keys: &["Shift+F1", "Alt+x F1"],
+        // Alt+X F1 was Usage's, for terminals with no Shift+F1; it opens F1 now (owner,
+        // 2026-11-12), and Usage is a row in F1 and in the Help menu.
+        keys: &["Shift+F1"],
     },
 ];
 
@@ -881,6 +885,16 @@ pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
         out.push(format!(
             "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p}, Enter too, goes to the program with it; Esc cancels."
         ));
+        // F1 from the shell, where F1 alone is the program's.
+        let f1 = keymap
+            .keys_for(Action::Help)
+            .into_iter()
+            .find(|k| k.starts_with(&format!("{p} ")));
+        if let Some(k) = f1 {
+            out.push(format!(
+                "{k} opens Commands (F1) from the shell, where F1 is the program's."
+            ));
+        }
     }
     out
 }
@@ -1066,7 +1080,6 @@ impl Action {
     /// Opens from the shell after the prefix (Alt+X F1), without being one of the keys
     /// xdevcmd takes inside the shell (`is_global`, F12's family): F1 typed there stays
     /// the program's. Kept apart so keymap A's rule and its tests do not move.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn opens_from_shell(self) -> bool {
         matches!(self, Action::Help)
     }
@@ -1229,6 +1242,15 @@ impl Keymap {
                     "[keys] has no action called \"{name}\"; see `xdevcmd --print-config`"
                 ));
             };
+            // F1 is the one key every page of the docs and every newcomer starts from: it
+            // cannot be taken away, only added to.
+            if action == Action::Help
+                && !keys.iter().any(|k| parse_binding(k) == parse_binding("F1"))
+            {
+                return Err(format!(
+                    "[keys] {name}: F1 is always kept; add keys beside it ({name} = [\"F1\", …])"
+                ));
+            }
             self.map.retain(|_, a| *a != action);
             self.seqs.retain(|_, a| *a != action);
             for k in keys {
@@ -1763,6 +1785,40 @@ mod tests {
         }
         assert_eq!(km.shell_prefix(), Some(parse_key("Alt+x").unwrap()));
         assert!(Action::SplitRight.acts_on_shell() && !Action::SplitRight.is_global());
+    }
+
+    #[test]
+    fn help_always_keeps_f1() {
+        let mut km = Keymap::default();
+        let e = km.apply(&table(&[("help", &["Alt+g k"])])).unwrap_err();
+        assert!(
+            e.contains("[keys] help") && e.contains("F1 is always kept"),
+            "{e}"
+        );
+        let mut km = Keymap::default();
+        let e = km.apply(&table(&[("help", &[])])).unwrap_err();
+        assert!(e.contains("F1 is always kept"), "{e}");
+        // Keys beside it are fine, and F1 is still there.
+        let mut km = Keymap::default();
+        km.apply(&table(&[("help", &["F1", "Alt+g k"])])).unwrap();
+        assert_eq!(km.action_for(ev("F1")), Some(Action::Help));
+        assert_eq!(
+            km.in_group(Keymap::chord(ev("Alt+g")), ev("k")),
+            Some(Action::Help)
+        );
+    }
+
+    #[test]
+    fn alt_x_f1_is_commands_and_a_users_own_alt_x_f1_still_wins() {
+        let km = Keymap::default();
+        let x = Keymap::chord(ev("Alt+x"));
+        assert_eq!(km.in_group(x, ev("F1")), Some(Action::Help));
+        assert_eq!(km.keys_for(Action::Usage), vec!["Shift+F1"]);
+        let mut km = Keymap::default();
+        km.apply(&table(&[("usage", &["Shift+F1", "Alt+x F1"])]))
+            .unwrap();
+        assert_eq!(km.in_group(x, ev("F1")), Some(Action::Usage));
+        assert_eq!(km.action_for(ev("F1")), Some(Action::Help));
     }
 
     #[test]

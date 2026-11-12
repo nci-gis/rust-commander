@@ -904,6 +904,13 @@ root; CI is not).
   `commit`, also with nothing to sync, so a test can count the steps it guards. Failing
   first: `stop_at_the_journal_question_keeps_the_sources_of_a_move`: `b`'s source was
   removed (`done: 2, cancelled: true`).
+- **4 Pack onto a free name used a plain rename.** A file that appeared there while the
+  archive was written was overwritten unasked (and, decided after the write, would have
+  been taken for one agreed to). Whether the name was free is now taken before writing;
+  free → synced, then `rename_noreplace` ("a file of that name appeared meanwhile —
+  kept", the part file removed); otherwise the one replace with `durable` then
+  `recheck`. Failing first: `a_file_that_appears_where_a_pack_goes_is_kept` (the seam's
+  `Swap` at the archive's sync): `pack` returned Ok and the newcomer was replaced.
 
 ## Check
 

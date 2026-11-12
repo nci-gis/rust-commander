@@ -645,23 +645,40 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
         }
     }
     let part = crate::ops::part_name(dest);
+    // Free before the archive is written (the question about an existing one came
+    // before this): taken only if still free, a file that appeared meanwhile is kept.
+    let free = dest.symlink_metadata().is_err();
     hooks.part(&part, true);
     let result = write_archive(fmt, &part, &files, hooks);
     let out = match result {
         // The archive's writers own the file and close it; opened again to sync it
-        // (the sync is of the file, whichever handle asks), then renamed over.
+        // (the sync is of the file, whichever handle asks), then renamed into place.
+        Ok(true) if free => fs::OpenOptions::new()
+            .write(true)
+            .open(&part)
+            .and_then(|f| crate::faults::sync_data(&f, &part))
+            .and_then(|()| crate::faults::at(crate::faults::Point::Rename, dest))
+            .and_then(|()| {
+                crate::noreplace::rename_noreplace(&part, dest).map_err(|e| {
+                    if e.kind() == io::ErrorKind::AlreadyExists {
+                        io::Error::other("a file of that name appeared meanwhile \u{2014} kept")
+                    } else {
+                        e
+                    }
+                })
+            })
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&part);
+            }),
         Ok(true) => fs::OpenOptions::new()
             .write(true)
             .open(&part)
             .and_then(|f| {
-                let existing = dest.symlink_metadata().is_ok();
                 crate::ops::commit_replace(f, &part, dest, || {
-                    if existing {
-                        if !hooks.durable(dest) {
-                            return Ok(false);
-                        }
-                        hooks.recheck(dest)?;
+                    if !hooks.durable(dest) {
+                        return Ok(false);
                     }
+                    hooks.recheck(dest)?;
                     Ok(true)
                 })
             })
@@ -1097,6 +1114,36 @@ mod tests {
             seen,
             ["sync-data", "rename", "sync-data", "rename"],
             "{seen:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A pack onto a name that was free, and is taken while the archive is written:
+    /// the newcomer is kept, never replaced. Before, a plain rename overwrote it.
+    #[test]
+    fn a_file_that_appears_where_a_pack_goes_is_kept() {
+        let d = scratch("pack-appears");
+        fs::write(d.join("f.txt"), b"x").unwrap();
+        let dest = d.join("new.zip");
+        let _g = crate::faults::set(
+            crate::faults::Point::SyncData,
+            ".new.zip.xdevcmd-part",
+            crate::faults::Action::Swap {
+                target: dest.clone(),
+                body: b"theirs".to_vec(),
+            },
+        );
+        let mut log = Log {
+            answer: Some(true),
+            ..Log::default()
+        };
+        let r = pack(&[d.join("f.txt")], &dest, &mut log);
+        assert!(r.is_err(), "said, not silent");
+        assert_eq!(fs::read(&dest).unwrap(), b"theirs");
+        assert_eq!(
+            fs::read_dir(&d).unwrap().count(),
+            2,
+            "no temporary file left"
         );
         let _ = fs::remove_dir_all(&d);
     }

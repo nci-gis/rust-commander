@@ -3307,9 +3307,18 @@ fn a_path_is_taken_from_the_directory_its_command_ran_in() {
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
     // A prompt, a command, and the shell gone elsewhere at once: the directory is the
-    // one at the prompt, however far behind the shell the output is read.
+    // one at the prompt, however far behind the shell the output is read. The prompt
+    // also reports its directory (OSC 7), as shells that send marks do: macOS has no
+    // /proc, and there that report is the command's directory (on Linux, /proc is read
+    // and the report ignored). Without it the test passed only on Linux (CI run
+    // 43180599423).
     let a = s.left().join("a").display().to_string();
-    xdevcmd.send(format!("cd '{a}'; printf '\\033]133;A\\007PROMP%s\\n' TED\r").as_bytes());
+    xdevcmd.send(
+        format!(
+            "cd '{a}'; printf '\\033]7;file://%s\\007\\033]133;A\\007PROMP%s\\n' \"$PWD\" TED\r"
+        )
+        .as_bytes(),
+    );
     xdevcmd.wait_for("PROMPTED");
     // The line number only in the output: the command line must not satisfy the wait
     // (it did once, and the history was opened before the output was there).

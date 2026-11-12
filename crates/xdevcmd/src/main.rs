@@ -90,7 +90,8 @@ Usage:
   xdevcmd --version            print the version and exit
   xdevcmd --help               print this and exit
 
-Press F1 inside xdevcmd for every key and setting as currently configured.
+Press F1 inside xdevcmd for every command and its key, as currently configured;
+Help > Config in use shows the settings in effect.
 
 Config file, first match wins:
   $XDEVCMD_CONFIG

@@ -1381,6 +1381,18 @@ fn a_shell_acting_command_from_f1_in_the_shell_keeps_the_shell_focused() {
     assert!(status(&s).contains("terminal 1/1"), "as Alt+X Alt+C\n{s}");
 }
 
+/// `--help` and the man page say what F1 is now, and where the settings went.
+#[test]
+fn help_and_the_man_page_say_f1_is_commands() {
+    for flag in ["--help", "--print-man"] {
+        let out = xdevcmd(&[OsStr::new(flag)]);
+        let text = String::from_utf8_lossy(&out.stdout).replace('\n', " ");
+        assert!(!text.contains("every key and setting"), "{flag}: {text}");
+        assert!(text.contains("every command and its key"), "{flag}");
+        assert!(text.contains("Config in use"), "{flag}");
+    }
+}
+
 /// The commands run from F1 are kept beside the session, the last first, and come
 /// first in the small list next time (the owner's decision 4). Read-only modes write
 /// nothing.

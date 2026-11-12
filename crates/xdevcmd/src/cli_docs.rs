@@ -179,7 +179,8 @@ pub fn man() -> String {
     s.push_str(".SH SYNOPSIS\n.B xdevcmd\n[\\fIOPTIONS\\fR] [\\fILEFT\\fR] [\\fIRIGHT\\fR]\n");
     s.push_str(".SH DESCRIPTION\nA two-pane file manager for the terminal, in the tradition of Total Commander: \
 copy, move, rename and compare between two panes, with archives, a terminal panel and \
-undo. Press F1 inside it for every key and setting as configured.\n");
+undo. Press F1 inside it for every command and its key, as configured; Help, Config \
+in use shows the settings in effect.\n");
     s.push_str(".SH OPTIONS\n");
     for (o, a, help) in OPTIONS {
         let arg = match a {

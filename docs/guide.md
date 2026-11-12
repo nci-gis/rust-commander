@@ -98,6 +98,15 @@ tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shi
   **Y** the screen, **:** or **Ctrl+G** goes to a line (`40`, `50%`, or in hex an
   offset such as `0x1f00`), **F2** saves a copy under another name (a shell's history
   readable by you only), **q** or **Esc** closes.
+- **The viewer colours source** by its language, from the theme's own colours: Rust,
+  Python, JavaScript/TypeScript, JSON, TOML, YAML, Markdown, shell (and Dockerfiles,
+  Makefiles), C/C++, Go, Java, Kotlin, C#, HTML/XML, CSS, SQL, INI, diffs and logs; the
+  title names it. The language comes from the file's name, else its first line
+  (`#!/usr/bin/env python3`). Files up to 64 MiB are coloured (quick view: 1 MiB);
+  lines longer than 4 KiB are drawn plain. A jump far into a big file may show plain
+  lines for a moment while the file is read through in the background. The search term
+  is lit over the colours; hex and a shell's history are never coloured.
+  `[viewer] highlight = false` (Settings → Files) or `NO_COLOR` turns it off.
 - **Enter on a program or script** asks "Run it?" (Cancel first). **Run in a terminal
   tab** shows its output and keeps it after the program ends; Enter or Esc closes the
   tab.

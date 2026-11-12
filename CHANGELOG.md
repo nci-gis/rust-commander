@@ -11,6 +11,15 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **The viewer colours source code.** F3 and quick view colour Rust, Python,
+  JavaScript/TypeScript, JSON, TOML, YAML, Markdown, shell, C/C++, Go, Java, Kotlin, C#,
+  HTML/XML, CSS, SQL, INI, diffs and logs, chosen by the file's name or its first line,
+  in the theme's own colours (every theme, yours included, with no new keys). A big
+  file opens as fast as before: only the lines on screen are coloured, from states a
+  background pass keeps every 128 lines, so a jump to line 1,000,000 never reads the
+  file on the spot. Up to 64 MiB in F3 and 1 MiB in quick view; lines over 4 KiB plain.
+  `[viewer] highlight = false` or `NO_COLOR` turns it off. Our own small lexer, not a
+  library: about 90 KB, where syntect would have taken the binary past its 7 MB budget.
 - **Log a terminal tab to a file.** A terminal tab's right-click menu has **Log to
   file…**: everything that tab's shell prints goes to a file from then on, including
   what scrolls past the history. **text** (the default) removes escapes and keeps a

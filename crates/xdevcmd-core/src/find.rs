@@ -135,14 +135,17 @@ pub fn check_grouped(
             if stop.load(Ordering::Relaxed) {
                 return scanned;
             }
-            if decided.contains_key(w) {
-                won[g] |= decided[w];
+            if let Some(&there) = decided.get(w) {
+                won[g] |= there;
                 continue;
             }
-            let there = !won[g] && {
-                scanned += 1;
-                !remote_name(w) && fs::symlink_metadata(w).is_ok()
-            };
+            // This line is already taken whole: its later wholes are left unlooked, not
+            // decided, since another line may name the same thing whole.
+            if won[g] {
+                continue;
+            }
+            scanned += 1;
+            let there = !remote_name(w) && fs::symlink_metadata(w).is_ok();
             won[g] |= there;
             decided.insert(w, there);
             let e = if there {
@@ -152,6 +155,17 @@ pub fn check_grouped(
             };
             if !emit(e) {
                 return scanned;
+            }
+        }
+    }
+    // Wholes no line needed looked at: not rows (dropped quietly, never checked).
+    for (wholes, _) in groups {
+        for w in wholes.iter().filter(|w| rows.contains(w)) {
+            if !decided.contains_key(w) {
+                decided.insert(w, false);
+                if !emit(Event::Gone(w.clone())) {
+                    return scanned;
+                }
             }
         }
     }
@@ -503,6 +517,37 @@ mod tests {
             true
         });
         assert!(found.contains(&p("b.txt")), "{found:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A line taken whole on its first whole does not decide its second for another
+    /// line that names the same thing whole: that one is still looked at.
+    #[test]
+    fn a_whole_left_unlooked_by_one_line_is_still_found_for_another() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-find-whole2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("x y"), "x").unwrap();
+        fs::write(d.join("x"), "x").unwrap();
+        // Line 1 as shown "x y" (there) then trimmed... a second whole, "x"; line 2 is "x".
+        let groups: Vec<Group> = vec![
+            (vec![d.join("x y"), d.join("x")], vec![]),
+            (vec![d.join("x")], vec![]),
+        ];
+        let rows = vec![d.join("x y"), d.join("x")];
+        let mut found = Vec::new();
+        let mut gone = Vec::new();
+        check_grouped(&rows, &groups, &AtomicBool::new(false), &mut |e| {
+            match e {
+                Event::Found(f) => found.push(f),
+                Event::Gone(g) => gone.push(g),
+                _ => {}
+            }
+            true
+        });
+        found.sort();
+        assert_eq!(found, [d.join("x"), d.join("x y")], "gone: {gone:?}");
+        assert!(gone.is_empty(), "{gone:?}");
         let _ = fs::remove_dir_all(&d);
     }
 }

@@ -929,6 +929,20 @@ root; CI is not).
   the same text in the terminal panel under it. New `Session::wait_below(title, text)`
   waits for the text under the title first. A race: no deterministic failing run here;
   the QA runs saw it. Three runs of both green.
+- **Nits.** `find::check_grouped`: a line taken whole on its first whole marked its
+  other wholes "not there" unlooked, so another line naming the same thing whole lost
+  it; now they are left undecided until every line had its say, then dropped quietly.
+  Failing first: `a_whole_left_unlooked_by_one_line_is_still_found_for_another`
+  (`x` reported gone). `ci.yml`: the cargo-package comment is back above its step.
+  `docs/security.md`: folder sync unsupported on a network mount is taken as done;
+  Windows' re-check has no file number (a swap keeping size, mtime and creation time is
+  not seen). `other_device`: already compares the device (Unix) or the drive (Windows)
+  and skips with a line when they match; unchanged.
+- **For pillar 4, not done here:** the release binary still holds
+  `XDEVCMD_TEST_SLOW_DIR`, `XDEVCMD_TEST_NO_SIGNALS` and `XDEVCMD_TEST_PANIC_THREAD`
+  (older test hooks, read from the environment); move them behind the `faults` feature
+  or a test cfg, and extend the budgets test to them.
+- `/dev/shm/xdevcmd-xdev-*` left by the QA runs removed.
 
 ## Check
 

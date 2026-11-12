@@ -148,6 +148,13 @@ journals its names, so a rename is either there or not after a crash, but the ne
 renames may be lost: a move across drives on Windows relies on that. On FAT drives and
 some network shares a rename that must not replace anything is a check followed by a
 rename, with the same kind of small window.
+Also on Windows, the look at a file before replacing it compares size, modification
+time and creation time only (there is no file number to compare without that same
+code): another file put there with all three the same is not told apart.
+
+**Network drives.** Some network file systems cannot sync a folder at all; xdevcmd then
+takes the folder as having nothing to sync, so on such a drive a copy's name rests on
+the server, as a moved file's name did before.
 
 **What happens whatever the setting.** A file being *replaced* is always written under
 a temporary name first, so cancelling never loses the old one. Closing the terminal or

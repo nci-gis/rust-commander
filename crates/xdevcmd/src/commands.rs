@@ -419,6 +419,20 @@ pub enum Item {
     },
 }
 
+/// How near a row is to where F1 was pressed, for ranking: 0 this place's own (the
+/// viewer's Close in the viewer), 1 a command that works everywhere (Zoom), 2 the
+/// rest. A read-only row that applies everywhere (a mouse gesture, a note) counts as
+/// the rest: it is never what someone typing a command's name wants first.
+fn nearness(r: &Row, ctx: Place) -> u8 {
+    if r.place == ctx {
+        0
+    } else if r.place == Place::Everywhere && !r.read_only() {
+        1
+    } else {
+        2
+    }
+}
+
 /// Index of `id` in the recent list, most recent first; `usize::MAX` when absent.
 fn recency(recent: &[String], id: &str) -> usize {
     if id.is_empty() {
@@ -443,17 +457,21 @@ fn as_key(query: &str) -> Option<keys::Keys> {
 /// 2. only the description matched, so: below every such name match;
 /// 3. the name's letters matched scattered ("trash" in "Terminal: Show…"), last.
 ///
-/// Within a tier, what can run before what is only to read (a mouse gesture that says
-/// "Copy or move there" is not the Copy someone typing "copy" wants); then by score;
-/// ties: recently run first, then the rows for where F1 was pressed, then table order. A description matched only by scattered letters is not a
+/// Within a tier: the rows for where F1 was pressed first, then those for everywhere,
+/// then the rest ([`nearness`]), so "close" in the viewer is the viewer's Close (its own
+/// key, read-only) and never Close pane, which would close the viewer and then the pane;
+/// then what can run before what is only to read (a mouse gesture that says "Copy or
+/// move there" is not the Copy someone typing "copy" in the shell wants); then by
+/// score; then recently run first, then a row for here (a mouse gesture works in any
+/// pane), then table order. A description matched only by scattered letters is not a
 /// match: in a sentence, almost anything is.
 pub fn rank(rows: &[Row], query: &str, ctx: Place, recent: &[String]) -> Vec<Item> {
     use xdevcmd_core::fuzzy;
     let key = as_key(query);
     let q = fuzzy::Query::new(query);
-    // Sorted by (tier, read-only, best score, recency, not here, table order).
+    // Sorted by (tier, nearness, read-only, best score, recency, not here, table order).
     type Found = (
-        (u8, bool, std::cmp::Reverse<i32>, usize, bool, usize),
+        (u8, u8, bool, std::cmp::Reverse<i32>, usize, bool, usize),
         Vec<usize>,
     );
     let mut found: Vec<Found> = Vec::new();
@@ -480,6 +498,7 @@ pub fn rank(rows: &[Row], query: &str, ctx: Place, recent: &[String]) -> Vec<Ite
         };
         let key = (
             tier,
+            nearness(r, ctx),
             r.read_only(),
             std::cmp::Reverse(score),
             recency(recent, &r.id),
@@ -820,7 +839,11 @@ impl Commands {
         self.sel = Some(i);
         let r = &self.rows[row];
         if let Run::ReadOnly(why) = r.run {
-            self.message = Some(format!("{}: {why}", r.title));
+            self.message = Some(if r.key_text.is_empty() {
+                format!("{}: {why}", r.title)
+            } else {
+                format!("{}: {why}", r.key_text)
+            });
             return Outcome::Stay;
         }
         if let Some(why) = &r.refused {
@@ -1429,13 +1452,28 @@ mod tests {
     #[test]
     fn a_command_ranks_above_a_read_only_row_that_matches_as_well() {
         let r = all(&Keymap::default());
-        for ctx in [Place::Files, Place::Terminal, Place::Viewer] {
+        for ctx in [Place::Files, Place::Terminal] {
             assert_eq!(
                 first_title(&r, &rank(&r, "copy", ctx, &[])),
                 "Copy",
                 "{ctx:?}"
             );
         }
+    }
+
+    #[test]
+    fn in_the_viewer_its_own_rows_come_first_and_close_pane_is_not_first() {
+        let r = all(&Keymap::default());
+        let t = titles(&r, &rank(&r, "close", Place::Viewer, &[]));
+        assert_eq!(t[0], "Close the viewer", "{t:?}");
+        let items = rank(&r, "copy", Place::Viewer, &[]);
+        let Item::Row { row, .. } = &items[0] else {
+            panic!()
+        };
+        assert_eq!(r[*row].group, "Viewer");
+        // Elsewhere, Close pane is found as before.
+        let t = titles(&r, &rank(&r, "close", Place::Files, &[]));
+        assert!(t[..2].contains(&"Close pane".to_string()), "{t:?}");
     }
 
     #[test]

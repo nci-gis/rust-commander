@@ -1393,6 +1393,23 @@ fn help_and_the_man_page_say_f1_is_commands() {
     }
 }
 
+/// In the viewer, "close" and Enter is the viewer's own Close, which says its key and
+/// does nothing: never Close pane, which closed the viewer and then the pane.
+#[test]
+fn close_typed_in_the_viewers_f1_closes_no_pane() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,F3,F1,c,l,o,s,e,Enter", &a, &b);
+    assert!(commands_box(&s).is_some(), "stays open\n{s}");
+    let last = commands_last_line(&s);
+    assert!(last.contains("Esc \u{b7} q: the viewer's own key"), "{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,c,l,o,s,e,Enter,Esc,Esc,Esc", &a, &b);
+    assert!(!s.contains("\u{250c} view "), "{s}");
+    assert!(
+        s.contains(&sep("a")) && s.contains(&sep("b")),
+        "both panes\n{s}"
+    );
+}
+
 /// The commands run from F1 are kept beside the session, the last first, and come
 /// first in the small list next time (the owner's decision 4). Read-only modes write
 /// nothing.

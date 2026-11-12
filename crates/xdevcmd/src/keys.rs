@@ -137,7 +137,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "help",
         title: "Commands",
         group: "General",
-        about: "This screen: every key and setting",
+        about: "Every command, found by typing, with its key; Enter runs it",
         // F1 is always kept (`apply` refuses a [keys] help without it). Alt+X F1 opens it
         // from the shell, where F1 alone is the program's (owner, decision 1).
         keys: &["F1", "Alt+x F1"],

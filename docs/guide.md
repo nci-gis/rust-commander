@@ -1,7 +1,7 @@
 # Guide
 
 What xdevcmd can do, one topic at a time. Every key below is a default; press **F1** in
-xdevcmd for yours, or see [keys.md](keys.md).
+xdevcmd and type what you want to do to find yours, or see [keys.md](keys.md).
 
 - [Panes and tabs](#panes-and-tabs)
 - [Moving around](#moving-around)
@@ -211,7 +211,9 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
   where the terminal reports it) for the same menu at the cursor's row. The wheel
   scrolls.
 - **Alt+X, then an F key** does what Shift and that key do (Alt+X F8 is Shift+F8), for
-  terminals that do not send Shift+F keys, like macOS Terminal.app.
+  terminals that do not send Shift+F keys, like macOS Terminal.app. The exception is
+  **Alt+X F1**, which opens F1 (Commands) from anywhere, the shell included; Usage
+  (Shift+F1) is a row in F1 and in the Help menu.
 - The bar on a long list's right border scrolls too: drag it, or click where to go.
 - In the viewer, drag over lines to select them; **y** copies them, **Esc** lets go.
   For part of a line, use your terminal's own selection (usually **Shift**+drag).
@@ -234,6 +236,23 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
   Rows marked *next start* apply after a restart. The Keys tab says how to rebind keys.
   In read-only and restricted mode it shows the settings but saves nothing.
 - **View → Theme…** tries a theme at once.
-- **F1** lists every key and setting.
+- **F1, Commands**: every command, found by typing, with its key beside it. Type a few
+  letters of a name ("cop" finds Copy, "sbn" Sort by name), a group's name ("sort"), or
+  a key itself ("f5", "alt+j"); ↑/↓ choose, **Enter** runs it on the pane you were in,
+  and the status line says the key for next time. **Alt+1…9** runs the first nine rows
+  (digits alone are typed). With nothing typed, the commands you ran last come first,
+  then those for where you are, then the rest under "elsewhere". **F1** again makes it
+  the whole window, the commands by group to browse (on a small screen it stays small);
+  **Esc** clears what you typed, then closes. Rows that cannot run say why: a mouse
+  gesture, the viewer's own key, or a mode that turns the command off. Your
+  `[[menu]]` commands are there too, under "Your commands".
+- In the shell, F1 is the program's: **Alt+X F1** opens Commands there. A file pane's
+  command run from the shell acts on the file pane you came from; the shell's own
+  (split, new tab) act on the shell. Over the viewer, F1 lists the viewer's keys first,
+  and Esc gives the viewer back.
+- **Help → Config in use** shows the config file as it is in effect, read-only: whether
+  it was loaded (or IGNORED, and why), the mode, and every setting, `•` on what differs
+  from the default. Type to filter; a `[section]`'s name keeps the whole section.
 - **Shift+F1** shows what xdevcmd is using: memory, CPU, and whether memory keeps growing.
+  It is in F1 and in the Help menu too, for terminals with no Shift+F1.
 - **Shift+F9** runs your own commands. See [config.md](config.md#your-own-commands).

@@ -11,6 +11,16 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **F1 is Commands: every command, found by typing, with its key.** Type a few letters
+  of a name, a group's name or a key ("f5"), and Enter runs it on the pane you were in;
+  the status line then says the key for next time. Alt+1…9 run the first nine rows.
+  With nothing typed, the commands you ran last (kept across restarts, 8 of them) come
+  first, then those for where you are. F1 again makes it the whole window, the
+  commands by group as F1 was before. Your `[[menu]]` commands, Settings…, Theme… and
+  About are rows too; mouse gestures and the viewer's keys are listed to read. Over the
+  viewer, F1 lists the viewer's keys and Esc gives it back.
+- **Help → Config in use**: the config in effect in its own read-only window, with a
+  filter; what F1's Settings tab showed, `[keys]` included.
 - **A slow directory no longer freezes the screen.** A directory that takes more than
   150 ms to read (a network mount, a sleeping disk, a huge folder) is read in the
   background: the pane keeps what it showed, a bar on its bottom edge names what is
@@ -62,6 +72,12 @@ that heading and starts a new, empty one here. -->
   menus need the room.
 
 ### Changed
+- **F1 opens Commands, not a screen of keys and settings**; the settings are in Help →
+  Config in use, and the Help menu is Commands… · Config in use · Usage · About.
+- **Alt+X F1 opens F1**, from the shell too (where F1 alone stays the program's). It was
+  Usage's second key; Usage keeps Shift+F1 and is a row in F1 and the Help menu.
+  `[keys] usage = ["Shift+F1", "Alt+x F1"]` brings the old key back.
+- **`[keys] help` must keep F1**: a config that takes it away is refused, saying so.
 - **Names sort as people read them, in any script.** Case, accents and width no longer
   split letters (`Éclair` with `eclair`, `Ölfeld` with `öl`, full-width `ｆｉｌｅ２` with
   `file2`, its `２` a number); katakana sort with hiragana and voiced kana with plain

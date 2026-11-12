@@ -39,7 +39,8 @@ The bash version is tested. The fish and PowerShell versions have not been run y
 - **Inside the terminal, xdevcmd takes only F12, Shift+F12 and Alt+X**; every other key
   is the program's. Alt+X, then a terminal key (Alt+S split, Alt+W close, Alt+N new tab,
   Alt+1…9 tab N) acts on the shell; anything else after Alt+X, Enter too, goes to the
-  program with it; Esc cancels.
+  program with it; Esc cancels. **Alt+X F1** opens F1, Commands, where F1 alone is the
+  program's (mc, htop and emacs use it).
 - **The mouse inside the terminal** is the program's when it asked for it (vim with
   `mouse=a`, htop, Claude Code): clicks, drags and the wheel are reported to it, as a
   terminal would. Otherwise a click only gives the shell focus, and the wheel scrolls

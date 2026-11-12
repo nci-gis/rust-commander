@@ -423,6 +423,25 @@ objects**, and nothing waits on them.
   - Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · ─ · About.
   - The two "F1 › Settings" messages and Shift+F9's "(F1, Settings)" now name
     Help › Config in use.
+- **2026-11-12, step 6: docs** (`docs/guide.md`, `docs/config.md`, `docs/shell.md`,
+  `docs/troubleshooting.md`, `docs/keys.md` from `--print-keys`, CHANGELOG).
+  - Help's row: "Every command, found by typing, with its key; Enter runs it" (it said
+    "This screen: every key and setting"). guide: F1 Commands, Alt+X F1, over the
+    viewer, Config in use, and Alt+X F1 as the exception to "Alt+X then an F key is
+    Shift+F"; config: `help` keeps F1, where the `[keys]` names are now, Config in use;
+    shell: Alt+X F1; troubleshooting (Terminal.app): Usage is reached through F1 or the
+    Help menu. README names no F1: unchanged. CHANGELOG Unreleased: Added (Commands,
+    Config in use), Changed (F1, Alt+X F1, `help` keeps F1).
+  - The Kitty, iTerm2 and sixel pty tests: any modal hides the picture, the small F1
+    included; the two Kitty ones pass unchanged, the sixel one only needed its wait
+    text (step 2).
+  - **Measured** (this machine, 2 CPUs):
+    - opening F1 (rows built, first list): 127 real rows + 20 `[[menu]]` = 147 rows,
+      0.68–0.93 ms debug, 0.15 ms release (`opening_f1_takes_well_under_a_frame`, best
+      of 5). The kickoff's "~200 rows" was high: the list is 127 without `[[menu]]`.
+    - ranking per key: 2,000 rows 2.2 ms debug, 0.28 ms release.
+    - release binary: 5,209,112 bytes at the kickoff (fd410e9), 5,292,824 now:
+      **+83,712 bytes (+82 KiB, +1.6 %)**; the 7 MB budget holds (5.05 MB).
 
 ## Check
 

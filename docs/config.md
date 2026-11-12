@@ -16,7 +16,8 @@ wins: `$XDEVCMD_CONFIG`,
 `~/.config/xdevcmd/config.toml`.
 
 **If the file has a mistake**, xdevcmd ignores the whole file, starts with the defaults,
-and the status line names the problem. **F1 → Settings** shows what is in use.
+and the status line names the problem. **Help → Config in use** shows what is in use,
+and why a file was ignored.
 
 **File → Settings…** inside xdevcmd changes the common settings and saves them here,
 writing only the lines that changed. Everything else, keys included, is set in this
@@ -210,7 +211,12 @@ copy = ["F5", "Ctrl+c"]   # F5 or Ctrl+C (naming an action replaces all its keys
 ```
 
 Naming an action replaces all of its default keys. The names are in
-`xdevcmd --print-config` and on the F1 screen.
+`xdevcmd --print-config`, and F1's large size (F1, F1) names the selected command's on
+its last line (`[keys] copy`); a key you changed has a `•` there.
+
+`help` always keeps **F1**: `help = ["F1", "Ctrl+F1"]` adds a key beside it, and a
+`help` without F1 is an error that says so. Keys added act in the file panes; inside the
+shell F1 is the program's, and xdevcmd's F1 there is **Alt+X F1**.
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
 Left. Bindings that start with the same key form a group, and there is no time limit

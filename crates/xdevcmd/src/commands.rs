@@ -1730,4 +1730,40 @@ mod tests {
         assert!(known("copy", &menu) && known("about", &menu) && known("menu:say it", &menu));
         assert!(!known("coppy", &menu) && !known("menu:gone", &menu));
     }
+
+    /// Opening F1 builds its rows from the keymap and the config, then lists them:
+    /// measured on the real list (127 rows: 87 bindings, 3 menu-only commands, 37
+    /// read-only) plus twenty `[[menu]]` entries.
+    #[test]
+    fn opening_f1_takes_well_under_a_frame() {
+        let km = Keymap::default();
+        let menu: Vec<MenuItem> = (0..20)
+            .map(|i| MenuItem {
+                key: String::new(),
+                label: format!("command {i}"),
+                command: "echo %f".into(),
+            })
+            .collect();
+        let best = (0..5)
+            .map(|_| {
+                let t = std::time::Instant::now();
+                let r = rows(&km, &menu, |_| None);
+                let n = r.len();
+                let c = Commands::new(
+                    r,
+                    Place::Files,
+                    vec!["copy".into()],
+                    Vec::new(),
+                    Size::Small,
+                    ratatui::layout::Rect::new(0, 0, 118, 34),
+                );
+                std::hint::black_box(&c);
+                (t.elapsed(), n)
+            })
+            .min()
+            .unwrap();
+        eprintln!("opening F1 with {} rows: {:?}", best.1, best.0);
+        assert!(best.1 >= 140, "{}", best.1);
+        assert!(best.0.as_millis() < 16, "{:?}", best.0);
+    }
 }

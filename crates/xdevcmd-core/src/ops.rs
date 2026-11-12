@@ -2800,8 +2800,10 @@ mod tests {
             panic!("{t:?}");
         };
         let uid = rustix::process::getuid().as_raw();
+        // The top of that volume: /dev/shm, or what XDEVCMD_TEST_OTHER_DEV names.
+        let top = other.parent().unwrap().to_path_buf();
         assert!(
-            file.starts_with(format!("/dev/shm/.Trash-{uid}/files")),
+            file.starts_with(top.join(format!(".Trash-{uid}/files"))),
             "{file:?}"
         );
         let record = fs::read_to_string(info).unwrap();
@@ -2811,7 +2813,7 @@ mod tests {
         assert_eq!(fs::read(&f).unwrap(), b"v");
         fs::remove_dir_all(&other).unwrap();
         // Leave no trash directory behind if this test made it (only empty ones go).
-        let trash = PathBuf::from(format!("/dev/shm/.Trash-{uid}"));
+        let trash = top.join(format!(".Trash-{uid}"));
         let _ = fs::remove_dir(trash.join("files"));
         let _ = fs::remove_dir(trash.join("info"));
         let _ = fs::remove_dir(&trash);

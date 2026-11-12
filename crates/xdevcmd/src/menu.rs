@@ -71,8 +71,9 @@ pub enum Cmd {
     TabList(crate::pane::terms::TabId),
     /// The menu on a terminal tab: close it, every shell in it.
     TabClose(crate::pane::terms::TabId),
-    /// A confirmed synchronisation plan: each source and the directory it goes into.
-    Sync(Vec<(PathBuf, PathBuf)>),
+    /// A confirmed synchronisation plan: each source, the directory it goes into, and
+    /// what the compare found where it goes (replaced only while it is still that).
+    Sync(Vec<(PathBuf, PathBuf, xdevcmd_core::ops::Expect)>),
     /// Quit even though jobs are still running: they are cancelled first.
     QuitAnyway,
     /// Quit now, though cancelled jobs have not finished stopping (a hung drive).

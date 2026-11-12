@@ -292,6 +292,11 @@ pub trait Hooks {
     fn durable(&mut self, _dst: &Path) -> bool {
         true
     }
+    /// Right before replacing `dst`: an error if it is no longer the file the user
+    /// agreed to replace (it is then kept, and the entry reported).
+    fn recheck(&mut self, _dst: &Path) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Where `rel` goes under `dest`, refusing a path whose existing directories include a
@@ -474,7 +479,10 @@ fn write_entry(
         };
         if !free {
             // Synced, then renamed over the old file (ops::commit_replace).
-            return crate::ops::commit_replace(file, &part, dst, || Ok(hooks.durable(dst)));
+            return crate::ops::commit_replace(file, &part, dst, || {
+                hooks.recheck(dst)?;
+                Ok(hooks.durable(dst))
+            });
         }
         drop(file);
         {
@@ -642,7 +650,12 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
             .open(&part)
             .and_then(|f| {
                 let existing = dest.symlink_metadata().is_ok();
-                crate::ops::commit_replace(f, &part, dest, || Ok(!existing || hooks.durable(dest)))
+                crate::ops::commit_replace(f, &part, dest, || {
+                    if existing {
+                        hooks.recheck(dest)?;
+                    }
+                    Ok(!existing || hooks.durable(dest))
+                })
             })
             .map(|_| ())
             .inspect_err(|_| {

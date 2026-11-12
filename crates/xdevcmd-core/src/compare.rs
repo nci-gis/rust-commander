@@ -39,6 +39,10 @@ pub enum State {
     /// only on the other side, there, may have its twin among them, so it is not planned.
     /// The directory's own row carries the first error; each such name is a row too.
     Incomplete(Side),
+    /// A name on one side whose twin on the other differs only in case, on a volume
+    /// that ignores case (macOS, Windows): to that volume they are one file, so copying
+    /// either way would replace the other. Left to a person, never planned.
+    CaseClash,
 }
 
 impl State {
@@ -60,6 +64,9 @@ pub struct Diff {
     pub state: State,
     /// Why, for [`State::Unreadable`], [`State::Missing`] and an incomplete directory.
     pub error: Option<String>,
+    /// What each side held when compared: what a plan expects to find there.
+    pub left: Option<crate::ops::Ident>,
+    pub right: Option<crate::ops::Ident>,
 }
 
 const SLACK_SECS: u64 = 2;
@@ -200,18 +207,20 @@ impl Walk<'_> {
                 } else {
                     State::Unreadable(s)
                 };
-                Diff {
+                Box::new(Diff {
                     rel: rel.to_path_buf(),
                     is_dir: true,
                     state,
                     error: Some(e.to_string()),
-                }
+                    left: None,
+                    right: None,
+                })
             })
         };
         match (side(l, Side::Left), side(r, Side::Right)) {
             (Ok(le), Ok(re)) => self.merge(l, r, rel, le, re, out),
             // One row for the whole subtree: neither side's entries under it are planned.
-            (Err(d), _) | (_, Err(d)) => out.push(d),
+            (Err(d), _) | (_, Err(d)) => out.push(*d),
         }
     }
 
@@ -236,6 +245,8 @@ impl Walk<'_> {
                     is_dir: true,
                     state: State::Incomplete(s),
                     error: Some(why.clone()),
+                    left: None,
+                    right: None,
                 });
             }
         }
@@ -243,12 +254,22 @@ impl Walk<'_> {
         let (left_whole, right_whole) = (le.incomplete.is_none(), re.incomplete.is_none());
         let (le, re) = (le.entries, re.entries);
         let rel = |n: &OsString| prefix.join(n);
-        let row = |rel: PathBuf, is_dir: bool, state: State| Diff {
+        let id = |m: &fs::Metadata| Some(crate::ops::Ident::of(m));
+        let row = |rel: PathBuf,
+                   is_dir: bool,
+                   state: State,
+                   left: Option<crate::ops::Ident>,
+                   right: Option<crate::ops::Ident>| Diff {
             rel,
             is_dir,
             state,
             error: None,
+            left,
+            right,
         };
+        // A name only on one side that the other side still finds: the other volume
+        // ignores case, and holds it under another case. One lookup per such name.
+        let clash = |other: &Path, n: &OsString| other.join(n).symlink_metadata().is_ok();
         let (mut i, mut j) = (0, 0);
         while i < le.len() || j < re.len() {
             let order = match (le.get(i), re.get(j)) {
@@ -259,22 +280,26 @@ impl Walk<'_> {
             match order {
                 std::cmp::Ordering::Less => {
                     let (n, m) = &le[i];
-                    let state = if right_whole {
-                        State::LeftOnly
-                    } else {
+                    let state = if !right_whole {
                         State::Incomplete(Side::Right)
+                    } else if clash(r, n) {
+                        State::CaseClash
+                    } else {
+                        State::LeftOnly
                     };
-                    out.push(row(rel(n), m.is_dir(), state));
+                    out.push(row(rel(n), m.is_dir(), state, id(m), None));
                     i += 1;
                 }
                 std::cmp::Ordering::Greater => {
                     let (n, m) = &re[j];
-                    let state = if left_whole {
-                        State::RightOnly
-                    } else {
+                    let state = if !left_whole {
                         State::Incomplete(Side::Left)
+                    } else if clash(l, n) {
+                        State::CaseClash
+                    } else {
+                        State::RightOnly
                     };
-                    out.push(row(rel(n), m.is_dir(), state));
+                    out.push(row(rel(n), m.is_dir(), state, None, id(m)));
                     j += 1;
                 }
                 std::cmp::Ordering::Equal => {
@@ -284,10 +309,10 @@ impl Walk<'_> {
                         if deep {
                             self.walk(&l.join(n), &r.join(n), &rel(n), out);
                         } else {
-                            out.push(row(rel(n), true, State::Same));
+                            out.push(row(rel(n), true, State::Same, id(a), id(b)));
                         }
                     } else if a.is_dir() != b.is_dir() {
-                        out.push(row(rel(n), false, State::Conflict));
+                        out.push(row(rel(n), false, State::Conflict, id(a), id(b)));
                     } else {
                         let state = match newer(stamp(a), stamp(b)) {
                             std::cmp::Ordering::Greater => State::LeftNewer,
@@ -295,7 +320,7 @@ impl Walk<'_> {
                             std::cmp::Ordering::Equal if a.len() != b.len() => State::Conflict,
                             std::cmp::Ordering::Equal => State::Same,
                         };
-                        out.push(row(rel(n), false, state));
+                        out.push(row(rel(n), false, state, id(a), id(b)));
                     }
                     i += 1;
                     j += 1;
@@ -305,19 +330,31 @@ impl Walk<'_> {
     }
 }
 
-/// What synchronising both ways copies: (source, directory to copy it into). Nothing
-/// that could not be decided ([`State::unknown`]) is ever in it.
-pub fn plan(left: &Path, right: &Path, diffs: &[Diff]) -> Vec<(PathBuf, PathBuf)> {
+/// What synchronising both ways copies: (source, directory to copy it into, what the
+/// compare found where it goes). Nothing that could not be decided ([`State::unknown`])
+/// or needs a person (a conflict, a case clash) is ever in it.
+pub fn plan(
+    left: &Path,
+    right: &Path,
+    diffs: &[Diff],
+) -> Vec<(PathBuf, PathBuf, crate::ops::Expect)> {
+    use crate::ops::Expect;
     let parent = |root: &Path, rel: &Path| match rel.parent() {
         Some(p) => root.join(p),
         None => root.to_path_buf(),
     };
+    let expect = |there: Option<crate::ops::Ident>| match there {
+        Some(id) => Expect::Replace(id),
+        None => Expect::Absent,
+    };
     diffs
         .iter()
         .filter_map(|d| match d.state {
-            State::LeftOnly | State::LeftNewer => Some((left.join(&d.rel), parent(right, &d.rel))),
+            State::LeftOnly | State::LeftNewer => {
+                Some((left.join(&d.rel), parent(right, &d.rel), expect(d.right)))
+            }
             State::RightOnly | State::RightNewer => {
-                Some((right.join(&d.rel), parent(left, &d.rel)))
+                Some((right.join(&d.rel), parent(left, &d.rel), expect(d.left)))
             }
             _ => None,
         })
@@ -379,7 +416,10 @@ mod tests {
         );
         assert_eq!(state("rdir/inner"), None);
 
-        let p = plan(&l, &r, &got);
+        let p: Vec<_> = plan(&l, &r, &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
         assert!(p.contains(&(l.join("newer"), r.clone())));
         assert!(p.contains(&(l.join("sub/deep"), r.join("sub"))));
         assert!(p.contains(&(r.join("rdir"), l.clone())));
@@ -455,7 +495,10 @@ mod tests {
             crate::faults::Fault::Os(13),
         );
         let got = diffs(&d);
-        let p = plan(&d.join("l"), &d.join("r"), &got);
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
         assert!(
             !p.iter().any(|(s, _)| s.starts_with(d.join("l/sub"))),
             "nothing under it is planned: {p:?}"
@@ -486,7 +529,10 @@ mod tests {
         fs::set_permissions(d.join("r/sub"), fs::Permissions::from_mode(0o000)).unwrap();
         let got = diffs(&d);
         fs::set_permissions(d.join("r/sub"), fs::Permissions::from_mode(0o755)).unwrap();
-        let p = plan(&d.join("l"), &d.join("r"), &got);
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
         assert!(p.is_empty(), "{p:?}");
         assert!(
             got.iter()
@@ -512,7 +558,10 @@ mod tests {
         fs::write(d.join("l").join(b), "fe").unwrap();
         let got = diffs(&d);
         assert_eq!(got.len(), 2, "{got:?}");
-        let p = plan(&d.join("l"), &d.join("r"), &got);
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
         assert_eq!(p.len(), 2);
         for (src, _) in &p {
             assert!(
@@ -541,7 +590,10 @@ mod tests {
             crate::faults::Fault::Os(5),
         );
         let got = diffs(&d);
-        let p = plan(&d.join("l"), &d.join("r"), &got);
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
         assert!(
             p.is_empty(),
             "nothing one-sided is planned where the left is unknown: {p:?}"
@@ -559,6 +611,31 @@ mod tests {
         let d = scratch("root");
         let e = compare(&d.join("l"), &d.join("gone"), true, false).unwrap_err();
         assert!(e.to_string().contains("gone"), "{e}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// `A.txt` on the left and `a.txt` on the right, on a volume that ignores case
+    /// (macOS, Windows): one file to it. Not "only left" and "only right", which a sync
+    /// would copy each over the other, losing one; a clash left to a person. On a
+    /// volume that keeps case apart there is nothing to find and this test says so.
+    #[test]
+    fn names_that_differ_only_in_case_are_a_clash_where_case_is_ignored() {
+        let d = scratch("case");
+        fs::write(d.join("l/A.txt"), "upper").unwrap();
+        fs::write(d.join("r/a.txt"), "lower").unwrap();
+        if !d.join("r/A.TXT").exists() {
+            eprintln!("skipped: {} keeps case apart", d.display());
+            let got = diffs(&d);
+            assert_eq!(plan(&d.join("l"), &d.join("r"), &got).len(), 2);
+            let _ = fs::remove_dir_all(&d);
+            return;
+        }
+        let got = diffs(&d);
+        assert!(plan(&d.join("l"), &d.join("r"), &got).is_empty(), "{got:?}");
+        assert!(
+            got.iter().all(|x| format!("{:?}", x.state) == "CaseClash"),
+            "{got:?}"
+        );
         let _ = fs::remove_dir_all(&d);
     }
 }

@@ -206,6 +206,9 @@ impl App {
                 State::Conflict => {
                     format!("\u{2260} {rel}  same time, different size \u{2014} left alone")
                 }
+                State::CaseClash => format!(
+                    "\u{2260} {rel}{slash}  same name, different case on the other side \u{2014} left alone"
+                ),
                 State::Same => continue,
                 State::Unreadable(s) => {
                     unknown += 1;

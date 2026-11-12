@@ -720,6 +720,45 @@ the fix, kept here because the commit carries test and fix together.
   `a_directory_that_cannot_be_read_is_shown_in_the_plan_not_taken_for_empty` (the seam
   through `XDEVCMD_FAULTS` in the real binary: row, title count, "cannot compare").
 
+### 2026-11-13, step 5: B05, the file agreed to is the file replaced
+
+- `ops::Ident` (kind, size, mtime; Unix `(dev, ino)`, elsewhere the creation time) and
+  `ops::Expect { Absent, Replace(Ident) }`, both public.
+- `resolve_conflict` takes the `Ident` of what it shows in the question and keeps it
+  (`Worker::agreed`) on Yes; "Replace all" and Update stay rules, re-applied to whatever
+  is there. `Worker::still_agreed` runs right before the replace: in `commit_replace`'s
+  `ready` (before the journal's sync and the rename) and before `move_into`'s same-device
+  `fs::rename`. A different file (or none) marks it `changed` and goes back to the
+  question, now `Question::Conflict { changed: true, .. }`, drawn as "Already exists, and
+  changed … It changed since you answered or since the plan was made: asked again."
+  Kept, not consumed, so a move that falls back to copying checks it again at the copy.
+  Archive extract and pack: a new `Hooks::recheck`; a changed target is kept and the
+  entry reported failed ("it changed since you answered — kept as it is") rather than
+  asked again (the archive walk has no loop back to a question; small, said here).
+- Sync: `Request::sync(Vec<(src, into, Expect)>)` fills `Request::expect` (destination →
+  expectation); `overwrite_confirmed` and the worker's `planned` (every destination
+  that existed when the job started) are gone. A destination is replaced unasked only
+  when it is still the `Ident` the compare saw; `Absent` and anything else there is
+  asked, as changed. `compare::Diff` carries `left`/`right` idents; `plan` returns the
+  triple; `Cmd::Sync` carries it.
+- Case clashes (decision 8): a one-sided name is looked up on the other side (one
+  `symlink_metadata`); found means the volume ignores case: `State::CaseClash`, shown
+  "≠ name  same name, different case on the other side — left alone", never planned.
+- Failing first (against the step-4 commit):
+  - **the fault test** `a_file_replaced_after_the_user_agreed_is_asked_about_again` (the
+    seam's `Swap` at the replacement's `SyncData`, after the Yes): one question only,
+    the other program's file overwritten.
+  - `a_move_onto_a_file_replaced_after_the_user_agreed_asks_again`: one question, the
+    replaced file overwritten by the rename.
+  - `a_file_made_where_the_plan_saw_none_is_asked_about` (run there with the old
+    two-element `Request::sync`): asked 0 times, overwritten.
+  - `names_that_differ_only_in_case_are_a_clash_where_case_is_ignored`: **not run
+    here** (Linux, case-sensitive: it skips and checks the plain plan); it runs on the
+    macOS and Windows runners, whose temporary directories ignore case.
+- What cannot be closed: between the re-check and the rename another program can still
+  replace the target (no portable compare-and-rename); microseconds instead of the whole
+  copy. For the contract (pillar 3).
+
 ## Check
 
 ## Act

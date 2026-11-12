@@ -317,15 +317,28 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
             path,
             existing_bytes,
             incoming_bytes,
-        } => (
-            "Already exists".to_string(),
-            vec![
+            changed,
+        } => {
+            let mut body = vec![
                 path.display().to_string(),
                 String::new(),
                 format!("on disk   {}", human_size(*existing_bytes)),
                 format!("incoming  {}", human_size(*incoming_bytes)),
-            ],
-        ),
+            ];
+            if *changed {
+                body.push(String::new());
+                body.push(
+                    "It changed since you answered or since the plan was made: asked again."
+                        .to_string(),
+                );
+            }
+            let title = if *changed {
+                "Already exists, and changed"
+            } else {
+                "Already exists"
+            };
+            (title.to_string(), body)
+        }
         Question::CrossDevice { path } => (
             "Different filesystem".to_string(),
             vec![

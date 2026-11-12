@@ -88,9 +88,11 @@ pub struct Request {
     /// Copy each source into its own directory (synchronising): `(source, into)`.
     /// Directories are created as needed. When set, `sources` and `dest` are unused.
     pub pairs: Vec<(PathBuf, PathBuf)>,
-    /// Overwrites were listed in a plan the user confirmed, so they are not asked
-    /// about one by one. Only a plan that names every overwrite may set this.
-    pub overwrite_confirmed: bool,
+    /// Synchronising: what the confirmed plan expected at each destination (the path a
+    /// pair's source is copied to). A destination is replaced without a question only
+    /// when it is still the file the plan saw ([`Expect::Replace`]); anything else there
+    /// (a file where the plan saw none, one changed since) is asked about.
+    pub expect: std::collections::HashMap<PathBuf, Expect>,
     /// Copy and move: what to do with files already at the destination.
     pub existing: Existing,
     /// Safe operations for this job, taken from the setting when the request is made
@@ -112,12 +114,17 @@ impl Request {
             ..Self::delete(Vec::new(), false)
         }
     }
-    /// Copy each `(source, into)`, overwriting what the confirmed plan said it would.
-    pub fn sync(pairs: Vec<(PathBuf, PathBuf)>) -> Self {
+    /// Copy each `(source, into, expected)`, replacing what the confirmed plan said it
+    /// would, and only while it is what the plan saw.
+    pub fn sync(pairs: Vec<(PathBuf, PathBuf, Expect)>) -> Self {
+        let expect = pairs
+            .iter()
+            .filter_map(|(src, into, e)| Some((into.join(src.file_name()?), *e)))
+            .collect();
         Self {
             kind: Kind::Copy,
-            pairs,
-            overwrite_confirmed: true,
+            pairs: pairs.into_iter().map(|(s, i, _)| (s, i)).collect(),
+            expect,
             ..Self::delete(Vec::new(), false)
         }
     }
@@ -143,7 +150,7 @@ impl Request {
             inner: Vec::new(),
             base: String::new(),
             pairs: Vec::new(),
-            overwrite_confirmed: false,
+            expect: Default::default(),
             existing: Existing::Ask,
             safe: safe(),
         }
@@ -160,7 +167,7 @@ impl Request {
             inner: Vec::new(),
             base: String::new(),
             pairs: Vec::new(),
-            overwrite_confirmed: false,
+            expect: Default::default(),
             existing: Existing::Ask,
             safe: safe(),
         }
@@ -177,20 +184,76 @@ impl Request {
             inner: Vec::new(),
             base: String::new(),
             pairs: Vec::new(),
-            overwrite_confirmed: false,
+            expect: Default::default(),
             existing: Existing::Ask,
             safe: safe(),
         }
     }
 }
 
+/// Which file a decision was about: enough to tell, right before the step it allowed,
+/// that the file there is still that one. Kind, size and modification time; on Unix the
+/// device and inode too, on Windows the creation time (std has no stable file index).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ident {
+    kind: u8,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    node: (u64, u64),
+    #[cfg(not(unix))]
+    created: Option<std::time::SystemTime>,
+}
+
+impl Ident {
+    pub fn of(m: &fs::Metadata) -> Self {
+        let t = m.file_type();
+        Self {
+            kind: if t.is_symlink() {
+                2
+            } else if t.is_dir() {
+                1
+            } else if t.is_file() {
+                0
+            } else {
+                3
+            },
+            len: m.len(),
+            modified: m.modified().ok(),
+            #[cfg(unix)]
+            node: {
+                use std::os::unix::fs::MetadataExt;
+                (m.dev(), m.ino())
+            },
+            #[cfg(not(unix))]
+            created: m.created().ok(),
+        }
+    }
+
+    /// What is at `p` now (a link as itself), if anything.
+    pub fn at(p: &Path) -> Option<Self> {
+        fs::symlink_metadata(p).ok().map(|m| Self::of(&m))
+    }
+}
+
+/// What a synchronisation plan saw at a destination when the user confirmed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect {
+    /// Nothing: the copy is new there.
+    Absent,
+    /// This file, which the copy replaces.
+    Replace(Ident),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Question {
-    /// The destination already exists.
+    /// The destination already exists. `changed`: it is not the file the user agreed
+    /// to replace, or the one the plan saw (replaced, or made, since): asked again.
     Conflict {
         path: PathBuf,
         existing_bytes: u64,
         incoming_bytes: u64,
+        changed: bool,
     },
     /// A move would cross a filesystem boundary, so it becomes a copy then a delete.
     CrossDevice { path: PathBuf },
@@ -327,7 +390,9 @@ pub fn start(req: Request) -> Handle {
             resuming: false,
             cross_all: false,
             trash_all: false,
-            planned: None,
+            expect: Default::default(),
+            agreed: None,
+            changed: None,
             abort: false,
             bytes_done: 0,
             last_report: 0,
@@ -363,9 +428,14 @@ struct Worker {
     resuming: bool,
     cross_all: bool,
     trash_all: bool,
-    /// Synchronising: the destinations the confirmed plan overwrites. Only these are
-    /// replaced without asking; a file that appears elsewhere is asked about.
-    planned: Option<std::collections::HashSet<PathBuf>>,
+    /// Synchronising: [`Request::expect`].
+    expect: std::collections::HashMap<PathBuf, Expect>,
+    /// The file a decision to replace was about: the destination and what was there
+    /// when the user was asked (what they saw) or the plan was made. Checked again
+    /// right before the step that replaces it ([`Worker::still_agreed`]).
+    agreed: Option<(PathBuf, Ident)>,
+    /// A destination found changed since it was agreed to: its next question says so.
+    changed: Option<PathBuf>,
     abort: bool,
     bytes_done: u64,
     last_report: u64,
@@ -437,15 +507,7 @@ impl Worker {
             Existing::Replace => self.overwrite_all = true,
             Existing::Resume => self.resuming = true,
         }
-        if req.overwrite_confirmed {
-            self.planned = Some(
-                req.pairs
-                    .iter()
-                    .filter_map(|(src, into)| Some(into.join(src.file_name()?)))
-                    .filter(|dst| dst.symlink_metadata().is_ok())
-                    .collect(),
-            );
-        }
+        self.expect = req.expect.clone();
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
@@ -606,15 +668,27 @@ impl Worker {
     /// Decide what to do about an existing destination. `Some(true)` means go ahead.
     /// `src`: the file that would replace it, for the update rule; none for an archive.
     fn resolve_conflict(&mut self, src: Option<&Path>, dst: &Path, incoming: u64) -> Option<bool> {
-        if dst.symlink_metadata().is_err() {
+        let Some(now) = Ident::at(dst) else {
             return Some(true);
-        }
+        };
         if self.approved.as_deref() == Some(dst) {
+            // Agreed already, at the move's question: that file is still the one.
             self.approved = None;
             return Some(true);
         }
-        if self.overwrite_all || self.planned.as_ref().is_some_and(|p| p.contains(dst)) {
+        self.agreed = None;
+        // "Replace all" is a rule, not a file: applied to whatever is there.
+        if self.overwrite_all {
             return Some(true);
+        }
+        // The plan's word holds for the file it saw, and for nothing else.
+        match self.expect.get(dst) {
+            Some(Expect::Replace(id)) if *id == now && self.changed.as_deref() != Some(dst) => {
+                self.agreed = Some((dst.to_path_buf(), now));
+                return Some(true);
+            }
+            Some(_) => self.changed = Some(dst.to_path_buf()),
+            None => {}
         }
         if self.skip_all {
             return Some(false);
@@ -629,12 +703,20 @@ impl Worker {
                 Same::No => {}
             }
         }
-        let existing = fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
-        match self.ask(Question::Conflict {
+        let changed = self.changed.as_deref() == Some(dst);
+        self.changed = None;
+        // What the user is shown is what they agree to: kept, and compared again
+        // before the file is replaced.
+        let answer = self.ask(Question::Conflict {
             path: dst.to_path_buf(),
-            existing_bytes: existing,
+            existing_bytes: now.len,
             incoming_bytes: incoming,
-        }) {
+            changed,
+        });
+        if answer == Answer::Yes {
+            self.agreed = Some((dst.to_path_buf(), now));
+        }
+        match answer {
             Answer::Yes => Some(true),
             Answer::YesToAll => {
                 self.overwrite_all = true;
@@ -654,6 +736,23 @@ impl Worker {
                 None
             }
         }
+    }
+
+    /// Right before replacing `dst`: whether it is still the file that was agreed to (an
+    /// answer, the plan), or still one the update rule replaces. If not, it is marked
+    /// changed and `false`: the caller goes back to the question.
+    fn still_agreed(&mut self, src: Option<&Path>, dst: &Path) -> bool {
+        let now = Ident::at(dst);
+        let ok = match &self.agreed {
+            // Kept, not taken: a move that falls back to copying checks it again.
+            Some((p, id)) if p == dst => now == Some(*id),
+            // A rule: re-applied to what is there now.
+            _ => self.overwrite_all || !self.update || self.is_older(src, dst),
+        };
+        if !ok {
+            self.changed = Some(dst.to_path_buf());
+        }
+        ok
     }
 
     /// The update rule: `dst` is replaced only when `src` is newer (beyond a FAT drive's
@@ -934,6 +1033,8 @@ impl Worker {
                 }
                 // Taken since it was found free: round again, to the question.
                 Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
+                // Not the file agreed to any more: asked again.
+                Ok(false) if self.changed.as_deref() == Some(dst) => continue,
                 // Cancelled mid-file: copy_bytes removed what it wrote, and a file
                 // being replaced is still the old one.
                 Ok(false) => return,
@@ -1008,8 +1109,13 @@ impl Worker {
                         .and_then(|()| crate::noreplace::rename_noreplace(&target, dst))
                         .map(|()| true)
                 } else {
-                    // Removes the temporary file itself on any failure.
-                    return commit_replace(w, &target, dst, || Ok(self.durable(dst)));
+                    // Removes the temporary file itself on any failure. The file there is
+                    // checked once more right before the rename: no portable rename
+                    // compares first, so a window of microseconds is left, not the
+                    // whole copy.
+                    return commit_replace(w, &target, dst, || {
+                        Ok(self.still_agreed(Some(src), dst) && self.durable(dst))
+                    });
                 }
             }
             other => other,
@@ -1076,6 +1182,10 @@ impl Worker {
             appear_in_test(&dst);
             let r = if free {
                 crate::noreplace::rename_noreplace(src, &dst)
+            } else if !self.still_agreed(Some(src), &dst) {
+                // Changed since it was agreed to: back to the question.
+                self.approved = None;
+                continue;
             } else if !self.durable(&dst) {
                 return;
             } else {
@@ -1199,6 +1309,15 @@ impl crate::archive::Hooks for Worker {
     }
     fn durable(&mut self, dst: &Path) -> bool {
         Worker::durable(self, dst)
+    }
+    fn recheck(&mut self, dst: &Path) -> io::Result<()> {
+        if self.still_agreed(None, dst) {
+            return Ok(());
+        }
+        self.changed = None;
+        Err(io::Error::other(
+            "it changed since you answered \u{2014} kept as it is",
+        ))
     }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
@@ -2433,8 +2552,12 @@ mod tests {
         APPEAR.lock().unwrap().push(dst.join("b"));
         let (_, asked) = run_with(
             Request::sync(vec![
-                (root.join("a"), dst.clone()),
-                (root.join("b"), dst.clone()),
+                (
+                    root.join("a"),
+                    dst.clone(),
+                    Expect::Replace(Ident::at(&dst.join("a")).unwrap()),
+                ),
+                (root.join("b"), dst.clone(), Expect::Absent),
             ]),
             Answer::Skip,
         );
@@ -2444,6 +2567,120 @@ mod tests {
         );
         assert_eq!(fs::read(dst.join("a")).unwrap(), b"new a");
         assert_eq!(fs::read(dst.join("b")).unwrap(), b"theirs");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The fault test (B05): the user says Yes to replacing a file, and another program
+    /// replaces that file while the copy is written. Asked again, saying so; Skip keeps
+    /// the newcomer. Before Round 029 it was overwritten unasked.
+    #[test]
+    fn a_file_replaced_after_the_user_agreed_is_asked_about_again() {
+        let root = tmp("swap-after-yes");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("f"), b"ours").unwrap();
+        fs::write(dst.join("f"), b"the file the user saw").unwrap();
+        // At the replacement's sync: after the answer, before the rename.
+        let _g = crate::faults::set(
+            crate::faults::Point::SyncData,
+            &root.to_string_lossy(),
+            crate::faults::Action::Swap {
+                target: dst.join("f"),
+                body: b"another program's file".to_vec(),
+            },
+        );
+        let (s, asked) = run_answering(Request::copy(vec![root.join("f")], dst.clone()), |q| {
+            if format!("{q:?}").contains("changed: true") {
+                Answer::Skip
+            } else {
+                Answer::Yes
+            }
+        });
+        assert_eq!(asked.len(), 2, "asked again: {asked:?}");
+        assert!(asked[1].contains("changed: true"), "{asked:?}");
+        assert_eq!(
+            fs::read(dst.join("f")).unwrap(),
+            b"another program's file",
+            "{s:?}"
+        );
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The same on a move within one file system, whose replace is a rename.
+    #[test]
+    fn a_move_onto_a_file_replaced_after_the_user_agreed_asks_again() {
+        let root = tmp("swap-move");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("m"), b"ours").unwrap();
+        fs::write(dst.join("m"), b"seen").unwrap();
+        let target = dst.join("m");
+        let mut first = true;
+        let h = start(Request::mv(vec![root.join("m")], dst.clone()));
+        let mut asked = Vec::new();
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                Event::Ask(q) => {
+                    asked.push(format!("{q:?}"));
+                    if first {
+                        // Another program replaces it as the user answers.
+                        fs::remove_file(&target).unwrap();
+                        fs::write(&target, b"replaced meanwhile, longer").unwrap();
+                        first = false;
+                        h.answer(Answer::Yes);
+                    } else {
+                        h.answer(Answer::Skip);
+                    }
+                }
+                Event::Done(_) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert_eq!(fs::read(&target).unwrap(), b"replaced meanwhile, longer");
+        assert_eq!(
+            fs::read(root.join("m")).unwrap(),
+            b"ours",
+            "the source stays"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A file made, after Alt+Y's compare, where the plan saw nothing: asked about, not
+    /// overwritten. Before Round 029 the job took every destination that existed when
+    /// it started for one the plan named.
+    #[test]
+    fn a_file_made_where_the_plan_saw_none_is_asked_about() {
+        let root = tmp("sync-absent");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("only-left"), b"left").unwrap();
+        let req = Request::sync(vec![(root.join("only-left"), dst.clone(), Expect::Absent)]);
+        // Between the compare and Enter.
+        fs::write(dst.join("only-left"), b"made since").unwrap();
+        let (_, asked) = run_with(req, Answer::Skip);
+        assert_eq!(asked, 1);
+        assert_eq!(fs::read(dst.join("only-left")).unwrap(), b"made since");
+        // And a planned replacement whose file changed since the compare: asked too.
+        let seen = Ident::at(&dst.join("only-left")).unwrap();
+        fs::remove_file(dst.join("only-left")).unwrap();
+        fs::write(dst.join("only-left"), b"changed since the plan").unwrap();
+        let req = Request::sync(vec![(
+            root.join("only-left"),
+            dst.clone(),
+            Expect::Replace(seen),
+        )]);
+        let (_, asked) = run_with(req, Answer::Skip);
+        assert_eq!(asked, 1);
+        assert_eq!(
+            fs::read(dst.join("only-left")).unwrap(),
+            b"changed since the plan"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

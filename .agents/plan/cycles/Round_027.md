@@ -1,6 +1,6 @@
 # Round 027: Log a terminal tab to a file (v0.4.0, step 4, item 35)
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: v0.4.0, step 4 of `ROADMAP.md` ("Next"); item 35 (the owner's go,
 2026-11-12: "go ahead")
 **Date started**: 2026-11-12
@@ -157,20 +157,77 @@ without the user being told.
 
 ## Do
 
-- ...
+- **2026-11-12, kickoff** (`7fe6470`): this file; ROADMAP step 4 and item 35 → Round 027.
+- **Core `termlog.rs`** (`0ed3170`): `TextFilter` (byte-wise state machine: CSI, OSC,
+  DCS/SOS/PM/APC, two-byte ESC removed; CR, BS, `CSI K/G/C/D` edit the line, written at
+  LF; UTF-8 decoded across reads, invalid → U+FFFD; C1 dropped; lines bounded at
+  16 384 chars; the alternate screen is one line; trailing blanks trimmed). `open`
+  (`guard_write`, the root, a non-regular file refused before and after opening,
+  `append`+`create`, `0600`). `Log`: `sync_channel(256)`, a writer thread with a
+  64 KiB `BufWriter` flushed when the queue runs dry; `tap` never holds the lock while
+  waiting, waits at most 500 ms for room, then marks Failed and drops the sender;
+  a write or flush error marks Failed with the system's words; `close` waits at most a
+  given time and says which of closed / stopped / may be incomplete. Text logs get a
+  header, a footer and, after an overflow, a last line saying output after it is not
+  there; raw gets nothing added. `tests/read_only.rs` covers new and existing files.
+- **The app** (`021367b`): `TermPane` holds a log slot shared with the reader, which
+  taps each chunk before `parser.process` and calls `finish` at EOF. `TermPanel`:
+  `start_log` (refused when the tab already logs or its shell ended), `stop_log`,
+  `take_notes` (ended logs closed and said; a failure said once, kept with its mark),
+  `close_logs`; `remove`/`close_tab` end a log before the shell goes. The tab bar draws
+  `●`, or a bold `!` in `th.err`. Tab menu: Log to file… (greyed by
+  `refused(CopyAs)`) or Stop logging. `InputKind::LogTo { tab, raw }`, Tab switches;
+  the prompt's checks are Save as…'s, now one function (`typed_destination`) used by
+  both. F1: "Log tab to file…" and "Stop logging tab" in Terminal (the first titles
+  tried, "Log this tab to a file…", were cut off in the small window). The loop polls
+  notes each turn; `reap_terminals` takes them before the panel can go with its last
+  shell (found by the pty test: the "log closed" was lost when `exit` closed the last
+  shell); `close_logs` after the loop, before saving the session.
+  - Tests: render (the menu item, the prompt's title, name and label, Tab → raw); pty
+    (text: colours, a `\r` progress line kept once, header/footer, `0600`, nothing after
+    Stop; raw: bytes with CR LF; `seq 1 3000` with `scrollback = 100`, every line in
+    order; closing a tab ends its log, `exit` ends the other's; quitting flushes;
+    read-only: the menu item does nothing, F1's row says "creating files is turned
+    off", nothing written).
+- **Docs** (`62cfb19`): guide (terminal: the tab menu, Log to file…), shell.md (a new
+  section, "Logging a tab to a file"; the history's "never written to disk, unless you
+  turn on a log for that tab"), security.md (the safe-modes table; the shell panel: what
+  a log keeps, secrets, `0600`), CHANGELOG. `docs/keys.md` regenerated: unchanged (F1's
+  menu-only rows are not in it). No setting added; `docs/config.md` untouched.
+- **Measurements** (`f1badf6`, two `#[ignore]` tests): `log_throughput` (release, a real
+  pty, `yes | head -c 50000000`, 120×40, scrollback 5000), three runs each, seconds
+  until the program ended: off 16.5 / 17.6 / 18.8; text 15.4 / 15.9 / 17.5; raw 16.1 /
+  16.9 / 16.7 (about 3 MB/s in every case). The reader is bound by vt100, not the log:
+  no difference beyond the noise, and the log was closed within 0.1 ms of the program
+  ending (nothing queued). `filter_throughput`: the text filter alone, 50 MB of
+  coloured build output in 0.34 s (148 MB/s), about 50 times the reader's rate, so the
+  queue does not fill on a working disk.
 
 ## Check
 
-- [ ] Text filter: escapes, CR overwrite, split UTF-8 and escapes, long lines bounded
-- [ ] Core: 0600, append, read-only refusal, a failing sink reported, a full queue
-  reported without blocking the reader past the bound
-- [ ] Pty: start from the tab menu, colours and a `\r` line, stop, text and raw files;
-  past the scrollback; tab close ends the log; read-only refuses
-- [ ] fmt, clippy `-D warnings`, `cargo test --workspace` twice, the pty suite 3×
-- [ ] Throughput with logging off vs on
-- [ ] CI on three systems
-
-Record what you could **not** verify as explicitly as what you could.
+- [x] Text filter: escapes, CR overwrite (`CSI K` too), split UTF-8 and escapes at every
+  cut and byte by byte, invalid bytes, long lines bounded, the alternate screen
+- [x] Core: 0600, append, a link/directory refused, others-can-read warned; read-only
+  refusal (new and existing file); a failing sink → Failed "No space left on device",
+  the reader told; a stuck sink → the queue fills, Failed "did not keep up" in well
+  under the bound, `close` returns after its wait, the writer finishes once the disk
+  answers
+- [x] Pty: start from the tab menu, colours and a `\r` line, stop, text and raw; past
+  the scrollback; tab close and `exit` end the log; quit flushes; read-only refuses
+- [x] fmt --check, clippy `-D warnings` (Linux), `cargo test --workspace` twice green,
+  the pty suite three times more (105 passed each)
+- [x] Throughput with logging off vs on (above)
+- [x] CI on three systems: run 43234324692 green first time (Linux x86_64 and ARM,
+  Windows, macOS, cargo-deny, the windows-gnu/darwin cross-check); no flake seen
+- [ ] **Not verified**: Windows and macOS logging by hand (CI compiles and runs the
+  render test there; the pty tests are Unix-only and ran on Linux here, macOS in CI);
+  a real full disk (simulated by a failing writer) and a real slow disk (simulated by
+  a blocked one); the `!` mark drawn (no test forces a failure in the running app);
+  F1's Stop logging row run end to end; clippy for windows-gnu and darwin (targets not
+  installed here; CI's cross-check is `cargo check`); a ConPTY-fed raw log replayed.
+  The 500 ms wait means a disk stalled that long briefly holds the shell's output
+  (and, on Windows, ConPTY's cursor answers) before the log gives up: by design,
+  bounded, not measured on Windows.
 
 ## Act
 

@@ -84,29 +84,64 @@ pub fn open(path: &Path) -> io::Result<(File, bool)> {
             "outside the root xdevcmd is confined to",
         ));
     }
-    let existed = match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_file() => true,
-        Ok(_) => {
-            return Err(io::Error::other(
-                "not a regular file \u{2014} choose another name",
-            ))
+    let (f, existed) = open_append(path)?;
+    Ok((f, existed))
+}
+
+fn not_regular() -> io::Error {
+    io::Error::other("not a regular file \u{2014} choose another name")
+}
+
+/// The file itself, with nothing between a look and the open for something to be
+/// swapped into: a new file is made with `create_new` (`O_EXCL`, which never follows a
+/// link nor opens what is there); an existing one is opened for appending with
+/// `O_NOFOLLOW` (a link is refused, not followed) and `O_NONBLOCK` (a FIFO with nobody
+/// reading fails at once instead of blocking the UI thread; one with a reader opens and
+/// is refused by the check below). `O_NONBLOCK` stays set: it changes nothing for a
+/// regular file, whose writes never return "would block". Then `fstat`: anything but a
+/// regular file is refused. Windows: an existing name is opened with
+/// `FILE_FLAG_OPEN_REPARSE_POINT`, so a link is opened as itself and then refused as
+/// not a regular file (not tested on Windows).
+fn open_append(path: &Path) -> io::Result<(File, bool)> {
+    let opts = |create: bool| {
+        let mut o = OpenOptions::new();
+        if create {
+            o.write(true).create_new(true);
+        } else {
+            o.append(true);
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            o.mode(0o600);
+            o.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+            o.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        }
+        o
+    };
+    let (f, existed) = match opts(true).open(path) {
+        Ok(f) => (f, false),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => match opts(false).open(path) {
+            Ok(f) => (f, true),
+            #[cfg(unix)]
+            Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+                return Err(io::Error::other(
+                    "a link \u{2014} choose the file itself or another name",
+                ))
+            }
+            #[cfg(unix)]
+            Err(e) if e.raw_os_error() == Some(libc::ENXIO) => return Err(not_regular()),
+            Err(e) => return Err(e),
+        },
         Err(e) => return Err(e),
     };
-    let mut opts = OpenOptions::new();
-    opts.append(true).create(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        opts.mode(0o600);
-    }
-    let f = opts.open(path)?;
-    // Swapped for something else between the look and the open: refused all the same.
     if !f.metadata()?.is_file() {
-        return Err(io::Error::other(
-            "not a regular file \u{2014} choose another name",
-        ));
+        return Err(not_regular());
     }
     Ok((f, existed))
 }
@@ -853,6 +888,45 @@ mod tests {
         f.write_all(b"two\n").unwrap();
         drop(f);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "one\ntwo\n");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Run `f` on another thread and require an answer within two seconds: a FIFO
+    /// opened for writing without `O_NONBLOCK` blocks until someone reads it.
+    #[cfg(unix)]
+    fn within_2s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(Duration::from_secs(2)).ok()
+    }
+
+    /// The open itself refuses what could be swapped in after any look at the name: a
+    /// link is not followed and a FIFO does not block (nobody reading it), and neither
+    /// is opened as a log.
+    #[cfg(unix)]
+    #[test]
+    fn the_open_refuses_a_fifo_and_a_link_without_hanging() {
+        let d = scratch("race");
+        let fifo = d.join("fifo");
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+        assert!(made.is_ok_and(|s| s.success()), "mkfifo");
+        let p = fifo.clone();
+        let got = within_2s(move || open_append(&p).map(|_| ()));
+        if got.is_none() {
+            // Unblock the stuck open before failing, so the test run ends.
+            let _ = std::fs::File::open(&fifo);
+            panic!("opening a FIFO blocked");
+        }
+        let e = got.unwrap().unwrap_err();
+        assert!(e.to_string().contains("not a regular file"), "{e}");
+
+        std::fs::write(d.join("target"), "x").unwrap();
+        std::os::unix::fs::symlink(d.join("target"), d.join("link")).unwrap();
+        let e = open_append(&d.join("link")).unwrap_err();
+        assert!(e.to_string().contains("a link"), "{e}");
+        assert_eq!(std::fs::read_to_string(d.join("target")).unwrap(), "x");
         let _ = std::fs::remove_dir_all(&d);
     }
 

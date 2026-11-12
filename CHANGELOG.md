@@ -52,6 +52,12 @@ that heading and starts a new, empty one here. -->
   runs teal, violet, pink, and the focused frame glows into the cells around it) and
   **xdevtheme-glass** (no lines: panes are cards, the focused path and the cursor row
   are pills).
+- **xdevtheme-light**, in `themes/`: xdevtheme for a terminal with a light background,
+  such as macOS Terminal's default profile. Every name, title and key reads at 4.5:1 or
+  more on white, on the bars and on the cursor row, at true colour and at 256 colours;
+  the frames at 3:1. Pick it in View → Theme…; it is not the default.
+- **`--print-theme` prints a theme file too** (`xdevcmd --print-theme xdevtheme-light`),
+  every colour and its style written out, to start your own from it.
 - **A theme file can say how it draws**, in a `[style]` table: `borders` (plain,
   rounded, thick, double, none), `titles` (line, notch, pill), `gradient` (one or two
   colours after the accent), `gradient_runs` (across, down), `cursor` (block, glow,

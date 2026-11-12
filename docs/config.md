@@ -122,12 +122,14 @@ blue-panel look of the DOS-era commanders; `high-contrast` is black and white wi
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). The release files come with eight in `themes/`: two more
+binary, for a portable copy). The release files come with nine in `themes/`: three more
 looks of xdevcmd's own, **xdevtheme-neon** (the light runs teal, violet and pink, and the
-focused frame glows) and **xdevtheme-glass** (no lines: panes are cards, the path and the
-cursor row are pills), and six well-known palettes (Dracula, Tokyo Night, Catppuccin
+focused frame glows), **xdevtheme-glass** (no lines: panes are cards, the path and the
+cursor row are pills) and **xdevtheme-light** (xdevtheme for a light terminal, such as
+macOS Terminal's default profile), and six well-known palettes (Dracula, Tokyo Night, Catppuccin
 Mocha, Nord, Gruvbox dark, Solarized light),
-which work as they are when kept beside `xdevcmd`. To start your own, print a built-in theme with every colour listed:
+which work as they are when kept beside `xdevcmd`. To start your own, print a theme with
+every colour listed (a built-in one, or a file's: `--print-theme xdevtheme-light`):
 
 ```bash
 mkdir -p ~/.config/xdevcmd/themes
@@ -181,6 +183,8 @@ The style uses only box-drawing, block and geometric characters, no Nerd Font. O
 16-colour terminal it is left off, since the glyphs may be missing (the old Windows
 console) and there are no colours to blend; at 256 colours the gradient is coarser.
 Programs in the terminal panel keep their own colours: the gradient never reaches them.
+On a light panel (xdevtheme-light) the lit cursor row is fainter and the `dim` shadow a
+soft grey, so the names on them stay readable.
 
 **`colors = "auto"`** sends 24-bit colour only where the terminal is known to take it:
 `COLORTERM=truecolor` (or `24bit`), iTerm2, WezTerm, kitty, Ghostty, Alacritty, VS Code,

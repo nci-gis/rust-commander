@@ -78,7 +78,7 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 |---|---|---|
 | 0 | ~~CI on all three systems for the whole branch~~ (green, run 43181663296); the owner's hand tests: Linux and Windows done 2026-11-12, macOS to come | S |
 | 1 | **F1 Commands** (item 38), Round [024](cycles/Round_024.md), at Review: the command palette in two sizes; Help menu reshaped; Config in use | M |
-| 2 | **xdevtheme-light** (item 37, part 2), Round [025](cycles/Round_025.md), in progress: Dawn brought back from git and tuned | S |
+| 2 | **xdevtheme-light** (item 37, part 2), Round [025](cycles/Round_025.md), at Review: Dawn brought back from git and tuned | S |
 | 3 | **Documentation** (item 40): Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
 | 4 | **L. Log a terminal tab to a file** (item 35) | S |
 | 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped. Designed with pillar 2's progressive indexing (A03) in mind, or done in one round with it, so the viewer changes once | S–M |

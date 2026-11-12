@@ -526,6 +526,14 @@ mod tests {
             K::Warning,
         ] {
             pairs.push(("syntax", slot_for(&t, kind), "viewer", t.bg, 4.5));
+            // And under a selection of lines in the viewer.
+            pairs.push((
+                "syntax",
+                slot_for(&t, kind),
+                "selection",
+                t.row_cursor_active,
+                4.5,
+            ));
         }
         pairs.push(("border", t.border, "panel", t.bg_panel, 3.0));
         pairs.push(("border_active", t.border_active, "panel", t.bg_panel, 3.0));

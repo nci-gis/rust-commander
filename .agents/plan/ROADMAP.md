@@ -76,7 +76,7 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 
 | Order | Item | Size |
 |---|---|---|
-| 0 | **CI on all three systems for the whole branch** (Rounds 020–023 have not run on Windows or macOS), and the owner's hand tests to close Rounds 018–023 | S |
+| 0 | ~~CI on all three systems for the whole branch~~ (green, run 43181663296); the owner's hand tests: Linux and Windows done 2026-11-12, macOS to come | S |
 | 1 | **F1 Commands** (item 38): the command palette in two sizes; Help menu reshaped; Config in use | M |
 | 2 | **xdevtheme-light** (item 37, part 2): Dawn brought back from git and tuned | S |
 | 3 | **Documentation** (item 40): Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |

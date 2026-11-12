@@ -223,6 +223,8 @@ slow mount is left for later.
 
 - 2026-11-12, **set aside at Review** for the owner's hand tests (this round's Check), with the ROADMAP rewritten around v0.4.0 the same day (owner: "clear proceed"). The next round starts from it; CI on all three systems for the whole branch comes first.
 
+- 2026-11-12, **the owner's hand tests: Linux and Windows done** ("I tested (linux, windows), macos later, I think will not much impact"). macOS by hand still to come; CI (run 43181663296) is green on macOS. Closing the round stays the owner's call.
+
 ## Check
 
 - [x] A late read: the old listing stays, the bar shows, the move completes on

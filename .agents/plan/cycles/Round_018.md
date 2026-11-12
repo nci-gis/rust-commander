@@ -72,6 +72,8 @@ screenshot: "Shift+F12 historystarted from the terminal panel…").
 - Owner's call: `.agents/reference/testing.md:51` lists the `--keys` tokens and could add
   `wait`; it is canon, so it is not edited here.
 
+- 2026-11-12, **the owner's hand tests: Linux and Windows done** ("I tested (linux, windows), macos later, I think will not much impact"). macOS by hand still to come; CI (run 43181663296) is green on macOS. Closing the round stays the owner's call.
+
 ## Check
 
 - [x] fmt; clippy `-D warnings` for Linux, x86_64-pc-windows-gnu and x86_64-apple-darwin

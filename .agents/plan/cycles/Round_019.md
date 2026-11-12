@@ -198,6 +198,8 @@ binstall yes, no canon edits, no CI until the pull request into `dev`.
     column cuts takes the cursor's row, over Ext, Size and Modified. The test
     `the_cursor_row_shows_a_long_name_whole` fails without the change.
 
+- 2026-11-12, **the owner's hand tests: Linux and Windows done** ("I tested (linux, windows), macos later, I think will not much impact"). macOS by hand still to come; CI (run 43181663296) is green on macOS. Closing the round stays the owner's call.
+
 ## Check
 
 - [x] Each move commit: build, three clippy targets and the full suite green. A pure move

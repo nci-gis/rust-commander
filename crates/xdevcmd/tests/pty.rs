@@ -2254,6 +2254,70 @@ fn shift_f9_with_a_program_running_offers_a_new_shell() {
     xdevcmd.quit();
 }
 
+// ── F1, Commands ───────────────────────────────────────────────────────────────────
+
+const F1: &[u8] = b"\x1bOP";
+
+/// F1, "copy", Enter: the file under the cursor of the pane that had focus is copied,
+/// through the same confirmation F5 asks.
+#[test]
+fn f1_copy_enter_copies_the_file_under_the_cursor() {
+    let s = Scratch::new("f1-copy");
+    s.file("left/report.txt", "R");
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"copy");
+    x.wait_for("Files: Copy");
+    x.send(ENTER);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    wait_file(&s.right().join("report.txt"), "copied", |c| {
+        c.as_deref() == Some("R")
+    });
+    x.quit();
+}
+
+/// Alt+1 runs the first row; a digit alone is filter text.
+#[test]
+fn alt_1_in_f1_runs_the_first_row() {
+    let s = Scratch::new("f1-alt1");
+    s.file("left/.secret.txt", "x");
+    let mut x = Session::start(&s, None);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"hidden");
+    x.wait_for("Show or hide hidden files");
+    x.send(b"\x1b1"); // Alt+1
+    x.wait_for(".secret");
+    x.wait_gone("type to find a command");
+    x.quit();
+}
+
+/// A `[[menu]]` entry is a row in F1, and Enter types it into the terminal through the
+/// same quoting as Shift+F9.
+#[test]
+fn a_menu_row_in_f1_types_its_command_into_the_shell() {
+    let s = Scratch::new("f1-menu");
+    s.file("left/it's here.txt", "x");
+    s.file(
+        "config.toml",
+        "[[menu]]\nkey = \"e\"\nlabel = \"say it\"\ncommand = \"echo GOT %s DONE\"\n",
+    );
+    let flag = format!("--config={}", s.0.join("config.toml").display());
+    let mut x = Session::start_flags(&s, &[&flag]);
+    x.send(DOWN);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"say it");
+    x.wait_for("Your commands: say it");
+    x.send(ENTER);
+    x.wait_for("GOT it's here.txt DONE");
+    x.send(F12);
+    x.quit();
+}
+
 // ── long-running: does memory settle? ───────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]

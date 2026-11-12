@@ -6,6 +6,13 @@ impl App {
     pub(super) fn on_modal_key(&mut self, k: KeyEvent) {
         let mut act = ModalAct::None;
 
+        // F1 over the viewer, which takes every other key: F1 there was nothing before.
+        if matches!(self.modal, Some(Modal::View(_)))
+            && self.settings.keymap.action_for(k) == Some(Action::Help)
+        {
+            return self.open_commands(commands::Size::Small, false);
+        }
+
         match self.modal.as_mut() {
             Some(Modal::Menu(menu)) => match menu.on_key(k) {
                 MenuOutcome::Stay => {}

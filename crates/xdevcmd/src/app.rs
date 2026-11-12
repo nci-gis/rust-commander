@@ -434,6 +434,8 @@ pub struct App {
     group: Option<crate::keys::Chord>,
     /// The Option-key hint has been shown this session.
     option_hinted: bool,
+    /// F1's recently run commands, most recent first, kept across restarts.
+    recent_commands: Vec<String>,
     /// The theme in use, by name (View → Theme… marks it).
     theme_name: String,
     /// The last operation that wrote to the disk, for Ctrl+Z.
@@ -591,6 +593,7 @@ impl App {
         let notice = outcome.message().or_else(|| settings.theme_note.clone());
         let settings_height = settings.config.terminal.height_percent;
         let theme_name = settings.theme_name.clone();
+        let recent_commands = commands::load_recent(&settings.config.menu);
         let mut panes = BTreeMap::new();
         panes.insert(
             0,
@@ -631,6 +634,7 @@ impl App {
             scrolling: None,
             group: None,
             option_hinted: false,
+            recent_commands,
             theme_name,
             last_undo: None,
             trash_pending: None,

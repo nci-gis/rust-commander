@@ -44,7 +44,13 @@ fn isolated() -> Command {
     c.env("XDEVCMD_CONFIG", sandbox.join("no-such-config.toml"));
     c.env("XDG_DATA_HOME", sandbox.join("data"));
     // And from their session: a test must neither reopen their panes nor overwrite them.
-    c.env("XDEVCMD_STATE", sandbox.join("session.toml"));
+    // One state directory per run of xdevcmd: what one test leaves there (F1's recent
+    // commands) must not change what another sees.
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    c.env(
+        "XDEVCMD_STATE",
+        sandbox.join(format!("state-{n}")).join("session.toml"),
+    );
     // And from how they are connected: whether a file can be opened depends on SSH and
     // a display, so every test starts as a local desktop session; a test about SSH
     // sets the variable itself.
@@ -1299,6 +1305,90 @@ fn f1_says_why_a_row_cannot_run() {
     let s = shot_keys("110x24", "F1,g,o,Space,t,o,Space,t,a,b,Enter", &a, &b);
     assert!(s.contains("Alt+1 \u{2026} Alt+9"), "{s}");
     assert!(commands_last_line(&s).contains("digit"), "{s}");
+}
+
+/// Enter runs the row on the pane F1 was opened from, and the status line says the
+/// key for next time; a command's own message says more, and wins.
+#[test]
+fn f1_runs_a_row_and_says_its_key_for_next_time() {
+    let (a, b) = fixture();
+    fs::write(a.join(".hidden.txt"), "x").unwrap();
+    let s = shot_keys("110x24", "F1,r,e,f,r,e,s,h,Enter", &a, &b);
+    assert!(commands_box(&s).is_none(), "closed\n{s}");
+    assert!(s.contains("Next time: Ctrl+r"), "{s}");
+    let s = shot_keys("110x24", "F1,h,i,d,d,e,n,Enter", &a, &b);
+    assert!(s.contains(".hidden"), "ran\n{s}");
+    assert!(s.contains("hidden files shown"), "{s}");
+    assert!(!s.contains("Next time"), "its own message instead\n{s}");
+    // Opened from the Help menu, whose item already shows F1: nothing to add.
+    let s = shot_keys("110x24", "F9,Left,Enter,r,e,f,r,e,s,h,Enter", &a, &b);
+    assert!(commands_box(&s).is_none(), "{s}");
+    assert!(!s.contains("Next time"), "{s}");
+}
+
+/// F1 over the viewer: the viewer's own keys first, read-only; Esc gives the viewer
+/// back; any other command closes the viewer first, as its Esc would, then runs.
+#[test]
+fn f1_over_the_viewer_lists_its_keys_and_gives_it_back() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,F3,F1", &a, &b);
+    assert!(s.contains("\u{250c} view "), "the viewer under it\n{s}");
+    let first = s
+        .lines()
+        .find(|l| l.contains("1   "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(first.contains("Viewer: Switch between"), "{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,Enter", &a, &b);
+    assert!(commands_last_line(&s).contains("press it there"), "{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,Esc", &a, &b);
+    assert!(commands_box(&s).is_none(), "{s}");
+    assert!(s.contains("\u{250c} view "), "the viewer is back\n{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,r,e,f,r,e,s,h,Enter", &a, &b);
+    assert!(
+        !s.contains("\u{250c} view "),
+        "the viewer closed first\n{s}"
+    );
+    assert!(s.contains("Next time: Ctrl+r"), "{s}");
+}
+
+/// The commands run from F1 are kept beside the session, the last first, and come
+/// first in the small list next time (the owner's decision 4). Read-only modes write
+/// nothing.
+#[test]
+fn f1_remembers_recent_commands_across_restarts() {
+    let (a, b) = fixture();
+    let state = a.parent().unwrap().join("recent-state");
+    let run = |flags: &[&str], keys: &str| {
+        let out = isolated()
+            .env("XDEVCMD_STATE", state.join("session.toml"))
+            .args(flags)
+            .arg("--screenshot=110x24")
+            .arg(format!("--keys={keys}"))
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .expect("xdevcmd should run");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    run(&[], "F1,s,o,r,t,Space,b,y,Space,s,i,z,e,Enter");
+    let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
+    assert!(kept.contains("sort_size"), "{kept}");
+    let s = run(&[], "F1");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(first.contains("Sort by size"), "{s}");
+    // An unknown name in the file is dropped, not an error.
+    fs::write(
+        state.join("commands.toml"),
+        "recent = [\"no_such_command\", \"sort_ext\"]\n",
+    )
+    .unwrap();
+    let s = run(&[], "F1");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(first.contains("Sort by extension"), "{s}");
+    // Read-only: run, but nothing written.
+    run(&["--read-only"], "F1,s,o,r,t,Space,b,y,Space,n,a,m,e,Enter");
+    let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
+    assert!(!kept.contains("sort_name"), "{kept}");
 }
 
 // ── mouse ──────────────────────────────────────────────────────────────────────────

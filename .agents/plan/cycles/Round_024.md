@@ -359,6 +359,31 @@ objects**, and nothing waits on them.
     click test became F1's click/double-click/outside test; the 80-column wrap test
     became "cut on the row, whole on the last line"; keymap A's tests read the large
     size (F1 F1) and find rows by title. The sixel pty test waited for "Keys".
+- **2026-11-12, step 3: running** (`app/palette.rs`, `modals.rs`, `commands.rs`).
+  - Enter, a double-click or Alt+1…9 closes F1 and runs the row through `perform` /
+    `perform_cmd` / `run_user_command`, the paths the keys and menus use; refused and
+    read-only rows say why on F1's last line and stay (step 2).
+  - From the shell, a file pane's command (`place() == Files`) moves focus to the file
+    pane used last (`mru`, as the "program ended" path does) and runs there; the
+    shell's commands act on the shell. Reachable by key only from step 4 (Alt+X F1),
+    so its pty tests are in step 4's commit.
+  - Over the viewer: F1 there (it did nothing) opens Commands with the viewer kept
+    underneath (`under`), the viewer's own keys first; Esc gives it back; any other row
+    closes the viewer as its Esc would (twice for a file opened from a shell's
+    history), then runs.
+  - "Next time: F5" on the status line after a row with a key, the key that works
+    where it ran ("Alt+x Alt+s" in the shell, "Shift+F9 e" for a `[[menu]]` row);
+    replaced by the command's own message. **Reading of "it says the menu's own key
+    instead"**: when F1 was opened from Help → Commands…, nothing is added, since that
+    menu item already shows F1 beside it.
+  - Recent: the last 8 ids (`[keys]` name, `menu:<label>`, `settings`/`theme`/`about`)
+    in `commands.toml` beside the session (`write_private`, 0600); unknown ids dropped
+    on load; not written in read-only and restricted modes (kept for the session).
+  - Render tests now get a state directory per run of xdevcmd: a recent command one
+    test ran would otherwise reorder another's list.
+  - Proved by putting the bug back: without closing the viewer first,
+    `f1_over_the_viewer_…` fails; writing recents in read-only mode fails
+    `f1_remembers_…`.
 
 ## Check
 

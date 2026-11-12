@@ -536,6 +536,68 @@ pub fn browse_large(rows: &[Row]) -> Vec<Item> {
     out
 }
 
+// ── recent commands ───────────────────────────────────────────────────────────────
+
+/// How many recently run commands are kept (the owner's decision 4).
+pub const RECENT: usize = 8;
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct RecentFile {
+    #[serde(default)]
+    recent: Vec<String>,
+}
+
+fn recent_path() -> Option<std::path::PathBuf> {
+    crate::session::state_file("commands.toml")
+}
+
+/// Whether `id` names a command that exists now: a `[keys]` action, a menu-only
+/// command, or one of `menu`'s entries by label.
+fn known(id: &str, menu: &[MenuItem]) -> bool {
+    keys::BINDINGS.iter().any(|b| b.name == id)
+        || matches!(id, "settings" | "theme" | "about")
+        || id
+            .strip_prefix("menu:")
+            .is_some_and(|l| menu.iter().any(|m| m.label == l))
+}
+
+/// The commands run recently, most recent first, kept beside the session. Names no
+/// longer known (a `[[menu]]` entry removed, an action renamed) are dropped; a missing
+/// or broken file is an empty list. Commands, not files: nothing private in it.
+pub fn load_recent(menu: &[MenuItem]) -> Vec<String> {
+    let Some(p) = recent_path() else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = std::fs::read_to_string(p)
+        .ok()
+        .and_then(|t| toml::from_str::<RecentFile>(&t).ok())
+        .map(|f| f.recent)
+        .unwrap_or_default();
+    out.retain(|id| known(id, menu));
+    out.dedup();
+    out.truncate(RECENT);
+    out
+}
+
+/// `id` to the front of `recent`, once, at most [`RECENT`] kept.
+pub fn remember(recent: &mut Vec<String>, id: &str) {
+    if id.is_empty() {
+        return;
+    }
+    recent.retain(|r| r != id);
+    recent.insert(0, id.to_string());
+    recent.truncate(RECENT);
+}
+
+pub fn save_recent(recent: &[String]) -> std::io::Result<()> {
+    let p = recent_path().ok_or_else(|| std::io::Error::other("no state directory"))?;
+    let text = toml::to_string_pretty(&RecentFile {
+        recent: recent.to_vec(),
+    })
+    .map_err(std::io::Error::other)?;
+    crate::session::write_private(&p, text.as_bytes())
+}
+
 // ── the palette ───────────────────────────────────────────────────────────────────
 
 /// F1's two sizes: one component, so the filter, the selection and the scroll stay
@@ -1111,7 +1173,7 @@ impl Commands {
             Rect::new(inner.x, y, inner.width, 1),
             Style::new().bg(th.bg_bar),
         );
-        let (left, right) = self.last_line(w, desc_x);
+        let (left, right) = self.last_line(w, desc_x, name_w);
         let st = if self.message.is_some() {
             Style::new().fg(th.err)
         } else {
@@ -1142,7 +1204,7 @@ impl Commands {
     /// The last line: on the left why a row cannot run, else the selected row's
     /// description where its row has no room for it, else the keys; on the right what
     /// the left leaves out (F1 larger, or the `[keys]` name to rebind it by).
-    fn last_line(&self, w: u16, desc_x: usize) -> (String, String) {
+    fn last_line(&self, w: u16, desc_x: usize, name_w: usize) -> (String, String) {
         let grow = if self.size == Size::Small && self.can_grow() {
             "F1 larger"
         } else {
@@ -1156,6 +1218,17 @@ impl Commands {
             Some(why) => why.clone(),
             None => self.description(row),
         });
+        // A row with no description whose name is a sentence (the viewer's and the
+        // mouse's) cut on its row: the sentence, whole.
+        if let Some(r) = sel.map(|row| &self.rows[row]) {
+            let shown = match self.items.get(self.sel.unwrap_or(0)) {
+                Some(Item::Row { tagged: true, .. }) => r.name.chars().count(),
+                _ => r.title.chars().count(),
+            };
+            if r.about.is_empty() && shown > name_w {
+                return (r.title.clone(), grow.to_string());
+            }
+        }
         // Narrow: the description has no column; or it was cut on its row.
         let cut_on_row = full
             .as_ref()
@@ -1602,5 +1675,24 @@ mod tests {
         // The next key clears it.
         press(&mut c, KeyCode::Down);
         assert_eq!(c.message, None);
+    }
+
+    #[test]
+    fn recent_keeps_eight_most_recent_first_and_drops_the_unknown() {
+        let mut r = Vec::new();
+        for id in ["copy", "move", "copy", "a", "b", "c", "d", "e", "f", "g"] {
+            remember(&mut r, id);
+        }
+        assert_eq!(r.len(), RECENT);
+        assert_eq!(r[0], "g");
+        assert_eq!(r.iter().filter(|x| *x == "copy").count(), 1, "once");
+        assert!(!r.contains(&"move".to_string()), "the oldest pushed out");
+        let menu = vec![MenuItem {
+            key: "e".into(),
+            label: "say it".into(),
+            command: "echo".into(),
+        }];
+        assert!(known("copy", &menu) && known("about", &menu) && known("menu:say it", &menu));
+        assert!(!known("coppy", &menu) && !known("menu:gone", &menu));
     }
 }

@@ -261,6 +261,32 @@ CSS · diff/patch · INI (and `.conf`, `.cfg`, `.properties`, `.gitconfig`, `.ed
     scan to reach the end (about 0.46 s for 50 MB, ~110 MB/s); a person sees the end at
     once, plain, coloured when the scan arrives.
 
+- **Independent review, 2026-11-12** (in-house lexer approved; its fuzzing: 17.1M
+  lines, no panic). Fixes, one commit each, each test shown to fail without its fix:
+  - `0de21e0` On-the-spot lexing was bounded by lines (2,048) only: a jump to the end of
+    64 MiB in 32 KiB lines lexed it all on the UI thread (the review: 704 ms; here, the
+    `measure_` test in release: **609 ms → 28 µs**, plain). Now also `SYNC_BYTES` = 1 MiB
+    (from `Document::line_start`), and the scan keeps a checkpoint at least every
+    512 KiB as well as every 128 lines, so after the scan a line is never more than
+    that from one. Test: 200 lines of 32 KiB, a jump to the line after them is `None`
+    in under 100 ms, then coloured after the scan.
+  - `d15fbb7` Lines over 4 KiB were lexed again on every frame, and the viewer's line
+    was read twice. Now a long line whose next state is cached returns at once, and
+    `spans_for` takes the text the viewer has read. A frame of 50 lines of 32 KiB
+    (release): **12 ms → 0.7 ms** on the second frame (the review saw 50–89 ms; the
+    0.7 ms left is the measurement's own reads). Test counts lexes: 50, then none.
+  - `cee8521` (nit) A file whose length or modification time changed during its scan
+    has its checkpoints dropped at the end (and the viewer's cache of states with
+    them), so it is not coloured from the old text; lines far from the top go plain.
+  - `39e6eef` (nit) The selection's background went over the search hit (fg = bg): it
+    now skips the hit's cells. The hit is also found on the whole line before it is
+    cut into wrapped rows, so one across a wrap is lit on both rows. Render test.
+  - `f5842bb` (nit) xdevtheme-light: every syntax colour at 4.5:1 on
+    `row_cursor_active` too (the viewer's selection), true colour and 256; passes.
+  - **Correction** to the kickoff's "hundreds of MB/s": measured about 85 MB/s by the
+    review and about 110 MB/s here (the 50 MB scan above); fast enough for a background
+    pass, not hundreds.
+
 ## Check
 
 - [x] Detection, lexer, checkpoints: unit tests (scroll = jump, checkpoint crossing,
@@ -274,12 +300,16 @@ CSS · diff/patch · INI (and `.conf`, `.cfg`, `.properties`, `.gitconfig`, `.ed
   licences, sources ok), `cargo test --workspace` twice
 - [x] CI on three systems: run 43253994728 green first time (Linux x86_64 and ARM,
   Windows, macOS, cargo-deny, the windows-gnu/darwin cross-check); no flake seen
+- [x] Review fixes: byte bound (609 ms → 28 µs), long lines lexed once (12 ms →
+  0.7 ms a frame), a changed file's checkpoints dropped, search over selection, the
+  selection contrast; fmt, clippy, `cargo test --workspace`; release binary now
+  5,454,952 B (5.20 MiB)
 - [ ] **Not verified**: colours on a real terminal by eye (only screenshots); the
   256- and 16-colour look of the syntax colours beyond the light theme's contrast test
   (the 16-colour theme is ANSI names, so the user's palette decides); Windows and
   macOS by hand; the plain-then-coloured redraw after a jump seen live (the screenshot
-  waits for the scan instead); a file changed while it is scanned (no test: lines may
-  be coloured from the old contents, never a panic by construction); quality of the
+  waits for the scan instead); a file changed while it is scanned is tested only with a forced
+  "changed" (and the stamp itself), not a real write racing the scan; quality of the
   colours in real projects beyond the samples (it is a lexer: no heredoc bodies, no
   code inside Markdown fences or HTML `<script>`, regex literals in JavaScript not
   recognised).

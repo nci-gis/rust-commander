@@ -24,6 +24,7 @@ pub enum Extra {
     Settings,
     Theme,
     About,
+    ConfigInUse,
 }
 
 /// What Enter on a row does.
@@ -173,6 +174,12 @@ pub fn rows(
                     "Try a theme now; Settings saves it",
                     Extra::Theme,
                     "theme",
+                ),
+                (
+                    "Config in use",
+                    "The loaded config file and the settings in effect, read-only",
+                    Extra::ConfigInUse,
+                    "config_in_use",
                 ),
                 (
                     "About xdevcmd",
@@ -576,7 +583,7 @@ fn recent_path() -> Option<std::path::PathBuf> {
 /// command, or one of `menu`'s entries by label.
 fn known(id: &str, menu: &[MenuItem]) -> bool {
     keys::BINDINGS.iter().any(|b| b.name == id)
-        || matches!(id, "settings" | "theme" | "about")
+        || matches!(id, "settings" | "theme" | "about" | "config_in_use")
         || id
             .strip_prefix("menu:")
             .is_some_and(|l| menu.iter().any(|m| m.label == l))
@@ -1576,7 +1583,12 @@ mod tests {
     #[test]
     fn menu_only_commands_are_rows_too() {
         let r = all(&Keymap::default());
-        for t in ["Settings\u{2026}", "Theme\u{2026}", "About xdevcmd"] {
+        for t in [
+            "Settings\u{2026}",
+            "Theme\u{2026}",
+            "Config in use",
+            "About xdevcmd",
+        ] {
             assert!(r.iter().any(|r| r.title == t), "{t}");
         }
     }
@@ -1732,7 +1744,7 @@ mod tests {
     }
 
     /// Opening F1 builds its rows from the keymap and the config, then lists them:
-    /// measured on the real list (127 rows: 87 bindings, 3 menu-only commands, 37
+    /// measured on the real list (128 rows: 87 bindings, 4 menu-only commands, 37
     /// read-only) plus twenty `[[menu]]` entries.
     #[test]
     fn opening_f1_takes_well_under_a_frame() {

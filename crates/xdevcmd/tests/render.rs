@@ -1544,6 +1544,19 @@ fn config_in_use_marks_changes_and_filters_to_a_section() {
     assert!(!s.contains("\u{250c} Config in use"), "closed\n{s}");
 }
 
+/// Config in use is a row in F1 too: every command by typing.
+#[test]
+fn config_in_use_is_a_row_in_f1() {
+    let (a, b) = fixture();
+    let s = shot_keys(
+        "110x24",
+        "F1,c,o,n,f,i,g,Space,i,n,Space,u,s,e,Enter",
+        &a,
+        &b,
+    );
+    assert!(s.contains("\u{250c} Config in use"), "{s}");
+}
+
 /// A config with an error is IGNORED, and Config in use says so and why.
 #[test]
 fn config_in_use_says_a_rejected_file_was_ignored() {

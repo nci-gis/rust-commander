@@ -98,6 +98,7 @@ impl App {
             Run::Extra(Extra::Settings) => self.perform_cmd(Cmd::Settings),
             Run::Extra(Extra::Theme) => self.perform_cmd(Cmd::ThemeMenu),
             Run::Extra(Extra::About) => self.perform_cmd(Cmd::About),
+            Run::Extra(Extra::ConfigInUse) => self.perform_cmd(Cmd::ConfigInUse),
             Run::User(i) => self.run_user_command(i),
             Run::ReadOnly(_) => {}
         }

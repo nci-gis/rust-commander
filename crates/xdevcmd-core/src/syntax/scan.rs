@@ -3,10 +3,11 @@
 //!
 //! A line's colours depend on the state at its start, which depends on every line before
 //! it. So a background [`Scan`] goes through the file once, lexing for the state only,
-//! and keeps the state at every [`EVERY`]th line in [`Checkpoints`]. Drawing line `i`
-//! then lexes from the checkpoint before it (or from a line drawn recently): at most
-//! `EVERY - 1` lines. A jump past what the scan has reached lexes at most [`SYNC_LINES`]
-//! on the spot, else the line is drawn plain until the scan gets there.
+//! and keeps the state at every [`EVERY`]th line (more often where lines are long) in
+//! [`Checkpoints`]. Drawing line `i` then lexes from the checkpoint before it (or from a
+//! line drawn recently): at most `EVERY - 1` lines and half of [`SYNC_BYTES`]. A jump
+//! past what the scan has reached lexes at most [`SYNC_LINES`] and [`SYNC_BYTES`] on
+//! the spot, else the line is drawn plain until the scan gets there.
 //!
 //! `Scan` is fed chunks of bytes, so whatever reads the file can feed it: today its own
 //! thread; when the viewer's line index is built in the background (pillar 2, A03), the
@@ -28,31 +29,46 @@ use crate::document::{line_text, Document, MAX_LINE};
 pub const EVERY: usize = 128;
 /// A jump past the scan lexes at most this many lines where it lands, else waits.
 pub const SYNC_LINES: usize = 2048;
+/// … and at most this many bytes of them: 2,048 lines of 32 KiB are 64 MiB, most of a
+/// second on the UI thread (Round 028's review).
+pub const SYNC_BYTES: u64 = 1 << 20;
 /// Lines longer than this (in bytes) are drawn plain: lexed only for the state after them.
 pub const LONG_LINE: usize = 4096;
 /// States of lines drawn recently, kept to scroll on from; cleared past this many.
 const CACHE: usize = 16_384;
 
-/// The state at the start of line `k * EVERY`, for each `k` reached so far.
+/// The state at the start of some lines, in order: every [`EVERY`]th line, and more
+/// often where lines are long (at least every half of [`SYNC_BYTES`]), so a line is
+/// never more than that many bytes of lexing from one.
 #[derive(Debug)]
 pub struct Checkpoints {
-    states: Vec<State>,
+    states: Vec<(usize, State)>,
     done: bool,
 }
 
 impl Default for Checkpoints {
     fn default() -> Self {
         Self {
-            states: vec![State::Normal],
+            states: vec![(0, State::Normal)],
             done: false,
         }
     }
 }
 
 impl Checkpoints {
-    /// The state at the start of line `k * EVERY`, if the scan has got there.
-    pub fn get(&self, k: usize) -> Option<State> {
-        self.states.get(k).copied()
+    /// The last checkpoint at or before `line`: its line and state.
+    pub fn before(&self, line: usize) -> (usize, State) {
+        let k = self.states.partition_point(|(l, _)| *l <= line);
+        self.states
+            .get(k.saturating_sub(1))
+            .copied()
+            .unwrap_or((0, State::Normal))
+    }
+
+    /// The state at the start of `line`, if there is a checkpoint there.
+    pub fn at(&self, line: usize) -> Option<State> {
+        let (l, st) = self.before(line);
+        (l == line).then_some(st)
     }
 
     /// How many checkpoints there are (line 0's always).
@@ -77,7 +93,9 @@ pub struct Scan {
     line: usize,
     lines: usize,
     buf: Vec<u8>,
-    found: Vec<State>,
+    found: Vec<(usize, State)>,
+    /// Bytes lexed since the last checkpoint.
+    since: usize,
     store: Arc<Mutex<Checkpoints>>,
 }
 
@@ -92,6 +110,7 @@ impl Scan {
             lines,
             buf: Vec::new(),
             found: Vec::new(),
+            since: 0,
             store,
         }
     }
@@ -133,11 +152,13 @@ impl Scan {
     }
 
     fn end_line(&mut self) {
+        self.since += self.buf.len();
         let text = line_text(std::mem::take(&mut self.buf));
         self.state = lex_line(self.lang, self.state, &text, None);
         self.line += 1;
-        if self.line.is_multiple_of(EVERY) {
-            self.found.push(self.state);
+        if self.line.is_multiple_of(EVERY) || self.since as u64 >= SYNC_BYTES / 2 {
+            self.found.push((self.line, self.state));
+            self.since = 0;
         }
     }
 
@@ -177,7 +198,7 @@ impl Highlighter {
         Self {
             lang,
             store: Arc::new(Mutex::new(Checkpoints {
-                states: vec![State::Normal],
+                states: vec![(0, State::Normal)],
                 done: true,
             })),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -252,10 +273,7 @@ impl Highlighter {
     pub fn spans(&mut self, doc: &mut Document, i: usize) -> Option<Vec<Span>> {
         let (mut at, mut state) = {
             let cached = self.cache.range(..=i).next_back().map(|(&l, &s)| (l, s));
-            let checkpoint = self.store.lock().ok().and_then(|s| {
-                let k = (i / EVERY).min(s.len().saturating_sub(1));
-                s.get(k).map(|st| (k * EVERY, st))
-            });
+            let checkpoint = self.store.lock().ok().map(|s| s.before(i));
             match (cached, checkpoint) {
                 (Some(c), Some(k)) => {
                     if c.0 >= k.0 {
@@ -270,6 +288,13 @@ impl Highlighter {
             }
         };
         if i - at > SYNC_LINES {
+            return None;
+        }
+        let bytes = doc
+            .line_start(i)
+            .zip(doc.line_start(at))
+            .map_or(0, |(to, from)| to.saturating_sub(from));
+        if bytes > SYNC_BYTES {
             return None;
         }
         while at < i {
@@ -384,7 +409,7 @@ mod tests {
         let mut jumped = Highlighter::new(Lang::Rust);
         jumped.scan_file(&path, total);
         wait(&jumped);
-        assert_eq!(jumped.progress().0, total.div_ceil(EVERY));
+        assert!(jumped.progress().0 >= total.div_ceil(EVERY));
         let mut order: Vec<usize> = (0..total).rev().step_by(7).collect();
         order.extend([
             121,
@@ -434,8 +459,9 @@ mod tests {
         let s = store.lock().unwrap();
         assert!(s.is_done());
         assert_eq!(s.len(), 3, "lines 0, 128, 256");
-        assert_eq!(s.get(1), Some(State::Comment(1)));
-        assert_eq!(s.get(2), Some(State::Normal));
+        assert_eq!(s.at(128), Some(State::Comment(1)));
+        assert_eq!(s.at(256), Some(State::Normal));
+        assert_eq!(s.before(200), (128, State::Comment(1)));
     }
 
     #[test]
@@ -460,6 +486,38 @@ mod tests {
         h.scan_file(&path, doc.line_count());
         wait(&h);
         assert!(h.spans(&mut doc, 9_000).is_some());
+    }
+
+    /// Few lines but many bytes: a jump does not lex them on the spot (plain), and is
+    /// coloured once the scan has been through.
+    #[test]
+    fn a_far_jump_in_long_lines_waits_for_the_scan() {
+        let unit = "let a = \"str\"; /* c */ f(1, 2.5); ";
+        let long = unit.repeat(32 * 1024 / unit.len());
+        let mut f = String::new();
+        for _ in 0..200 {
+            f.push_str(&long);
+            f.push('\n');
+        }
+        f.push_str("fn tail() {}\n");
+        let path = temp("long-jump.rs", f.as_bytes());
+        let mut doc = Document::open(&path).unwrap();
+        let mut h = Highlighter::new(Lang::Rust);
+        let t = Instant::now();
+        assert_eq!(
+            h.spans(&mut doc, 200),
+            None,
+            "6 MiB before it: plain for now"
+        );
+        assert!(
+            t.elapsed() < Duration::from_millis(100),
+            "{:?}",
+            t.elapsed()
+        );
+        h.scan_file(&path, doc.line_count());
+        wait(&h);
+        let got = h.spans(&mut doc, 200).expect("from a checkpoint");
+        assert_eq!(got.len(), 2, "fn and tail: {got:?}");
     }
 
     #[test]
@@ -511,5 +569,44 @@ mod tests {
         let mut h = Highlighter::new(Lang::Rust);
         h.scan_file(Path::new("/no/such/file/here.rs"), 10);
         assert_eq!(h.progress(), (1, true));
+    }
+
+    /// A file of `n` lines of about `len` bytes each, Rust-ish.
+    fn long_lines(name: &str, n: usize, len: usize) -> std::path::PathBuf {
+        let unit = "let a = \"str\"; /* c */ f(1, 2.5); ";
+        let line = unit.repeat(len / unit.len() + 1);
+        let mut f = String::with_capacity(n * (len + 1));
+        for _ in 0..n {
+            f.push_str(&line[..len]);
+            f.push('\n');
+        }
+        temp(name, f.as_bytes())
+    }
+
+    /// Measurements for Round 028's review (release: `cargo test --release -p
+    /// xdevcmd-core measure_ -- --ignored --nocapture`).
+    #[test]
+    #[ignore = "a measurement; run by hand"]
+    fn measure_frames_of_long_lines_and_a_far_jump() {
+        let path = long_lines("frame.rs", 50, 32 * 1024);
+        let mut doc = Document::open(&path).unwrap();
+        let mut h = Highlighter::new(Lang::Rust);
+        for frame in 1..=3 {
+            let t = Instant::now();
+            for i in 0..50 {
+                h.spans(&mut doc, i);
+            }
+            eprintln!("frame {frame} of 50 lines of 32 KiB: {:?}", t.elapsed());
+        }
+        let path = long_lines("jump.rs", 2048, 32 * 1024);
+        let mut doc = Document::open(&path).unwrap();
+        let mut h = Highlighter::new(Lang::Rust);
+        let t = Instant::now();
+        let got = h.spans(&mut doc, 2047);
+        eprintln!(
+            "jump to the end of 64 MiB in 32 KiB lines, no scan yet: {:?} ({})",
+            t.elapsed(),
+            if got.is_some() { "lexed" } else { "plain" }
+        );
     }
 }

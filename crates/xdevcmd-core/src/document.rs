@@ -186,6 +186,16 @@ impl Document {
         Ok(())
     }
 
+    /// Where line `i` starts in the file; for `i == line_count()`, where the text shown
+    /// ends. `None` past that.
+    pub fn line_start(&self, i: usize) -> Option<u64> {
+        match self.lines.get(i) {
+            Some(&s) => Some(s),
+            None if i == self.lines.len() => Some(self.indexed_len),
+            None => None,
+        }
+    }
+
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }

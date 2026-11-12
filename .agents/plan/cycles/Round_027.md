@@ -247,7 +247,7 @@ without the user being told.
   Windows, macOS, cargo-deny, the windows-gnu/darwin cross-check); no flake seen
 - [x] Review fixes: huge counts, a dying writer (core and panel), the open race (FIFO,
   link), another user's file, C1/SS2/SS3/tab; fmt, clippy, workspace tests, pty 2×;
-  CI: see below
+  CI run 43240349626 green first time on all jobs, no flake
 - [ ] **Not verified**: Windows and macOS logging by hand (CI compiles and runs the
   render test there; the pty tests are Unix-only and ran on Linux here, macOS in CI);
   a real full disk (simulated by a failing writer) and a real slow disk (simulated by

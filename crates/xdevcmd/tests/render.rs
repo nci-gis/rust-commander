@@ -1395,7 +1395,7 @@ fn f1_remembers_recent_commands_across_restarts() {
 /// why; keys beside it are fine.
 #[test]
 fn a_config_that_takes_f1_from_help_is_refused() {
-    let (a, _) = fixture();
+    let (a, b) = fixture();
     let cfg = write_config(a.parent().unwrap(), "[keys]\nhelp = [\"Alt+g k\"]\n");
     let out = xdevcmd(&[
         "--check-config".as_ref(),
@@ -1405,6 +1405,21 @@ fn a_config_that_takes_f1_from_help_is_refused() {
     assert_eq!(out.status.code(), Some(1));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("[keys] help: F1 is always kept"), "{err}");
+    // Nor can another action take F1 (`copy = ["F1"]` used to pass, and F1 copied).
+    let cfg = write_config(a.parent().unwrap(), "[keys]\ncopy = [\"F1\"]\n");
+    let out = xdevcmd(&[
+        "--check-config".as_ref(),
+        "--config".as_ref(),
+        cfg.as_os_str(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("[keys] copy") && err.contains("F1 is always kept"),
+        "{err}"
+    );
+    let s = shot_with(&cfg, "F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "F1 still opens Commands\n{s}");
     let cfg = write_config(
         a.parent().unwrap(),
         "[keys]\nhelp = [\"F1\", \"Alt+g k\"]\n",

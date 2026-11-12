@@ -1255,6 +1255,18 @@ impl Keymap {
             self.seqs.retain(|_, a| *a != action);
             for k in keys {
                 let parsed = parse_binding(k).map_err(|e| format!("[keys] {name}: {e}"))?;
+                // F1 is Help's and nobody else's: given to another action, or made the
+                // start of a two-key binding, it would no longer open Commands.
+                let f1 = parse_key("F1").ok();
+                let takes_f1 = match parsed {
+                    Keys::One(c) => Some(c) == f1,
+                    Keys::Two(p, _) => Some(p) == f1,
+                };
+                if takes_f1 && action != Action::Help {
+                    return Err(format!(
+                        "[keys] {name} = \"{k}\": F1 is always kept for help (Commands); use another key"
+                    ));
+                }
                 // Keymap A: the actions xdevcmd takes inside the shell keep to F12's
                 // family, or a rebinding would take a key from the program there.
                 if action.is_global() && !F12_FAMILY.iter().any(|f| parse_binding(f) == Ok(parsed))
@@ -1785,6 +1797,19 @@ mod tests {
         }
         assert_eq!(km.shell_prefix(), Some(parse_key("Alt+x").unwrap()));
         assert!(Action::SplitRight.acts_on_shell() && !Action::SplitRight.is_global());
+    }
+
+    #[test]
+    fn no_other_action_can_take_f1() {
+        for (name, key) in [("copy", "F1"), ("usage", "F1"), ("view", "F1 v")] {
+            let mut km = Keymap::default();
+            let e = km.apply(&table(&[(name, &[key])])).unwrap_err();
+            assert!(e.contains(name) && e.contains("F1 is always kept"), "{e}");
+        }
+        // Alt+X F1 is a different key: a user may give it to Usage again.
+        let mut km = Keymap::default();
+        km.apply(&table(&[("usage", &["Alt+x F1"])])).unwrap();
+        assert_eq!(km.action_for(ev("F1")), Some(Action::Help));
     }
 
     #[test]

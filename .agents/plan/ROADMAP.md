@@ -167,6 +167,7 @@ Steered by launch feedback. Not started before 0.4.0 ships.
 | Item | Why later |
 |---|---|
 | 41 Useful commands (owner's "readiness"): built-in examples and your own, type to filter, Enter runs, Alt+Enter types; rows in F1's "Your commands" | Builds on F1; how to build it is open (owner, 2026-11-12) |
+| 44 **The planner hands work to trusted tools** (co-opetition): the plan exported to rsync, robocopy or rclone, run in a terminal tab, its output read back into a list; their dry-runs shown in the plan table; a suggestion when a big job crosses the network and such a tool is installed | Grows from 41 and 42; the lead of 0.5 |
 | F1: Enter on a row of Config in use opens Settings at that setting | Small, after F1 has met users |
 | Settings: the terminal's background detected (OSC 11) to pick light or dark | xdevtheme-light covers it by hand first |
 | 29 One directory history for panes and shells | Alt+J covers the panes; item 30a already records each command's directory |
@@ -224,6 +225,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 41 | Useful commands (readiness) | M | — | 0.5 |
 | 42 | **Smart Planner v1** (trust): scan → plan → confirm → execute, the executor unchanged | M–L | — | 0.4.0-beta.1 |
 | 43 | **Smart Planner v2** (speed): lanes, adaptive concurrency, group commit, checkpointed resume, item 22 | M–L | — | 0.4.0-beta.2, scope after beta.1's numbers |
+| 44 | The planner hands work to trusted tools (rsync, robocopy, rclone) | M | — | 0.5 |
 | ~~—~~ | ~~SFTP, remote panes~~ | — | — | dropped 2026-11-06 |
 
 Sizes are relative: **S** a day or two, **M** under a week, **L** one to two weeks.
@@ -308,8 +310,28 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
   batches, large files alone) per device; concurrency adapted from the measured
   throughput (no separate probe); group commit for small files; checkpointed resume of a
   large file (continue from the last synced offset, after checking the source is
-  unchanged); pause and retry on a network error instead of failing the rest; item 22's
-  reflink, `copy_file_range` and server-side copy.
+  unchanged); item 22's reflink, `copy_file_range`, `clonefile` and Windows'
+  `CopyFile2` — **co-opetition with the system itself**: the planner decides what, the
+  platform's own fastest primitive does it (`CopyFile2` uses SMB's server-side copy when
+  both ends are on a share, network speed with no network code of ours); the plan shows
+  which engine ran.
+- **44 The planner hands work to trusted tools** (0.5; owner, 2026-11-13: "co-opetitive"):
+  - **One model for the user: the plan is always xdevcmd's; who carries it out is written
+    at the top of it** (xdevcmd, the system's fast copy, or a named tool), so the trust
+    built inside does not leak at the seam with the outside.
+  - **Out:** the plan exported in the tool's own form (rsync `--files-from`, a robocopy
+    job, rclone `--files-from`) and run in a terminal tab, through `send_to_shell`,
+    visible, editable and loggable (item 35).
+  - **Before:** the tool's dry run (`rsync -n --itemize-changes`, `robocopy /L`,
+    `rclone --dry-run`) shown in the plan table: over the network the tool knows the
+    remote side better than our scan does.
+  - **Back:** the tool's output read into a list (items 30a, 30b): what moved, what failed,
+    run again for the failures only.
+  - **A suggestion, never a push:** when a big job crosses the network and such a tool is
+    already installed (found on `PATH`, nothing fetched), the planner offers it beside
+    "use xdevcmd anyway".
+  - Limits: three tools and their machine-readable output only; an unknown version still
+    runs, without reading its output back.
 - **37 xdevtheme-light**: Terminal.app's default profile is light, so it is a first
   impression; a file theme, not the default.
 - **4 Themes, 5 Keymaps, 6 Settings, 7 Logo, 11 Icons**: see their rounds.
@@ -331,6 +353,7 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
 | Plugins | not for now, low priority (owner, 2026-11-09, 2026-11-11) |
 | Copy and move | Smart Planner in 0.4, not 0.5: trust is the point of a stable release; v1 in beta.1, v2 in beta.2; warnings before anything that cannot be undone (owner, 2026-11-13) |
 | Release path | 0.4.0-beta.1 → beta.2 → rc.1 (fixes only) → 0.4.0 (owner, 2026-11-13) |
+| Where pre-releases go | **GitHub only**, marked pre-release (never "Latest"); crates.io, Scoop, winget and binstall start at 0.4.0. A crates.io version can never be deleted, only yanked, and package managers have no beta channel worth keeping (owner, 2026-11-13). Needs: the release workflow taking a `-beta.N` / `-rc.N` tag from `dev` and marking it pre-release, with the CHANGELOG check for such a tag — done in the beta.1 round |
 
 ## Not planned
 

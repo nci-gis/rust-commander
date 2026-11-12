@@ -33,6 +33,12 @@ and 2026-11-12 (recorded under Decisions below).
 - **Nothing to memorise** (owner, 2026-11-12). Every command can be found by typing, from
   anywhere, with its key shown beside it (F1, item 38). A key is a shortcut, never the
   only way.
+- **Co-opetition, not competition** (owner, 2026-11-13). Where others already do it well
+  (transfers over the network: rclone, rsync, robocopy), xdevcmd works with them rather
+  than against them: the Smart Planner is best on local disks and across drives; over a
+  mount it still does well without aiming to be first; for the network itself the user
+  runs a trusted third-party tool, and xdevcmd helps (useful commands, item 41). The
+  principles stay whole and the features stay good.
 - **Stable before bigger.** v0.4.0 is judged by people meeting xdevcmd for the first time:
   a smaller release done well is the stable one (the release bar below).
 - **No network, no telemetry.** Remote files come through a mount the system or a trusted
@@ -290,6 +296,13 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
     source after a move across devices) and the journal's line synced before it: "before
     any step that cannot be undone, everything needed to recover is on disk".
   - The lists kept in the app follow a move (relinked), instead of reporting rows gone.
+  - **A network error pauses the job and asks** (retry / skip / pause), with backoff for
+    errors that pass (`ETIMEDOUT`, `ESTALE`, `ENOTCONN`, EIO on a mount), instead of
+    failing everything left. **An ETA** from throughput measured on the real work (a
+    moving average; no separate probe). Both pulled from v2 (owner, 2026-11-13).
+  - On a network target the sync before the rename also brings write errors out (SMB and
+    NFS often report them only at `fsync` or `close`, and a dropped `File` hides a close
+    error); rclone's cached mount may still upload after "done": the contract says so.
 - **43 Smart Planner v2**: decided after beta.1's measurements. Candidates, with the
   owner's ideas of 2026-11-13 (see the note under Decisions): two lanes (small files in
   batches, large files alone) per device; concurrency adapted from the measured

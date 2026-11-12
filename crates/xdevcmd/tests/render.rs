@@ -1351,6 +1351,19 @@ fn f1_over_the_viewer_lists_its_keys_and_gives_it_back() {
     assert!(s.contains("Next time: Ctrl+r"), "{s}");
 }
 
+/// Keys added to `help` act in the panes; in the viewer its own keys win: with
+/// `help = ["F1", "q"]`, q still closes the viewer, and F1 still opens Commands.
+#[test]
+fn a_key_added_to_help_is_the_viewers_own_in_the_viewer() {
+    let (a, b) = fixture();
+    let body = "[keys]\nhelp = [\"F1\", \"q\"]\n";
+    let s = shot_cfg_env(body, &[], "Down,F3,q", &a, &b);
+    assert!(!s.contains("\u{250c} view "), "q closed the viewer\n{s}");
+    assert!(commands_box(&s).is_none(), "{s}");
+    let s = shot_cfg_env(body, &[], "Down,F3,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+}
+
 /// The commands run from F1 are kept beside the session, the last first, and come
 /// first in the small list next time (the owner's decision 4). Read-only modes write
 /// nothing.

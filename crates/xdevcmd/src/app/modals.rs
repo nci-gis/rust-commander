@@ -7,8 +7,10 @@ impl App {
         let mut act = ModalAct::None;
 
         // F1 over the viewer, which takes every other key: F1 there was nothing before.
+        // Bare F1 only: a key added to `help` (`q`) is the viewer's own there.
         if matches!(self.modal, Some(Modal::View(_)))
-            && self.settings.keymap.action_for(k) == Some(Action::Help)
+            && k.code == KeyCode::F(1)
+            && k.modifiers.is_empty()
         {
             return self.open_commands(commands::Size::Small, false);
         }

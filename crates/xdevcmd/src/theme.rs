@@ -318,8 +318,12 @@ pub fn is_executable(e: &Entry) -> bool {
 /// The colour of a piece of source in the viewer: a slot the theme already has, so every
 /// theme, built in or a file, colours source without new keys (Round 028).
 pub fn syntax_style(kind: xdevcmd_core::syntax::Kind) -> Style {
+    syntax_style_in(&t(), kind)
+}
+
+/// [`syntax_style`] under theme `th`.
+pub fn syntax_style_in(th: &Theme, kind: xdevcmd_core::syntax::Kind) -> Style {
     use xdevcmd_core::syntax::Kind as K;
-    let th = t();
     let fg = match kind {
         K::Comment => th.fg_dim,
         K::String | K::Added => th.exec,
@@ -469,11 +473,17 @@ mod tests {
         }
     }
 
+    /// The colour `syntax_style` gives `kind` under theme `t`.
+    fn slot_for(t: &Theme, kind: xdevcmd_core::syntax::Kind) -> Color {
+        syntax_style_in(t, kind).fg.unwrap()
+    }
+
     /// The light theme is for reading on white: every name at 4.5:1 or more on the
     /// panel and on the unfocused cursor row, the titles and keys on the bars, and the
     /// frames at 3:1, at true colour and at 256 colours (Terminal.app has no more).
     #[test]
     fn xdevtheme_light_reads_on_its_own_background() {
+        use xdevcmd_core::syntax::Kind as K;
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../themes/xdevtheme-light.toml");
         let text = std::fs::read_to_string(path).unwrap();
@@ -496,6 +506,26 @@ mod tests {
         }
         for (name, c) in [("text", t.fg), ("text_dim", t.fg_dim), ("accent", t.accent)] {
             pairs.push((name, c, "bar", t.bg_bar, 4.5));
+        }
+        // The viewer draws on `bg`, and colours source with these slots
+        // (`syntax_style`): every kind of piece at 4.5:1 there too.
+        for kind in [
+            K::Comment,
+            K::String,
+            K::Number,
+            K::Keyword,
+            K::Type,
+            K::Function,
+            K::Meta,
+            K::Key,
+            K::Tag,
+            K::Heading,
+            K::Added,
+            K::Removed,
+            K::Error,
+            K::Warning,
+        ] {
+            pairs.push(("syntax", slot_for(&t, kind), "viewer", t.bg, 4.5));
         }
         pairs.push(("border", t.border, "panel", t.bg_panel, 3.0));
         pairs.push(("border_active", t.border_active, "panel", t.bg_panel, 3.0));

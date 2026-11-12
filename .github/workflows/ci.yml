@@ -81,6 +81,17 @@ jobs:
       # What crates.io would get: each crate packed alone and built from the pack, the
       # engine from a temporary local registry. Catches a file the build reads from
       # outside its crate, or a dependency with no version. Once is enough: Linux.
+      # The cost of the sync rules on a move across devices (Round 029, decision 4):
+      # from the second file system onto the runner's own disk, with and without the
+      # syncs. A measurement, read in the log; it never fails the run. Only when a run
+      # is asked for by hand, and only where a second file system is mounted.
+      - name: measure the sync cost of a move across devices
+        if: github.event_name == 'workflow_dispatch' && runner.os != 'Windows'
+        continue-on-error: true
+        env:
+          XDEVCMD_MEASURE: 2000x1024,1x33554432
+          XDEVCMD_MEASURE_BACK: "1"
+        run: cargo test -p xdevcmd-core --lib -- --ignored --nocapture measure_a_move 2>&1 | grep -E "MEASURE|skipped"
       - name: cargo package
         if: matrix.os == 'ubuntu-latest'
         run: cargo package --workspace --locked

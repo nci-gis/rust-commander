@@ -76,7 +76,7 @@ pub fn at(_point: Point, _path: &Path) -> io::Result<()> {
 /// No seam in this build: every sync happens.
 #[cfg(not(any(test, feature = "faults")))]
 #[inline(always)]
-fn skipped(_point: Point, _path: &Path) -> bool {
+pub(crate) fn skipped(_point: Point, _path: &Path) -> bool {
     false
 }
 
@@ -275,7 +275,7 @@ mod imp {
     }
 
     /// Whether a rule says to leave out the real call at `point` on `path`.
-    pub(super) fn skipped(point: Point, path: &Path) -> bool {
+    pub(crate) fn skipped(point: Point, path: &Path) -> bool {
         lock(&RULES).iter().any(|r| {
             r.point == point && matches(&r.fragment, path) && matches!(r.action, Action::Skip)
         })

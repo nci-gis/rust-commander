@@ -620,6 +620,70 @@ the fix, kept here because the commit carries test and fix together.
   - `extract_and_pack_sync_a_replacement_before_renaming_it`, `saving_over_a_file_syncs_before_renaming`:
     empty trace (no sync, no rename point).
 
+### 2026-11-13, step 3: a move across devices is durable
+
+- Per file, in this order, every file's copy on disk before its source goes:
+  copy (temporary name, or in place with safe operations off) → rename into place →
+  **its data synced** → **its directory synced** (Unix) → the journal's `moved <src> <dst>`
+  line, **synced** → `RemoveSource`. A directory made on the other side syncs its parent
+  before anything under it loses its source; an emptied source directory is removed
+  (through `RemoveSource`) after its files' batch. `Interrupted::moved` lists the pairs a
+  dead run left with both files there; the start-up dialog says "N file(s) of a move had
+  been copied completely, and its source is still there … Both are kept; nothing was
+  removed." Resume then leaves such a source (`Summary::left`, as before).
+- **Measured** (this sandbox: `/tmp` on a virtio disk, ext4-backed `/dev/vda`; the other
+  device tmpfs `/dev/shm`; release build; the journal in `/tmp`;
+  `measure_a_move_across_devices_with_and_without_syncs`, the "no sync" run leaving out
+  `SyncData`, `SyncDir`, `JournalSync` through the seam's `Skip`):
+
+  | Move | per file, unbatched | no sync | ratio |
+  |---|---|---|---|
+  | 10,000 × 1 KiB, disk → tmpfs | 3.86 s | 1.83 s | 2.1× |
+  | 10,000 × 1 KiB, tmpfs → disk | 11.86 s | 1.42 s | **8.4×** |
+  | 3 × 100 MiB, disk → tmpfs | 0.43 s | 0.30 s | 1.4× |
+  | 3 × 100 MiB, tmpfs → disk | 0.53 s | 0.16 s | 3.3× |
+
+  More than twice as slow, so **batched** (decision 4): sources are removed 64 files or
+  64 MiB at a time (`MOVE_BATCH_FILES`, `MOVE_BATCH_BYTES`), and a batch first syncs each
+  copy's data (written all first, synced after, so the system writes them out together),
+  then each distinct directory once, then the journal once, then removes the sources.
+  First cut (data synced per file before its rename, the rest batched): tmpfs → disk
+  7.03 s vs 1.52 s, 4.6×. Final (three runs, tmpfs → disk):
+
+  | Move | batched | no sync | ratio |
+  |---|---|---|---|
+  | 10,000 × 1 KiB, disk → tmpfs | 1.40 s | 1.37 s | 1.0× |
+  | 10,000 × 1 KiB, tmpfs → disk | 4.12 / 4.32 / 4.60 s | 1.75 / 1.85 / 1.81 s | **~2.4×** |
+  | 3 × 100 MiB, tmpfs → disk | 0.50–0.55 s | 0.16–0.19 s | ~3× |
+
+  Still above 2× onto a real disk: what is left is one data sync per file (small files)
+  and the disk writing what the unsynced run leaves in memory (large files, where "no
+  sync" has not written the data at all when it reports). Going further needs a sync of
+  the whole file system per batch (`syncfs`, Linux only) or group commit: v2 (item 43).
+  The owner's USB stick and a Mac are still to measure (CI: a `workflow_dispatch` run now
+  has a step "measure the sync cost of a move across devices", RAM disk → the runner's
+  disk, 2,000 × 1 KiB and 32 MiB, printed in the log, never failing the run).
+- **Deviations**: (1) a `moved` line per file, not one per batch: lines cost nothing
+  unsynced and the next start can then name each pair; one journal sync per batch, as
+  planned. (2) A copy whose **data** sync fails is removed and its source kept (as
+  planned), and is counted failed, not done; nothing is asked, it is in the summary's
+  errors. A **directory** sync that fails keeps both the source and the complete copy
+  (removing a complete, data-synced copy would gain nothing). (3) A copy under its real
+  name is not synced until its batch: a kill never leaves a short file under a real name
+  with safe operations on (written under a temporary name), a power cut can, as for any
+  new file (decision 6's contract), but never with its source already gone.
+- Failing first (against the step-2 commit, with the `RemoveSource` point put in front
+  of the old `remove_file` for the trace and the halt):
+  - `a_move_across_devices_removes_a_source_only_once_its_copy_is_on_disk`: trace
+    `… Write, Rename, JournalSync, RemoveSource`: no `SyncData`, no `SyncDir`.
+  - `a_move_across_devices_whose_copy_cannot_be_synced_keeps_the_source`: `done: 1,
+    failed: 0`, source removed.
+  - pty `a_move_killed_before_removing_its_source_says_both_are_there` (SIGKILL while the
+    seam holds the job at `RemoveSource`): the next start's dialog never says "copied
+    completely" (no `moved` line existed).
+- Also: `a_move_killed_before_removing_a_source_says_both_are_there` (tidy lists only the
+  pairs still both there).
+
 ## Check
 
 ## Act

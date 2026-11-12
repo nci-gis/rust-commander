@@ -166,6 +166,20 @@ impl App {
                 if restored == 1 { "its" } else { "their" }
             ));
         }
+        let both: Vec<_> = found.iter().flat_map(|i| i.moved.clone()).collect();
+        if !both.is_empty() {
+            let n = both.len();
+            body.push(format!(
+                "{n} file{} of a move had been copied completely, and {} source{} still there:",
+                plural(n),
+                if n == 1 { "its" } else { "their" },
+                if n == 1 { " is" } else { "s are" },
+            ));
+            for (src, dst) in both.iter().take(3) {
+                body.push(format!("  {}  and  {}", tidy(src), tidy(dst)));
+            }
+            body.push("Both are kept; nothing was removed.".into());
+        }
         for (tmp, orig) in stranded.iter().take(3) {
             body.push(format!(
                 "Could not put back {} as {} (the name is taken).",

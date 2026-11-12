@@ -340,6 +340,7 @@ const INSERT: &[u8] = b"\x1b[2~";
 const ENTER: &[u8] = b"\r";
 const F4: &[u8] = b"\x1bOS";
 const F5: &[u8] = b"\x1b[15~";
+const F6: &[u8] = b"\x1b[17~";
 const F12: &[u8] = b"\x1b[24~";
 const SHIFT_F8: &[u8] = b"\x1b[19;2~";
 
@@ -992,6 +993,99 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
         std::thread::sleep(Duration::from_millis(25));
     }
     x.quit();
+}
+
+/// A directory on another file system than the temporary directory, for a move across
+/// devices: `XDEVCMD_TEST_OTHER_DEV` (CI mounts one), else /dev/shm. None, and said,
+/// where there is none.
+#[cfg(unix)]
+fn other_device(tag: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let tmp = std::fs::metadata(std::env::temp_dir()).ok()?.dev();
+    let bases = std::env::var_os("XDEVCMD_TEST_OTHER_DEV")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(cfg!(target_os = "linux").then(|| PathBuf::from("/dev/shm")));
+    for b in bases {
+        if std::fs::metadata(&b).is_ok_and(|m| m.is_dir() && m.dev() != tmp) {
+            let d = b.join(format!("xdevcmd-pty-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            if std::fs::create_dir_all(&d).is_ok() {
+                return Some(d);
+            }
+        }
+    }
+    eprintln!("{tag}: skipped, no second file system (set XDEVCMD_TEST_OTHER_DEV)");
+    None
+}
+
+/// A move across devices killed (SIGKILL) after a file's copy is on disk and the
+/// journal says so, before its source is removed: the next start says both are there,
+/// and both are, whole (Round 029, step 3). The fault seam holds the job at that point.
+#[cfg(unix)]
+#[test]
+fn a_move_killed_before_removing_its_source_says_both_are_there() {
+    let s = Scratch::new("kill-move");
+    let Some(other) = other_device("kill-move") else {
+        return;
+    };
+    s.file("left/a.txt", "moved data");
+    let marker = s.0.join("halted");
+    let spec = format!(
+        "halt:remove-source:{}:{}",
+        s.left().join("a.txt").display(),
+        marker.display()
+    );
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), other.clone()],
+        &[("XDEVCMD_FAULTS", spec.as_str())],
+    );
+    x.send(DOWN);
+    x.send(F6);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    x.wait_for("copy then delete");
+    x.send(b"y");
+    wait_file(&marker, "the job held before removing the source", |c| {
+        c.is_some()
+    });
+    // As a power cut or `kill -9` would: no handler runs.
+    let pid = x.child.process_id().expect("a pid");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let start = Instant::now();
+    while !matches!(x.child.try_wait(), Ok(Some(_))) {
+        assert!(start.elapsed() < PATIENCE, "xdevcmd did not die");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    drop(x);
+    assert_eq!(
+        std::fs::read_to_string(s.left().join("a.txt")).unwrap(),
+        "moved data"
+    );
+    assert_eq!(
+        std::fs::read_to_string(other.join("a.txt")).unwrap(),
+        "moved data"
+    );
+    let x = Session::start_with(&s, None, &[s.left(), other.clone()]);
+    x.wait_for("Interrupted");
+    x.wait_for("copied completely");
+    x.wait_for("Both are kept");
+    assert!(
+        s.left().join("a.txt").exists(),
+        "the next start removes nothing"
+    );
+    assert_eq!(
+        std::fs::read_to_string(other.join("a.txt")).unwrap(),
+        "moved data"
+    );
+    drop(x);
+    let _ = std::fs::remove_dir_all(&other);
 }
 
 /// Continuing an interrupted copy never replaces a file the user kept in the first run:

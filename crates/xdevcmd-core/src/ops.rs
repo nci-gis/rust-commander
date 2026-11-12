@@ -17,6 +17,10 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 const BUF: usize = 256 * 1024;
+/// A move across devices removes sources a batch at a time: this many files, or
+/// [`MOVE_BATCH_BYTES`] of them, whichever comes first.
+const MOVE_BATCH_FILES: usize = 64;
+const MOVE_BATCH_BYTES: u64 = 64 << 20;
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
 
@@ -331,6 +335,8 @@ pub fn start(req: Request) -> Handle {
             moving: false,
             approved: None,
             journal: None,
+            removing: Vec::new(),
+            removing_bytes: 0,
             safe: req.safe,
         };
         w.run(req);
@@ -370,6 +376,11 @@ struct Worker {
     /// A destination the user already agreed to replace, so the copy a cross-device
     /// move falls back to does not ask about it a second time.
     approved: Option<PathBuf>,
+    /// A move across devices: copies complete and synced whose sources wait to be
+    /// removed, a batch at a time ([`Worker::remove_moved`]).
+    removing: Vec<(PathBuf, PathBuf)>,
+    /// Their size, in bytes.
+    removing_bytes: u64,
     /// Safe operations: what this job is in the middle of, for the next start if it is
     /// killed. Removed when the job ends.
     journal: Option<crate::journal::Journal>,
@@ -702,11 +713,20 @@ impl Worker {
         if meta.file_type().is_symlink() {
             let before = self.sum.done;
             self.copy_symlink(src, dst);
-            self.moved(src, before);
+            self.moved(src, dst, before);
         } else if meta.is_dir() {
+            let made = dst.symlink_metadata().is_err();
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
                 return;
+            }
+            // Moving: a directory made here keeps its name in a power cut before any
+            // source under it is removed (its files sync their own names).
+            if self.moving && made {
+                if let Err(e) = dst.parent().map_or(Ok(()), crate::faults::sync_dir) {
+                    self.note_error(dst, &e);
+                    return;
+                }
             }
             let entries = match fs::read_dir(src) {
                 Ok(it) => it,
@@ -725,25 +745,110 @@ impl Worker {
             self.sum.done += 1;
             // Moving: the directory goes only once empty, that is when everything in
             // it was copied and removed; anything skipped keeps it.
+            if self.moving {
+                // Its files' sources first: the directory goes only once empty.
+                self.remove_moved();
+            }
             if self.moving && !self.stopped() {
-                let _ = fs::remove_dir(src);
+                let _ = crate::faults::at(crate::faults::Point::RemoveSource, src)
+                    .and_then(|()| fs::remove_dir(src));
             }
         } else {
             let before = self.sum.done;
             self.copy_file(src, dst, meta.len());
-            self.moved(src, before);
+            self.moved(src, dst, before);
         }
     }
 
-    /// While moving across devices: remove `src` if its copy just completed (the count
-    /// of done items went up). A skipped or failed copy leaves it.
-    fn moved(&mut self, src: &Path, done_before: u64) {
-        if self.moving && self.sum.done > done_before {
-            if !self.durable(src) {
-                return;
+    /// While moving across devices: `src`'s copy `dst` just completed (the count of
+    /// done items went up), so its source is to be removed. A skipped or failed copy
+    /// leaves it. All of that waits for [`Worker::remove_moved`], a batch at a time.
+    fn moved(&mut self, src: &Path, dst: &Path, done_before: u64) {
+        if !self.moving || self.sum.done <= done_before {
+            return;
+        }
+        self.removing_bytes += fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
+        self.removing.push((src.to_path_buf(), dst.to_path_buf()));
+        if self.removing.len() >= MOVE_BATCH_FILES || self.removing_bytes >= MOVE_BATCH_BYTES {
+            self.remove_moved();
+        }
+    }
+
+    /// Remove the sources of the copies waiting in [`Worker::removing`]. First each
+    /// copy's data is synced, then each copy's directory (its name then survives a power
+    /// cut too), then the journal's `moved` lines, one sync for the batch (a kill from
+    /// here on is told at the next start that both are there), and only then do the
+    /// sources go. A file's source never goes before its copy is on disk. A copy that
+    /// cannot be synced may not hold what was read: it is removed and its source kept.
+    ///
+    /// Batched (the owner's decision 4, Round 029): three syncs per file made a move of
+    /// 10,000 small files to a disk eight times slower. Syncing a batch of files after
+    /// writing them all lets the system write them out together.
+    fn remove_moved(&mut self) {
+        let mut batch = std::mem::take(&mut self.removing);
+        self.removing_bytes = 0;
+        if batch.is_empty() {
+            return;
+        }
+        let mut kept = Vec::with_capacity(batch.len());
+        for (src, dst) in batch {
+            // A link has no data of its own to sync; its name is synced below.
+            let file = fs::symlink_metadata(&dst).is_ok_and(|m| m.is_file());
+            let synced = if file {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&dst)
+                    .and_then(|f| crate::faults::sync_data(&f, &dst))
+            } else {
+                Ok(())
+            };
+            match synced {
+                Ok(()) => kept.push((src, dst)),
+                Err(e) => {
+                    // Never synced again (fsyncgate): this copy goes, its source stays,
+                    // and a later move copies it afresh.
+                    let _ = fs::remove_file(&dst);
+                    self.sum.done = self.sum.done.saturating_sub(1);
+                    self.note_error(&dst, &e);
+                }
             }
-            if let Err(e) = fs::remove_file(src) {
-                self.note_error(src, &e);
+        }
+        batch = kept;
+        let mut dirs: Vec<PathBuf> = batch
+            .iter()
+            .filter_map(|(_, d)| d.parent())
+            .map(Path::to_path_buf)
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        for dir in dirs {
+            if let Err(e) = crate::faults::sync_dir(&dir) {
+                // Its copies are complete but their names may not last: their sources stay.
+                for (src, _) in batch
+                    .iter()
+                    .filter(|(_, d)| d.parent() == Some(dir.as_path()))
+                {
+                    self.note_error(src, &e);
+                }
+                batch.retain(|(_, d)| d.parent() != Some(dir.as_path()));
+            }
+        }
+        let Some((first, _)) = batch.first().cloned() else {
+            return;
+        };
+        if let Some(j) = self.journal.as_mut() {
+            for (src, dst) in &batch {
+                let _ = j.moved(src, dst);
+            }
+        }
+        if !self.durable(&first) {
+            return;
+        }
+        for (src, _) in batch {
+            if let Err(e) = crate::faults::at(crate::faults::Point::RemoveSource, &src)
+                .and_then(|()| fs::remove_file(&src))
+            {
+                self.note_error(&src, &e);
             }
         }
     }
@@ -889,6 +994,9 @@ impl Worker {
                 if let Ok(mtime) = meta.modified() {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
+                // A new file is not synced here (the owner's call: new files stay
+                // fast). One whose source is to be removed (a move across devices) is
+                // synced with its batch, before any source goes (`remove_moved`).
                 if in_place {
                     drop(w);
                     Ok(true)
@@ -1014,6 +1122,7 @@ impl Worker {
                 // user chose to skip was deleted with it, never copied (0.2.0).
                 self.moving = true;
                 self.copy_node(src, &dst);
+                self.remove_moved();
                 self.moving = false;
                 self.approved = None;
             }
@@ -2103,6 +2212,146 @@ mod tests {
             "no temporary link left"
         );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A move across devices, per file: the copy's data synced, its directory synced,
+    /// the journal's `moved` line synced, and only then the source removed. Before Round
+    /// 029 the source was removed right after an unsynced copy.
+    #[test]
+    fn a_move_across_devices_removes_a_source_only_once_its_copy_is_on_disk() {
+        journals();
+        let Some(other) = other_device("move-order") else {
+            return;
+        };
+        let root = tmp("move-order");
+        let tag = format!("xmvd-{}", std::process::id());
+        let dir = root.join(&tag);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("f"), b"payload").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::mv(vec![dir.clone()], other.clone());
+        req.safe = true;
+        let (s, _) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert_eq!(fs::read(other.join(&tag).join("f")).unwrap(), b"payload");
+        assert!(!dir.exists(), "moved in full");
+        let at = |point: &str, file: bool| {
+            seen.iter()
+                .position(|(p, path)| p.name() == point && (path.ends_with("f") || !file))
+                .unwrap_or_else(|| panic!("no {point} in {seen:?}"))
+        };
+        let gone = at("remove-source", true);
+        for before in ["sync-data", "sync-dir", "journal-sync"] {
+            assert!(
+                at(before, false) < gone,
+                "{before} before the source goes: {seen:?}"
+            );
+        }
+        let synced_dir = seen
+            .iter()
+            .position(|(p, path)| p.name() == "sync-dir" && path.ends_with(&tag))
+            .unwrap_or_else(|| panic!("the copy's directory is synced: {seen:?}"));
+        assert!(synced_dir < gone);
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The copy's sync fails: the source stays, and the copy, which may not be what was
+    /// read, is removed.
+    #[test]
+    fn a_move_across_devices_whose_copy_cannot_be_synced_keeps_the_source() {
+        let Some(other) = other_device("move-sync-fail") else {
+            return;
+        };
+        let root = tmp("move-sync-fail");
+        fs::write(root.join("only.txt"), b"the only copy").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &other.to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let (s, _) = run_with(
+            Request::mv(vec![root.join("only.txt")], other.clone()),
+            Answer::Yes,
+        );
+        assert_eq!((s.done, s.failed), (0, 1), "{s:?}");
+        assert_eq!(fs::read(root.join("only.txt")).unwrap(), b"the only copy");
+        assert_eq!(
+            fs::read_dir(&other).unwrap().count(),
+            0,
+            "no copy, no temporary file"
+        );
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The cost of the sync rules on a move across devices, measured: `n` files of
+    /// `size` bytes moved with every sync made and again with the seam leaving them out.
+    /// `XDEVCMD_MEASURE=<n>x<size>[,…]`, from where `XDEVCMD_MEASURE_FROM` says (default:
+    /// the temporary directory) to the other device, or back with `XDEVCMD_MEASURE_BACK`.
+    /// Run by hand: `cargo test -p xdevcmd-core --release -- --ignored --nocapture measure`.
+    #[test]
+    #[ignore = "a measurement; run by hand (Round 029, step 3)"]
+    fn measure_a_move_across_devices_with_and_without_syncs() {
+        journals();
+        let Some(other) = other_device("measure") else {
+            return;
+        };
+        let spec =
+            std::env::var("XDEVCMD_MEASURE").unwrap_or_else(|_| "10000x1024,3x104857600".into());
+        let back = std::env::var_os("XDEVCMD_MEASURE_BACK").is_some();
+        for case in spec.split(',') {
+            let Some((n, size)) = case.split_once('x') else {
+                continue;
+            };
+            let (n, size): (usize, u64) = (n.parse().unwrap(), size.parse().unwrap());
+            for synced in [true, false] {
+                let here = tmp("measure");
+                let (from, to) = if back {
+                    (other.clone(), here.clone())
+                } else {
+                    (here.clone(), other.clone())
+                };
+                let src = from.join(format!("m-{n}-{size}-{synced}"));
+                fs::create_dir_all(&src).unwrap();
+                let chunk = vec![0x5au8; size as usize];
+                for i in 0..n {
+                    fs::write(src.join(format!("f{i}")), &chunk).unwrap();
+                }
+                let frag = src.file_name().unwrap().to_string_lossy().into_owned();
+                let _skips: Vec<_> = if synced {
+                    Vec::new()
+                } else {
+                    [
+                        crate::faults::Point::SyncData,
+                        crate::faults::Point::SyncDir,
+                        crate::faults::Point::JournalSync,
+                    ]
+                    .into_iter()
+                    .map(|p| crate::faults::set(p, &frag, crate::faults::Action::Skip))
+                    .collect()
+                };
+                // What was written to make the files is not the move's to flush.
+                let _ = std::process::Command::new("sync").status();
+                let mut req = Request::mv(vec![src.clone()], to.clone());
+                req.safe = true;
+                let t = std::time::Instant::now();
+                let (s, _) = run_with(req, Answer::Yes);
+                let took = t.elapsed();
+                assert_eq!(s.failed, 0, "{s:?}");
+                eprintln!(
+                    "MEASURE {n} x {size} B {} {}: {:.3} s",
+                    if back { "back" } else { "out" },
+                    if synced { "synced" } else { "no sync" },
+                    took.as_secs_f64()
+                );
+                let _ = fs::remove_dir_all(to.join(src.file_name().unwrap()));
+                let _ = fs::remove_dir_all(&here);
+            }
+        }
+        let _ = fs::remove_dir_all(&other);
     }
 
     #[test]

@@ -301,8 +301,12 @@ impl Journal {
         if !self.dirty {
             return Ok(());
         }
-        let r = crate::faults::at(crate::faults::Point::JournalSync, about)
-            .and_then(|()| self.file.sync_data());
+        let r = crate::faults::at(crate::faults::Point::JournalSync, about).and_then(|()| {
+            if crate::faults::skipped(crate::faults::Point::JournalSync, about) {
+                return Ok(());
+            }
+            self.file.sync_data()
+        });
         match r {
             Ok(()) => {
                 self.dirty = false;
@@ -340,6 +344,12 @@ impl Journal {
     pub fn unrenamed(&mut self, tmp: &Path) -> std::io::Result<()> {
         self.line(&format!("unren {}", enc(tmp)), tmp)
     }
+
+    /// A move across devices: `dst`, a complete copy of `src`, is on disk, and `src` is
+    /// about to be removed. Synced by the [`Journal::commit`] before the removal.
+    pub fn moved(&mut self, src: &Path, dst: &Path) -> std::io::Result<()> {
+        self.line(&format!("moved {} {}", enc(src), enc(dst)), src)
+    }
 }
 
 impl Drop for Journal {
@@ -366,6 +376,10 @@ pub struct Interrupted {
     /// Rename many's files that could not be put back (their name is taken): each
     /// (temporary name, name it had).
     pub stranded: Vec<(PathBuf, PathBuf)>,
+    /// A move across devices killed between a file's complete copy and the removal of
+    /// its source: (source, copy), both still there. Nothing is removed: Resume leaves
+    /// such a source where it is and says so.
+    pub moved: Vec<(PathBuf, PathBuf)>,
 }
 
 /// Tidy up after runs that ended without warning, and say what they were doing.
@@ -553,6 +567,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         cleaned: 0,
         restored: 0,
         stranded: Vec::new(),
+        moved: Vec::new(),
     };
     let mut parts: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -573,6 +588,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("gone", Some(p), _) => parts.retain(|x| *x != p),
             ("ren", Some(t), Some(o)) => renames.push((t, o)),
             ("unren", Some(t), _) => renames.retain(|(x, _)| *x != t),
+            ("moved", Some(s), Some(d)) => it.moved.push((s, d)),
             _ => {}
         }
     }
@@ -601,6 +617,9 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             it.cleaned += 1;
         }
     }
+    // What was copied and not yet removed: told, never acted on.
+    it.moved
+        .retain(|(s, d)| fs::symlink_metadata(s).is_ok() && fs::symlink_metadata(d).is_ok());
     for (tmp, orig) in renames {
         if fs::symlink_metadata(&tmp).is_err() {
             continue;
@@ -1042,6 +1061,10 @@ mod tests {
         );
         let it = tidy(&new, "2147483646");
         assert_eq!(it.kind, "copy");
+        assert!(
+            it.moved.is_empty(),
+            "neither file is there: nothing to tell"
+        );
         assert_eq!(it.sources, vec![d.join("a")]);
         let _ = fs::remove_dir_all(&d);
     }
@@ -1072,6 +1095,33 @@ mod tests {
             j.commit(&d.join("anything")).is_err(),
             "and never synced again"
         );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A move killed between a file's synced copy and its source's removal: the next
+    /// start says both are there, and removes neither.
+    #[test]
+    fn a_move_killed_before_removing_a_source_says_both_are_there() {
+        let d = dir("moved");
+        let (src, dst, gone) = (d.join("a"), d.join("b"), d.join("c"));
+        fs::write(&src, "x").unwrap();
+        fs::write(&dst, "x").unwrap();
+        let text = format!(
+            "host {}\nv 2\nkind move\nsrc {}\nmoved {} {}\nmoved {} {}\n",
+            enc(Path::new(&hostname())),
+            enc(&src),
+            enc(&src),
+            enc(&dst),
+            enc(&gone),
+            enc(&dst),
+        );
+        let it = tidy(&text, "2147483646");
+        assert_eq!(
+            it.moved,
+            vec![(src.clone(), dst.clone())],
+            "the source of c is gone"
+        );
+        assert!(src.exists() && dst.exists(), "neither removed");
         let _ = fs::remove_dir_all(&d);
     }
 }

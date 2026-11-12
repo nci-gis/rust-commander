@@ -5242,3 +5242,23 @@ fn settings_offers_colouring_source_on_by_default() {
     assert!(row.contains("[x]"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
+
+/// A selected line keeps the search term lit: the selection's background goes round it.
+#[test]
+fn the_search_term_stays_lit_inside_a_selection() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot(
+        "Down,F3,drag:10:2:10:2,/,t,h,e,r,e,Enter",
+        &a,
+        &b,
+        &[],
+        None,
+    );
+    assert!(s.contains("1 line selected") || s.contains("/there"), "{s}");
+    assert_eq!(
+        colours_at(&s, "there").1,
+        DARK_MARK,
+        "the hit, not the selection\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}

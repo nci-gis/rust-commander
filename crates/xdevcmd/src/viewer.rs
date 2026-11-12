@@ -810,6 +810,7 @@ impl Viewer {
                 None => Vec::new(),
             };
             let styles = char_styles(&raw, &pieces_of, self.tab_width, chars.len());
+            let hits = self.hits(&chars);
             let chosen = self.links.as_ref().and_then(|l| l.selected);
             let links: Vec<(std::ops::Range<usize>, bool)> = match self.links.as_mut() {
                 Some(l) => l
@@ -848,15 +849,31 @@ impl Viewer {
                 };
                 let mut spans = vec![Span::styled(num, Style::new().fg(theme::t().fg_dim))];
                 spans.push(Span::styled("\u{2502}", Style::new().fg(theme::t().border)));
-                spans.extend(self.highlight(&chars[from..from + len], &styles[from..from + len]));
+                spans.extend(self.highlight(
+                    &chars[from..from + len],
+                    &styles[from..from + len],
+                    &hits[from..from + len],
+                ));
                 frame
                     .buffer_mut()
                     .set_line(area.x, y, &Line::from(spans), area.width);
                 if selected.is_some_and(|(a, b)| i >= a && i <= b) {
-                    let text = Rect::new(area.x + gutter + 1, y, area.width - gutter - 1, 1);
-                    frame
-                        .buffer_mut()
-                        .set_style(text, Style::new().bg(theme::t().row_cursor_active));
+                    // The selection's background, except under the search term's hits,
+                    // which stay on top.
+                    let x0 = area.x + gutter + 1;
+                    let w = area.width - gutter - 1;
+                    let buf = frame.buffer_mut();
+                    for dx in 0..w {
+                        if hits.get(from + usize::from(dx)).copied().unwrap_or(false)
+                            && usize::from(dx) < len
+                        {
+                            continue;
+                        }
+                        buf.set_style(
+                            Rect::new(x0 + dx, y, 1, 1),
+                            Style::new().bg(theme::t().row_cursor_active),
+                        );
+                    }
                 }
                 // The paths on this piece of the line: underlined, the chosen one lit.
                 let start = if self.wrap { n * text_w } else { self.col };
@@ -893,14 +910,9 @@ impl Viewer {
         };
     }
 
-    /// A row's characters in their colours (the language's, else plain), with the
-    /// search term on top where it appears, case-insensitively.
-    fn highlight(&self, chars: &[char], styles: &[Style]) -> Vec<Span<'static>> {
-        let hit = Style::new()
-            .fg(theme::t().bg)
-            .bg(theme::t().mark)
-            .add_modifier(Modifier::BOLD);
-        let mut styles = styles.to_vec();
+    /// Which characters of a line are the search term, case-insensitively.
+    fn hits(&self, chars: &[char]) -> Vec<bool> {
+        let mut hits = vec![false; chars.len()];
         if let Some(needle) = self.needle.as_ref().filter(|n| !n.is_empty()) {
             let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
             let pin: Vec<char> = needle.chars().map(fold).collect();
@@ -908,13 +920,28 @@ impl Viewer {
             let mut at = 0;
             while at + pin.len() <= hay.len() {
                 if hay[at..at + pin.len()] == pin[..] {
-                    styles[at..at + pin.len()].fill(hit);
+                    hits[at..at + pin.len()].fill(true);
                     at += pin.len();
                 } else {
                     at += 1;
                 }
             }
         }
+        hits
+    }
+
+    /// A row's characters in their colours (the language's, else plain), with the
+    /// search term's hits on top.
+    fn highlight(&self, chars: &[char], styles: &[Style], hits: &[bool]) -> Vec<Span<'static>> {
+        let hit = Style::new()
+            .fg(theme::t().bg)
+            .bg(theme::t().mark)
+            .add_modifier(Modifier::BOLD);
+        let styles: Vec<Style> = styles
+            .iter()
+            .zip(hits)
+            .map(|(&s, &h)| if h { hit } else { s })
+            .collect();
         let mut spans = Vec::new();
         let mut start = 0;
         for k in 1..=chars.len() {

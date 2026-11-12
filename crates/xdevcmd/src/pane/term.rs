@@ -72,7 +72,15 @@ pub struct TermPane {
     /// When the shell last printed anything: a new shell's prompt is taken to be up
     /// once it has printed and gone quiet ([`TermPane::prompt_ready`]).
     last_output: Arc<std::sync::Mutex<Option<Instant>>>,
+    /// The file this shell's output is logged to, if any (the tab menu's Log to file…).
+    /// The reader thread hands it each chunk before the parser sees it.
+    log: LogSlot,
+    /// The log's failure has been said on the status line.
+    log_said: std::cell::Cell<bool>,
 }
+
+/// Where a shell's log is kept, shared with its reader thread.
+type LogSlot = Arc<std::sync::Mutex<Option<Arc<xdevcmd_core::termlog::Log>>>>;
 
 /// Whether a shell can take typed text: what every action that types into it asks
 /// first (`App::send_to_shell`).
@@ -481,20 +489,36 @@ impl TermPane {
         )));
         let (tx, rx) = channel::<Vec<u8>>();
         let last_output = Arc::new(std::sync::Mutex::new(None));
+        let log: LogSlot = Arc::new(std::sync::Mutex::new(None));
         {
             let parser = parser.clone();
             let answers = tx.clone();
             let last_output = last_output.clone();
+            let log = log.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 let mut tail = Vec::new();
+                // Taken out of the slot, so the UI thread never waits behind a send.
+                let logging = || log.lock().ok().and_then(|l| l.clone());
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => {
+                            // The shell is gone: its log ends here, flushed by its
+                            // writer; the panel says so (`TermPanel::take_notes`).
+                            if let Some(l) = logging() {
+                                l.finish();
+                            }
                             OUTPUT.store(true, Ordering::Relaxed);
                             break;
                         }
                         Ok(n) => {
+                            // Before the parser: what scrolls off its history is
+                            // still logged. Never waits on the disk (`Log::tap`).
+                            if let Some(l) = logging() {
+                                if !l.tap(&buf[..n]) {
+                                    OUTPUT.store(true, Ordering::Relaxed);
+                                }
+                            }
                             let asked = cursor_queries(&mut tail, &buf[..n]);
                             if let Ok(mut t) = last_output.lock() {
                                 *t = Some(Instant::now());
@@ -538,7 +562,32 @@ impl TermPane {
             keep,
             ended,
             last_output,
+            log,
+            log_said: std::cell::Cell::new(false),
         })
+    }
+
+    /// This shell's log, while it has one.
+    pub fn log(&self) -> Option<Arc<xdevcmd_core::termlog::Log>> {
+        self.log.lock().ok().and_then(|l| l.clone())
+    }
+
+    /// Log this shell's output from now on.
+    pub fn set_log(&self, l: Arc<xdevcmd_core::termlog::Log>) {
+        if let Ok(mut slot) = self.log.lock() {
+            *slot = Some(l);
+        }
+        self.log_said.set(false);
+    }
+
+    /// Stop handing output to the log; the caller closes it.
+    pub fn take_log(&self) -> Option<Arc<xdevcmd_core::termlog::Log>> {
+        self.log.lock().ok().and_then(|mut l| l.take())
+    }
+
+    /// Whether the log's failure was said yet; marks it said.
+    pub fn log_failure_said(&self) -> bool {
+        self.log_said.replace(true)
     }
 
     /// Started for one program: kept after it ends (see `keep`).

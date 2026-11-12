@@ -180,6 +180,12 @@ pub enum InputKind {
     /// F2 in the viewer: where to write what it shows. The viewer waits in
     /// `App::save_from` meanwhile.
     SaveAs,
+    /// The tab menu's Log to file…: where tab `tab`'s output goes, and whether as raw
+    /// bytes (Tab switches).
+    LogTo {
+        tab: crate::pane::terms::TabId,
+        raw: bool,
+    },
 }
 
 pub struct Input {
@@ -694,6 +700,7 @@ fn render_input(frame: &mut Frame, area: Rect, i: &mut Input) {
         InputKind::Permissions { .. } => "apply",
         InputKind::Pack { .. } => "pack",
         InputKind::SaveAs => "save",
+        InputKind::LogTo { .. } => "log",
     };
     let y = inner.y + inner.height.saturating_sub(1);
     i.buttons = buttons(

@@ -3772,3 +3772,234 @@ fn a_slow_directory_shows_a_bar_and_esc_stops_it() {
     );
     xdevcmd.quit();
 }
+
+/// Round 027: start logging tab 1 from its menu into `path`, `raw` switched on with Tab
+/// in the prompt; returns once the status line says it started.
+fn start_log(xdevcmd: &mut Session, path: &Path, raw: bool) {
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    let (lx, ly) = xdevcmd.locate("Log to file");
+    xdevcmd.click(lx, ly, 0);
+    xdevcmd.wait_for("Log terminal 1 to file");
+    xdevcmd.wait_for(".log");
+    if raw {
+        xdevcmd.send(b"\t");
+        xdevcmd.wait_for("raw bytes, as received");
+    }
+    xdevcmd.send(b"\x15"); // Ctrl+U clears the line
+    xdevcmd.send(path.to_string_lossy().as_bytes());
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("logging to");
+    xdevcmd.wait_for("\u{25cf}");
+}
+
+/// Stop tab 1's log from its menu; returns once the status line says it closed.
+fn stop_log(xdevcmd: &mut Session) {
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    let (sx, sy) = xdevcmd.locate("Stop logging");
+    xdevcmd.click(sx, sy, 0);
+    xdevcmd.wait_for("log closed");
+    xdevcmd.wait_gone("\u{25cf}");
+}
+
+/// The tab menu's Log to file…: colours gone, a line a CR rewrote kept once as it ended,
+/// the file readable by its owner only, a header and a footer, nothing after Stop.
+#[test]
+fn a_tab_logged_from_its_menu_is_text_without_escapes_and_progress_kept_once() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("log-text");
+    let log = s.right().join("tab.log");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    start_log(&mut xdevcmd, &log, false);
+    xdevcmd.send(
+        b"printf '\\033[31mRED\\033[0m plain\\n10%%\\r50%%\\r1%s\\n' 00%; echo done-$((6*7))\r",
+    );
+    xdevcmd.wait_for("done-42");
+    stop_log(&mut xdevcmd);
+    xdevcmd.send(b"echo AFTER_$((1+1))\r");
+    xdevcmd.wait_for("AFTER_2");
+    let bytes = std::fs::read(&log).unwrap();
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    assert!(!bytes.contains(&0x1b), "no escape left: {text:?}");
+    assert!(!bytes.contains(&b'\r'), "no CR left: {text:?}");
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines[0].starts_with("--- xdevcmd: log of sh"), "{text}");
+    assert!(lines.contains(&"RED plain"), "{text}");
+    assert!(lines.contains(&"100%"), "{text}");
+    assert!(!lines.contains(&"50%") && !lines.contains(&"10%"), "{text}");
+    assert!(lines.contains(&"done-42"), "{text}");
+    assert!(
+        lines.last().unwrap().starts_with("--- xdevcmd: log ended"),
+        "{text}"
+    );
+    assert!(!text.contains("AFTER_2"), "stopped means stopped: {text}");
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Tab in the prompt: raw, the bytes as the shell wrote them, nothing added.
+#[test]
+fn a_raw_log_keeps_the_bytes() {
+    let s = Scratch::new("log-raw");
+    let log = s.right().join("raw.log");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    start_log(&mut xdevcmd, &log, true);
+    xdevcmd.wait_for("(raw)");
+    xdevcmd.send(b"printf '\\033[31mRED\\033[0m\\n10%%\\r1%s\\n' 00%; echo done-$((6*7))\r");
+    xdevcmd.wait_for("done-42");
+    stop_log(&mut xdevcmd);
+    let bytes = std::fs::read(&log).unwrap();
+    let has = |n: &[u8]| bytes.windows(n.len()).any(|w| w == n);
+    assert!(
+        has(b"\x1b[31mRED\x1b[0m\r\n"),
+        "{:?}",
+        String::from_utf8_lossy(&bytes)
+    );
+    assert!(
+        has(b"10%\r100%\r\n"),
+        "{:?}",
+        String::from_utf8_lossy(&bytes)
+    );
+    assert!(!has(b"--- xdevcmd"), "no header in raw");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// The log is fed before the screen's parser: what scrolls past `[terminal] scrollback`
+/// is gone from Shift+F12 but still in the log.
+#[test]
+fn a_log_keeps_what_scrolled_past_the_scrollback() {
+    let s = Scratch::new("log-scrollback");
+    let cfg = s.file("short.toml", "[terminal]\nscrollback = 100\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let log = s.right().join("long.log");
+    let mut xdevcmd = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", cfg.as_str())],
+    );
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    start_log(&mut xdevcmd, &log, false);
+    xdevcmd.send(b"seq 1 3000; echo seq-done-$((6*7))\r");
+    xdevcmd.wait_for("seq-done-42");
+    stop_log(&mut xdevcmd);
+    let text = std::fs::read_to_string(&log).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let first = lines
+        .iter()
+        .position(|l| *l == "1")
+        .expect("the first line");
+    let nums: Vec<&str> = lines[first..first + 3000].to_vec();
+    let want: Vec<String> = (1..=3000).map(|n| n.to_string()).collect();
+    assert_eq!(nums, want, "every line, in order");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+}
+
+/// Closing a logged tab ends its log: the footer is written and the status line says so.
+/// A shell that exits does the same.
+#[test]
+fn closing_the_tab_or_exiting_the_shell_ends_the_log() {
+    let s = Scratch::new("log-close");
+    let first = s.right().join("first.log");
+    let second = s.right().join("second.log");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(ALT_N);
+    xdevcmd.wait_for("\u{2302} 2");
+    start_log(&mut xdevcmd, &first, false);
+    // Tab 1 is logged; close it from its menu while tab 2 has focus.
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    let (cx, cy) = xdevcmd.locate("Close tab");
+    xdevcmd.click(cx, cy, 0);
+    xdevcmd.wait_for("log closed");
+    let text = std::fs::read_to_string(&first).unwrap();
+    assert!(
+        text.lines()
+            .last()
+            .unwrap()
+            .starts_with("--- xdevcmd: log ended"),
+        "{text}"
+    );
+
+    // The remaining tab (now 1): logged, then `exit`.
+    xdevcmd.wait_for("$ ");
+    start_log(&mut xdevcmd, &second, false);
+    xdevcmd.send(b"echo BYE_$((3+4)); exit\r");
+    wait_file(&second, "the footer", |t| {
+        t.is_some_and(|t| t.contains("BYE_7") && t.contains("--- xdevcmd: log ended"))
+    });
+    // Said even though the panel went with its last shell.
+    xdevcmd.wait_for("log closed");
+    xdevcmd.wait_gone("\u{2302}");
+    xdevcmd.quit();
+}
+
+/// Quitting with a log running: its last output and footer are in the file.
+#[test]
+fn quitting_flushes_a_running_log() {
+    let s = Scratch::new("log-quit");
+    let log = s.right().join("quit.log");
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    start_log(&mut xdevcmd, &log, false);
+    xdevcmd.send(b"echo LAST_$((5+5))\r");
+    xdevcmd.wait_for("LAST_10");
+    xdevcmd.send(F12);
+    xdevcmd.quit();
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(text.contains("LAST_10\n"), "{text}");
+    assert!(
+        text.lines()
+            .last()
+            .unwrap()
+            .starts_with("--- xdevcmd: log ended"),
+        "{text}"
+    );
+}
+
+/// Read-only mode: the menu item is greyed and F1's row refuses with the usual words;
+/// nothing is written.
+#[test]
+fn read_only_mode_refuses_logging_a_tab() {
+    let s = Scratch::new("log-ro");
+    let mut xdevcmd = Session::start_flags(&s, &["--read-only"]);
+    xdevcmd.wait_for("READ-ONLY");
+    xdevcmd.send(F12);
+    xdevcmd.wait_for("$ ");
+    let (x, y) = xdevcmd.locate("\u{2302} 1");
+    xdevcmd.click(x + 1, y, 2);
+    let (lx, ly) = xdevcmd.locate("Log to file");
+    xdevcmd.click(lx, ly, 0);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        !xdevcmd.screen().contains("Log terminal 1 to file"),
+        "{}",
+        xdevcmd.screen()
+    );
+    xdevcmd.send(b"\x1b");
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(F1);
+    xdevcmd.wait_for("Commands");
+    xdevcmd.send(b"log tab");
+    xdevcmd.wait_for("Log tab to file");
+    xdevcmd.send(ENTER);
+    xdevcmd.wait_for("creating files is turned off");
+    assert!(!xdevcmd.screen().contains("Log terminal 1 to file"));
+    let right: Vec<_> = std::fs::read_dir(s.right()).unwrap().collect();
+    let left: Vec<_> = std::fs::read_dir(s.left()).unwrap().collect();
+    assert!(right.is_empty() && left.is_empty(), "nothing written");
+}

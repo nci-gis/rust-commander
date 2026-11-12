@@ -43,6 +43,12 @@ impl App {
                 KeyCode::Esc => act = ModalAct::Close,
                 KeyCode::Enter => act = ModalAct::Apply,
                 KeyCode::Tab if i.kind == InputKind::GoTo => complete_path(i),
+                KeyCode::Tab => {
+                    if let InputKind::LogTo { raw, .. } = &mut i.kind {
+                        *raw = !*raw;
+                        i.label = super::shell::log_label(*raw);
+                    }
+                }
                 _ => {
                     if i.edit.on_key(k) {
                         i.error = None;

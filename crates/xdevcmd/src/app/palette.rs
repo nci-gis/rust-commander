@@ -47,6 +47,7 @@ impl App {
         match r {
             Run::Act(a) => self.refused(*a).or_else(|| self.archive_refused(*a)),
             Run::User(_) => self.refused(Action::UserMenu),
+            Run::Extra(Extra::LogTab) => self.refused(Action::CopyAs),
             Run::Extra(_) | Run::ReadOnly(_) => None,
         }
     }
@@ -100,6 +101,14 @@ impl App {
             Run::Extra(Extra::About) => self.perform_cmd(Cmd::About),
             Run::Extra(Extra::ConfigInUse) => self.perform_cmd(Cmd::ConfigInUse),
             Run::Extra(Extra::Documentation) => self.perform_cmd(Cmd::Documentation),
+            Run::Extra(e @ (Extra::LogTab | Extra::StopLog)) => {
+                let active = self.panel().and_then(|p| p.tab_id(p.active_tab()));
+                match (active, e) {
+                    (None, _) => self.status = "no terminal is open".into(),
+                    (Some(id), Extra::LogTab) => self.perform_cmd(Cmd::TabLog(id)),
+                    (Some(id), _) => self.perform_cmd(Cmd::TabStopLog(id)),
+                }
+            }
             Run::User(i) => self.run_user_command(i),
             Run::ReadOnly(_) => {}
         }
@@ -149,6 +158,7 @@ impl App {
                 let menu = self.footer_key(Action::UserMenu)?;
                 (!letter.is_empty()).then(|| format!("{menu} {letter}"))
             }
+            Run::Extra(Extra::LogTab) => self.refused(Action::CopyAs),
             Run::Extra(_) | Run::ReadOnly(_) => None,
         }
     }

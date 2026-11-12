@@ -2119,6 +2119,32 @@ fn right_click_on_a_terminal_tab_opens_its_menu() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Round 027: the tab menu's Log to file… asks where, Save as…-style: the tab's number,
+/// an `xdevcmd-<shell>-<date>-<time>.log` name, text by default and Tab for raw.
+#[test]
+fn log_to_file_from_the_tab_menu_asks_where_and_tab_switches_to_raw() {
+    let (a, b) = files(&["alpha.txt"]);
+    let one = shot_keys(SIZE, "F12", &a, &b);
+    let (bar, y) = tab_bar(&one);
+    let first = col(&bar, "\u{2302} 1");
+    let menu = format!("F12,rclick:{first}:{y}");
+    let s = shot_keys(SIZE, &menu, &a, &b);
+    let (ly, line) = s
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("Log to file"))
+        .unwrap_or_else(|| panic!("no Log to file in the tab menu:\n{s}"));
+    assert!(!s.contains("Stop logging"), "one or the other\n{s}");
+    let lx = col(line, "Log to file");
+    let ask = shot_keys(SIZE, &format!("{menu},click:{lx}:{ly}"), &a, &b);
+    assert!(ask.contains("Log terminal 1 to file"), "{ask}");
+    assert!(ask.contains("text, escapes removed (Tab: raw)"), "{ask}");
+    assert!(ask.contains("xdevcmd-") && ask.contains(".log"), "{ask}");
+    let raw = shot_keys(SIZE, &format!("{menu},click:{lx}:{ly},Tab"), &a, &b);
+    assert!(raw.contains("raw bytes, as received (Tab: text)"), "{raw}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn dragging_the_boundary_between_shells_resizes_them() {
     let (a, b) = files(&["alpha.txt"]);

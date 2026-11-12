@@ -85,6 +85,8 @@ impl App {
                 .backend_mut()
                 .raw(&crate::graphics::kitty_delete(KITTY_ID));
         }
+        // A log's last lines and footer reach its file before xdevcmd ends.
+        self.close_logs();
         self.save_session();
         if let Some(e) = lost {
             return Err(e);
@@ -160,6 +162,7 @@ impl App {
         self.pump_job();
         *dirty |= self.stop_step();
         *dirty |= self.reap_terminals();
+        *dirty |= self.log_notes();
         *dirty |= self.background();
         *dirty |= crate::pane::term::take_output();
         // A job's progress moves on its own, with no message to say so; a picture
@@ -345,6 +348,7 @@ impl App {
     pub fn tick(&mut self) {
         self.pump_job();
         self.reap_terminals();
+        self.log_notes();
         self.background();
     }
 

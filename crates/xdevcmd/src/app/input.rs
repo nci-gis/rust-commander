@@ -776,6 +776,8 @@ impl App {
                     }
                 }
             }
+            Cmd::TabLog(id) => self.begin_log(id),
+            Cmd::TabStopLog(id) => self.stop_log(id),
             Cmd::TabClose(id) => {
                 if let Some(i) = self.tab_still_there(id) {
                     let nothing_left = self.panel().is_some_and(|p| p.close_tab(i));

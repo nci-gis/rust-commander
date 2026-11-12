@@ -14,6 +14,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
+use std::sync::Arc;
+
+use xdevcmd_core::termlog::{self, Log};
+
 use crate::layout::{Axis, Divider, Node, PaneId};
 use crate::pane::TermPane;
 use crate::theme;
@@ -43,7 +47,18 @@ impl Tab {
         self.tree.leaves(&mut v);
         v
     }
+
+    /// The shell in this tab whose output is being logged, and its log. One at most.
+    fn logged(&self) -> Option<(PaneId, Arc<Log>)> {
+        self.terms
+            .iter()
+            .find_map(|(id, t)| t.log().map(|l| (*id, l)))
+    }
 }
+
+/// How long ending a log waits for its writer: a hung disk must not hang a close or
+/// quitting.
+const LOG_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// What a click in the panel asked for. Opening a tab needs the file pane's directory,
 /// which only the app knows, so that one is handed back rather than done here.
@@ -112,6 +127,8 @@ pub struct TermPanel {
     new_hit: Rect,
     rects: Vec<(PaneId, Rect)>,
     body: Rect,
+    /// What ending logs had to say (a shell exited, a tab closed), for the status line.
+    notes: Vec<String>,
 }
 
 impl TermPanel {
@@ -128,6 +145,7 @@ impl TermPanel {
             new_hit: Rect::ZERO,
             rects: Vec::new(),
             body: Rect::new(0, 0, cols + 2, rows + 2),
+            notes: Vec::new(),
         };
         p.add_tab(cwd)?;
         Ok(p)
@@ -246,7 +264,9 @@ impl TermPanel {
     fn remove(&mut self, tab: usize, id: PaneId) -> bool {
         let t = &mut self.tabs[tab];
         // Dropping the TermPane drops the pty master, which hangs up the shell.
-        t.terms.remove(&id);
+        if let Some(gone) = t.terms.remove(&id) {
+            Self::end_log(&gone, &mut self.notes);
+        }
         if t.terms.is_empty() {
             self.tabs.remove(tab);
             if self.active >= self.tabs.len() {
@@ -272,7 +292,10 @@ impl TermPanel {
         if i >= self.tabs.len() {
             return false;
         }
-        self.tabs.remove(i);
+        let tab = self.tabs.remove(i);
+        for t in tab.terms.values() {
+            Self::end_log(t, &mut self.notes);
+        }
         if self.active >= self.tabs.len() {
             self.active = self.tabs.len().saturating_sub(1);
         } else if self.active > i {
@@ -304,6 +327,111 @@ impl TermPanel {
             }
         }
         (gone, self.tabs.is_empty())
+    }
+
+    /// A shell's log, ended: queued output written, flushed, said in `notes`.
+    fn end_log(t: &TermPane, notes: &mut Vec<String>) {
+        if let Some(l) = t.take_log() {
+            notes.push(l.close(LOG_WAIT));
+        }
+    }
+
+    /// Tab `i`'s log, while it has one.
+    pub fn tab_log(&self, i: usize) -> Option<Arc<Log>> {
+        self.tabs.get(i)?.logged().map(|(_, l)| l)
+    }
+
+    /// The name of tab `i`'s focused shell: what a log's file is named after.
+    pub fn tab_shell_name(&self, i: usize) -> Option<String> {
+        let t = self.tabs.get(i)?;
+        t.terms.get(&t.focus).map(|p| p.shell_name().to_string())
+    }
+
+    /// Log tab `i`'s focused shell to `path` (appended; created `0600`). The words for
+    /// the status line, or why not.
+    pub fn start_log(
+        &mut self,
+        i: usize,
+        path: &Path,
+        mode: termlog::Mode,
+    ) -> std::result::Result<String, String> {
+        let Some(tab) = self.tabs.get(i) else {
+            return Err("that terminal tab is gone".into());
+        };
+        if let Some((_, l)) = tab.logged() {
+            return Err(format!(
+                "this tab is already logged to {}",
+                l.path().display()
+            ));
+        }
+        let Some(shell) = tab.terms.get(&tab.focus) else {
+            return Err("that terminal tab is gone".into());
+        };
+        if shell.has_exited() {
+            return Err("that shell has ended \u{2014} nothing more to log".into());
+        }
+        let (file, existed) =
+            termlog::open(path).map_err(|e| format!("cannot log to {}: {e}", path.display()))?;
+        let shared = existed && termlog::readable_by_others(&file);
+        let about = termlog::About {
+            label: format!("{} \u{b7} tab {}", shell.shell_name(), i + 1),
+        };
+        shell.set_log(Log::start(path.to_path_buf(), mode, Box::new(file), about));
+        let verb = if existed {
+            "appending to"
+        } else {
+            "logging to"
+        };
+        let mut said = format!("{verb} {} ({})", path.display(), mode.word());
+        if shared {
+            said.push_str(" \u{2014} note: others can read that file");
+        }
+        Ok(said)
+    }
+
+    /// End tab `i`'s log; what to say, or `None` when it had none.
+    pub fn stop_log(&mut self, i: usize) -> Option<String> {
+        let (id, _) = self.tabs.get(i)?.logged()?;
+        let t = self.tabs[i].terms.get(&id)?;
+        let mut notes = Vec::new();
+        Self::end_log(t, &mut notes);
+        notes.pop()
+    }
+
+    /// What the logs have to say since the last call: a log that ended with its shell
+    /// (closed and let go), a failure (said once; the log stays, marked, until Stop
+    /// logging or the tab closes), and what closing shells and tabs said.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        let mut out = std::mem::take(&mut self.notes);
+        for tab in &self.tabs {
+            for t in tab.terms.values() {
+                let Some(l) = t.log() else { continue };
+                match l.status() {
+                    termlog::Status::Running => {}
+                    termlog::Status::Ended => Self::end_log(t, &mut out),
+                    termlog::Status::Failed(why) => {
+                        if !t.log_failure_said() {
+                            out.push(format!(
+                                "log stopped: {why} \u{2014} {}",
+                                l.path().display()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Quitting: every log ended, each given [`LOG_WAIT`] at most.
+    pub fn close_logs(&mut self) -> Vec<String> {
+        let mut out = std::mem::take(&mut self.notes);
+        for tab in &self.tabs {
+            for t in tab.terms.values() {
+                Self::end_log(t, &mut out);
+            }
+        }
+        out
     }
 
     pub fn cycle_tab(&mut self, delta: isize) {
@@ -603,8 +731,22 @@ impl TermPanel {
                 (true, false) => Style::new().fg(th.fg).bg(th.row_cursor),
                 (false, _) => Style::new().fg(th.fg_dim),
             };
-            let label = format!(" \u{2302} {} {} ", i + 1, tab.label());
-            let w = put(frame, cx, &label, style);
+            // ● while the tab is logged; ! in the error colour once its log failed.
+            let failed = |l: Arc<Log>| matches!(l.status(), termlog::Status::Failed(_));
+            let mark = tab.logged().map(|(_, l)| failed(l));
+            let label = match mark {
+                Some(_) => format!(" \u{2302} {} {}", i + 1, tab.label()),
+                None => format!(" \u{2302} {} {} ", i + 1, tab.label()),
+            };
+            let mut w = put(frame, cx, &label, style);
+            if let Some(failed) = mark {
+                let (text, st) = if failed {
+                    (" ! ", style.fg(th.err).add_modifier(Modifier::BOLD))
+                } else {
+                    (" \u{25cf} ", style)
+                };
+                w += put(frame, cx + w, text, st);
+            }
             // The selected tab of the focused pane as a slanted segment, in that look.
             let slanted =
                 i == self.active && active && crate::decor::get().keys == crate::decor::Keys::Slant;

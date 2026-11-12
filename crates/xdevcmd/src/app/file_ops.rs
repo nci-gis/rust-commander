@@ -226,6 +226,7 @@ impl App {
         let text = i.edit.text();
         match &i.kind {
             InputKind::SaveAs => self.apply_save_as(i),
+            InputKind::LogTo { .. } => self.apply_log_to(i),
             InputKind::MkDir => {
                 let name = text.trim();
                 if name.is_empty() {

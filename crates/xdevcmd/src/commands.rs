@@ -26,6 +26,10 @@ pub enum Extra {
     About,
     ConfigInUse,
     Documentation,
+    /// The active terminal tab's menu: Log to file….
+    LogTab,
+    /// The active terminal tab's menu: Stop logging.
+    StopLog,
 }
 
 /// What Enter on a row does.
@@ -215,6 +219,45 @@ pub fn rows(
                 });
             }
         }
+    }
+
+    // The terminal tab menu's own commands, which have no key: acting on the active tab.
+    if let Some(at) = out.iter().rposition(|r| r.group == "Terminal") {
+        let mut rows = Vec::new();
+        for (title, about, extra, id) in [
+            (
+                "Log tab to file\u{2026}",
+                "Everything the active terminal tab prints, to a file you name (text or raw); \u{25cf} on the tab",
+                Extra::LogTab,
+                "log_tab",
+            ),
+            (
+                "Stop logging tab",
+                "End the active terminal tab's log; the file is flushed and closed",
+                Extra::StopLog,
+                "stop_log",
+            ),
+        ] {
+            let run = Run::Extra(extra);
+            rows.push(Row {
+                title: title.into(),
+                group: "Terminal".into(),
+                keys: Vec::new(),
+                key_text: String::new(),
+                about: about.into(),
+                note: Some("also on the tab's right-click menu".into()),
+                place: Place::Everywhere,
+                refused: refuse(&run),
+                run,
+                rebound: false,
+                keys_name: None,
+                id: id.into(),
+                name: format!("Terminal: {title}"),
+                parsed: Vec::new(),
+                hay: String::new(),
+            });
+        }
+        out.splice(at + 1..at + 1, rows);
     }
 
     // Your commands: their letter is the one Shift+F9's menu takes.

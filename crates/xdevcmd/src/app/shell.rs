@@ -141,12 +141,17 @@ impl App {
     pub(super) fn reap_terminals(&mut self) -> bool {
         let Some(p) = self.panel() else { return false };
         let (gone, empty) = p.reap();
+        // A log that ended with its shell says so, before the panel can go with it.
+        let notes = p.take_notes();
         if gone > 0 {
             self.status = if gone == 1 {
                 "shell exited".into()
             } else {
                 format!("{gone} shells exited")
             };
+        }
+        if let Some(last) = notes.last() {
+            self.status = last.clone();
         }
         if empty {
             self.remove_terminal_panel();
@@ -313,6 +318,10 @@ impl App {
                 Cmd::TabSaveHistory(id),
                 writes,
             ),
+            match self.panel().and_then(|p| p.tab_log(i)) {
+                Some(_) => Item::cmd("Stop logging", "\u{25cf}", Cmd::TabStopLog(id), true),
+                None => Item::cmd("Log to file\u{2026}", "", Cmd::TabLog(id), writes),
+            },
             Item::cmd(
                 "List from the last command\u{2026}",
                 "",
@@ -327,6 +336,113 @@ impl App {
             items,
             (x, y),
         )));
+    }
+
+    /// The tab menu's Log to file… (and F1's row): ask where, Save as…-style. Offered
+    /// as `xdevcmd-<shell>-<date>-<time>.log` in the shell's directory when the system
+    /// gave it, else the pane's. Tab in the prompt switches text and raw.
+    pub(super) fn begin_log(&mut self, id: crate::pane::terms::TabId) {
+        // Logging is creating a file, which is what Copy as… is refused for.
+        if let Some(why) = self.refused(Action::CopyAs) {
+            self.status = why;
+            return;
+        }
+        let Some(i) = self.tab_still_there(id) else {
+            return;
+        };
+        let pane_dir = self.focused_cwd();
+        let Some(p) = self.panel() else { return };
+        if let Some(l) = p.tab_log(i) {
+            self.status = format!("this tab is already logged to {}", l.path().display());
+            return;
+        }
+        let shell = p.tab_shell_name(i).unwrap_or_default();
+        // Only a directory the system gave: the history's rule for Save as….
+        let dir = p
+            .history(Some(i))
+            .and_then(|h| h.cwd)
+            .filter(|d| d.to_str().is_some())
+            .unwrap_or(pane_dir);
+        let name = xdevcmd_core::termlog::file_name(&shell);
+        self.modal = Some(Modal::Input(Input {
+            title: format!("Log terminal {} to file", i + 1),
+            label: log_label(false),
+            edit: LineEdit::new(&dir.join(name).display().to_string()),
+            kind: InputKind::LogTo {
+                tab: id,
+                raw: false,
+            },
+            dir,
+            buttons: Vec::new(),
+            error: None,
+        }));
+    }
+
+    /// Enter in Log to file: open the file (appended; `0600` when new) and start.
+    pub(super) fn apply_log_to(&mut self, i: Input) {
+        let InputKind::LogTo { tab, raw } = i.kind else {
+            return;
+        };
+        let refuse = |app: &mut Self, i: Input, why: String| {
+            app.modal = Some(Modal::Input(Input {
+                error: Some(why),
+                ..i
+            }));
+        };
+        if let Some(why) = self.refused(Action::CopyAs) {
+            self.status = why;
+            return;
+        }
+        let dest = match self.typed_destination(&i) {
+            Ok(Some(d)) => d,
+            Ok(None) => return,
+            Err(why) => return refuse(self, i, why),
+        };
+        let Some(n) = self.tab_still_there(tab) else {
+            return;
+        };
+        let mode = if raw {
+            xdevcmd_core::termlog::Mode::Raw
+        } else {
+            xdevcmd_core::termlog::Mode::Text
+        };
+        let Some(p) = self.panel() else { return };
+        match p.start_log(n, &dest, mode) {
+            Ok(said) => self.status = said,
+            Err(why) => refuse(self, i, why),
+        }
+    }
+
+    /// The tab menu's Stop logging (and F1's row).
+    pub(super) fn stop_log(&mut self, id: crate::pane::terms::TabId) {
+        let Some(i) = self.tab_still_there(id) else {
+            return;
+        };
+        self.status = self
+            .panel()
+            .and_then(|p| p.stop_log(i))
+            .unwrap_or_else(|| "this tab is not being logged".into());
+    }
+
+    /// What the terminal panel's logs have to say, on the status line. Whether
+    /// anything was said.
+    pub(super) fn log_notes(&mut self) -> bool {
+        let notes = self.panel().map(|p| p.take_notes()).unwrap_or_default();
+        match notes.last() {
+            Some(last) => {
+                self.status = last.clone();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Quitting: every log ended and flushed, each given two seconds at most. There is
+    /// no screen left to say it on; a failure was said when it happened.
+    pub(super) fn close_logs(&mut self) {
+        if let Some(p) = self.panel() {
+            let _ = p.close_logs();
+        }
     }
 
     /// F2 in the viewer: ask where to save what it shows. History (held in memory) is
@@ -386,14 +502,14 @@ impl App {
         }));
     }
 
-    /// Enter in Save as…: a document in memory is written by the core
-    /// (`document::save_bytes`, `0600`), asking first if the name is taken; a file is
-    /// copied by an ordinary job, which asks its own question about a name taken.
-    pub(super) fn apply_save_as(&mut self, i: Input) {
+    /// Where the text typed in a Save as…-style prompt points, checked as Save as…
+    /// checks it: inside the root (no `..`), no control character, not a directory, in
+    /// a folder that exists. `Ok(None)` when nothing was typed.
+    pub(super) fn typed_destination(&self, i: &Input) -> Result<Option<PathBuf>, String> {
         let typed = i.edit.text();
         let typed = typed.trim();
         if typed.is_empty() {
-            return;
+            return Ok(None);
         }
         let mut dest = expand_tilde(typed);
         if dest.is_relative() {
@@ -407,40 +523,44 @@ impl App {
         let inside = dest
             .parent()
             .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
+        if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+            return Err("outside the root xdevcmd is confined to".into());
+        }
+        // The prefill comes from a file's name or the shell's directory, which someone
+        // else may have chosen: a control character in it is refused, as everywhere a
+        // name could later be typed into a shell or pasted.
+        if let Some(c) = crate::safety::control_char(typed) {
+            return Err(format!(
+                "the name contains a control character (U+{:04X}) \u{2014} not saved",
+                c as u32
+            ));
+        }
+        if dest.is_dir() {
+            return Err("that is a directory \u{2014} add a file name".into());
+        }
+        // Said plainly here, before a job is started that would end in the system's
+        // own words for it.
+        if !dest.parent().is_some_and(Path::is_dir) {
+            return Err("that folder does not exist".into());
+        }
+        Ok(Some(dest))
+    }
+
+    /// Enter in Save as…: a document in memory is written by the core
+    /// (`document::save_bytes`, `0600`), asking first if the name is taken; a file is
+    /// copied by an ordinary job, which asks its own question about a name taken.
+    pub(super) fn apply_save_as(&mut self, i: Input) {
         let refuse = |app: &mut Self, i: Input, why: String| {
             app.modal = Some(Modal::Input(Input {
                 error: Some(why),
                 ..i
             }));
         };
-        if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
-            return refuse(self, i, "outside the root xdevcmd is confined to".into());
-        }
-        // The prefill comes from a file's name or the shell's directory, which someone
-        // else may have chosen: a control character in it is refused, as everywhere a
-        // name could later be typed into a shell or pasted.
-        if let Some(c) = crate::safety::control_char(typed) {
-            return refuse(
-                self,
-                i,
-                format!(
-                    "the name contains a control character (U+{:04X}) \u{2014} not saved",
-                    c as u32
-                ),
-            );
-        }
-        if dest.is_dir() {
-            return refuse(
-                self,
-                i,
-                "that is a directory \u{2014} add a file name".into(),
-            );
-        }
-        // Said plainly here, before a job is started that would end in the system's
-        // own words for it.
-        if !dest.parent().is_some_and(Path::is_dir) {
-            return refuse(self, i, "that folder does not exist".into());
-        }
+        let dest = match self.typed_destination(&i) {
+            Ok(Some(d)) => d,
+            Ok(None) => return,
+            Err(why) => return refuse(self, i, why),
+        };
         let Some(v) = self.save_from.as_ref() else {
             return;
         };
@@ -921,5 +1041,14 @@ impl App {
         if let Some(id) = self.term_id {
             self.focus = id;
         }
+    }
+}
+
+/// The Log to file prompt's label: which mode, and how to switch.
+pub(super) fn log_label(raw: bool) -> String {
+    if raw {
+        "raw bytes, as received (Tab: text), appended to:".into()
+    } else {
+        "text, escapes removed (Tab: raw), appended to:".into()
     }
 }

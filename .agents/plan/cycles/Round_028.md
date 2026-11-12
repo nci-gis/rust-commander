@@ -272,7 +272,8 @@ CSS · diff/patch · INI (and `.conf`, `.cfg`, `.properties`, `.gitconfig`, `.ed
 - [x] Release binary 5.20 MiB, under 7 MiB; first paint of 50 MB on vs off (above)
 - [x] fmt --check, clippy `-D warnings` (Linux), `cargo deny check` (advisories, bans,
   licences, sources ok), `cargo test --workspace` twice
-- [ ] CI on three systems
+- [x] CI on three systems: run 43253994728 green first time (Linux x86_64 and ARM,
+  Windows, macOS, cargo-deny, the windows-gnu/darwin cross-check); no flake seen
 - [ ] **Not verified**: colours on a real terminal by eye (only screenshots); the
   256- and 16-colour look of the syntax colours beyond the light theme's contrast test
   (the 16-colour theme is ANSI names, so the user's palette decides); Windows and

@@ -282,12 +282,12 @@ mod imp {
     }
 
     /// `XDEVCMD_FAULTS`, read once: rules for a program run by a test (the pty suite),
-    /// `;`-separated, each `kind:point:fragment[:argument]`, the argument last so it
-    /// may hold `:` (a Windows path):
+    /// `;`-separated, each `kind|point|fragment[|argument]`: `|`, which no Windows path
+    /// can hold, where `:` would cut `C:\…` in two:
     ///
-    /// - `fail:<point>:<fragment>:<n>[:<os error code>]` (EIO when no code is given)
-    /// - `halt:<point>:<fragment>:<marker file>`
-    /// - `delay:<point>:<fragment>:<milliseconds>`
+    /// - `fail|<point>|<fragment>|<n>[|<os error code>]` (EIO when no code is given)
+    /// - `halt|<point>|<fragment>|<marker file>`
+    /// - `delay|<point>|<fragment>|<milliseconds>`
     fn load_env() {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
@@ -316,7 +316,7 @@ mod imp {
         ];
         let mut out = Vec::new();
         for rule in spec.split(';').filter(|r| !r.trim().is_empty()) {
-            let mut w = rule.trim().splitn(4, ':');
+            let mut w = rule.trim().splitn(4, '|');
             let (Some(kind), Some(point), Some(fragment)) = (w.next(), w.next(), w.next()) else {
                 continue;
             };
@@ -326,7 +326,7 @@ mod imp {
             };
             let action = match kind {
                 "fail" => {
-                    let mut a = arg.splitn(2, ':');
+                    let mut a = arg.splitn(2, '|');
                     let nth = a.next().and_then(|n| n.parse().ok()).unwrap_or(1);
                     // EIO: 5 on Unix, ERROR_CRC (23, "data error") on Windows.
                     let code = a
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn xdevcmd_faults_is_read_rule_by_rule() {
         let rules = parse(
-            "fail:sync-data:b.txt:2:28; halt:remove-source:a.txt:C:\\t\\m;bogus;fail:nowhere:x:1;delay:write:c:5",
+            "fail|sync-data|b.txt|2|28; halt|remove-source|a.txt|C:\\t\\m;bogus;fail|nowhere|x|1;delay|write|c|5",
         );
         assert_eq!(rules.len(), 3, "{rules:?}");
         assert!(matches!(

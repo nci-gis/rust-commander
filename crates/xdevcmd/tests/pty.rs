@@ -1032,7 +1032,7 @@ fn a_move_killed_before_removing_its_source_says_both_are_there() {
     s.file("left/a.txt", "moved data");
     let marker = s.0.join("halted");
     let spec = format!(
-        "halt:remove-source:{}:{}",
+        "halt|remove-source|{}|{}",
         s.left().join("a.txt").display(),
         marker.display()
     );

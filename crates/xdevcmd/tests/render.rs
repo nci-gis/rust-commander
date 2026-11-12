@@ -4367,6 +4367,28 @@ fn alt_k_marks_what_the_other_side_lacks_and_f5_copies_it() {
     );
 }
 
+/// A directory on the other side that cannot be read (the fault seam, so it runs as
+/// root and on every system): a row with a warning and a count in the title, never
+/// "nothing to do", and Alt+K names it on the status line and marks nothing under it.
+#[test]
+fn a_directory_that_cannot_be_read_is_shown_in_the_plan_not_taken_for_empty() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("sub")).unwrap();
+    fs::write(a.join("sub/inner.txt"), "x").unwrap();
+    fs::create_dir_all(b.join("sub")).unwrap();
+    let fault = format!("fail|read-dir|{}|1", b.join("sub").display());
+    let s = shot_cfg_env("", &[("XDEVCMD_FAULTS", fault.as_str())], "Alt+y", &a, &b);
+    assert!(s.contains("cannot be read in the other"), "{s}");
+    assert!(s.contains("1 not read"), "{s}");
+    assert!(!s.contains("inner.txt"), "nothing under it is planned\n{s}");
+    let fault = format!("fail|read-dir|{}|1", b.display());
+    let s = shot_cfg_env("", &[("XDEVCMD_FAULTS", fault.as_str())], "Alt+y", &a, &b);
+    assert!(
+        s.contains("cannot compare"),
+        "a root that cannot be read\n{s}"
+    );
+}
+
 #[test]
 fn alt_y_shows_the_plan_then_makes_both_trees_agree() {
     let (a, b) = two_trees();

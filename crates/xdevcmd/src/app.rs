@@ -328,7 +328,7 @@ struct Comparing {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     seen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     shown: u64,
-    rx: Receiver<Option<Vec<xdevcmd_core::compare::Diff>>>,
+    rx: Receiver<Option<std::io::Result<Vec<xdevcmd_core::compare::Diff>>>>,
 }
 
 /// What undo says while a delete to the trash is still running.

@@ -43,7 +43,13 @@ impl App {
         let Some((me, left, other, right, hidden)) = self.compare_pair() else {
             return;
         };
-        let diffs = compare(&left, &right, false, hidden);
+        let diffs = match compare(&left, &right, false, hidden) {
+            Ok(d) => d,
+            Err(e) => {
+                self.status = format!("cannot compare: {e}");
+                return;
+            }
+        };
         let count = |s: &[State]| diffs.iter().filter(|d| s.contains(&d.state)).count();
         let mark = |f: &mut FilePane, root: &Path, states: &[State]| {
             f.marked.clear();
@@ -69,8 +75,22 @@ impl App {
         } else {
             String::new()
         };
+        // What could not be read is named, never taken for "nothing there".
+        let unknown: Vec<String> = diffs
+            .iter()
+            .filter(|d| d.state.unknown() && d.error.is_some())
+            .map(|d| shown_rel(&d.rel))
+            .collect();
+        let unknown = match unknown.len() {
+            0 => String::new(),
+            1 => format!(" \u{b7} \u{26a0} {} not read in full", unknown[0]),
+            n => format!(
+                " \u{b7} \u{26a0} {n} not read in full ({}, \u{2026})",
+                unknown[0]
+            ),
+        };
         self.status = format!(
-            "marked: {mine} here, {theirs} there, newer or missing on the other side{clash} \u{b7} {same} the same"
+            "marked: {mine} here, {theirs} there, newer or missing on the other side{clash}{unknown} \u{b7} {same} the same"
         );
     }
 
@@ -88,8 +108,10 @@ impl App {
         // A screenshot (the tests) has no later frame to bring the result to: compare
         // there and then.
         if !self.interactive {
-            let diffs = xdevcmd_core::compare::compare(&left, &right, true, hidden);
-            return self.show_sync_plan(&left, &right, &diffs);
+            return match xdevcmd_core::compare::compare(&left, &right, true, hidden) {
+                Ok(diffs) => self.show_sync_plan(&left, &right, &diffs),
+                Err(e) => self.status = format!("cannot compare: {e}"),
+            };
         }
         let stop = Arc::new(AtomicBool::new(false));
         let seen = Arc::new(AtomicU64::new(0));
@@ -119,10 +141,15 @@ impl App {
             return false;
         };
         match c.rx.try_recv() {
-            Ok(Some(diffs)) => {
+            Ok(Some(Ok(diffs))) => {
                 let (left, right) = (c.left.clone(), c.right.clone());
                 self.comparing = None;
                 self.show_sync_plan(&left, &right, &diffs);
+                true
+            }
+            Ok(Some(Err(e))) => {
+                self.comparing = None;
+                self.status = format!("cannot compare: {e}");
                 true
             }
             Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -148,7 +175,7 @@ impl App {
         right: &Path,
         diffs: &[xdevcmd_core::compare::Diff],
     ) {
-        use xdevcmd_core::compare::{plan, State};
+        use xdevcmd_core::compare::{plan, Side, State};
         let pairs = plan(left, right, diffs);
         let mut body = vec![
             format!("\u{2192} this pane  {}", tidy(left)),
@@ -156,24 +183,55 @@ impl App {
             String::new(),
         ];
         let mut overwrites = 0;
+        let mut unknown = 0;
+        let which = |s: Side| match s {
+            Side::Left => "this pane",
+            Side::Right => "the other",
+        };
         for d in diffs {
             let slash = if d.is_dir { "/" } else { "" };
+            let rel = shown_rel(&d.rel);
+            let why = d.error.as_deref().unwrap_or_default();
             let line = match d.state {
-                State::LeftOnly => format!("\u{2192} {}{slash}", d.rel),
-                State::RightOnly => format!("\u{2190} {}{slash}", d.rel),
+                State::LeftOnly => format!("\u{2192} {rel}{slash}"),
+                State::RightOnly => format!("\u{2190} {rel}{slash}"),
                 State::LeftNewer => {
                     overwrites += 1;
-                    format!("\u{2192} {}  replaces an older copy", d.rel)
+                    format!("\u{2192} {rel}  replaces an older copy")
                 }
                 State::RightNewer => {
                     overwrites += 1;
-                    format!("\u{2190} {}  replaces an older copy", d.rel)
+                    format!("\u{2190} {rel}  replaces an older copy")
                 }
-                State::Conflict => format!(
-                    "\u{2260} {}  same time, different size \u{2014} left alone",
-                    d.rel
-                ),
+                State::Conflict => {
+                    format!("\u{2260} {rel}  same time, different size \u{2014} left alone")
+                }
                 State::Same => continue,
+                State::Unreadable(s) => {
+                    unknown += 1;
+                    format!(
+                        "\u{26a0} {rel}/  cannot be read in {} ({why}) \u{2014} nothing under it is copied",
+                        which(s)
+                    )
+                }
+                State::Missing(s) => {
+                    unknown += 1;
+                    format!(
+                        "\u{26a0} {rel}/  went away in {} while compared \u{2014} left alone",
+                        which(s)
+                    )
+                }
+                State::Incomplete(s) if d.error.is_some() => {
+                    unknown += 1;
+                    format!(
+                        "\u{26a0} {rel}/  not all of it could be read in {} ({why})",
+                        which(s)
+                    )
+                }
+                State::Incomplete(s) => format!(
+                    "? {rel}{slash}  not copied: {} could not be read in full here",
+                    which(s)
+                ),
             };
             body.push(line);
         }
@@ -188,10 +246,13 @@ impl App {
             }
         }
         let n = pairs.len();
-        let title = match overwrites {
+        let mut title = match overwrites {
             0 => format!("Synchronise \u{b7} {n} to copy"),
             o => format!("Synchronise \u{b7} {n} to copy, {o} replacing older files"),
         };
+        if unknown > 0 {
+            title.push_str(&format!(" \u{b7} \u{26a0} {unknown} not read"));
+        }
         self.modal = Some(Modal::Ask(modal::Ask {
             title,
             body,
@@ -202,5 +263,14 @@ impl App {
             footnote: None,
             pictures: Vec::new(),
         }));
+    }
+}
+
+/// A path below the compared roots as shown: "." for the roots themselves.
+fn shown_rel(rel: &Path) -> String {
+    if rel.as_os_str().is_empty() {
+        ".".into()
+    } else {
+        rel.display().to_string()
     }
 }

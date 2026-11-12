@@ -512,8 +512,9 @@ the fix, kept here because the commit carries test and fix together.
   each held by a guard and matched on a path fragment; a trace per fragment for order
   tests; wrappers `sync_data(&File, path)` and `sync_dir(dir)` (Unix; EINVAL/ENOTSUP from
   a file system that cannot sync a directory taken as nothing to sync; Windows: nothing,
-  decision 7). `XDEVCMD_FAULTS` (`fail:<point>:<frag>:<n>[:<os code>]`,
-  `halt:<point>:<frag>:<marker>`, `delay:<point>:<frag>:<ms>`, `;`-separated) read once,
+  decision 7). `XDEVCMD_FAULTS` (`fail|<point>|<frag>|<n>[|<os code>]`,
+  `halt|<point>|<frag>|<marker>`, `delay|<point>|<frag>|<ms>`, `;`-separated; `|` and not
+  the plan's `:`, which cuts a Windows path in two, changed in step 4) read once,
   only in a build with the seam.
 - Compiled under `cfg(any(test, feature = "faults"))`; otherwise `at` is an inline
   `Ok(())` and nothing else of it exists. `xdevcmd` turns `faults` on through a
@@ -683,6 +684,41 @@ the fix, kept here because the commit carries test and fix together.
     completely" (no `moved` line existed).
 - Also: `a_move_killed_before_removing_a_source_says_both_are_there` (tidy lists only the
   pairs still both there).
+
+### 2026-11-13, step 4: B01, compare never plans what it could not read
+
+- `compare.rs`: names are `OsString` end to end (`Diff::rel` a relative `PathBuf`, both
+  sides sorted by the same `OsStr` order, hidden told by the first byte); the shown text
+  is made where it is drawn. New `Side`, and `State::Unreadable(side)` (a `read_dir` that
+  fails: the subtree is one row, nothing under it planned on either side),
+  `Missing(side)` (gone while compared: `NotFound` on the directory), `Incomplete(side)`
+  (an entry that could not be read or stated, `NotFound` excepted: the directory gets a
+  row with the first error, and every name in it only on the *other* side becomes
+  `Incomplete` instead of one-sided). `Diff::error` carries why; `State::unknown()`;
+  `plan` never takes an unknown row. A root that cannot be read is an error:
+  `compare` → `io::Result<Vec<Diff>>`, `compare_until` → `Option<io::Result<…>>`.
+  `ReadDir` and `Stat` points in `entries`.
+- App: Alt+K's status line adds "⚠ <dir> not read in full" (or a count) and marks
+  nothing unknown; Alt+Y's dialog draws ⚠ rows ("cannot be read in the other (…) —
+  nothing under it is copied", "went away …", "not all of it could be read …") and
+  "? name  not copied: … could not be read in full here", and the title gains
+  "· ⚠ N not read"; a plan with only such rows is shown, never "already agree". A root
+  that cannot be read: "cannot compare: …" on the status line.
+- Seam format changed: `XDEVCMD_FAULTS` fields are separated by `|`, not `:` (the
+  render test passing a Windows path in a rule would have cut it at `C:`).
+- Failing first (against the step-3 commit, `ReadDir`/`Stat` points put in front of the
+  old calls):
+  - `a_directory_that_cannot_be_read_is_never_planned_into`: the plan copied
+    `l/sub/a` and `l/sub/b` into the unreadable `r/sub`.
+  - `names_that_are_not_utf8_are_compared_and_planned_as_they_are`: `l/a\u{fffd}` is
+    planned and does not exist.
+  - `an_entry_that_cannot_be_looked_at_leaves_its_directory_unplanned`: `r/x` planned
+    into `l`, over the left `x` that could not be stated.
+- Also: `a_directory_without_read_permission_is_never_planned_into` (real `chmod 000`;
+  skips as root, so here it skipped: runs on CI, which is not root),
+  `a_root_that_cannot_be_read_is_an_error_not_a_plan`, and the render test
+  `a_directory_that_cannot_be_read_is_shown_in_the_plan_not_taken_for_empty` (the seam
+  through `XDEVCMD_FAULTS` in the real binary: row, title count, "cannot compare").
 
 ## Check
 

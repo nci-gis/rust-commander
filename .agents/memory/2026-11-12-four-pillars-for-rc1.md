@@ -60,6 +60,10 @@ contracts, and proof that the shipped artifact meets the budgets. Grouped as fou
    waiting.
 6. **Not in the review**: the suite fails when `NO_COLOR=1` is set in the environment;
    the test harnesses must clear it (hermetic tests).
+7. **A Windows flake**, seen 2026-11-12 (run 43221291571, passed on re-run):
+   `render.rs` `tilde_goes_home_and_ctrl_backslash_to_the_root` — the pane stayed in
+   its directory after Ctrl+\\. For pillar 4: find the race (the key before the pane is
+   ready?) or wait on the screen, as the pty tests do.
 
 ## Recommendation
 

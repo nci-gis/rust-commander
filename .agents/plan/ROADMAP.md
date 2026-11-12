@@ -77,14 +77,29 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 | Order | Item | Size |
 |---|---|---|
 | 0 | ~~CI on all three systems for the whole branch~~ (green, run 43181663296); the owner's hand tests: Linux and Windows done 2026-11-12, macOS to come | S |
-| 1 | **F1 Commands** (item 38), Round [024](cycles/Round_024.md), in progress: the command palette in two sizes; Help menu reshaped; Config in use | M |
+| 1 | **F1 Commands** (item 38), Round [024](cycles/Round_024.md), at Review: the command palette in two sizes; Help menu reshaped; Config in use | M |
 | 2 | **xdevtheme-light** (item 37, part 2): Dawn brought back from git and tuned | S |
 | 3 | **Documentation** (item 40): Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
 | 4 | **L. Log a terminal tab to a file** (item 35) | S |
-| 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped | S–M |
-| 6 | **Q. The rest of the stable-quality pass** (item 36, part 2): the release bar below | M |
+| 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped. Designed with pillar 2's progressive indexing (A03) in mind, or done in one round with it, so the viewer changes once | S–M |
+| 6 | **Q. Four pillars** (item 36, part 2; owner, 2026-11-12), each a round: **1. Data correct** (P0) · **2. Responsive and bounded** · **3. Honest contracts** · **4. Release proof** (P0 gate). Contents in the table below; the release bar below is what they must meet. **rc.1 is not cut before pillar 1 is done** | M–L |
 | 7 | *If a day is spare:* **which-key** for the prefix groups (item 39) | S |
 | 8 | **0.4.0-rc.1** (GitHub pre-release) → a week of the owner's real use, fixes only → **0.4.0** → packages → launch (item 10) | — |
+
+### Step 6: the four pillars
+
+From an outside review of v0.4 (the owner's, 2026-11-12) and this agent's answer to it:
+[memory/2026-11-12-four-pillars-for-rc1.md](../memory/2026-11-12-four-pillars-for-rc1.md)
+(the review itself is in `memory/attachments/`). IDs are the review's.
+
+| Pillar | Contents | Priority |
+|---|---|---|
+| **1. Data correct** | B01 compare: an unreadable directory or a non-UTF-8 name never becomes a sync plan; B02 the cursor lands on the chosen file after a slow move; B04 a journal that cannot be written stops or says so (copy mid-job, rename-many); B03 panelize takes a whole line that exists before the `:line` heuristics; B05 one fault test (target replaced after confirm); `sync_data` before replacing an existing file (owner's call) | P0 |
+| **2. Responsive and bounded** | A06 request generations, stale results dropped; A07 watcher debounce with max-wait, a budget per tick, rescan on overflow; A03 progressive viewer index (with D); B08 one shared resource budget; A01 marks as a `HashSet`; one measurement harness, not a framework | P1 |
+| **3. Honest contracts** | Recovery contract (A08: what survives a kill, what a power cut can lose); what a copy preserves per system (B06); name identity vs display vs sort key (B07); panelize's limits; the compatibility promise | P1 |
+| **4. Release proof** | B09 the size checked after the release build, per target, a missing artifact fails (today CI's test runs before the build and skips); a smoke test on the release archives; the hand-test matrix; a benchmark protocol (OS, FS, profile, cache, runs); hermetic tests (`NO_COLOR` cleared) | P0 gate |
+
+Not for 0.4 (the review agrees): mmap, a trie, a custom arena, Tokio, a batch WAL.
 
 **If it runs late**, the suggested cut order is D, then L; F1 Commands stays (it decides a
 newcomer's first five minutes). Cutting is the owner's call.
@@ -102,7 +117,7 @@ newcomer's first five minutes). Cutting is the owner's call.
 3. **Budgets, kept by tests where possible**: start-up under 150 ms; 100,000 entries
    listed and sorted in under 1 s; idle CPU under 0.5 %; memory flat in the soak test;
    **the binary at most 7 MB** (owner: important), checked on each release target in CI
-   at the pull request.
+   at the pull request, **after** the release build (pillar 4: today it is not).
 4. **A compatibility promise in `docs/`** ("From 0.4.0"): what it covers (config keys,
    CLI flags, action names in `[keys]`, the theme-file format) is the owner's call at Q's
    kickoff. Display names in F1 are not covered.

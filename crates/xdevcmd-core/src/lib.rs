@@ -14,6 +14,8 @@ pub mod color;
 pub mod compare;
 pub mod document;
 pub mod entry;
+#[doc(hidden)]
+pub mod faults;
 pub mod find;
 pub mod format;
 pub mod found;

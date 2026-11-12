@@ -4,7 +4,7 @@
 **Part of**: v0.4.0, step 6 of `ROADMAP.md` ("Step 6: three pre-releases", beta.1); pillar 1
 of `memory/2026-11-12-four-pillars-for-rc1.md` (B01–B05, A08's sync gap); the owner's
 decisions of 2026-11-12 and 2026-11-13 (below, §1)
-**Date started**: YYYY-MM-DD
+**Date started**: 2026-11-13
 **Date completed**: YYYY-MM-DD
 
 ## Goal
@@ -500,6 +500,44 @@ the seam's trace, not inferred from results.
 - Panelize's NUL mode (`find -print0`), 0.5. Pillar 2 (A06, A07, B08), beta.2.
 
 ## Do
+
+Coder's log, newest last. "Failing first" is the run of the new test on the code before
+the fix, kept here because the commit carries test and fix together.
+
+### 2026-11-13, step 0: the fault seam and the test places
+
+- `xdevcmd-core/src/faults.rs`: `Point` (the ten of §7), `at(point, path)`, rules
+  `Fail { nth, error }` (an `ErrorKind` or a raw OS code), `Delay`, `Halt { marker }`,
+  `Swap { target, body }` and `Skip` (leave a sync out, for step 3's measurement only),
+  each held by a guard and matched on a path fragment; a trace per fragment for order
+  tests; wrappers `sync_data(&File, path)` and `sync_dir(dir)` (Unix; EINVAL/ENOTSUP from
+  a file system that cannot sync a directory taken as nothing to sync; Windows: nothing,
+  decision 7). `XDEVCMD_FAULTS` (`fail:<point>:<frag>:<n>[:<os code>]`,
+  `halt:<point>:<frag>:<marker>`, `delay:<point>:<frag>:<ms>`, `;`-separated) read once,
+  only in a build with the seam.
+- Compiled under `cfg(any(test, feature = "faults"))`; otherwise `at` is an inline
+  `Ok(())` and nothing else of it exists. `xdevcmd` turns `faults` on through a
+  dev-dependency on its own engine. **Confirmed** (resolver 2): the program `cargo test`
+  builds for the pty/render tests holds `XDEVCMD_FAULTS`; `cargo build --release` does
+  not (string search, 0 matches; the binary is stripped, so `nm` proves nothing).
+  `tests/budgets.rs`
+  `the_fault_seam_is_in_the_tests_program_and_not_in_the_release_build` checks both; CI
+  now runs `cargo test -p xdevcmd --test budgets` again after `cargo build --release`, so
+  the release half is checked there (before, the release size check always skipped on
+  CI: `cargo test` runs before the release build).
+- First guarded call: `ops::write_all_from`, `Point::Write` per chunk.
+- Test places: `faults::places::{other_device, small_fs}` (`XDEVCMD_TEST_OTHER_DEV`, else
+  `/dev/shm` on Linux; `XDEVCMD_TEST_SMALL_FS`), each skipping with a line on stderr.
+  `ci.yml`: Linux mounts two tmpfs (4 MiB to fill, 64 MiB to move to) with `sudo mount`;
+  macOS two HFS+ RAM disks (`hdiutil attach -nomount ram://…`, `diskutil erasevolume`);
+  Windows names `$RUNNER_TEMP\xdev-other` (D:, the temp directory is on C:).
+  Two mounts, not one: a test filling the small one must not fail another test moving
+  files onto it at the same moment.
+- Tests: the seam (nth pass of one path only; a dropped rule is gone; trace order; swap
+  once; `XDEVCMD_FAULTS` parsing), and a real ENOSPC:
+  `a_replacement_that_fills_the_disk_keeps_the_old_file` (passes on today's code: the
+  place works; checked here with a 4 MiB tmpfs mounted by hand, and skipped without it).
+- Nothing to fail first in this step: it adds the seam, no fix.
 
 ## Check
 

@@ -44,6 +44,37 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
+      # Two small file systems of their own for the data-safety tests (Round 029): one
+      # to fill (a real "disk full" from the kernel, XDEVCMD_TEST_SMALL_FS) and one to
+      # move to across devices (XDEVCMD_TEST_OTHER_DEV). The tests that need them skip,
+      # and say so, when the variables are unset, so a developer's machine needs
+      # nothing. Mounted here, never by a test.
+      - name: small file systems (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /mnt/xdev-small /mnt/xdev-other
+          sudo mount -t tmpfs -o size=4m,mode=1777 tmpfs /mnt/xdev-small
+          sudo mount -t tmpfs -o size=64m,mode=1777 tmpfs /mnt/xdev-other
+          echo "XDEVCMD_TEST_SMALL_FS=/mnt/xdev-small" >> "$GITHUB_ENV"
+          echo "XDEVCMD_TEST_OTHER_DEV=/mnt/xdev-other" >> "$GITHUB_ENV"
+      # RAM disks: 8192 and 131072 sectors of 512 bytes (4 MiB, 64 MiB). HFS+, which
+      # ignores case as the system disk does.
+      - name: small file systems (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          small=$(hdiutil attach -nomount ram://8192 | awk '{print $1}')
+          diskutil erasevolume HFS+ xdevsmall "$small"
+          other=$(hdiutil attach -nomount ram://131072 | awk '{print $1}')
+          diskutil erasevolume HFS+ xdevother "$other"
+          echo "XDEVCMD_TEST_SMALL_FS=/Volumes/xdevsmall" >> "$GITHUB_ENV"
+          echo "XDEVCMD_TEST_OTHER_DEV=/Volumes/xdevother" >> "$GITHUB_ENV"
+      # Windows: the temporary directory is on C:, the workspace on D:.
+      - name: another volume (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdev-other"
+          echo "XDEVCMD_TEST_OTHER_DEV=$RUNNER_TEMP\\xdev-other" >> "$GITHUB_ENV"
       # The suite starts a real pty and renders real frames, so this is the step that
       # actually says whether xdevcmd works on this platform.
       - run: cargo test --all
@@ -54,6 +85,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo package --workspace --locked
       - run: cargo build --release
+      # Now that there is a release build: its size, and that it holds no fault seam.
+      - run: cargo test -p xdevcmd --test budgets
       # macos-latest is Apple Silicon, and an Intel Mac cannot run what it builds. Build
       # the Intel half too and join the two, so the one file runs on either.
       - name: universal macOS binary

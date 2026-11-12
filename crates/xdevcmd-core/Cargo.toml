@@ -13,6 +13,13 @@ license.workspace = true
 rust-version.workspace = true
 publish = true
 
+[features]
+# The fault seam (faults.rs): failures, halts and swaps at the file system calls data
+# safety rests on, for tests. Never on in the program people install: only xdevcmd's
+# tests turn it on (its dev-dependencies), and a test checks the release binary has none
+# of it.
+faults = []
+
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 flate2 = "1.1.10"

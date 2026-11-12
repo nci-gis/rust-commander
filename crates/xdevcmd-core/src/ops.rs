@@ -808,7 +808,7 @@ impl Worker {
             .write(true)
             .create_new(true)
             .open(&target)?;
-        let written = self.write_all_from(&mut r, &mut w);
+        let written = self.write_all_from(&mut r, &mut w, &target);
         let kept = match written {
             Ok(true) => {
                 // Permissions and mtime are part of the file as far as a user is
@@ -836,8 +836,8 @@ impl Worker {
         kept
     }
 
-    /// Copy `r` into `w`; Ok(false) when cancelled part-way.
-    fn write_all_from(&mut self, r: &mut File, w: &mut File) -> io::Result<bool> {
+    /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
+    fn write_all_from(&mut self, r: &mut File, w: &mut File, path: &Path) -> io::Result<bool> {
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -847,6 +847,7 @@ impl Worker {
             if n == 0 {
                 break;
             }
+            crate::faults::at(crate::faults::Point::Write, path)?;
             w.write_all(&buf[..n])?;
             self.advance(n as u64);
         }
@@ -1606,24 +1607,9 @@ mod tests {
     }
 
     /// A directory on another file system than the temporary directory, for moves
-    /// across devices: tmpfs at /dev/shm on Linux. None where there is no such place.
+    /// across devices. None, and said, where there is no such place.
     fn other_device(tag: &str) -> Option<PathBuf> {
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let shm = Path::new("/dev/shm");
-            let tmp = fs::metadata(std::env::temp_dir()).ok()?;
-            let other = fs::metadata(shm).ok()?;
-            if other.dev() != tmp.dev() {
-                let d = shm.join(format!("xdevcmd-xdev-{tag}-{}", std::process::id()));
-                let _ = fs::remove_dir_all(&d);
-                fs::create_dir_all(&d).ok()?;
-                return Some(d);
-            }
-        }
-        #[cfg(not(target_os = "linux"))]
-        let _ = tag;
-        None
+        crate::faults::places::other_device(tag)
     }
 
     /// Run `req`, answering each question with `answer(question)`; the summary and
@@ -1708,6 +1694,42 @@ mod tests {
         assert_eq!(fs::read(root.join("g")).unwrap(), b"ours");
         assert_eq!(fs::read(other.join("g")).unwrap(), b"theirs");
         fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A real "disk full" from the kernel (CI's small file system): the replacement fails,
+    /// the old file is kept, and nothing is left under a temporary name.
+    #[test]
+    fn a_replacement_that_fills_the_disk_keeps_the_old_file() {
+        let Some(small) = crate::faults::places::small_fs("full-replace") else {
+            return;
+        };
+        let root = tmp("full-replace");
+        // Sparse: bigger than the whole small file system, free to make here.
+        let big = File::create(root.join("f")).unwrap();
+        big.set_len(64 << 20).unwrap();
+        drop(big);
+        fs::write(small.join("f"), b"old").unwrap();
+        let (s, asked) =
+            run_answering(
+                Request::copy(vec![root.join("f")], small.clone()),
+                |q| match q {
+                    Question::Failed { .. } => Answer::Skip,
+                    _ => Answer::Yes,
+                },
+            );
+        assert!(
+            asked.iter().any(|q| q.starts_with("Failed")),
+            "the full disk is asked about: {asked:?}"
+        );
+        assert_eq!((s.done, s.failed), (0, 1), "{s:?}");
+        assert_eq!(fs::read(small.join("f")).unwrap(), b"old");
+        assert_eq!(
+            fs::read_dir(&small).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        fs::remove_dir_all(&small).unwrap();
         fs::remove_dir_all(&root).unwrap();
     }
 

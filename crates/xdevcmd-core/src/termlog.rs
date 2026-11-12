@@ -187,6 +187,8 @@ enum State {
     Str,
     /// ESC inside a string: `\` ends it.
     StrEsc,
+    /// SS2 or SS3 (ESC N, ESC O): the next byte goes with it.
+    SkipOne,
 }
 
 /// A terminal's output as text: escapes removed, each line written once, as the
@@ -203,6 +205,8 @@ pub struct TextFilter {
     col: usize,
     /// A full-screen program has the alternate screen.
     alt: bool,
+    /// Inside a string, the last byte was 0xC2: a 0x9C now is ST (U+009C) in UTF-8.
+    str_c2: bool,
 }
 
 impl Default for TextFilter {
@@ -220,6 +224,7 @@ impl TextFilter {
             line: Vec::new(),
             col: 0,
             alt: false,
+            str_c2: false,
         }
     }
 
@@ -264,12 +269,18 @@ impl TextFilter {
                 0x18 | 0x1a => self.state = State::Ground,
                 _ => {}
             },
-            State::Str => match b {
-                0x07 => self.state = State::Ground,
-                0x1b => self.state = State::StrEsc,
-                0x18 | 0x1a => self.state = State::Ground,
-                _ => {}
-            },
+            State::SkipOne => self.state = State::Ground,
+            State::Str => {
+                let c2 = self.str_c2;
+                self.str_c2 = b == 0xc2;
+                match b {
+                    0x9c if c2 => self.state = State::Ground,
+                    0x07 => self.state = State::Ground,
+                    0x1b => self.state = State::StrEsc,
+                    0x18 | 0x1a => self.state = State::Ground,
+                    _ => {}
+                }
+            }
             State::StrEsc => {
                 if b == b'\\' {
                     self.state = State::Ground;
@@ -287,7 +298,11 @@ impl TextFilter {
                 self.csi.clear();
                 State::Csi
             }
-            b']' | b'P' | b'X' | b'^' | b'_' => State::Str,
+            b']' | b'P' | b'X' | b'^' | b'_' => {
+                self.str_c2 = false;
+                State::Str
+            }
+            b'N' | b'O' => State::SkipOne,
             0x20..=0x2f => State::EscInter,
             0x1b => State::Esc,
             _ => State::Ground,
@@ -309,7 +324,7 @@ impl TextFilter {
                         .ok()
                         .and_then(|s| s.chars().next())
                         .unwrap_or('\u{fffd}');
-                    self.put(c, out);
+                    self.char_in(c, out);
                 }
                 return;
             }
@@ -326,11 +341,36 @@ impl TextFilter {
             }
             b'\r' => self.col = 0,
             0x08 => self.col = self.col.saturating_sub(1),
-            b'\t' => self.put('\t', out),
+            // To the next stop, as a terminal's default tab stops every 8 columns: the
+            // cursor moves, nothing is written over.
+            b'\t' => {
+                if !self.alt {
+                    self.col = (self.col / 8)
+                        .saturating_add(1)
+                        .saturating_mul(8)
+                        .min(MAX_LINE - 1);
+                }
+            }
             0x00..=0x1f | 0x7f => {}
             0x20..=0x7e => self.put(b as char, out),
             0xc2..=0xf4 => self.utf8.push(b),
             _ => self.put('\u{fffd}', out),
+        }
+    }
+
+    /// A decoded character: a C1 control acts as its ESC form does, anything else is
+    /// put on the line.
+    fn char_in(&mut self, c: char, out: &mut Vec<u8>) {
+        match c {
+            '\u{9b}' => {
+                self.csi.clear();
+                self.state = State::Csi;
+            }
+            '\u{90}' | '\u{98}' | '\u{9d}' | '\u{9e}' | '\u{9f}' => {
+                self.str_c2 = false;
+                self.state = State::Str;
+            }
+            _ => self.put(c, out),
         }
     }
 
@@ -793,8 +833,8 @@ mod tests {
             "a character cut short"
         );
         assert_eq!(text(&[b"end\xe6"]), "end\u{fffd}\n", "cut short at the end");
-        // C1 controls written as UTF-8 are controls, not text.
-        assert_eq!(text(&["a\u{9b}b\n".as_bytes()]), "ab\n");
+        // C1 controls written as UTF-8 are controls, not text: U+0085 is dropped.
+        assert_eq!(text(&["a\u{85}b\n".as_bytes()]), "ab\n");
     }
 
     #[test]
@@ -809,6 +849,42 @@ mod tests {
 
     /// A count no terminal would send must not overflow the column (a panic in a debug
     /// build, a wrap in release): the cursor stops at the line's bound.
+    /// C1 controls written as UTF-8 do what their ESC forms do: U+009B is CSI, U+009D,
+    /// U+0090, U+0098, U+009E and U+009F start a string that ST (U+009C or ESC \\) or BEL
+    /// ends; split anywhere, they are taken whole.
+    #[test]
+    fn c1_controls_start_sequences() {
+        assert_eq!(
+            same_split_anywhere("a\u{9b}31mred\u{9b}0m\n".as_bytes()),
+            "ared\n"
+        );
+        assert_eq!(
+            same_split_anywhere("\u{9d}0;title\u{9c}after\n".as_bytes()),
+            "after\n"
+        );
+        assert_eq!(same_split_anywhere("\u{9d}0;t\x07x\n".as_bytes()), "x\n");
+        for start in ['\u{90}', '\u{98}', '\u{9e}', '\u{9f}'] {
+            let input = format!("{start}payload \u{2713}\x1b\\kept\n");
+            assert_eq!(same_split_anywhere(input.as_bytes()), "kept\n", "{start:?}");
+        }
+    }
+
+    /// SS2 and SS3 (ESC N, ESC O) take the next byte with them.
+    #[test]
+    fn single_shifts_take_the_next_byte() {
+        assert_eq!(same_split_anywhere(b"\x1bNa b\x1bOc\n"), " b\n");
+    }
+
+    /// A tab moves to the next multiple of 8, as a terminal's default stops do, over
+    /// what is there rather than into it.
+    #[test]
+    fn a_tab_moves_to_the_next_stop() {
+        assert_eq!(text(&[b"a\tb\n"]), "a       b\n");
+        assert_eq!(text(&[b"12345678\tx\n"]), "12345678        x\n");
+        assert_eq!(text(&[b"abcdefghij\rX\tY\n"]), "XbcdefghYj\n");
+        assert_eq!(text(&[b"tail\t\n"]), "tail\n");
+    }
+
     #[test]
     fn a_huge_cursor_count_is_bounded() {
         let max = usize::MAX.to_string();

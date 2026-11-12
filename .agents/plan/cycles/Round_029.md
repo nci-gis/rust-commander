@@ -843,6 +843,19 @@ on macOS and Windows, whose temporary directories ignore case.
 - No test needed: `every_toml_example_in_the_docs_is_a_valid_config` and the docs tests
   pass.
 
+### 2026-11-13, end of the round: checks and CI
+
+- Local (this sandbox, Linux x86_64, as root): `cargo fmt --all --check` clean; `cargo
+  clippy --workspace --all-targets -- -D warnings` and with `--all-features` clean;
+  `cargo test --workspace` twice in a row, all green both times (each run includes the
+  pty suite: 108 passed, 1 ignored).
+- CI run 43310782838 (at 792c335): green on ubuntu-latest, macOS, Windows, the
+  cross-check and cargo-deny; **ARM failed** on the new pty test
+  `enter_on_a_result_in_a_slow_directory_lands_on_the_file`: a race in the test, not
+  the code (it waited for "zz-target", which the find dialog shows as typed, then
+  pressed End before the result row had arrived; Enter went up out of the results).
+  Fixed to wait for "1 found"; three local runs green.
+
 ## Check
 
 ## Act

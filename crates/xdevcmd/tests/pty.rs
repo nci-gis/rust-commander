@@ -3933,8 +3933,8 @@ fn enter_on_a_result_in_a_slow_directory_lands_on_the_file() {
     x.wait_for("Find");
     x.send(b"zz-target*");
     x.send(ENTER);
-    x.wait_for("zz-target");
-    x.wait_gone("searching");
+    // The result itself, counted: the name alone is on screen as typed, before any row.
+    x.wait_for("1 found");
     x.send(b"\x1b[F"); // End: the result
     x.send(ENTER);
     x.wait_for("opening slowdir\u{2026}");

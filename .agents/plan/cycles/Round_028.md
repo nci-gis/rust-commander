@@ -1,6 +1,6 @@
 # Round 028: Syntax-highlighted viewer (v0.4.0, step 5, item 33)
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: v0.4.0, step 5 of `ROADMAP.md` ("Next"); item 33 (the owner's go,
 2026-11-12: "yes, pls go as plan")
 **Date started**: 2026-11-12
@@ -201,17 +201,87 @@ CSS · diff/patch · INI (and `.conf`, `.cfg`, `.properties`, `.gitconfig`, `.ed
 
 ## Do
 
-- **2026-11-12, kickoff**: this file; ROADMAP step 5 and item 33 → Round 028.
+- **2026-11-12, kickoff** (`19e9821`): this file; ROADMAP step 5 and item 33 → Round 028.
+- **Detection and lexers** (`11e522b`): core `syntax/mod.rs` (`Lang`, `Kind`, `Span`,
+  `State`, `detect`: whole names, then extensions, then a shebang or `<?xml`,
+  `<!DOCTYPE html`, `diff --git`) and `syntax/lex.rs`: one table-driven lexer (`Spec`:
+  comments, nesting, quotes and which go on past a line, raw quotes, triple quotes,
+  Rust's raw strings/chars/lifetimes/`name!`, Python's prefixes, decorators, the
+  preprocessor, `#[…]`, shell's `$…`, `Capitalised` types and `ALL_CAPS` constants,
+  `fn`/`def`/`class` naming the next word) for Rust, Python, JS/TS, JSON, shell, C/C++,
+  Go, Java, Kotlin, C#, CSS, SQL; lexers of their own for Markdown (fences carry over),
+  diff, logs (a leading timestamp, levels in capitals or before `:`), INI, TOML (keys,
+  tables, `'''`/`"""` over lines), YAML (keys, list markers, anchors) and HTML/XML
+  (tags, attributes, comments and tags over lines, entities). Spans start and end only
+  at ASCII bytes or the line's end, so on character boundaries (asserted by every test).
+  Tests: each language's pieces, states carried over lines, and every lexer from every
+  state over odd input (lone quotes, `r#"`, `${`, `<`, U+FFFD, emoji, 75 KB lines).
+- **Checkpoints** (`bd0909a`): `syntax/scan.rs`. `Checkpoints` (the state at every
+  128th line), `Scan` (fed byte chunks, cuts lines with `document::line_text`, the rule
+  `Document::line` now calls too, and the 64 KiB cap), `Highlighter` (`scan_file` on a
+  thread of its own with its own handle, cancelled on drop, a panic marks it done;
+  `spans(doc, i)` from the nearer of the checkpoint and a recently lexed line, `None`
+  past 2,048 lines; a bounded cache; lines over 4 KiB lexed for the state, drawn
+  plain). Tests: 5,000 lines with comments, strings and raw strings over checkpoints,
+  CRLF, invalid UTF-8, a 70 KiB line with `/*` past the cut and a long line opening a
+  comment: every 7th line and the edges, reached by jumping with the scan, equal the
+  same lines scrolled to one by one; a C comment across line 128 fed in 5-byte chunks;
+  a far jump is `None` without the scan and `Some` within 2,048 lines or after it;
+  empty and one-line files; dropping stops an endless scan; a missing file.
+- **The viewer and quick view** (`71f1c45`): `Viewer::with_syntax(on, max, scan)`
+  (never for binary or in-memory documents; over the cap the message says "<lang> file
+  over 64 MiB — not coloured"); a style per character (a tab's spaces take its style),
+  then the search hit over it, char-wise (the old byte slicing of a lower-cased copy
+  could cut a character whose lower case is longer); the language in the title; lines
+  the scan has not reached drawn plain and the frame drawn again when it moves on
+  (`App::background`); `--screenshot` waits for it as for a job. `theme::syntax_style`
+  maps kinds to slots. F3, a file from an archive and F3 on a path in a history get the
+  scan; quick view gets 1 MiB and none; the history none. `[viewer] highlight` in the
+  config (default true), `colours_on` adds `NO_COLOR`. Render tests: Rust and Python
+  at true colour (keyword, string, comment and a comment over two lines, call,
+  decorator, triple string over two lines); off by setting and under `NO_COLOR`; hex
+  and back; the search hit's background with the string's colour kept beside it; `G`
+  on 30,000 lines under one open comment, coloured from the scan; quick view. Unit:
+  a document in memory is never coloured; the cap, its message, the setting.
+- **Settings and config.md** (`43df979`): "Viewer colours source" in Settings → Files,
+  on by default (render test).
+- **Contrast** (`72da39c`): `xdevtheme_light_reads_on_its_own_background` now checks
+  every kind's colour on the viewer's `bg` at 4.5:1, true colour and 256 (passes with
+  the existing slots; shown to fail at 2.86:1 with comments mapped to `border`).
+  `syntax_style_in(theme, kind)` so the test does not touch the global theme.
+- **Docs** (`9767e68`): guide (viewer), CHANGELOG. `config.md` in `43df979`. No new
+  dependency: `Cargo.lock`, `THIRD-PARTY.md` and `about.toml` unchanged.
+- **Measurements** (this machine, Linux x86_64, 2 cores, release):
+  - Binary **5,451,752 B (5.20 MiB)**, +91,808 B over the 5,359,944 B before; 1.80 MiB
+    under the 7 MiB budget (`tests/budgets.rs` passes on the release build).
+  - Time to first paint, a 50 MB Rust file (653,680 lines), `--screenshot=120x40`,
+    shell wait 0, median of 5 (each includes start-up, about 36 ms, and the
+    screenshot's 30 ms pause per key): `Down,F3` off **107 ms**, on **108 ms**;
+    `Down,F3,G` off 147 ms, on 610 ms: there the screenshot waits for the background
+    scan to reach the end (about 0.46 s for 50 MB, ~110 MB/s); a person sees the end at
+    once, plain, coloured when the scan arrives.
 
 ## Check
 
-- [ ] Detection, lexer, checkpoints: unit tests (scroll = jump, checkpoint crossing,
-  invalid UTF-8, huge lines, empty file)
-- [ ] Render: Rust and Python coloured; off by setting and under `NO_COLOR`; search on
-  top; history plain; quick view
-- [ ] xdevtheme-light contrast for the syntax colours
-- [ ] Release binary under 7 MB, size recorded; first paint of 50 MB on vs off
-- [ ] fmt, clippy, tests twice, cargo deny; CI on three systems
+- [x] Detection, lexer, checkpoints: unit tests (scroll = jump, checkpoint crossing,
+  invalid UTF-8, huge lines, empty file, cancel)
+- [x] Render: Rust and Python coloured; off by setting and under `NO_COLOR`; search on
+  top; quick view; a jump coloured from the scan. History plain: a unit test (it is a
+  document in memory), not a render test (no shell in the render suite)
+- [x] xdevtheme-light contrast for the syntax colours on the viewer, true colour and 256
+- [x] Release binary 5.20 MiB, under 7 MiB; first paint of 50 MB on vs off (above)
+- [x] fmt --check, clippy `-D warnings` (Linux), `cargo deny check` (advisories, bans,
+  licences, sources ok), `cargo test --workspace` twice
+- [ ] CI on three systems
+- [ ] **Not verified**: colours on a real terminal by eye (only screenshots); the
+  256- and 16-colour look of the syntax colours beyond the light theme's contrast test
+  (the 16-colour theme is ANSI names, so the user's palette decides); Windows and
+  macOS by hand; the plain-then-coloured redraw after a jump seen live (the screenshot
+  waits for the scan instead); a file changed while it is scanned (no test: lines may
+  be coloured from the old contents, never a panic by construction); quality of the
+  colours in real projects beyond the samples (it is a lexer: no heredoc bodies, no
+  code inside Markdown fences or HTML `<script>`, regex literals in JavaScript not
+  recognised).
 
 ## Act
 

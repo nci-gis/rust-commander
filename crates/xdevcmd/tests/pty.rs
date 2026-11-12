@@ -2320,6 +2320,32 @@ fn a_menu_row_in_f1_types_its_command_into_the_shell() {
     x.quit();
 }
 
+/// A `[[menu]]` row run from F1 in the shell fills %s from the file pane the shell was
+/// entered from, as Shift+F9 there would; before, it took the shell's (none).
+#[test]
+fn a_menu_row_from_the_shell_takes_the_files_from_the_pane() {
+    let s = Scratch::new("f1-menu-shell");
+    s.file("left/it's here.txt", "x");
+    s.file(
+        "config.toml",
+        "[[menu]]\nkey = \"e\"\nlabel = \"say it\"\ncommand = \"echo GOT %s DONE\"\n",
+    );
+    let flag = format!("--config={}", s.0.join("config.toml").display());
+    let mut x = Session::start_flags(&s, &[&flag]);
+    x.send(DOWN);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(ALT_X);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"say it");
+    x.wait_for("Your commands: say it");
+    x.send(ENTER);
+    x.wait_for("GOT it's here.txt DONE");
+    x.send(F12);
+    x.quit();
+}
+
 /// Keymap A keeps F1 for the program in the shell; xdevcmd's F1 there is Alt+X F1.
 #[test]
 fn from_the_shell_f1_is_the_programs_and_alt_x_f1_opens_commands() {

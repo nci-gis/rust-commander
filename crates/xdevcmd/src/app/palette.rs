@@ -75,7 +75,14 @@ impl App {
             self.modal_act_inner(ModalAct::Close);
         }
         let in_shell = self.focus_is_term();
-        if in_shell && matches!(run, Run::Act(a) if a.place() == Place::Files) {
+        // A `[[menu]]` command's %f %s %d are the file pane's, whatever it then types
+        // into: from the shell, the file pane the shell was entered from.
+        let files_first = match run {
+            Run::Act(a) => a.place() == Place::Files,
+            Run::User(_) => true,
+            Run::Extra(_) | Run::ReadOnly(_) => false,
+        };
+        if in_shell && files_first {
             self.focus_last_files();
         }
         let hint = if from_menu {

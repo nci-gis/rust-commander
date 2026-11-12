@@ -5,7 +5,7 @@
 //! Not a parser. Each line is lexed on its own, from a [`State`] that says what the line
 //! starts inside of (a block comment, a multi-line string, a fenced block), and gives the
 //! state the next line starts in. The state is a few bytes, so keeping one every
-//! hundred lines of a big file costs nothing, and a line anywhere is coloured
+//! [`scan::EVERY`] lines of a big file costs nothing, and a line anywhere is coloured
 //! by lexing at most that many lines before it.
 //!
 //! Why our own and not syntect or tree-sitter: Round 028 measured both against the
@@ -13,8 +13,10 @@
 //! languages and C on every target.
 
 mod lex;
+pub mod scan;
 
 pub use lex::lex_line;
+pub use scan::{Checkpoints, Highlighter, Scan};
 
 /// The languages coloured. Anything else is drawn plain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

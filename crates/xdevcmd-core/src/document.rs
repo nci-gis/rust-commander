@@ -15,10 +15,10 @@ use std::path::{Path, PathBuf};
 
 /// Stop indexing here. A file with more lines than this is still viewable; the viewer
 /// says it is showing the first part rather than pretending otherwise.
-const MAX_LINES: usize = 4_000_000;
+pub(crate) const MAX_LINES: usize = 4_000_000;
 /// A single "line" longer than this is truncated for display. Minified JavaScript is one
 /// line of several megabytes, and nothing good comes of trying to lay that out.
-const MAX_LINE: u64 = 64 * 1024;
+pub(crate) const MAX_LINE: u64 = 64 * 1024;
 /// Bytes sniffed to decide text or binary.
 const SNIFF: usize = 8192;
 /// Give up a search after this much reading rather than freezing the UI.
@@ -204,10 +204,7 @@ impl Document {
         let mut buf = vec![0u8; want];
         let got = self.source.read_at(start, &mut buf)?;
         buf.truncate(got);
-        while matches!(buf.last(), Some(b'\n') | Some(b'\r')) {
-            buf.pop();
-        }
-        Ok(String::from_utf8_lossy(&buf).into_owned())
+        Ok(line_text(buf))
     }
 
     pub fn lines_from(&mut self, from: usize, count: usize) -> Vec<String> {
@@ -297,6 +294,17 @@ impl Document {
         }
         last_hit.map(|at| self.line_of(at))
     }
+}
+
+/// A line as the viewer shows it, from its first bytes (at most [`MAX_LINE`], the
+/// terminator counted): the terminator removed, invalid UTF-8 replaced. The one rule,
+/// shared with the highlighter's scan ([`crate::syntax::Scan`]), so a line coloured from
+/// the scan's checkpoints is the line drawn.
+pub(crate) fn line_text(mut buf: Vec<u8>) -> String {
+    while matches!(buf.last(), Some(b'\n') | Some(b'\r')) {
+        buf.pop();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// The name Save as offers for a shell's history: `xdevcmd-history-2026-11-10-142233.txt`,

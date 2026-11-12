@@ -612,16 +612,34 @@ fn known(id: &str, menu: &[MenuItem]) -> bool {
 /// longer known (a `[[menu]]` entry removed, an action renamed) are dropped; a missing
 /// or broken file is an empty list. Commands, not files: nothing private in it.
 pub fn load_recent(menu: &[MenuItem]) -> Vec<String> {
-    let Some(p) = recent_path() else {
+    recent_path().map_or_else(Vec::new, |p| load_recent_from(&p, menu))
+}
+
+fn load_recent_from(p: &std::path::Path, menu: &[MenuItem]) -> Vec<String> {
+    // A file far larger than eight names could ever make is not ours: ignored, unread.
+    if std::fs::metadata(p).map_or(true, |m| m.len() > RECENT_FILE_MAX) {
         return Vec::new();
-    };
-    let mut out: Vec<String> = std::fs::read_to_string(p)
-        .ok()
-        .and_then(|t| toml::from_str::<RecentFile>(&t).ok())
+    }
+    std::fs::read_to_string(p)
+        .map(|t| parse_recent(&t, menu))
+        .unwrap_or_default()
+}
+
+/// The largest `commands.toml` read: eight names are a few hundred bytes.
+const RECENT_FILE_MAX: u64 = 64 * 1024;
+
+/// The list in a `commands.toml`: known names only, each once (the first, most recent,
+/// kept), at most [`RECENT`]. Anything unreadable is an empty list.
+fn parse_recent(text: &str, menu: &[MenuItem]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in toml::from_str::<RecentFile>(text)
         .map(|f| f.recent)
-        .unwrap_or_default();
-    out.retain(|id| known(id, menu));
-    out.dedup();
+        .unwrap_or_default()
+    {
+        if known(&id, menu) && !out.contains(&id) {
+            out.push(id);
+        }
+    }
     out.truncate(RECENT);
     out
 }
@@ -1815,5 +1833,25 @@ mod tests {
         eprintln!("opening F1 with {} rows: {:?}", best.1, best.0);
         assert!(best.1 >= 140, "{}", best.1);
         assert!(best.0.as_millis() < 16, "{:?}", best.0);
+    }
+
+    #[test]
+    fn a_recent_file_keeps_each_name_once_and_a_huge_one_is_ignored() {
+        let t = "recent = [\"copy\", \"move\", \"copy\", \"nope\", \"move\", \"view\"]\n";
+        assert_eq!(parse_recent(t, &[]), ["copy", "move", "view"]);
+        assert!(parse_recent("not toml at all [", &[]).is_empty());
+        // Over the cap the file is not read at all.
+        let dir = std::env::temp_dir().join(format!("xdevcmd-recent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = format!("recent = [\"copy\"]\n#{}\n", "x".repeat(70 * 1024));
+        std::fs::write(dir.join("commands.toml"), big).unwrap();
+        let p = dir.join("commands.toml");
+        assert!(
+            load_recent_from(&p, &[]).is_empty(),
+            "64 KB and more: ignored"
+        );
+        std::fs::write(&p, "recent = [\"copy\"]\n").unwrap();
+        assert_eq!(load_recent_from(&p, &[]), ["copy"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -752,6 +752,28 @@ mod tests {
         assert_eq!(got, format!("before\n{FULL_SCREEN}\nafter\n"));
     }
 
+    /// Not a check: the text filter's speed on coloured output, against the terminal's
+    /// reader (Round 027 measured vt100 at about 3 MB/s). `cargo test --release -p
+    /// xdevcmd-core -- --ignored --nocapture filter_throughput`.
+    #[test]
+    #[ignore]
+    fn filter_throughput() {
+        let line = b"\x1b[32mok\x1b[0m src/some/path/file.rs:120: a line of build output\r\n";
+        let input: Vec<u8> = line.iter().copied().cycle().take(50_000_000).collect();
+        let mut f = TextFilter::new();
+        let mut out = Vec::with_capacity(16 * 1024);
+        let t = Instant::now();
+        for chunk in input.chunks(8192) {
+            out.clear();
+            f.feed(chunk, &mut out);
+        }
+        let took = t.elapsed();
+        eprintln!(
+            "filter: 50 MB in {took:?} ({:.0} MB/s)",
+            50.0 / took.as_secs_f64()
+        );
+    }
+
     #[test]
     fn an_unfinished_line_and_trailing_spaces() {
         assert_eq!(text(&[b"$ "]), "$\n");

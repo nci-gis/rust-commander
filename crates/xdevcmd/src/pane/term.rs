@@ -1722,6 +1722,50 @@ mod tests {
         );
     }
 
+    /// Not a check: how fast a shell's output is read with its log off, text and raw
+    /// (Round 027). 50 MB of `yes` through a real pty, timed until the program has
+    /// ended (its output read), then until the log is closed. `cargo test --release
+    /// -p xdevcmd --bin xdevcmd -- --ignored --nocapture log_throughput`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn log_throughput() {
+        use xdevcmd_core::termlog::{About, Log, Mode};
+        const BYTES: u64 = 50_000_000;
+        let dir = std::env::temp_dir().join(format!("xdevcmd-log-bench-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        for mode in [None, Some(Mode::Text), Some(Mode::Raw)] {
+            let argv: Vec<std::ffi::OsString> = ["sh", "-c", "yes | head -c 50000000"]
+                .iter()
+                .map(Into::into)
+                .collect();
+            let t = TermPane::spawn_argv(&dir, 40, 120, &argv, 5000).expect("a pty");
+            let path = dir.join(format!("{mode:?}.log"));
+            if let Some(m) = mode {
+                let (f, _) = xdevcmd_core::termlog::open(&path).expect("the log");
+                let about = About {
+                    label: "bench".into(),
+                };
+                t.set_log(Log::start(path.clone(), m, Box::new(f), about));
+            }
+            let t0 = Instant::now();
+            while !t.has_exited() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let read = t0.elapsed();
+            let said = t
+                .take_log()
+                .map(|l| l.close(Duration::from_secs(30)))
+                .unwrap_or_default();
+            let all = t0.elapsed();
+            let mbs = BYTES as f64 / read.as_secs_f64() / 1e6;
+            eprintln!(
+                "log {mode:?}: read in {read:?} ({mbs:.0} MB/s), closed after {all:?} {said}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn history_is_measured_without_moving_the_view() {
         let mut p = vt100::Parser::new(nz(5), nz(20), 100);

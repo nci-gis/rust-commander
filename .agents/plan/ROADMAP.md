@@ -82,11 +82,24 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 | 3 | **Documentation** (item 40), Round [026](cycles/Round_026.md), at Review: Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
 | 4 | **L. Log a terminal tab to a file** (item 35), Round [027](cycles/Round_027.md), at Review: per tab from the tab menu, `text` or `raw`, a bounded writer that stops and says so | S |
 | 5 | **D. Syntax-highlighted viewer** (item 33), Round [028](cycles/Round_028.md), at Review: measured on day one (syntect 7.25 MiB, over; tree-sitter further over), so a small lexer of our own; checkpoints from a background scan shaped for pillar 2's progressive indexing (A03) | S–M |
-| 6 | **Q. Four pillars** (item 36, part 2; owner, 2026-11-12), each a round: **1. Data correct** (P0) · **2. Responsive and bounded** · **3. Honest contracts** · **4. Release proof** (P0 gate). Contents in the table below; the release bar below is what they must meet. **rc.1 is not cut before pillar 1 is done** | M–L |
+| 6 | **Q. Four pillars and the Smart Planner** (items 36 part 2, 42, 43; owner, 2026-11-12 and 2026-11-13), in three pre-releases, below | L |
 | 7 | *If a day is spare:* **which-key** for the prefix groups (item 39) | S |
-| 8 | **0.4.0-rc.1** (GitHub pre-release) → a week of the owner's real use, fixes only → **0.4.0** → packages → launch (item 10) | — |
+| 8 | **0.4.0-beta.1 → beta.2 → rc.1 → 0.4.0** (owner, 2026-11-13: "không cần vội"; each pre-release a GitHub pre-release and about a week of the owner's real use) → packages → launch (item 10) | — |
 
-### Step 6: the four pillars
+### Step 6: three pre-releases (owner, 2026-11-13)
+
+| Pre-release | Contents | Rule |
+|---|---|---|
+| **0.4.0-beta.1** | Pillar 1 (data correct) + **Smart Planner v1** (item 42) | features may still land |
+| **0.4.0-beta.2** | **Smart Planner v2** (item 43, its scope set by beta.1's measurements) + pillar 2 (responsive and bounded) | features may still land |
+| **0.4.0-rc.1** | Pillars 3 (honest contracts) and 4 (release proof) | **feature freeze: fixes only** |
+| **0.4.0** | all tests and the owner's week green | packages, then launch |
+
+Semver orders them `beta.1 < beta.2 < rc.1 < 0.4.0`; crates.io and GitHub take
+pre-releases; winget and Scoop start at 0.4.0. "rc" keeps its meaning (fixes only), which
+is why the plan's second half is a beta, not rc.2.
+
+### The four pillars
 
 From an outside review of v0.4 (the owner's, 2026-11-12) and this agent's answer to it:
 [memory/2026-11-12-four-pillars-for-rc1.md](../memory/2026-11-12-four-pillars-for-rc1.md)
@@ -203,6 +216,8 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 39 | which-key for prefix groups (Alt+X, Alt+R) | S | — | v0.4.0 if a day is spare, else 0.5 |
 | 40 | Documentation from the app: versioned link, `docs/README.md`, docs in the archives | S | [026](cycles/Round_026.md) | Review (v0.4.0) |
 | 41 | Useful commands (readiness) | M | — | 0.5 |
+| 42 | **Smart Planner v1** (trust): scan → plan → confirm → execute, the executor unchanged | M–L | — | 0.4.0-beta.1 |
+| 43 | **Smart Planner v2** (speed): lanes, adaptive concurrency, group commit, checkpointed resume, item 22 | M–L | — | 0.4.0-beta.2, scope after beta.1's numbers |
 | ~~—~~ | ~~SFTP, remote panes~~ | — | — | dropped 2026-11-06 |
 
 Sizes are relative: **S** a day or two, **M** under a week, **L** one to two weeks.
@@ -249,6 +264,39 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
 - **33 Highlighting**: off past a size cap and by setting; measured against the 7 MB
   budget first (Round 028: syntect is +2.24 MB, its regex engine, so over even
   trimmed; our own lexer instead, colours from the theme's slots).
+- **42 Smart Planner v1** (owner, 2026-11-13: "tính năng ăn điểm (tin cậy)"):
+  - **Scan → Plan → Confirm → Execute.** The executor stays the sequential one with the
+    temporary name, rename and journal; it is fed by the plan. The planner only reads.
+  - **Mode by measured scan time**, not by file system type: at most 64 files and 128 MB
+    are always planned in full first (a floor); above that, a scan done within about 300 ms
+    gives a full plan, a longer one (network, a huge tree) goes **streaming**: work that
+    has no question starts while the scan goes on, questions are gathered into one table.
+    Same or another device from `st_dev` / the volume serial; a UNC path is network. The
+    numbers are measured again at beta.1.
+  - **Checked before starting**: free space; conflicts (identical, older, newer, a file
+    over a directory and the reverse); names the target cannot hold (Windows' characters,
+    names that collide without case, path length); FAT32's 4 GB; permissions.
+  - **The confirm table only when there is something to decide**; otherwise today's F5
+    dialog, no extra key press. A summary line: create · replace · skip · needed / free.
+  - **Warnings in three levels, asked once per group, the default never the one that
+    loses data**: ⛔ cannot be done (reported before the start, not halfway); ⚠️ data lost
+    for good (a replace with no trash, a permanent delete) — default "skip those"; ℹ️
+    undoable or a property lost (a replace into the trash, a move across devices, FAT
+    losing permissions) — in the summary only.
+  - **The journal holds the plan**, so a resume knows exactly what is left.
+  - **Undo for a copy** (remove what it made); **replace to trash on by default** where
+    the trash is on the same volume, so a replaced file comes back with Ctrl+Z.
+  - **`sync_data` before every step that cannot be undone** (a replace, deleting a
+    source after a move across devices) and the journal's line synced before it: "before
+    any step that cannot be undone, everything needed to recover is on disk".
+  - The lists kept in the app follow a move (relinked), instead of reporting rows gone.
+- **43 Smart Planner v2**: decided after beta.1's measurements. Candidates, with the
+  owner's ideas of 2026-11-13 (see the note under Decisions): two lanes (small files in
+  batches, large files alone) per device; concurrency adapted from the measured
+  throughput (no separate probe); group commit for small files; checkpointed resume of a
+  large file (continue from the last synced offset, after checking the source is
+  unchanged); pause and retry on a network error instead of failing the rest; item 22's
+  reflink, `copy_file_range` and server-side copy.
 - **37 xdevtheme-light**: Terminal.app's default profile is light, so it is a first
   impression; a file theme, not the default.
 - **4 Themes, 5 Keymaps, 6 Settings, 7 Logo, 11 Icons**: see their rounds.
@@ -268,6 +316,8 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
 | L and D | in 0.4.0 (owner, 2026-11-12) |
 | F1 | design C, as in the note on item 38; Config in use separate (owner, 2026-11-12) |
 | Plugins | not for now, low priority (owner, 2026-11-09, 2026-11-11) |
+| Copy and move | Smart Planner in 0.4, not 0.5: trust is the point of a stable release; v1 in beta.1, v2 in beta.2; warnings before anything that cannot be undone (owner, 2026-11-13) |
+| Release path | 0.4.0-beta.1 → beta.2 → rc.1 (fixes only) → 0.4.0 (owner, 2026-11-13) |
 
 ## Not planned
 

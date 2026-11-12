@@ -1,6 +1,6 @@
 # Round 026: Documentation from the app (v0.4.0, step 3, item 40)
 
-**Status**: In Progress
+**Status**: Review
 **Part of**: v0.4.0, step 3 of `ROADMAP.md` ("Next"); item 40 (the owner's go,
 2026-11-12: "ok")
 **Date started**: 2026-11-12
@@ -110,12 +110,49 @@ order. A machine without a browser or a network still has the docs.
 
 ## Do
 
+- **2026-11-12, kickoff** (`b47923f`) and **`docs/README.md`** (`92fb463`): the seven
+  pages in reading order, one line each, and "for the version you have installed, use
+  Help → Documentation (or F1, type "doc")".
+- **The app** (`5bbcc11`): `docs.rs` — `docs_url(page)` (`tree/v{tag}/docs`, a page
+  `blob/v{tag}/docs/<page>`, build metadata dropped), `docs_page!` for F1's static
+  "More" row (a test holds it equal to the function), `local_copy()` (beside
+  `current_exe`, then beside its resolved path). Help menu: Commands… · Config in use ·
+  Usage · **Documentation** · ─ · About. F1: `Extra::Documentation` in General, before
+  About. The window is an `Ask`: the local copy first ("On this computer, beside
+  xdevcmd:"), then "Online, for xdevcmd 0.3.0:" and the link, and "xdevcmd opens no
+  connection"; Enter = read README.md (new `Cmd::ViewFile`, through `view_path`, which
+  F3's `begin_view` now calls too: one root check), C = copy link (`Cmd::CopyText` →
+  `copy_text`); without a copy, Enter copies. `wrap.rs`'s test URL uses `docs_url`.
+  - Decisions 1–5 followed as written. No OSC 8, no browser.
+  - Tests: four unit (`docs::tests`); render: Help menu order, the window without a
+    copy (the tag link, no `/main/`, Enter copies and closes), the F1 row by typing,
+    and **a copy beside the binary**: the test binary hard-linked (copied where links
+    fail) into `CARGO_TARGET_TMPDIR/archive-<pid>/` with a `docs/README.md`, run with
+    the same isolation — the local copy above the link, Enter shows the index.
+- **The archives** (`10df179`): release.yml `mkdir "$name/docs"; cp docs/*.md
+  "$name/docs/"` after `themes/`, before zip/tar; names unchanged. Packaging test:
+  the package step keeps the three lines before both archive commands, and
+  `docs/README.md` links every page in `docs/` (a new page not in the index fails).
+  `docs/development.md` lists `docs/` in the archive; guide "Menus and help";
+  CHANGELOG.
+- fmt, clippy `-D warnings` (Linux), `cargo test --workspace` green (one clippy fix:
+  the new `impl` was after the test module).
+
 ## Check
 
-- [ ] `docs_url`: normal, pre-release, build metadata, a page; the F1 row equal
-- [ ] Help menu order; the window with and without a local copy; the F1 row
-- [ ] release.yml copies `docs/` into every archive; packaging tests pass
-- [ ] fmt, clippy `-D warnings`, `cargo test --workspace`; CI on three systems
+- [x] `docs_url`: normal, pre-release, build metadata, a page; the F1 row equal
+- [x] Help menu order; the window with and without a local copy; the F1 row
+- [x] release.yml copies `docs/` into every archive; packaging tests pass (archive
+  names untouched, so Scoop/winget/binstall tests unchanged)
+- [x] fmt, clippy `-D warnings` (Linux), `cargo test --workspace`
+- [ ] CI on three systems: see below
+- [ ] **Not verified**: a real release archive with `docs/` (release.yml runs only on a
+  tag; checked by reading and by the packaging test); the links resolving on GitHub
+  (no tag v0.4.0 yet; v0.3.0's `docs/` has no `README.md`, so a 0.3.0 build's link
+  shows the directory listing, which GitHub renders without an index); the local copy
+  through a Homebrew-style symlink (code path, not tested); clippy for windows-gnu and
+  darwin (targets not installed here; CI); the owner's hand test of C (OSC 52) in a
+  real terminal.
 
 Record what you could **not** verify as explicitly as what you could.
 

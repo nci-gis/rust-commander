@@ -2576,6 +2576,58 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// Every file of a move across devices, across batch boundaries (64, 65, 128, 129…):
+    /// its copy's data, then its directory, then the journal, are synced after it was
+    /// written and before ITS source goes. An off-by-one at a boundary shows here.
+    #[test]
+    fn every_file_of_a_batched_move_is_on_disk_before_its_own_source_goes() {
+        journals();
+        let Some(other) = other_device("batch-order") else {
+            return;
+        };
+        let root = tmp("batch-order");
+        let tag = format!("batchord-{}", std::process::id());
+        let dir = root.join(&tag);
+        fs::create_dir_all(&dir).unwrap();
+        let n = 2 * MOVE_BATCH_FILES + 2;
+        for i in 0..n {
+            fs::write(dir.join(format!("f{i:03}")), b"x").unwrap();
+        }
+        crate::faults::trace(&tag);
+        let mut req = Request::mv(vec![dir.clone()], other.clone());
+        req.safe = true;
+        let (s, _) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(s.failed, 0, "{s:?}");
+        let to_dir = other.join(&tag);
+        for i in 0..n {
+            let name = format!("f{i:03}");
+            let at = |point: &str, path: &Path| {
+                seen.iter()
+                    .position(|(p, q)| p.name() == point && q == path)
+                    .unwrap_or_else(|| panic!("{name}: no {point} for {}", path.display()))
+            };
+            let gone = at("remove-source", &dir.join(&name));
+            let data = at("sync-data", &to_dir.join(&name));
+            assert!(data < gone, "{name}: its data before its source goes");
+            let between = |point: &str| {
+                seen[data..gone]
+                    .iter()
+                    .any(|(p, q)| p.name() == point && (point != "sync-dir" || q == &to_dir))
+            };
+            assert!(
+                between("sync-dir"),
+                "{name}: its directory synced after its data, before its source goes"
+            );
+            assert!(
+                between("journal-sync"),
+                "{name}: the journal synced after its data, before its source goes"
+            );
+        }
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// The cost of the sync rules on a move across devices, measured: `n` files of
     /// `size` bytes moved with every sync made and again with the seam leaving them out.
     /// `XDEVCMD_MEASURE=<n>x<size>[,…]`, from where `XDEVCMD_MEASURE_FROM` says (default:

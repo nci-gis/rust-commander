@@ -911,6 +911,13 @@ root; CI is not).
   kept", the part file removed); otherwise the one replace with `durable` then
   `recheck`. Failing first: `a_file_that_appears_where_a_pack_goes_is_kept` (the seam's
   `Swap` at the archive's sync): `pack` returned Ok and the newcomer was replaced.
+- **5 Batch boundaries were not tested per file.** New
+  `every_file_of_a_batched_move_is_on_disk_before_its_own_source_goes` (130 files, so
+  boundaries at 64/65 and 128/129): for each file, its `sync-data` before its
+  `remove-source`, and a `sync-dir` of its directory and a `journal-sync` between the
+  two. No code bug; proved by two mutations, each failing it: (a) the 64th file of a
+  batch not synced (`f063: no sync-data`); (b) the file that fills a batch kept out of
+  it and its source removed after the flush (`f063`, same). Both reverted.
 
 ## Check
 

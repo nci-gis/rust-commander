@@ -14,6 +14,7 @@ use ratatui::Frame;
 
 use xdevcmd_core::document::{Document, Mode, HEX_COLS};
 use xdevcmd_core::format::{display_line, elide_middle, human_size};
+use xdevcmd_core::syntax::{self, Highlighter, Span as Piece};
 
 use crate::theme;
 
@@ -100,6 +101,21 @@ pub struct Viewer {
     /// The chosen path's description in its parts, while the message is still it: drawn
     /// to fit, the path cut in its middle.
     said: Option<crate::links::Said>,
+    /// Colours for the file's language, when it has one and colouring is on.
+    syntax: Option<Highlighter>,
+    /// The last frame drew a line plain because the scan had not reached it, and how
+    /// far the scan was then: when it moves on, the frame is drawn again.
+    syntax_waiting: Option<(usize, bool)>,
+}
+
+/// Files up to this size are coloured in F3; bigger ones are drawn plain.
+pub const COLOUR_MAX: u64 = 64 << 20;
+/// Quick view colours files up to this size, without a background scan.
+pub const QUICK_COLOUR_MAX: u64 = 1 << 20;
+
+/// Whether the viewer colours source: the setting, unless `NO_COLOR` says no colour.
+pub fn colours_on(setting: bool) -> bool {
+    setting && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
 }
 
 impl Viewer {
@@ -134,7 +150,65 @@ impl Viewer {
             row_starts: Vec::new(),
             pressed_link: None,
             said: None,
+            syntax: None,
+            syntax_waiting: None,
         }
+    }
+
+    /// Colour the file by its language when `on` ([`colours_on`]), it is text on disk,
+    /// and at most `max` bytes. `scan`: work out the state through the whole file in
+    /// the background, so a jump anywhere is coloured (F3); without it, only lines near
+    /// the top are (quick view). A document held in memory (a shell's history) is never
+    /// coloured.
+    pub fn with_syntax(mut self, on: bool, max: u64, scan: bool) -> Self {
+        if !on || self.doc.binary || self.doc.in_memory {
+            return self;
+        }
+        let name = self
+            .doc
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let first = self.doc.line(0).unwrap_or_default();
+        let Some(lang) = syntax::detect(&name, &first) else {
+            return self;
+        };
+        if self.doc.len > max {
+            if self.message.is_empty() {
+                self.message = format!(
+                    "{} file over {} \u{2014} not coloured",
+                    lang.name(),
+                    human_size(max)
+                );
+            }
+            return self;
+        }
+        let mut h = Highlighter::new(lang);
+        if scan && self.doc.line_count() > syntax::scan::EVERY {
+            h.scan_file(&self.doc.path.clone(), self.doc.line_count());
+        }
+        self.syntax = Some(h);
+        self
+    }
+
+    /// The language the text is coloured as, if it is.
+    pub fn language(&self) -> Option<&'static str> {
+        self.syntax.as_ref().map(|h| h.lang().name())
+    }
+
+    /// True when lines were drawn plain for want of the scan and the scan has moved on
+    /// since: time to draw again.
+    pub fn syntax_moved(&self) -> bool {
+        match (&self.syntax_waiting, &self.syntax) {
+            (Some(seen), Some(h)) => h.progress() != *seen,
+            _ => false,
+        }
+    }
+
+    /// Lines on screen are waiting for the scan.
+    pub fn syntax_waiting(&self) -> bool {
+        self.syntax_waiting.is_some() && self.syntax.as_ref().is_some_and(|h| !h.progress().1)
     }
 
     /// What the message line says now.
@@ -645,9 +719,10 @@ impl Viewer {
             Mode::Text => "text",
             Mode::Hex => "hex",
         };
-        let scale = match self.mode {
-            Mode::Text => format!("{} lines", self.doc.line_count()),
-            Mode::Hex => human_size(self.doc.len),
+        let scale = match (self.mode, self.language()) {
+            (Mode::Text, Some(lang)) => format!("{lang} \u{b7} {} lines", self.doc.line_count()),
+            (Mode::Text, None) => format!("{} lines", self.doc.line_count()),
+            (Mode::Hex, _) => human_size(self.doc.len),
         };
         let title = Line::from(vec![
             Span::raw(" "),
@@ -719,12 +794,22 @@ impl Viewer {
         let selected = self.selected();
         self.text_x = area.x + gutter + 1;
         self.row_starts.clear();
+        let mut waiting = false;
         let mut row = 0u16;
         let mut i = self.top;
         while row < area.height && i < total {
             let raw = self.doc.line(i).unwrap_or_default();
             let shown = display_line(&raw, self.tab_width);
             let chars: Vec<char> = shown.chars().collect();
+            let pieces_of = match self.syntax.as_mut() {
+                Some(h) => {
+                    let got = h.spans(&mut self.doc, i);
+                    waiting |= got.is_none();
+                    got.unwrap_or_default()
+                }
+                None => Vec::new(),
+            };
+            let styles = char_styles(&raw, &pieces_of, self.tab_width, chars.len());
             let chosen = self.links.as_ref().and_then(|l| l.selected);
             let links: Vec<(std::ops::Range<usize>, bool)> = match self.links.as_mut() {
                 Some(l) => l
@@ -736,17 +821,22 @@ impl Viewer {
                 None => Vec::new(),
             };
 
-            let pieces: Vec<String> = if self.wrap {
+            // Each row's piece of the line, as the character it starts at and how many.
+            let pieces: Vec<(usize, usize)> = if self.wrap {
                 if chars.is_empty() {
-                    vec![String::new()]
+                    vec![(0, 0)]
                 } else {
-                    chars.chunks(text_w).map(|c| c.iter().collect()).collect()
+                    (0..chars.len())
+                        .step_by(text_w)
+                        .map(|s| (s, text_w.min(chars.len() - s)))
+                        .collect()
                 }
             } else {
-                vec![chars.iter().skip(self.col).take(text_w).collect::<String>()]
+                let s = self.col.min(chars.len());
+                vec![(s, text_w.min(chars.len() - s))]
             };
 
-            for (n, piece) in pieces.iter().enumerate() {
+            for (n, &(from, len)) in pieces.iter().enumerate() {
                 if row >= area.height {
                     break;
                 }
@@ -758,7 +848,7 @@ impl Viewer {
                 };
                 let mut spans = vec![Span::styled(num, Style::new().fg(theme::t().fg_dim))];
                 spans.push(Span::styled("\u{2502}", Style::new().fg(theme::t().border)));
-                spans.extend(self.highlight(piece));
+                spans.extend(self.highlight(&chars[from..from + len], &styles[from..from + len]));
                 frame
                     .buffer_mut()
                     .set_line(area.x, y, &Line::from(spans), area.width);
@@ -772,7 +862,7 @@ impl Viewer {
                 let start = if self.wrap { n * text_w } else { self.col };
                 for (span, chosen) in &links {
                     let from = span.start.max(start);
-                    let to = span.end.min(start + piece.chars().count());
+                    let to = span.end.min(start + len);
                     if from >= to {
                         continue;
                     }
@@ -797,34 +887,47 @@ impl Viewer {
             }
             i += 1;
         }
+        self.syntax_waiting = match (&self.syntax, waiting) {
+            (Some(h), true) => Some(h.progress()),
+            _ => None,
+        };
     }
 
-    /// Colour the search term where it appears, case-insensitively.
-    fn highlight(&self, text: &str) -> Vec<Span<'static>> {
-        let plain = Style::new().fg(theme::t().fg);
-        let Some(needle) = self.needle.as_ref().filter(|n| !n.is_empty()) else {
-            return vec![Span::styled(text.to_string(), plain)];
-        };
-        let hay = text.to_lowercase();
-        let pin = needle.to_lowercase();
+    /// A row's characters in their colours (the language's, else plain), with the
+    /// search term on top where it appears, case-insensitively.
+    fn highlight(&self, chars: &[char], styles: &[Style]) -> Vec<Span<'static>> {
         let hit = Style::new()
             .fg(theme::t().bg)
             .bg(theme::t().mark)
             .add_modifier(Modifier::BOLD);
-
-        let mut spans = Vec::new();
-        let mut at = 0usize;
-        while let Some(rel) = hay[at..].find(&pin) {
-            let s = at + rel;
-            let e = s + pin.len();
-            if s > at {
-                spans.push(Span::styled(text[at..s].to_string(), plain));
+        let mut styles = styles.to_vec();
+        if let Some(needle) = self.needle.as_ref().filter(|n| !n.is_empty()) {
+            let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
+            let pin: Vec<char> = needle.chars().map(fold).collect();
+            let hay: Vec<char> = chars.iter().map(|&c| fold(c)).collect();
+            let mut at = 0;
+            while at + pin.len() <= hay.len() {
+                if hay[at..at + pin.len()] == pin[..] {
+                    styles[at..at + pin.len()].fill(hit);
+                    at += pin.len();
+                } else {
+                    at += 1;
+                }
             }
-            spans.push(Span::styled(text[s..e].to_string(), hit));
-            at = e;
         }
-        if at < text.len() {
-            spans.push(Span::styled(text[at..].to_string(), plain));
+        let mut spans = Vec::new();
+        let mut start = 0;
+        for k in 1..=chars.len() {
+            if k == chars.len() || styles[k] != styles[start] {
+                spans.push(Span::styled(
+                    chars[start..k].iter().collect::<String>(),
+                    styles[start],
+                ));
+                start = k;
+            }
+        }
+        if spans.is_empty() {
+            spans.push(Span::styled(String::new(), Style::new().fg(theme::t().fg)));
         }
         spans
     }
@@ -974,6 +1077,34 @@ impl Viewer {
     }
 }
 
+/// The style of each character of `raw` as [`display_line`] shows it (`shown` of
+/// them): a tab is as many spaces as it spreads to, each in the tab's style.
+fn char_styles(raw: &str, pieces: &[Piece], tab: usize, shown: usize) -> Vec<Style> {
+    let plain = Style::new().fg(theme::t().fg);
+    if pieces.is_empty() {
+        return vec![plain; shown];
+    }
+    let mut out = Vec::with_capacity(shown);
+    let mut p = 0;
+    for (at, c) in raw.char_indices() {
+        while p < pieces.len() && pieces[p].end <= at {
+            p += 1;
+        }
+        let style = match pieces.get(p) {
+            Some(s) if s.start <= at => theme::syntax_style(s.kind),
+            _ => plain,
+        };
+        let n = if c == '\t' {
+            tab - (out.len() % tab)
+        } else {
+            1
+        };
+        out.extend(std::iter::repeat_n(style, n));
+    }
+    out.resize(shown, plain);
+    out
+}
+
 /// Digits in `radix` as a number; more than a `u64` holds is the largest one, which is
 /// past the end of anything, rather than "not a number".
 fn number(digits: &str, radix: u32) -> Option<u64> {
@@ -997,6 +1128,32 @@ fn command_text(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::command_text;
+    use super::Viewer;
+    use xdevcmd_core::document::Document;
+
+    /// A shell's history is held in memory and never coloured, whatever it is called.
+    #[test]
+    fn a_document_in_memory_is_never_coloured() {
+        let doc = Document::from_bytes("history.rs", b"fn main() {}\n".to_vec());
+        let v = Viewer::open(doc, true, 4).with_syntax(true, u64::MAX, true);
+        assert_eq!(v.language(), None);
+    }
+
+    #[test]
+    fn a_file_over_the_cap_is_plain_and_says_so() {
+        let dir = std::env::temp_dir().join(format!("xdevcmd-viewer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("big.rs");
+        std::fs::write(&p, "fn main() {}\n".repeat(10)).unwrap();
+        let v = Viewer::open(Document::open(&p).unwrap(), true, 4).with_syntax(true, 100, true);
+        assert_eq!(v.language(), None);
+        assert!(v.message().contains("not coloured"), "{}", v.message());
+        let v = Viewer::open(Document::open(&p).unwrap(), true, 4).with_syntax(true, 1000, true);
+        assert_eq!(v.language(), Some("Rust"));
+        let v = Viewer::open(Document::open(&p).unwrap(), true, 4).with_syntax(false, 1000, true);
+        assert_eq!(v.language(), None, "off by setting");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_command_is_what_follows_the_prompt() {

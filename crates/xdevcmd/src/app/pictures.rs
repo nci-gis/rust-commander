@@ -78,7 +78,11 @@ impl App {
                     let v = &self.settings.config.viewer;
                     Some((
                         e.path.clone(),
-                        Box::new(Viewer::open(doc, v.wrap, v.tab_width)),
+                        Box::new(Viewer::open(doc, v.wrap, v.tab_width).with_syntax(
+                            crate::viewer::colours_on(v.highlight),
+                            crate::viewer::QUICK_COLOUR_MAX,
+                            false,
+                        )),
                     ))
                 }
                 Err(err) => {

@@ -255,7 +255,11 @@ impl App {
             viewer::LinkAct::View => match Document::open(&canonical) {
                 Ok(doc) => {
                     let v = &self.settings.config.viewer;
-                    let mut viewer = Viewer::open(doc, v.wrap, v.tab_width);
+                    let mut viewer = Viewer::open(doc, v.wrap, v.tab_width).with_syntax(
+                        crate::viewer::colours_on(v.highlight),
+                        crate::viewer::COLOUR_MAX,
+                        true,
+                    );
                     if let Some(n) = link.line {
                         viewer.show_line(n);
                     }

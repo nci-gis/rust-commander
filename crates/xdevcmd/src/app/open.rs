@@ -31,7 +31,11 @@ impl App {
         match Document::open(path) {
             Ok(doc) => {
                 let v = &self.settings.config.viewer;
-                let viewer = Viewer::open(doc, v.wrap, v.tab_width);
+                let viewer = Viewer::open(doc, v.wrap, v.tab_width).with_syntax(
+                    crate::viewer::colours_on(v.highlight),
+                    crate::viewer::COLOUR_MAX,
+                    true,
+                );
                 self.modal = Some(Modal::View(Box::new(viewer)));
             }
             Err(e) => self.status = format!("cannot view {}: {e}", path.display()),

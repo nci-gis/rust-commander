@@ -241,6 +241,9 @@ impl Default for Terminal {
 pub struct Viewer {
     pub wrap: bool,
     pub tab_width: usize,
+    /// Colour source code, config files, diffs and logs by their language (F3 up to
+    /// 64 MiB, quick view up to 1 MiB). Off under `NO_COLOR`.
+    pub highlight: bool,
     /// How quick view draws pictures: "auto" (the terminal's own pictures where it can
     /// draw them, kitty, Ghostty, iTerm2, WezTerm, Windows Terminal, foot; half blocks
     /// elsewhere), "kitty", "iterm2", "sixel", or "blocks" (half blocks always).
@@ -252,6 +255,7 @@ impl Default for Viewer {
         Self {
             wrap: true,
             tab_width: 4,
+            highlight: true,
             images: "auto".into(),
         }
     }

@@ -488,7 +488,7 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     terminal.draw(|f| app.draw(f))?;
     let finish_jobs = |app: &mut App| {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while app.job_working() && std::time::Instant::now() < deadline {
+        while (app.job_working() || app.syntax_waiting()) && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
             app.tick();
         }

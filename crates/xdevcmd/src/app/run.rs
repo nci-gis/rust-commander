@@ -235,6 +235,10 @@ impl App {
     /// any of it changed what is on screen.
     pub(super) fn background(&mut self) -> bool {
         let mut changed = self.pump_pending_type();
+        // The viewer drew lines plain while its scan was behind them; it has moved on.
+        if let Some(Modal::View(v)) = &self.modal {
+            changed |= v.syntax_moved();
+        }
         changed |= self.follow_shell();
         // A thread other than this one panicked: xdevcmd goes on, and says where the
         // details went.

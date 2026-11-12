@@ -10,6 +10,12 @@ impl App {
         matches!(&self.modal, Some(Modal::Job(j)) if working(j)) || self.jobs.iter().any(working)
     }
 
+    /// The viewer has lines on screen drawn plain until its scan reaches them
+    /// (`--screenshot` waits for it, as for a job).
+    pub fn syntax_waiting(&self) -> bool {
+        matches!(&self.modal, Some(Modal::View(v)) if v.syntax_waiting())
+    }
+
     pub(super) fn reload_all(&mut self) {
         // Every tab, not only those on show: a tab you switch to after a move must not
         // still list the files that left it.

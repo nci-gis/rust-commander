@@ -315,6 +315,28 @@ pub fn is_executable(e: &Entry) -> bool {
     )
 }
 
+/// The colour of a piece of source in the viewer: a slot the theme already has, so every
+/// theme, built in or a file, colours source without new keys (Round 028).
+pub fn syntax_style(kind: xdevcmd_core::syntax::Kind) -> Style {
+    use xdevcmd_core::syntax::Kind as K;
+    let th = t();
+    let fg = match kind {
+        K::Comment => th.fg_dim,
+        K::String | K::Added => th.exec,
+        K::Number => th.archive,
+        K::Keyword | K::Tag => th.link,
+        K::Type | K::Key => th.dir,
+        K::Function | K::Heading => th.accent,
+        K::Meta | K::Warning => th.mark,
+        K::Removed | K::Error => th.err,
+    };
+    let style = Style::new().fg(fg);
+    match kind {
+        K::Heading | K::Error => style.add_modifier(Modifier::BOLD),
+        _ => style,
+    }
+}
+
 pub fn border_style(active: bool) -> Style {
     Style::new().fg(if active {
         t().border_active

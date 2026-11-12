@@ -5064,3 +5064,169 @@ fn a_deleted_theme_file_gives_the_default_theme_and_keeps_the_config() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no such theme"));
 }
+
+// ── syntax colours in the viewer (Round 028) ─────────────────────────────────────────
+
+/// A colour screenshot at true colour, in the plain look (`dark`), `NO_COLOR` cleared
+/// unless the test sets it.
+fn coloured_shot(
+    keys: &str,
+    a: &std::path::Path,
+    b: &std::path::Path,
+    env: &[(&str, &str)],
+    config: Option<&std::path::Path>,
+) -> String {
+    let mut c = isolated();
+    c.env_remove("NO_COLOR")
+        .env("XDEVCMD_SCREENSHOT_COLOR", "1")
+        .env("XDEVCMD_COLORS", "truecolor");
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    if let Some(cfg) = config {
+        c.arg("--config").arg(cfg);
+    }
+    let out = c
+        .args(["--screenshot=110x20", &format!("--keys={keys}")])
+        .arg(a)
+        .arg(b)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// The colours (foreground, background) in force where `text` first appears in a
+/// colour screenshot.
+fn colours_at(s: &str, text: &str) -> (String, String) {
+    let at = s
+        .find(text)
+        .unwrap_or_else(|| panic!("{text:?} not on screen\n{s}"));
+    let sgr_at = s[..at].rfind("\x1b[").expect("an SGR before it");
+    let sgr = &s[sgr_at + 2..at];
+    let sgr = &sgr[..sgr.find('m').expect("the SGR's end")];
+    let parts: Vec<&str> = sgr.split(';').collect();
+    let mut fg = String::new();
+    let mut bg = String::new();
+    let mut k = 0;
+    while k < parts.len() {
+        match parts[k] {
+            "38" | "48" if parts.get(k + 1) == Some(&"2") => {
+                let rgb = parts[k + 2..k + 5].join(",");
+                if parts[k] == "38" {
+                    fg = rgb;
+                } else {
+                    bg = rgb;
+                }
+                k += 5;
+            }
+            _ => k += 1,
+        }
+    }
+    (fg, bg)
+}
+
+// The dark theme's slots (theme.rs, `Theme::dark`).
+const DARK_TEXT: &str = "199,212,227";
+const DARK_DIM: &str = "101,119,139";
+const DARK_KEYWORD: &str = "197,164,255";
+const DARK_STRING: &str = "126,231,135";
+const DARK_MARK: &str = "255,214,102";
+const DARK_ACCENT: &str = "0,214,190";
+
+const RUST_SAMPLE: &[u8] =
+    b"fn main() {\n    let s = \"hi there\"; // a note\n    /* two\n       lines */ go();\n}\n";
+const PYTHON_SAMPLE: &[u8] =
+    b"@cached\ndef area(r=None):\n    \"\"\"Doc string\n    more of it\"\"\"\n    return 3.14  # pi\n";
+
+#[test]
+fn f3_colours_rust_and_python_by_their_language() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot("Down,F3", &a, &b, &[], None);
+    assert!(s.contains("Rust"), "the title names the language\n{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_KEYWORD);
+    assert_eq!(colours_at(&s, "\"hi there\"").0, DARK_STRING);
+    assert_eq!(colours_at(&s, "// a note").0, DARK_DIM);
+    assert_eq!(
+        colours_at(&s, "lines */").0,
+        DARK_DIM,
+        "a comment over two lines"
+    );
+    assert_eq!(colours_at(&s, "go").0, DARK_ACCENT, "a call");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    let (a, b) = with_file("area.py", PYTHON_SAMPLE);
+    let s = coloured_shot("Down,F3", &a, &b, &[], None);
+    assert!(s.contains("Python"), "{s}");
+    assert_eq!(colours_at(&s, "@cached").0, DARK_MARK);
+    assert_eq!(colours_at(&s, "def").0, DARK_KEYWORD);
+    assert_eq!(
+        colours_at(&s, "more of it").0,
+        DARK_STRING,
+        "a string over two lines"
+    );
+    assert_eq!(colours_at(&s, "# pi").0, DARK_DIM);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn colours_are_off_by_setting_and_under_no_color() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let cfg = write_config(a.parent().unwrap(), "[viewer]\nhighlight = false\n");
+    let s = coloured_shot("Down,F3", &a, &b, &[], Some(&cfg));
+    assert!(!s.contains("Rust"), "{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_TEXT);
+    assert_eq!(colours_at(&s, "// a note").0, DARK_TEXT);
+    // NO_COLOR: nothing lexed. (The screenshot itself keeps the theme's colours: it is
+    // crossterm that leaves colour out on a real terminal.)
+    let s = coloured_shot("Down,F3", &a, &b, &[("NO_COLOR", "1")], None);
+    assert!(!s.contains("Rust"), "{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_TEXT);
+    // Hex view is never coloured, and back to text it is again.
+    let s = coloured_shot("Down,F3,h,h", &a, &b, &[], None);
+    assert_eq!(colours_at(&s, "fn").0, DARK_KEYWORD);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn the_search_term_is_lit_over_the_colours() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot("Down,F3,/,t,h,e,r,e,Enter", &a, &b, &[], None);
+    assert_eq!(colours_at(&s, "there").1, DARK_MARK, "the hit's background");
+    assert_eq!(
+        colours_at(&s, "\"hi ").0,
+        DARK_STRING,
+        "the rest of the string keeps its colour"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A comment opened on the first line and never closed: at the end of a file of 30,000
+/// lines, reached by `G`, the lines are the comment's colour: the scan's checkpoints
+/// carried the state there.
+#[test]
+fn a_jump_to_the_end_is_coloured_from_the_scan() {
+    let mut body = String::from("/* opened here\n");
+    for i in 0..30_000 {
+        body.push_str(&format!("let x{i} = \"not a string, a comment\";\n"));
+    }
+    let (a, b) = with_file("big.rs", body.as_bytes());
+    let s = coloured_shot("Down,F3,G", &a, &b, &[], None);
+    assert!(s.contains("x29999"), "{s}");
+    assert_eq!(colours_at(&s, "let x29999").0, DARK_DIM);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn quick_view_colours_too() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot("Down,Alt+q", &a, &b, &[], None);
+    assert!(s.contains("Rust"), "{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_KEYWORD);
+    assert_eq!(colours_at(&s, "\"hi there\"").0, DARK_STRING);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}

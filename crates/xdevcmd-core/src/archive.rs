@@ -469,10 +469,15 @@ fn write_entry(
     let part = crate::ops::part_name(dst);
     hooks.part(&part, true);
     let result = write_part(&part, size, mode, data, hooks).and_then(|complete| {
-        if !complete {
+        let Some(file) = complete else {
             return Ok(false);
+        };
+        if !free {
+            // Synced, then renamed over the old file (ops::commit_replace).
+            return crate::ops::commit_replace(file, &part, dst, || Ok(hooks.durable(dst)));
         }
-        if free {
+        drop(file);
+        {
             crate::noreplace::rename_noreplace(&part, dst).map_err(|e| {
                 if e.kind() == io::ErrorKind::AlreadyExists {
                     io::Error::other("a file of that name appeared meanwhile \u{2014} kept")
@@ -480,10 +485,6 @@ fn write_entry(
                     e
                 }
             })?;
-        } else if !hooks.durable(dst) {
-            return Ok(false);
-        } else {
-            fs::rename(&part, dst)?;
         }
         Ok(true)
     });
@@ -494,13 +495,15 @@ fn write_entry(
     result
 }
 
+/// The entry's bytes into the new file `part`: the file, still open, once complete;
+/// `None` when stopped part-way.
 fn write_part(
     part: &Path,
     size: u64,
     mode: Option<u32>,
     data: &mut dyn Read,
     hooks: &mut dyn Hooks,
-) -> io::Result<bool> {
+) -> io::Result<Option<File>> {
     let mut out = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -512,7 +515,7 @@ fn write_part(
     let mut total = 0u64;
     loop {
         if hooks.stopped() {
-            return Ok(false);
+            return Ok(None);
         }
         let n = limited.read(&mut buf)?;
         if n == 0 {
@@ -535,7 +538,7 @@ fn write_part(
     }
     #[cfg(not(unix))]
     let _ = mode;
-    Ok(true)
+    Ok(Some(out))
 }
 
 /// Above this many entries, or this ratio of unpacked size to archive size beyond a
@@ -632,11 +635,19 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
     hooks.part(&part, true);
     let result = write_archive(fmt, &part, &files, hooks);
     let out = match result {
-        Ok(true) if dest.symlink_metadata().is_ok() && !hooks.durable(dest) => {
-            let _ = fs::remove_file(&part);
-            Ok(())
-        }
-        Ok(true) => fs::rename(&part, dest),
+        // The archive's writers own the file and close it; opened again to sync it
+        // (the sync is of the file, whichever handle asks), then renamed over.
+        Ok(true) => fs::OpenOptions::new()
+            .write(true)
+            .open(&part)
+            .and_then(|f| {
+                let existing = dest.symlink_metadata().is_ok();
+                crate::ops::commit_replace(f, &part, dest, || Ok(!existing || hooks.durable(dest)))
+            })
+            .map(|_| ())
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&part);
+            }),
         Ok(false) => {
             let _ = fs::remove_file(&part);
             Ok(())
@@ -1034,5 +1045,38 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&d);
         }
+    }
+
+    /// Extracting over a file and packing over an archive go through the one replace:
+    /// synced, then renamed.
+    #[test]
+    fn extract_and_pack_sync_a_replacement_before_renaming_it() {
+        let d = scratch("sync");
+        let z = d.join("a.zip");
+        zip_with(&z, &[("f.txt", b"new")]);
+        let out = d.join("out");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("f.txt"), b"old").unwrap();
+        let frag = d.to_string_lossy().into_owned();
+        crate::faults::trace(&frag);
+        let mut log = Log {
+            answer: Some(true),
+            ..Log::default()
+        };
+        extract(&z, &["f.txt".into()], "", &out, &mut log).unwrap();
+        assert_eq!(fs::read(out.join("f.txt")).unwrap(), b"new");
+        let packed = d.join("p.zip");
+        fs::write(&packed, b"old archive").unwrap();
+        pack(&[out.join("f.txt")], &packed, &mut log).unwrap();
+        let seen: Vec<&str> = crate::faults::traced(&frag)
+            .into_iter()
+            .map(|(p, _)| p.name())
+            .collect();
+        assert_eq!(
+            seen,
+            ["sync-data", "rename", "sync-data", "rename"],
+            "{seen:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
     }
 }

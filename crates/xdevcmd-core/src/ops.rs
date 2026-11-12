@@ -758,12 +758,36 @@ impl Worker {
                     }
                     return;
                 }
-                if dst.symlink_metadata().is_ok() && !self.durable(dst) {
-                    return;
-                }
-                let _ = fs::remove_file(dst);
-                match std::os::unix::fs::symlink(&target, dst) {
-                    Ok(()) => self.sum.done += 1,
+                // A link replacing something is made under a temporary name and renamed
+                // over it, like a file: removing the old entry first lost it whenever
+                // making the link then failed.
+                let replacing = dst.symlink_metadata().is_ok();
+                let made = if replacing {
+                    let tmp = part_name(dst);
+                    if let Some(j) = self.journal.as_mut() {
+                        let _ = j.part(&tmp);
+                    }
+                    let r = crate::faults::at(crate::faults::Point::Write, dst)
+                        .and_then(|()| std::os::unix::fs::symlink(&target, &tmp))
+                        .and_then(|()| {
+                            if !self.durable(dst) {
+                                return Ok(false);
+                            }
+                            crate::faults::at(crate::faults::Point::Rename, dst)?;
+                            fs::rename(&tmp, dst).map(|()| true)
+                        });
+                    if !matches!(r, Ok(true)) {
+                        let _ = fs::remove_file(&tmp);
+                    }
+                    r
+                } else {
+                    crate::faults::at(crate::faults::Point::Write, dst)
+                        .and_then(|()| std::os::unix::fs::symlink(&target, dst))
+                        .map(|()| true)
+                };
+                match made {
+                    Ok(true) => self.sum.done += 1,
+                    Ok(false) => {}
                     Err(e) => self.note_error(dst, &e),
                 }
             }
@@ -865,17 +889,19 @@ impl Worker {
                 if let Ok(mtime) = meta.modified() {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
-                drop(w);
                 if in_place {
+                    drop(w);
                     Ok(true)
                 } else if new_only {
+                    drop(w);
                     // Taken only if still free: a file that appeared meanwhile is asked
                     // about (the caller goes round again on AlreadyExists).
-                    crate::noreplace::rename_noreplace(&target, dst).map(|()| true)
-                } else if !self.durable(dst) {
-                    Ok(false)
+                    crate::faults::at(crate::faults::Point::Rename, dst)
+                        .and_then(|()| crate::noreplace::rename_noreplace(&target, dst))
+                        .map(|()| true)
                 } else {
-                    fs::rename(&target, dst).map(|()| true)
+                    // Removes the temporary file itself on any failure.
+                    return commit_replace(w, &target, dst, || Ok(self.durable(dst)));
                 }
             }
             other => other,
@@ -1221,6 +1247,39 @@ pub fn set_safe(on: bool) {
 
 pub fn safe() -> bool {
     SAFE.load(Ordering::Relaxed)
+}
+
+/// The one way xdevcmd replaces a file (Round 029). `tmp`, complete and still open as
+/// `f`, is synced to the disk (a close error, or an NFS or SMB write that failed, is told
+/// here, not lost when the file is dropped), then `ready` runs (the journal's line
+/// synced, the target looked at once more) and may stop it with `Ok(false)`, and only
+/// then is `tmp` renamed over `dst`. Without the sync, a power cut after the rename can
+/// leave `dst` empty or short where ext4's defaults do not happen to save it.
+///
+/// Whatever does not end in the rename removes `tmp`, and `dst` is as it was. A sync
+/// that failed is never tried again on the same file: Linux may have dropped the data
+/// and cleared the error ("fsyncgate", PostgreSQL 2018), so the caller writes the file
+/// again from its source.
+pub(crate) fn commit_replace(
+    f: File,
+    tmp: &Path,
+    dst: &Path,
+    ready: impl FnOnce() -> io::Result<bool>,
+) -> io::Result<bool> {
+    let r = (|| {
+        crate::faults::sync_data(&f, tmp)?;
+        drop(f);
+        if !ready()? {
+            return Ok(false);
+        }
+        crate::faults::at(crate::faults::Point::Rename, dst)?;
+        fs::rename(tmp, dst)?;
+        Ok(true)
+    })();
+    if !matches!(r, Ok(true)) {
+        let _ = fs::remove_file(tmp);
+    }
+    r
 }
 
 /// A temporary name beside `dst` to write a replacement under: hidden, and unique to
@@ -1889,6 +1948,159 @@ mod tests {
             s.describe(Kind::Copy)
                 .contains("safe operations off for this job"),
             "{s:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The points a trace saw, in order, as their names.
+    fn points(fragment: &str) -> Vec<&'static str> {
+        crate::faults::traced(fragment)
+            .into_iter()
+            .map(|(p, _)| p.name())
+            .collect()
+    }
+
+    fn first(seen: &[&str], name: &str) -> usize {
+        seen.iter()
+            .position(|p| *p == name)
+            .unwrap_or_else(|| panic!("no {name} in {seen:?}"))
+    }
+
+    /// A replacement's data is on disk before its rename, with safe operations on (the
+    /// journal's line synced in between) or off (the rule holds either way: the
+    /// owner's decision 1). Before Round 029 nothing was synced.
+    #[test]
+    fn a_replacement_is_synced_before_it_is_renamed_into_place() {
+        journals();
+        for safe in [false, true] {
+            let root = tmp(if safe {
+                "sync-order-safe"
+            } else {
+                "sync-order"
+            });
+            let dst = root.join("dst");
+            fs::create_dir_all(&dst).unwrap();
+            fs::write(root.join("f"), b"new").unwrap();
+            fs::write(dst.join("f"), b"old").unwrap();
+            let frag = root.to_string_lossy().into_owned();
+            crate::faults::trace(&frag);
+            let mut req = Request::copy(vec![root.join("f")], dst.clone());
+            req.safe = safe;
+            let (s, _) = run_with(req, Answer::Yes);
+            let seen = points(&frag);
+            assert_eq!(s.done, 1, "{s:?}");
+            assert!(
+                first(&seen, "sync-data") < first(&seen, "rename"),
+                "safe {safe}: {seen:?}"
+            );
+            if safe {
+                let (synced, renamed) = (first(&seen, "sync-data"), first(&seen, "rename"));
+                assert!(
+                    seen[synced..renamed].contains(&"journal-sync"),
+                    "the journal's line is synced between: {seen:?}"
+                );
+            }
+            assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
+            fs::remove_dir_all(&root).unwrap();
+        }
+    }
+
+    /// A sync that fails: the temporary file goes, the old file stays, and Retry writes
+    /// the file again from its source instead of syncing the same one twice.
+    #[test]
+    fn a_failed_sync_keeps_the_old_file_and_retry_copies_again() {
+        let root = tmp("sync-fail");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("f"), b"new").unwrap();
+        fs::write(dst.join("f"), b"old").unwrap();
+        let frag = root.to_string_lossy().into_owned();
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &frag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let (s, asked) = run_answering(
+            Request::copy(vec![root.join("f")], dst.clone()),
+            |q| match q {
+                Question::Failed { .. } => Answer::Skip,
+                _ => Answer::Yes,
+            },
+        );
+        assert!(asked.iter().any(|q| q.starts_with("Failed")), "{asked:?}");
+        assert_eq!((s.done, s.failed), (0, 1));
+        assert_eq!(fs::read(dst.join("f")).unwrap(), b"old");
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        drop(_f);
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &frag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        crate::faults::trace(&frag);
+        let (s, _) = run_answering(
+            Request::copy(vec![root.join("f")], dst.clone()),
+            |q| match q {
+                Question::Failed { .. } => Answer::Retry,
+                _ => Answer::Yes,
+            },
+        );
+        let seen = points(&frag);
+        assert_eq!(s.done, 1, "{s:?}");
+        let order: Vec<&str> = seen
+            .iter()
+            .copied()
+            .filter(|p| matches!(*p, "write" | "sync-data" | "rename"))
+            .collect();
+        assert_eq!(
+            order,
+            ["write", "sync-data", "write", "sync-data", "rename"],
+            "written again, never synced twice"
+        );
+        assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
+        assert_eq!(fs::read_dir(&dst).unwrap().count(), 1);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Replacing with a link: making the link fails, and the old file is still there.
+    /// Before Round 029 the old file was removed first and lost.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_that_cannot_be_made_does_not_lose_the_file_it_was_to_replace() {
+        let root = tmp("link-replace");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        std::os::unix::fs::symlink("target", root.join("l")).unwrap();
+        fs::write(dst.join("l"), b"the only copy").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::Write,
+            &dst.join("l").to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let (s, _) = run_with(
+            Request::copy(vec![root.join("l")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.failed, 1, "{s:?}");
+        assert_eq!(fs::read(dst.join("l")).unwrap(), b"the only copy");
+        drop(_f);
+        let (s, _) = run_with(
+            Request::copy(vec![root.join("l")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.done, 1, "{s:?}");
+        assert_eq!(fs::read_link(dst.join("l")).unwrap(), Path::new("target"));
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary link left"
         );
         fs::remove_dir_all(&root).unwrap();
     }

@@ -583,6 +583,43 @@ the fix, kept here because the commit carries test and fix together.
 - Not tested end to end: the rename-many dialog itself (the suite has no test driving
   Shift+F2's editor); the core outcome it shows is.
 
+### 2026-11-13, step 2: a replace is durable
+
+- `ops::commit_replace(f, tmp, dst, ready)`, the one helper: `sync_data` on the temporary
+  file **still open** → close → `ready()` (the worker's `durable`: the journal's line
+  synced; step 5 adds the re-check) → `Rename` point → `fs::rename`. Anything short of
+  the rename removes the temporary file; the old `dst` is untouched. A failed sync is
+  never retried on the same file: the error goes up, the copy loop asks `Failed`, and
+  Retry writes the file again from its source (fsyncgate).
+- Used by `ops::copy_bytes` (replacing), `archive::write_entry` (extract over a file;
+  `write_part` now hands back the open `File`), `archive::pack` (the archive writers own
+  and close the file, so it is opened again for writing and synced: the sync is of the
+  file whichever handle asks; on Linux an unseen writeback error is still reported to a
+  new handle) and `document::save_bytes` (Save as… replacing; it used `sync_all` before,
+  now `sync_data` through the helper). `session.rs` (app crate) already syncs and is left.
+- `copy_symlink` (Unix): a replacing link is made under `part_name(dst)` and renamed over
+  the old entry (journal part line, `durable`, `Rename`), never "remove, then make".
+- New files on the same device: still no sync (the owner's rule). A `Rename` point now
+  also sits before `rename_noreplace` in `copy_bytes`, for order tests.
+- **A bug caught on the way**: the first cut of `document::write_new` removed `path` on
+  any error, including `AlreadyExists` from `create_new`: Save as… without "replace"
+  onto an existing file would have deleted it. `save_bytes_never_replaces_without_being_told`
+  failed on it at once; fixed before commit (`create` fails before anything is made, and
+  only what was made is removed).
+- **macOS** (std 1.97.0, `library/std/src/sys/fs/unix.rs`): `File::sync_data` and
+  `File::sync_all` both call `fcntl(fd, F_FULLFSYNC)` on every Apple target (`fsync` is
+  not used: it does not empty the drive's cache there). So every replace on macOS pays a
+  full flush of the drive's write cache; its cost is measured in step 3.
+- Failing first (against the step-1 commit; the link test with the `Write` point put in
+  front of the old `symlink` call, which is how a failing `symlink()` looks there):
+  - `a_replacement_is_synced_before_it_is_renamed_into_place`: `no sync-data in ["write"]`.
+  - `a_failed_sync_keeps_the_old_file_and_retry_copies_again`: only `Conflict` asked; no
+    sync to fail, the file replaced.
+  - `a_link_that_cannot_be_made_does_not_lose_the_file_it_was_to_replace`: reading the
+    old file: `NotFound`: lost.
+  - `extract_and_pack_sync_a_replacement_before_renaming_it`, `saving_over_a_file_syncs_before_renaming`:
+    empty trace (no sync, no rename point).
+
 ## Check
 
 ## Act

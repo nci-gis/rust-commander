@@ -110,17 +110,15 @@ impl Links {
     }
 
     /// What the status line says about the chosen link, with a warning while ssh runs.
-    pub fn describe_chosen(&self) -> String {
+    pub fn describe_chosen(&self) -> Said {
         let Some(l) = self.chosen() else {
-            return String::new();
+            return Said::default();
         };
-        match &self.remote {
-            Some(p) => format!(
-                "{p} is running: this is looked up on this machine \u{2014} {}",
-                describe(l)
-            ),
-            None => describe(l),
+        let mut said = describe(l);
+        if let Some(p) = &self.remote {
+            said.before = format!("{p} is running: this is looked up on this machine \u{2014} ");
         }
+        said
     }
 
     /// The directory relative paths on line `i` are taken from: the last command that
@@ -201,9 +199,44 @@ impl Links {
     }
 }
 
+/// What the status line says about a chosen link, in its parts: a warning, the path,
+/// then the keys and what the path was resolved against. Kept apart so that a path too
+/// long for the line is cut in its middle, not at the end with everything after it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Said {
+    pub before: String,
+    /// The absolute path, with its line and column.
+    pub path: String,
+    pub after: String,
+}
+
+impl Said {
+    /// All of it, as the message line holds it.
+    pub fn text(&self) -> String {
+        format!("{}{}{}", self.before, self.path, self.after)
+    }
+
+    /// The text for `width` columns. A path is a directory's name, then its own; on a
+    /// narrow line, or in a long temporary directory (macOS's is `/private/var/folders/
+    /// …/T/`, the links resolved), cutting the end lost the name and the keys. So the
+    /// path gives up its middle, as much as the whole needs and never below half the
+    /// line; what still does not fit is cut at the end as before.
+    pub fn fit(&self, width: usize) -> String {
+        let n = |s: &str| s.chars().count();
+        let total = n(&self.before) + n(&self.path) + n(&self.after);
+        if total <= width {
+            return self.text();
+        }
+        let need = width.saturating_sub(n(&self.before) + n(&self.after));
+        let room = need.max(width / 2);
+        let path = xdevcmd_core::format::elide_middle(&self.path, room);
+        format!("{}{path}{}", self.before, self.after)
+    }
+}
+
 /// What the status line says about a chosen link: its absolute path and line, what it
 /// was resolved against, and the keys.
-pub fn describe(l: &Link) -> String {
+pub fn describe(l: &Link) -> Said {
     let at = match (l.line, l.col) {
         (Some(n), Some(c)) => format!(":{n}:{c}"),
         (Some(n), None) => format!(":{n}"),
@@ -223,7 +256,11 @@ pub fn describe(l: &Link) -> String {
         }
         None => "",
     };
-    format!("{}{at} \u{2014} {keys}{from}", l.path.display())
+    Said {
+        before: String::new(),
+        path: format!("{}{at}", l.path.display()),
+        after: format!(" \u{2014} {keys}{from}"),
+    }
 }
 
 #[cfg(test)]
@@ -270,7 +307,7 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert!(got[0].dir);
         assert_eq!(got[0].base, Some(Base::Unmarked));
-        assert!(describe(&got[0]).contains("no prompt marks"));
+        assert!(describe(&got[0]).text().contains("no prompt marks"));
         // An absolute path needs no base, and says none.
         let abs = format!("{}", d.join("two/b.txt").display());
         let got = l.on_line(1, &abs).to_vec();
@@ -290,5 +327,45 @@ mod tests {
         let got = l.on_line(0, "ü 設計.md").to_vec();
         assert_eq!(got[0].chars, 2..7);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A path too long for the line loses its middle, not its name and the keys after
+    /// it (macOS's temporary directory, links resolved, is long; CI run 43177254223).
+    #[test]
+    fn a_long_path_is_cut_in_its_middle_and_keeps_its_name_and_keys() {
+        let said = Said {
+            before: String::new(),
+            path: "/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/x-12/left/notes.txt"
+                .into(),
+            after: " \u{2014} Enter goes there, F3 views, F4 edits \u{b7} from the shell's \
+                    directory now"
+                .into(),
+        };
+        let got = said.fit(95);
+        assert!(got.starts_with("/private/var/"), "{got}");
+        assert!(
+            got.contains(
+                "/left/notes.txt \u{2014} Enter goes there, F3 views, F4 edits \u{b7} from"
+            ),
+            "{got}"
+        );
+        assert!(got.contains('\u{2026}'), "{got}");
+        // The path keeps half the line, at least: the base is what is cut after it.
+        assert!(got.chars().count() > 95, "{got}");
+        // One that fits is left whole, and so is the whole when the line has room.
+        assert_eq!(said.fit(500), said.text());
+        let short = Said {
+            path: "/tmp/a/notes.txt".into(),
+            ..said.clone()
+        };
+        assert_eq!(short.fit(95), short.text());
+        // The warning while ssh runs stays whole: it is the point.
+        let warned = Said {
+            before: "ssh is running: this is looked up on this machine \u{2014} ".into(),
+            ..said
+        };
+        assert!(warned
+            .fit(95)
+            .starts_with("ssh is running: this is looked up"));
     }
 }

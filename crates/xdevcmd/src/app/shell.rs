@@ -254,10 +254,11 @@ impl App {
                     if let Some(n) = link.line {
                         viewer.show_line(n);
                     }
-                    viewer.note(&format!(
-                        "{} \u{2014} Esc back to the history",
-                        tidy(&canonical)
-                    ));
+                    viewer.note_path(crate::links::Said {
+                        before: String::new(),
+                        path: tidy(&canonical),
+                        after: " \u{2014} Esc back to the history".into(),
+                    });
                     if let Some(Modal::View(h)) = self.modal.take() {
                         self.return_to = Some(h);
                     }

@@ -97,6 +97,9 @@ pub struct Viewer {
     row_starts: Vec<usize>,
     /// A press on a path, and where: its release on the same cell is a click on it.
     pressed_link: Option<((usize, usize), (u16, u16))>,
+    /// The chosen path's description in its parts, while the message is still it: drawn
+    /// to fit, the path cut in its middle.
+    said: Option<crate::links::Said>,
 }
 
 impl Viewer {
@@ -130,6 +133,7 @@ impl Viewer {
             text_x: 0,
             row_starts: Vec::new(),
             pressed_link: None,
+            said: None,
         }
     }
 
@@ -185,7 +189,7 @@ impl Viewer {
             if let Some(j) = next {
                 links.selected = Some((i, j));
                 let said = links.describe_chosen();
-                self.message = said;
+                self.note_path(said);
                 // Into view, a few lines from the edge.
                 let page = self.page.max(1);
                 if i < self.top || i >= self.top + page {
@@ -323,7 +327,8 @@ impl Viewer {
                         }
                     }
                     links.selected = Some(hit);
-                    self.message = links.describe_chosen();
+                    let said = links.describe_chosen();
+                    self.note_path(said);
                     return Action::Stay;
                 }
             }
@@ -395,6 +400,13 @@ impl Viewer {
             Mode::Text => self.doc.line_count().saturating_sub(1),
             Mode::Hex => self.doc.hex_rows().saturating_sub(1),
         }
+    }
+
+    /// Say something that names a path: drawn to fit, the path cut in its middle so
+    /// its name and what follows stay on the line.
+    pub fn note_path(&mut self, said: crate::links::Said) {
+        self.message = said.text();
+        self.said = Some(said);
     }
 
     /// Say something on the viewer's own message line, which is what shows while it
@@ -922,10 +934,15 @@ impl Viewer {
                 .sum()
         };
         let room = area.width as usize;
-        let said = if self.message.is_empty() {
+        // A chosen path's description, cut to fit beside Esc, the path in its middle.
+        let message = match &self.said {
+            Some(s) if s.text() == self.message => s.fit(room.saturating_sub(width(1) + 2)),
+            _ => self.message.clone(),
+        };
+        let said = if message.is_empty() {
             0
         } else {
-            self.message.chars().count() + 2
+            message.chars().count() + 2
         };
         let mut shown = keys.len();
         while shown > 1 && width(shown) + said > room {
@@ -945,9 +962,9 @@ impl Viewer {
                 Style::new().fg(theme::t().fg_dim),
             ));
         }
-        if !self.message.is_empty() {
+        if !message.is_empty() {
             spans.push(Span::styled(
-                format!("  {}", self.message),
+                format!("  {message}"),
                 Style::new().fg(theme::t().mark),
             ));
         }

@@ -1085,11 +1085,43 @@ fn foreground_of(pid: u32) -> Fg {
         return Fg::Unknown;
     };
     if tpgid > 0 && tpgid != pgrp {
-        let comm = ps(&["-o", "comm=", "-p", &tpgid.to_string()]).unwrap_or_default();
-        let name = comm.rsplit('/').next().unwrap_or("").trim();
-        return Fg::Program(if name.is_empty() { "a program" } else { name }.to_string());
+        let group = tpgid.to_string();
+        let comm = ps(&["-o", "comm=", "-p", &group]).unwrap_or_default();
+        let args = || ps(&["-o", "args=", "-p", &group]).unwrap_or_default();
+        let name = program_name(&comm, args);
+        return Fg::Program(if name.is_empty() {
+            "a program".into()
+        } else {
+            name
+        });
     }
     Fg::Shell
+}
+
+/// Interpreters a script names on its `#!` line.
+const INTERPRETERS: &[&str] = &[
+    "sh", "bash", "dash", "zsh", "ksh", "perl", "python", "python3", "ruby",
+];
+
+/// The program's name from macOS's `ps -o comm=`, and its command line if needed.
+/// macOS names a script run by its `#!` line after its interpreter (`/bin/sh`), where
+/// Linux names it after the script; so a script called `ssh`, or mosh (a Perl script),
+/// went unseen. For an interpreter, the name is the first word after it that is not an
+/// option (`/bin/sh /usr/local/bin/ssh` is `ssh`); a path with a space in it is cut
+/// there, as ps prints the words joined.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn program_name(comm: &str, args: impl FnOnce() -> String) -> String {
+    let name = comm.trim().rsplit('/').next().unwrap_or("").to_string();
+    if !INTERPRETERS.contains(&name.as_str()) {
+        return name;
+    }
+    args()
+        .split_whitespace()
+        .skip(1)
+        .find(|w| !w.starts_with('-'))
+        .and_then(|w| w.rsplit('/').next())
+        .filter(|w| !w.is_empty())
+        .map_or(name, str::to_string)
 }
 
 #[cfg(target_os = "macos")]
@@ -1329,6 +1361,27 @@ fn function_key_bytes(n: u8, mods: KeyModifiers) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// macOS calls a script by its interpreter's name; the script's own is the program
+    /// (CI run 43177254223: a stand-in `ssh` script was not seen as ssh there).
+    #[test]
+    fn a_script_is_named_for_itself_not_its_interpreter() {
+        let never = || -> String { panic!("a binary needs no command line") };
+        assert_eq!(program_name("/usr/bin/ssh", never), "ssh");
+        assert_eq!(program_name("vim\n", never), "vim");
+        assert_eq!(
+            program_name("/bin/sh", || "/bin/sh /tmp/x/bin/ssh".into()),
+            "ssh"
+        );
+        assert_eq!(
+            program_name("perl", || "/usr/bin/perl -w /usr/local/bin/mosh host"
+                .into()),
+            "mosh"
+        );
+        // An interpreter with nothing after it (a subshell) is itself.
+        assert_eq!(program_name("/bin/bash", || "-bash".into()), "bash");
+        assert_eq!(program_name("/bin/zsh", String::new), "zsh");
+    }
 
     #[test]
     fn a_shell_is_idle_only_when_that_is_known() {

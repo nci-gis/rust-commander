@@ -80,7 +80,7 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 | 1 | **F1 Commands** (item 38), Round [024](cycles/Round_024.md), at Review: the command palette in two sizes; Help menu reshaped; Config in use | M |
 | 2 | **xdevtheme-light** (item 37, part 2), Round [025](cycles/Round_025.md), at Review: Dawn brought back from git and tuned | S |
 | 3 | **Documentation** (item 40), Round [026](cycles/Round_026.md), at Review: Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
-| 4 | **L. Log a terminal tab to a file** (item 35) | S |
+| 4 | **L. Log a terminal tab to a file** (item 35), Round [027](cycles/Round_027.md), in progress: per tab from the tab menu, `text` or `raw`, a bounded writer that stops and says so | S |
 | 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped. Designed with pillar 2's progressive indexing (A03) in mind, or done in one round with it, so the viewer changes once | S–M |
 | 6 | **Q. Four pillars** (item 36, part 2; owner, 2026-11-12), each a round: **1. Data correct** (P0) · **2. Responsive and bounded** · **3. Honest contracts** · **4. Release proof** (P0 gate). Contents in the table below; the release bar below is what they must meet. **rc.1 is not cut before pillar 1 is done** | M–L |
 | 7 | *If a day is spare:* **which-key** for the prefix groups (item 39) | S |
@@ -196,7 +196,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 32 | Foundation | S–M | [019](cycles/Round_019.md) | Review (v0.4.0) |
 | 33 | Syntax-highlighted viewer, off by setting and past a size cap | S–M | — | v0.4.0, step 5 |
 | 34 | Remote | — | — | none in 0.4.0, mounts instead (owner, 2026-11-11) |
-| 35 | Log a terminal tab to a file | S | — | v0.4.0, step 4 |
+| 35 | Log a terminal tab to a file | S | — | v0.4.0, step 4, Round 027 |
 | 36 | Stable-quality pass (the release bar) | M | [022](cycles/Round_022.md) (part 1) | part 1 Review; part 2 v0.4.0, step 6 |
 | 37 | xdevtheme: the default look, Neon and Glass; **xdevtheme-light** | S | (memory) | part 1 done; light v0.4.0, step 2, Round [025](cycles/Round_025.md) |
 | 38 | F1 Commands: the command palette | M | [024](cycles/Round_024.md) | Review (v0.4.0) |

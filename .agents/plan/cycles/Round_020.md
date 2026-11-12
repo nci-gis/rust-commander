@@ -1,6 +1,6 @@
 # Round 020: Paths in the shell's output (v0.4 entry B)
 
-**Status**: Planning (kickoff written; waiting for the owner's go)
+**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
 **Part of**: v0.4.0, entry B of `.agents/memory/2026-11-10-v0.4.0-plan.md`; ROADMAP item
 30, part 1
 **Date started**: 2026-11-11
@@ -241,6 +241,8 @@ The owner (2026-11-11): "bắt đầu round B nhé", with the recommended answer
 - **Step 6, docs**: docs/shell.md "Paths in the output"; docs/security.md (the shell
   panel); F1's viewer rows; CHANGELOG Unreleased → Added.
 - Cleanups: `TermPane::history_text` (replaced by `history_commands`) removed.
+
+- 2026-11-12, **set aside at Review** for the owner's hand tests (this round's Check), with the ROADMAP rewritten around v0.4.0 the same day (owner: "clear proceed"). The next round starts from it; CI on all three systems for the whole branch comes first.
 
 ## Check
 

@@ -1,6 +1,6 @@
 # Round 023: Names sorted as people read them, in any script (v0.4 Q, item 21)
 
-**Status**: In Progress (the owner: "Move next", 2026-11-11)
+**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
 **Part of**: v0.4.0, entry Q (scope proposal §2, Should: "item 21 … correctness for the
 owner's own Japanese names; part of Q"); ROADMAP item 21
 **Date started**: 2026-11-11
@@ -127,6 +127,8 @@ language.
 - Docs: docs/guide.md (Panes and tabs), CHANGELOG (Changed).
 - Not done: half-width katakana (U+FF61–U+FF9F) are left as they are; rare in file
   names.
+
+- 2026-11-12, **set aside at Review** for the owner's hand tests (this round's Check), with the ROADMAP rewritten around v0.4.0 the same day (owner: "clear proceed"). The next round starts from it; CI on all three systems for the whole branch comes first.
 
 ## Check
 

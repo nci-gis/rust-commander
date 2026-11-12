@@ -1,226 +1,264 @@
 # Roadmap
 
 > What comes next, in order, and why that order. Latest release: **0.3.0** (2026-11-10);
-> **v0.4.0** is in progress on `feat/v0.4.0`. Each line becomes a round in
-> `cycles/` when work on it starts; a round says how, this file says what and when.
-> Reorder freely; strike through what is dropped rather than deleting it.
+> **v0.4.0, the first stable release**, is in progress on `feat/v0.4.0`. Each line
+> becomes a round in `cycles/` when work on it starts; a round says how, this file says
+> what and when. Reorder freely; strike through what is dropped rather than deleting it.
 
-Written 2026-11-06 from feedback on 0.1.0, a market study the same day (five research
-threads, kept outside the repository) and the owner's review of both. The feedback:
-Windows and Ubuntu look fine; on macOS the colours are wrong, Alt shortcuts and some
-other keys do nothing, and scrolling shows the terminal's history; Total Commander
-users want Enter to open files.
+Written 2026-11-06 from feedback on 0.1.0 and a market study; **rewritten 2026-11-12**
+around v0.4.0 as the first stable release, from the scope proposal
+(`memory/2026-11-11-v0.4.0-scope-proposal.md`) and the owner's decisions of 2026-11-11
+and 2026-11-12 (recorded under Decisions below).
 
 ---
 
 ## Direction
 
-- **xdevcmd's edge (rcmd until 2026-11-07) is a combination, not a feature**: MIT, the Total Commander model,
+- **xdevcmd's edge is a combination, not a feature**: MIT, the Total Commander model,
   native Windows, one static binary to drop on a server, no network, nothing destructive
   done silently. Nothing below thins it.
 - **The name, and who it is for** (owner, 2026-11-10). **xDev Commander**, `xdevcmd` to
   type. **x** = *extend* (it extends the shell, never replaces it: the shell keeps its
-  keys, its history search and its completion) and *cross-platform* (Windows native, macOS,
-  Linux). **Dev** = developers and devops: people who live in the terminal, build and
-  deploy from it. **Commander** = the two-pane file manager family (Total Commander,
-  Double Commander, One Commander, mc). The one-line description, chosen from six
-  candidates scored on what each says (Round 017's Do): "xDev Commander: a cross-platform,
+  keys, its history search and its completion) and *cross-platform* (Windows native,
+  macOS, Linux). **Dev** = developers and devops: people who live in the terminal, build
+  and deploy from it. **Commander** = the two-pane file manager family (Total Commander,
+  Double Commander, One Commander, mc). One line: "xDev Commander: a cross-platform,
   two-pane terminal file manager that extends your shell."
-- **What only xdevcmd can do is join the shell to the panes.** It holds the shell's output
-  (in memory), knows the shell's directory and has file panes and a viewer in one
-  process. v0.4 builds on that: the shell's output turned into files to act on (item 30).
+- **What only xdevcmd can do is join the shell to the panes.** It holds the shell's
+  output (in memory), knows the shell's directory and has file panes and a viewer in one
+  process. Paths in the output and lists made from it (items 30a, 30b) are built on that.
 - **The boundary for every idea: it ends in an action on a file.** A path in the shell's
   output is xdevcmd's business; a URL, a commit hash, a process id or log analytics are
-  not (a log viewer or a plugin's).
-- **Make it pleasant before making it bigger.** macOS's colours, keys and scrolling were
-  broken in 0.1.0 and fixed in 0.2.x (items 1–2); themes and a Settings screen are what a
-  first-time user touches. Polish still comes before any large feature.
-- **Plugins are for optional extras** (uncommon or nice-to-have features), not the
-  core. Low priority, and no in-app fetcher.
-- **No SFTP** (owner, 2026-11-06): `ssh` in the terminal panel and the many good
-  existing tools cover it.
+  not.
+- **Nothing to memorise** (owner, 2026-11-12). Every command can be found by typing, from
+  anywhere, with its key shown beside it (F1, item 38). A key is a shortcut, never the
+  only way.
+- **Stable before bigger.** v0.4.0 is judged by people meeting xdevcmd for the first time:
+  a smaller release done well is the stable one (the release bar below).
+- **No network, no telemetry.** Remote files come through a mount the system or a trusted
+  tool provides (sshfs, rclone, SMB, NFS); xdevcmd opens no connection (owner,
+  2026-11-11). Plugins are for optional extras, later, with no in-app fetcher.
 
 ## Working rules
 
-Agreed with the owner on 2026-11-07, after Round 002 sat in Planning while 003 and 004
-were done first:
-
 - **A round gets its number when its work starts**, not when it is first imagined. Ideas
-  wait here, in the table below, without a round file.
+  wait here without a round file.
 - **Rounds run in number order, one at a time.** A new round starts only when the one
   before is Complete or explicitly set aside (said in its Do section, with why).
-- Round 002 was numbered under the old habit and then waited. At the owner's request it
-  is **Superseded** and its plan moved to Round 005, so numbers and order agree again.
-  Numbers are never changed afterwards: rounds are append-only (`PDCA.md`).
-- Each round works on its own `feat/…` branch and lands in `dev` by pull request.
+- **Each round starts with a kickoff review** written into its Plan (what changed, the
+  code it touches, an outside check, a critique, steps, the owner's decisions), and the
+  owner says go before any code.
+- **No new features after a release candidate**; fixes only.
+- Each round works on its own `feat/…` branch (v0.4.0's rounds share `feat/v0.4.0`) and
+  lands in `dev` by pull request. Rounds are append-only (`PDCA.md`).
 
-## Where things stand
+## Done
 
-- **Released**: 0.2.0 (2026-11-07), 0.2.1 (2026-11-08), **0.3.0** (2026-11-10: GitHub
-  release with six builds; `xdevcmd` and `xdevcmd-core` on crates.io). Rounds 001 and
-  003–017 are Complete; 002 is Superseded. The history of each step is in its round and
-  in `CHANGELOG.md`.
-- **On `feat/v0.4.0`, at Review**: [Round 018](cycles/Round_018.md) (Windows asks before
-  starting from its panel; the pid on the menu bar) and [Round 019](cycles/Round_019.md)
-  (entry A below). Both are pushed without CI by the owner's choice (2026-11-10); CI runs
-  at the pull request into `dev`.
+- **0.2.0** (2026-11-07), **0.2.1** (2026-11-08), **0.3.0** (2026-11-10: GitHub release
+  with six builds; `xdevcmd` and `xdevcmd-core` on crates.io). Rounds 001, 003–017
+  Complete; 002 Superseded. Details: each round and `CHANGELOG.md`.
+- **v0.4.0 so far, on `feat/v0.4.0`, code done, at Review for the owner's hand tests**:
 
-## Next: v0.4.0, in this order
+  | Round | What | Item |
+  |---|---|---|
+  | [018](cycles/Round_018.md) | Windows asks before starting from its own panel; the pid on the menu bar | 31 |
+  | [019](cycles/Round_019.md) | Foundation: `app.rs` split, Windows end to end, binstall metadata, CJK columns | 32 |
+  | [020](cycles/Round_020.md) | Paths in the shell's output: marked in the history, Enter goes there, F3/F4 at the line | 30a |
+  | [021](cycles/Round_021.md) | Lists from the shell's output (panelize), Alt+F7 into a list, lists kept for the session | 30b |
+  | [022](cycles/Round_022.md) | Slow directories off the UI thread, the progress bar, budgets as tests, remote by mount (docs) | 36 (part 1) |
+  | [023](cycles/Round_023.md) | Names sorted by Unicode's default order, in any script | 21 |
+  | (memory) | xdevtheme, the default look; Neon and Glass as files; a missing theme keeps the config | 37 (part 1) |
 
-The detailed plan, with each entry's tests and risks:
-`.agents/memory/2026-11-10-v0.4.0-plan.md`. **Each round starts with a kickoff review**
-written into its Plan (what changed, the code it touches, an outside check, a critique,
-steps and the owner's decisions), and the owner says go before any code.
+## Next: v0.4.0, the first stable release
 
-1. **A. Foundation** (item 32, S–M), Round 019:
-   - `app.rs` split into 15 files;
-   - Windows end to end under ConPTY;
-   - `cargo binstall` metadata;
-   - this housekeeping.
-2. **B. Paths in the shell's output** (item 30, part 1, M): marked in the history view,
-   Enter goes there, F3/F4 open at the line.
-3. **C. Panelize and find into a panel** (item 30, part 2, M).
-4. **D. Syntax-highlighted viewer** (item 33, S–M): measure the binary-size cost first.
-5. **E. One directory history** (item 29, S–M).
-6. **F. Remote: the owner's decision first** (item 34). Either:
-   - a panel over the user's own `ssh`, which needs hard rule 2 reworded; or
-   - no remote, said plainly.
-   Until decided, Not planned below stands.
-7. **G. Settings: built-in and your own** (items 4c, 5b): in 0.4.0 or 0.5.
-8. Optional if there is room: items 21 and 22.
-9. **Release 0.4.0, then the launch** (item 10): a GIF and Show HN, after the packages.
+Decided by the owner on 2026-11-12 ("L, D: v0.4.0; có rc.1"; F1 as below; "clear
+proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a week of rc.
 
-**Packages** (item 8):
-- crates.io: done with 0.3.0.
-- `cargo binstall`: the metadata is in Round 019 and works from 0.4.0.
-- Scoop and winget: templates in `packaging/`; submitting them is the owner's.
-- Homebrew tap and AUR: the owner's call.
-
-**Waiting on the owner**:
-
-| Question | Why it matters | Suggested |
+| Order | Item | Size |
 |---|---|---|
-| Where do the tap and the bucket live? | Homebrew and scoop each read a separate repository | `nci-gis/homebrew-xdevcmd` and `nci-gis/scoop-xdevcmd`, created by the owner |
-| AUR | needs a personal AUR account and SSH key | the owner's call; skip if no one maintains it |
-| winget | a pull request to `microsoft/winget-pkgs`, reviewed by Microsoft | yes, after scoop |
-| F: remote | the most asked-for gap, against hard rule 2 as worded | decide at F's kickoff |
+| 0 | **CI on all three systems for the whole branch** (Rounds 020–023 have not run on Windows or macOS), and the owner's hand tests to close Rounds 018–023 | S |
+| 1 | **F1 Commands** (item 38): the command palette in two sizes; Help menu reshaped; Config in use | M |
+| 2 | **xdevtheme-light** (item 37, part 2): Dawn brought back from git and tuned | S |
+| 3 | **Documentation** (item 40): Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
+| 4 | **L. Log a terminal tab to a file** (item 35) | S |
+| 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped | S–M |
+| 6 | **Q. The rest of the stable-quality pass** (item 36, part 2): the release bar below | M |
+| 7 | *If a day is spare:* **which-key** for the prefix groups (item 39) | S |
+| 8 | **0.4.0-rc.1** (GitHub pre-release) → a week of the owner's real use, fixes only → **0.4.0** → packages → launch (item 10) | — |
+
+**If it runs late**, the suggested cut order is D, then L; F1 Commands stays (it decides a
+newcomer's first five minutes). Cutting is the owner's call.
+
+### The release bar (what "stable" means for 0.4.0)
+
+1. **No known data-loss or crash bug.** Every open finding from Rounds 014–023 fixed or
+   written down as harmless; MkDir and Rename refuse control characters on Unix (Round
+   015's backlog).
+2. **A hand-test matrix, run and recorded** by the owner from a checklist the agent
+   writes: Windows Terminal (cmd, pwsh) and the old console; Terminal.app and iTerm2;
+   GNOME Terminal, kitty, tmux, over SSH. The same script on each: copy, move, delete,
+   undo, archives, the shell bridge, paths and lists from the output, logging, F1, F3/F4,
+   Settings, quit with jobs, CJK and Vietnamese names.
+3. **Budgets, kept by tests where possible**: start-up under 150 ms; 100,000 entries
+   listed and sorted in under 1 s; idle CPU under 0.5 %; memory flat in the soak test;
+   **the binary at most 7 MB** (owner: important), checked on each release target in CI
+   at the pull request.
+4. **A compatibility promise in `docs/`** ("From 0.4.0"): what it covers (config keys,
+   CLI flags, action names in `[keys]`, the theme-file format) is the owner's call at Q's
+   kickoff. Display names in F1 are not covered.
+5. **The parsers of untrusted input fuzzed** by hand (cargo-fuzz, nightly): OSC 7, 9;9
+   and 133, the path recogniser, config and theme files, archive names.
+6. **CI on for the pull request into `dev`**, the Windows ConPTY tests included.
+7. **Docs and README for a first-time reader**: a 20–30 s GIF (a build error → Shift+F12
+   → Enter), three lines of why, install in one command each; `docs/guide.md` checked
+   against what ships.
+
+### Packages and waiting on the owner
+
+| | Status / question | Suggested |
+|---|---|---|
+| crates.io | done with 0.3.0 | — |
+| `cargo binstall` | metadata in Round 019; works from 0.4.0; dry run after publishing | — |
+| Scoop | templates in `packaging/`; bucket repository | `nci-gis/scoop-xdevcmd`, created by the owner |
+| winget | templates in `packaging/`; PR to `microsoft/winget-pkgs` | after Scoop |
+| Homebrew tap, AUR | the owner's call | tap `nci-gis/homebrew-xdevcmd`; skip AUR unless someone maintains it |
+| Q: compatibility promise | what it covers | config keys, CLI flags, `[keys]` action names, theme format |
 
 **Releasing stays the owner's call**; the flow in `docs/development.md` is unchanged.
 
-**Small fixes, no round of their own** — all done on `feat/v0.2.0` (2026-11-07):
+## Later: 0.5 and after
 
-- ~~`rcmd --screenshot … | head` panics~~: stdout goes through `emit()`, which ends
-  quietly on a closed pipe; a test fails without it.
-- ~~`rcmd --show-keys` has no automated test~~: a pty test (F7, Alt+J, a click, Esc Esc).
-- ~~The Alt+R group's Esc path has no test~~: a render test.
-- ~~rcmd keeps track of its own temporary files~~: `tempfiles.rs`, one `rcmd-run-<pid>`
-  directory per run, user-only; a marker refreshed while running; removed on exit; at
-  start, runs whose marker is over an hour old are removed (only marked directories).
+Steered by launch feedback. Not started before 0.4.0 ships.
 
-Promotions are recorded in `promotions.md`; a memory still waiting on a person says so
-in its own header.
+| Item | Why later |
+|---|---|
+| 41 Useful commands (owner's "readiness"): built-in examples and your own, type to filter, Enter runs, Alt+Enter types; rows in F1's "Your commands" | Builds on F1; how to build it is open (owner, 2026-11-12) |
+| F1: Enter on a row of Config in use opens Settings at that setting | Small, after F1 has met users |
+| Settings: the terminal's background detected (OSC 11) to pick light or dark | xdevtheme-light covers it by hand first |
+| 29 One directory history for panes and shells | Alt+J covers the panes; item 30a already records each command's directory |
+| 4c, 5b Settings: built-in and your own themes apart; keymap presets | Not a reason to choose xdevcmd; presets would churn keys right before the promise |
+| 22 Faster copies (reflink, `copy_file_range`, clonefile, CopyFile2) | Changes the copy engine; needs time to soak |
+| 34 Remote | Decided: none in 0.4.0, mounts instead (docs ship). Revisit only with feedback, keeping hard rule 2 |
+| Marking paths in the live panel; a refresh model for lists beyond "run again" | Trimmed from 30a and 30b |
+| F3 on a slow mount off the UI thread; fuzzing in CI; `[terminal] log = "always"` | Trimmed from 36 and 35 |
+| A docs site (mdBook / GitHub Pages) | Item 40's link then points there; nothing else changes |
+| 39 which-key | If not done in 0.4.0 |
+| 11 File icon sets; 12–13 plugins | Optional extras; plugins not for now (owner, 2026-11-09, 2026-11-11) |
 
-## Order
+## Order (every item, for reference)
+
+Item numbers are referenced from rounds, commits and memory, and never change.
 
 | # | Item | Size | Round | Status |
 |---|---|---|---|---|
-| **Now: fix what is broken** | | | | |
-| 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (2026-11-07) |
-| 2 | macOS keys and mouse: Alt shortcuts, other keys, scrolling into the terminal's history | S–M | [003](cycles/Round_003.md) | Complete (2026-11-07); Mac history and resize keys moved to 004 |
-| **Next: Total Commander feel** | | | | |
-| 3 | Enter opens a file with the program its extension belongs to, like Total Commander | M | [005](cycles/Round_005.md) (was [002](cycles/Round_002.md), superseded) | Complete (2026-11-07) |
-| 4 | Themes as files: built-in themes plus the user's own, chosen by name, switchable while running | M | [006](cycles/Round_006.md) | Complete (2026-11-07) |
-| 5 | Keys that work on every system: two-key bindings (Alt+R then arrows), Alt+J history, Alt+1…9 tabs, clash checks; Esc as Meta removed. Named keymap sets deferred | M | [004](cycles/Round_004.md) | Complete (2026-11-07) |
-| 6 | Settings (File → Settings…): tabs General, Files, Theme, Terminal, Keys | L | [007](cycles/Round_007.md) | Complete (2026-11-07) |
-| 7 | The logo in the app: About screen (and the empty state) drawn with the picture renderer | S | [008](cycles/Round_008.md) | Complete (2026-11-07; About only) |
-| 8 | One name, then a Homebrew tap, scoop, winget, `cargo binstall`, AUR | S each | [011](cycles/Round_011.md), [017](cycles/Round_017.md), [019](cycles/Round_019.md) | name **xdevcmd** (011); crates.io with 0.3.0; binstall metadata in 019 (from 0.4.0); Scoop and winget templates in `packaging/`, submitted by the owner; tap and AUR the owner's call |
-| 8b | Leftover safety items from the 0.2.0 review, and tests carried from 005 and 009 | S | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 7b | The About logo on macOS (and checked by hand on Windows) | S | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 4b | Example theme files in the release archives; `--print-theme` | S | [013](cycles/Round_013.md) | Complete (0.2.1); seven example themes since 0.3.0 |
-| 4c | Settings → Theme: built-in and your own apart; "Make my copy" | S | — | v0.4 entry G, or 0.5 |
-| 5b | Keymap presets (deferred in 004); Keys tab shows the preset's key and yours | M | — | v0.4 entry G, or 0.5 |
-| 5c | Ctrl+G beside Ctrl+L to go to a path | S | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 14 | An app to click: launchers on Windows and macOS (14a); perhaps its own window (14b) | S / L–XL | — | deferred until there is a real need (owner) |
-| 15 | Idle CPU near zero: redraw only on change (measured about 5 % of a core) | S–M | [013](cycles/Round_013.md) | Complete (0.2.1; 0.2–0.5 %) |
-| 16 | Undo a delete to the trash (Linux, macOS, Windows); Linux trash by the spec, per volume | M | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 17 | Directory watching with the system's events, polling as fallback | M | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 18 | Copy/move "replace only if older" (robocopy) | S | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 19 | Fuzzy Ctrl+F filter, best first | S | [013](cycles/Round_013.md) | Complete (0.2.1) |
-| 20 | Sharp image previews: Kitty, iTerm2, sixel, half blocks as fallback | M | [014](cycles/Round_014.md) | Complete (0.3.0; our own code, not `ratatui-image`) |
-| 21 | Sort names by Unicode, not ASCII-only folding | S | — | proposed |
-| 22 | Faster copies: reflink, copy_file_range, clonefile, CopyFile2 | M | — | proposed |
-| ~~23~~ | ~~Quit from the terminal panel~~ | — | — | dropped by the owner: inconsistent keys confuse more than they help |
-| 24 | Save the session on every way out, signals included | S | [014](cycles/Round_014.md) | Complete (0.3.0) |
-| 25 | Safe operations (a setting, on): temp-then-rename for every copy, a journal, clean-up and resume at the next start; proper quit waits; a closed terminal cancels, cleans, saves | M | [014](cycles/Round_014.md) | Complete (0.3.0) |
-| 26 | Terminal copy mode: history in the viewer (Shift+F12), Save as… and Go to line in the viewer, `[terminal] scrollback`, the terminal tab's menu; keymap A (only the F12 family is xdevcmd's inside the shell) | M | [015](cycles/Round_015.md) | Complete (0.3.0) |
-| 27 | Shell ↔ pane bridge: the shell's directory on every system, go there, type names into the command line, `[terminal] follow` | M | [016](cycles/Round_016.md) | Complete (0.3.0) |
-| 28 | Release prep for 0.3.0: package `xdevcmd`, crates publishable, Scoop and winget templates | S | [017](cycles/Round_017.md) | Complete (0.3.0, published 2026-11-10) |
-| 29 | One directory history for panes and shells | M | — | v0.4 entry E |
-| 30 | The shell's output to files: in the history view, a path (with `:line[:col]`, Python's and JS's trace forms, MSBuild's `(line,col)`, Windows paths) that exists on disk is marked; Enter takes the pane to it, F3/F4 open it at that line; **panelize** turns chosen lines (or a command's whole output: `rg -l`, `git status`, `find`) into a panel for F5/F6/F8. Paths resolved against the shell's directory when the command ran (prompt marks), never trusted beyond moving a pane | M | — | v0.4 entries B and C, the lead feature (owner, 2026-11-10) |
-| 31 | Windows: ask before starting from a terminal panel; the pid on the menu bar | S | [018](cycles/Round_018.md) | Review (on `feat/v0.4.0`) |
-| 32 | Foundation: `app.rs` split, Windows end to end, `cargo binstall` metadata, canon housekeeping; CJK names fitted in columns (the owner's find) | S–M | [019](cycles/Round_019.md) | Review (on `feat/v0.4.0`) |
-| 33 | Syntax-highlighted viewer (F3, quick view), off by setting and past a size cap | S–M | — | v0.4 entry D |
-| 34 | Remote: a panel over the user's own `ssh`, or no remote said plainly | S–L | — | v0.4 entry F, the owner's decision first |
-| 9 | Undo for the last operation | M | [009](cycles/Round_009.md) | Complete (2026-11-07) |
-| 9b | The mouse in Settings (carried from 007) | S | [010](cycles/Round_010.md) | Complete (2026-11-07) |
-| 9c | Click a directory in a pane's path; double-click a border to share it evenly | S | [012](cycles/Round_012.md) | Complete (2026-11-07) |
+| 1 | Colours on terminals without 24-bit colour (macOS Terminal.app) | S | [001](cycles/Round_001.md) | Complete (0.2.0) |
+| 2 | macOS keys and mouse | S–M | [003](cycles/Round_003.md) | Complete (0.2.0) |
+| 3 | Enter opens a file with its program, like Total Commander | M | [005](cycles/Round_005.md) | Complete (0.2.0) |
+| 4 | Themes as files, switchable while running | M | [006](cycles/Round_006.md) | Complete (0.2.0) |
+| 5 | Keys that work on every system: two-key bindings, Alt+J, Alt+1…9, clash checks | M | [004](cycles/Round_004.md) | Complete (0.2.0) |
+| 6 | Settings (File → Settings…) | L | [007](cycles/Round_007.md) | Complete (0.2.0) |
+| 7 | The logo in About | S | [008](cycles/Round_008.md) | Complete (0.2.0) |
+| 8 | One name, then packages | S each | [011](cycles/Round_011.md), [017](cycles/Round_017.md), [019](cycles/Round_019.md) | crates.io with 0.3.0; binstall from 0.4.0; Scoop, winget, tap: see Packages |
+| 8b, 7b, 4b, 5c | Leftovers from the 0.2.0 review; About logo on macOS; example themes; Ctrl+G | S | [013](cycles/Round_013.md) | Complete (0.2.1) |
+| 4c | Settings → Theme: built-in and your own apart | S | — | 0.5 |
+| 5b | Keymap presets | M | — | 0.5 |
+| 9, 9b, 9c | Undo; the mouse in Settings; click a path, double-click a border | M, S, S | [009](cycles/Round_009.md), [010](cycles/Round_010.md), [012](cycles/Round_012.md) | Complete (0.2.0) |
 | 10 | Launch: Show HN with a GIF | S | — | after 0.4.0 and the packages |
-| **Later: optional extras** | | | | |
-| 11 | File icons as an optional extra: icon sets per extension, Nerd Font or plain | S–M | — | builds on 4 |
-| 12 | Plugins v0: the user menu with documented variables and the selection, run in a tab | S–M | — | not for now (owner, 2026-11-09) |
-| 13 | Plugins: external programs over stdin/stdout, versioned | L | — | not for now (owner, 2026-11-09) |
-| ~~—~~ | ~~SFTP, remote panes, a file-source layer for remote writes~~ | — | — | dropped 2026-11-06 |
+| 11 | File icon sets | S–M | — | later |
+| 12 | Plugins v0 | S–M | — | not for now |
+| 13 | Plugins over stdin/stdout | L | — | not for now |
+| 14 | An app to click (launchers; perhaps a window) | S / L–XL | — | deferred until a real need |
+| 15, 16, 17, 18, 19 | Idle CPU; undo a delete to the trash; watching; replace only if older; fuzzy filter | S–M | [013](cycles/Round_013.md) | Complete (0.2.1) |
+| 20 | Sharp image previews | M | [014](cycles/Round_014.md) | Complete (0.3.0) |
+| 21 | Sort names by Unicode | S | [023](cycles/Round_023.md) | Review (v0.4.0) |
+| 22 | Faster copies | M | — | 0.5 |
+| ~~23~~ | ~~Quit from the terminal panel~~ | — | — | dropped by the owner |
+| 24–28 | Session on every way out; safe operations; terminal copy mode and keymap A; shell ↔ pane bridge; 0.3.0 release prep | S–M | [014](cycles/Round_014.md)–[017](cycles/Round_017.md) | Complete (0.3.0) |
+| 29 | One directory history for panes and shells | M | — | 0.5 |
+| 30a | Paths in the shell's output (was 30, part 1) | M | [020](cycles/Round_020.md) | Review (v0.4.0) |
+| 30b | Lists from the shell's output, Alt+F7 into a list, kept lists (was 30, part 2) | M | [021](cycles/Round_021.md) | Review (v0.4.0) |
+| 31 | Windows: ask before starting from a terminal panel; the pid on the menu bar | S | [018](cycles/Round_018.md) | Review (v0.4.0) |
+| 32 | Foundation | S–M | [019](cycles/Round_019.md) | Review (v0.4.0) |
+| 33 | Syntax-highlighted viewer, off by setting and past a size cap | S–M | — | v0.4.0, step 5 |
+| 34 | Remote | — | — | none in 0.4.0, mounts instead (owner, 2026-11-11) |
+| 35 | Log a terminal tab to a file | S | — | v0.4.0, step 4 |
+| 36 | Stable-quality pass (the release bar) | M | [022](cycles/Round_022.md) (part 1) | part 1 Review; part 2 v0.4.0, step 6 |
+| 37 | xdevtheme: the default look, Neon and Glass; **xdevtheme-light** | S | (memory) | part 1 done; light v0.4.0, step 2 |
+| 38 | F1 Commands: the command palette | M | — | v0.4.0, step 1 |
+| 39 | which-key for prefix groups (Alt+X, Alt+R) | S | — | v0.4.0 if a day is spare, else 0.5 |
+| 40 | Documentation from the app: versioned link, `docs/README.md`, docs in the archives | S | — | v0.4.0, step 3 |
+| 41 | Useful commands (readiness) | M | — | 0.5 |
+| ~~—~~ | ~~SFTP, remote panes~~ | — | — | dropped 2026-11-06 |
 
 Sizes are relative: **S** a day or two, **M** under a week, **L** one to two weeks.
 
 ## Notes on the items
 
-- **4 Themes.** `themes/<name>.toml` in the config directory, each a full palette in
-  the slots `--print-config` lists; `[theme] name = "…"` picks one and the existing
-  per-colour settings still apply on top. Built in: `dark` (today's), `light`,
-  `ansi` (the 16 terminal colours, so it follows the user's palette), `blue` (blue
-  panels in the tradition of the DOS-era commanders), `high-contrast`. A theme also
-  says how it degrades at 256 and 16 colours (item 1). Today the theme is set once at
-  start-up and "never changes while running"; switching needs that to change.
-- **5 Keymaps and sequences**: see [Round 004](cycles/Round_004.md). Changed on
-  2026-11-07 from `classic` / `laptop` / `mc` to one set per system, after Round 003
-  found that macOS Terminal.app drops the modifiers of most arrow keys, and Windows
-  Terminal is believed to keep Alt+arrows for itself. `mc` may come later.
-- **6 Settings.** Tabs: **General** (confirmations, trash, session, Esc as Meta),
-  **Theme** (pick a theme and the colour depth, with a live preview), **Keys** (pick a
-  keymap; the list of keys, editing them later), **Panels and layout** (how many file
-  panes, the terminal panel). Security shows the mode but is not editable from inside,
-  or a restricted session could lift its own restriction. Writes `config.toml` keeping the user's comments and order. Refused in
-  read-only and restricted modes, where xdevcmd writes nothing.
-- **7 Logo.** Quick view already draws PNG and JPEG with half blocks, two pixels a cell,
-  in any terminal: the icon can be an embedded PNG drawn the same way. At 256 colours
-  it is quantised like everything else.
-- **11 File icons** already exist as `[files] icons = true` (needs a Nerd Font). The
-  extra is choosing the set (Nerd Font, plain Unicode, none) and per-extension icons in
-  a theme-like file.
+- **38 F1 Commands** (owner, 2026-11-12, design C of four):
+  - **One component, two sizes, one key.** F1 opens the small palette: a filter on top,
+    the list below. F1 again (or when the screen is small, it simply stays small)
+    expands it into the large window. The text typed is kept across the change. The
+    large window is today's Help, with **no tabs**: settings move to their own window.
+  - **Rows:** Name · Key · Description. Narrow: Name · Key, with the selected row's full
+    description on the last line. Read-only rows (mouse gestures, the viewer's own keys,
+    the terminal tab bar) are shown but cannot run.
+  - **Groups:** with an empty filter the large size shows the groups as today (to browse);
+    the small one shows recent commands, then the ones for where F1 was pressed. Typing
+    gives one flat list, best match first, each row tagged with its group (`Files: Copy`);
+    typing a group's name filters to it.
+  - **Context:** commands for where F1 was pressed (file pane, terminal, viewer, archive)
+    first, the rest under a dim "elsewhere" line.
+  - **Running:** Enter or double-click closes F1 and runs on what had focus before. **Alt+1…9**
+    runs the first nine rows (digits alone go into the filter). A command refused in
+    read-only or restricted mode is shown with the reason. After running a command that
+    has a key, the status line says "Next time: F5".
+  - **Your `[[menu]]` commands** are rows in F1 (group "Your commands"); Shift+F9 stays as
+    the quick menu.
+  - **Keys:** `help` always keeps F1; `[keys]` may add more, which act in the panes only
+    (keymap A). From the shell: Alt+X F1. Inside F1, Tab and the digit keys are no longer
+    tab switches; ↑/↓ move the selection; Esc clears the filter, then closes.
+  - **Help menu:** Commands… (F1, opens the large size) · Config in use (read-only, the
+    loaded config file in its own syntax, with a filter; no key) · Usage (Shift+F1) ·
+    Documentation (item 40) · About. "Config in use", not "Settings in use", so it is not
+    taken for File → Settings…, which edits the common settings.
+  - Display names are separate from `[keys]` action names, so they can change freely.
+- **40 Documentation**: `https://github.com/nci-gis/rust-commander/tree/v{version}/docs`
+  from `CARGO_PKG_VERSION`, not `main` (main describes features the installed version may
+  not have). `docs/README.md` gives the reading order. `docs/` ships in the release
+  archives for machines without a browser or network; Help → Documentation names the
+  local copy first. A docs site later only changes the link.
+- **35 Log a tab**: per tab, off by default, from the tab menu "Log to file…", a ● on the
+  tab while it runs. `text` (escapes stripped, lines a CR rewrote kept once) or `raw`.
+  File `0600`, appended. Refused in read-only and restricted modes. The docs' "never
+  written to disk" becomes "unless you turn on a log for that tab".
+- **33 Highlighting**: off past a size cap and by setting; measured against the 7 MB
+  budget first.
+- **37 xdevtheme-light**: Terminal.app's default profile is light, so it is a first
+  impression; a file theme, not the default.
+- **4 Themes, 5 Keymaps, 6 Settings, 7 Logo, 11 Icons**: see their rounds.
 
 ## Decisions
 
-The owner accepted every recommendation below on 2026-11-06 ("mình đồng ý theo đề xuất
-của bro"). The one name was chosen on 2026-11-07: **xdevcmd**.
-
-| Decision | Options | Decided |
-|---|---|---|
-| Colour `auto` | downgrade only old Terminal.app / truecolor only on positive evidence | positive evidence; 256 colours over SSH unless `COLORTERM` arrives |
-| Default theme | `dark` (today) / `ansi` | keep `dark`; revisit after the launch |
-| Enter on a file | `view` / `open` (Total Commander) | `open` by default, falling back to view where nothing can be opened; `view` by setting |
-| Where theme files live | config directory / also beside the binary (portable, as Total Commander's ini) | config directory; also read `themes/` beside the binary for portable installs |
-| Name | keep `rcmd` + `rust-commander` / one name | **xdevcmd** (2026-11-07): command, package, config paths, environment variables. The repository keeps `rust-commander`. `rust-commander` was taken on crates.io by another TUI file manager and `rcmd` by a 2020 crate and a Homebrew cask; xdevcmd was free everywhere checked (crates.io, Homebrew, AUR, scoop, Debian, npm, PyPI, GitHub) |
-| Extension points in secure modes | — | off in read-only and restricted unless whitelisted |
+| Decision | Decided |
+|---|---|
+| Colour `auto` | truecolour only on positive evidence; 256 colours over SSH unless `COLORTERM` arrives (2026-11-06) |
+| Default theme | **xdevtheme** (owner, 2026-11-11); the old look is `dark` |
+| Enter on a file | `open` (Total Commander), falling back to view; `view` by setting (2026-11-06) |
+| Where theme files live | config directory, and `themes/` beside the binary (2026-11-06) |
+| Name | **xdevcmd** (2026-11-07); the repository keeps `rust-commander` |
+| Extension points in secure modes | off in read-only and restricted unless whitelisted |
+| v0.4.0 | the first stable release, judged by the release bar; an rc.1 with a week of the owner's use first (owner, 2026-11-11, 2026-11-12) |
+| Remote | none in 0.4.0; mounts through the system or trusted tools, documented (owner, 2026-11-11) |
+| L and D | in 0.4.0 (owner, 2026-11-12) |
+| F1 | design C, as in the note on item 38; Config in use separate (owner, 2026-11-12) |
+| Plugins | not for now, low priority (owner, 2026-11-09, 2026-11-11) |
 
 ## Not planned
 
-- **SFTP and remote file systems** (see Direction). Round 003's first draft, a spike
-  for this, was replaced by the macOS round before it started.
-- **Fetching anything** — a plugin list, updates, telemetry. Hard rule 2 stays as it is.
+- **SFTP and remote file systems inside xdevcmd**; remote comes through a mount.
+- **Fetching anything**: a plugin list, updates, telemetry. Hard rule 2 stays as it is.
 - **Total Commander's native plugins** (WFX/WCX DLLs) and **embedded Lua**: the first
   needs `unsafe` and runs Windows-only binaries in-process; the second runs plugin code
   in-process with no boundary.
-- The owner's word of 2026-11-09: **no SFTP; no plugins for now.** v0.4's entry F asks
-  once more, for a panel over the user's own `ssh` only (xdevcmd opening no socket
-  itself); until the owner decides, this stands.
+- **Our own history search or completion in the shell**: the shell's job (fzf, atuin,
+  PSReadLine).

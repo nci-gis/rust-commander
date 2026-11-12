@@ -1,6 +1,6 @@
 # Round 021: Panelize, a panel from the shell's output (v0.4 entry C)
 
-**Status**: In Progress (the owner's go, 2026-11-11)
+**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
 **Part of**: v0.4.0, entry C of `.agents/memory/2026-11-10-v0.4.0-plan.md`, trimmed as in
 `.agents/memory/2026-11-11-v0.4.0-scope-proposal.md`; ROADMAP item 30, part 2
 **Date started**: 2026-11-11
@@ -368,6 +368,8 @@ and the six recommendations. Work on `feat/v0.4.0`, pushed, no CI.
     the app had built was right (logged, then the logging removed).
   - The four full runs after that all passed.
   - Worth a look in Q, with the soak test.
+
+- 2026-11-12, **set aside at Review** for the owner's hand tests (this round's Check), with the ROADMAP rewritten around v0.4.0 the same day (owner: "clear proceed"). The next round starts from it; CI on all three systems for the whole branch comes first.
 
 ## Check
 

@@ -1,6 +1,6 @@
 # Round 022: Stable quality, first part (v0.4 entry Q)
 
-**Status**: In Progress (the owner's go, 2026-11-11: "làm theo đề xuất của bro. Go")
+**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
 **Part of**: v0.4.0, entry Q of `.agents/memory/2026-11-11-v0.4.0-scope-proposal.md`
 (§3, the bar the release must clear)
 **Date started**: 2026-11-11
@@ -220,6 +220,8 @@ slow mount is left for later.
   - **Not written:** a test of a second move replacing a pending one. The hook is read
     once per process, so unit tests cannot set it per test; the code path is the first
     line of `navigate`.
+
+- 2026-11-12, **set aside at Review** for the owner's hand tests (this round's Check), with the ROADMAP rewritten around v0.4.0 the same day (owner: "clear proceed"). The next round starts from it; CI on all three systems for the whole branch comes first.
 
 ## Check
 

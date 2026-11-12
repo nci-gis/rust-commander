@@ -215,8 +215,14 @@ Naming an action replaces all of its default keys. The names are in
 its last line (`[keys] copy`); a key you changed has a `•` there.
 
 `help` always keeps **F1**: `help = ["F1", "Ctrl+F1"]` adds a key beside it, and a
-`help` without F1 is an error that says so. Keys added act in the file panes; inside the
-shell F1 is the program's, and xdevcmd's F1 there is **Alt+X F1**.
+`help` without F1 is an error that says so, and so is F1 given to any other action. Keys
+added act in the file panes; inside the shell F1 is the program's, and **Alt+X F1** opens
+Commands there (and in the panes).
+
+`usage = ["Shift+F1", "Alt+x F1"]` gives Alt+X F1 back to Usage, as before 0.4: then
+Alt+X F1 is Usage in the file panes, and in the shell it goes to the program (Usage is
+not one of the shell's commands), so Commands is reached from the shell with F12, then
+F1.
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
 Left. Bindings that start with the same key form a group, and there is no time limit

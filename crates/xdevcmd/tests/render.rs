@@ -1521,6 +1521,21 @@ fn alt_x_f1_opens_commands_from_the_shell_and_the_panes() {
     assert!(commands_box(&s).is_some(), "{s}");
     let s = shot_keys(SIZE, "S-F1", &a, &b);
     assert!(commands_box(&s).is_none() && s.contains("Usage"), "{s}");
+    // `usage` given Alt+X F1 back (docs/config.md): Usage in the panes; in the shell it
+    // is the program's, and Commands is F12, then F1.
+    let body = "[keys]\nusage = [\"Shift+F1\", \"Alt+x F1\"]\n";
+    let s = shot_cfg_env(body, &[], "A-x,F1", &a, &b);
+    assert!(
+        s.contains("\u{250c} Usage") && commands_box(&s).is_none(),
+        "{s}"
+    );
+    let s = shot_cfg_env(body, &[], "F12,A-x,F1", &a, &b);
+    assert!(
+        commands_box(&s).is_none() && !s.contains("\u{250c} Usage"),
+        "{s}"
+    );
+    let s = shot_cfg_env(body, &[], "F12,A-x,F1,F12,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
 }
 
 /// The Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · ─ · About.

@@ -76,8 +76,10 @@ that heading and starts a new, empty one here. -->
   Config in use, and the Help menu is Commands… · Config in use · Usage · About.
 - **Alt+X F1 opens F1**, from the shell too (where F1 alone stays the program's). It was
   Usage's second key; Usage keeps Shift+F1 and is a row in F1 and the Help menu.
-  `[keys] usage = ["Shift+F1", "Alt+x F1"]` brings the old key back.
-- **`[keys] help` must keep F1**: a config that takes it away is refused, saying so.
+  `[keys] usage = ["Shift+F1", "Alt+x F1"]` brings the old key back in the file panes;
+  in the shell Alt+X F1 then goes to the program, and Commands is F12, then F1.
+- **F1 always opens Commands**: a config whose `[keys] help` leaves F1 out, or that gives
+  F1 to another action, is refused, saying so.
 - **Names sort as people read them, in any script.** Case, accents and width no longer
   split letters (`Éclair` with `eclair`, `Ölfeld` with `öl`, full-width `ｆｉｌｅ２` with
   `file2`, its `２` a number); katakana sort with hiragana and voiced kana with plain

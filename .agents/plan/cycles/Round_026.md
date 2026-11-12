@@ -151,7 +151,7 @@ order. A machine without a browser or a network still has the docs.
   tag; checked by reading and by the packaging test); the links resolving on GitHub
   (no tag v0.4.0 yet; v0.3.0's `docs/` has no `README.md`, so a 0.3.0 build's link
   shows the directory listing, which GitHub renders without an index); the local copy
-  through a Homebrew-style symlink (code path, not tested); the owner's hand test of C (OSC 52) in a
+  through a Homebrew-style symlink (code path, not tested); clippy for windows-gnu and darwin (CI's cross-check is `cargo check`, not clippy; targets not installed here); the owner's hand test of C (OSC 52) in a
   real terminal.
 
 Record what you could **not** verify as explicitly as what you could.

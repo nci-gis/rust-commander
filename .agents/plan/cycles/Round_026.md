@@ -145,13 +145,13 @@ order. A machine without a browser or a network still has the docs.
 - [x] release.yml copies `docs/` into every archive; packaging tests pass (archive
   names untouched, so Scoop/winget/binstall tests unchanged)
 - [x] fmt, clippy `-D warnings` (Linux), `cargo test --workspace`
-- [ ] CI on three systems: see below
+- [x] CI on three systems: run 43225964170 green first time (Linux x86_64 and ARM,
+  Windows, macOS, cargo-deny, the windows-gnu/darwin cross-check); no flake seen
 - [ ] **Not verified**: a real release archive with `docs/` (release.yml runs only on a
   tag; checked by reading and by the packaging test); the links resolving on GitHub
   (no tag v0.4.0 yet; v0.3.0's `docs/` has no `README.md`, so a 0.3.0 build's link
   shows the directory listing, which GitHub renders without an index); the local copy
-  through a Homebrew-style symlink (code path, not tested); clippy for windows-gnu and
-  darwin (targets not installed here; CI); the owner's hand test of C (OSC 52) in a
+  through a Homebrew-style symlink (code path, not tested); the owner's hand test of C (OSC 52) in a
   real terminal.
 
 Record what you could **not** verify as explicitly as what you could.

@@ -442,25 +442,62 @@ objects**, and nothing waits on them.
     - ranking per key: 2,000 rows 2.2 ms debug, 0.28 ms release.
     - release binary: 5,209,112 bytes at the kickoff (fd410e9), 5,292,824 now:
       **+83,712 bytes (+82 KiB, +1.6 %)**; the 7 MB budget holds (5.05 MB).
+- **2026-11-12, review and QA fixes** (one commit each, each test failing with the fix
+  taken out unless said):
+  - Blocker: `[keys] copy = ["F1"]` passed and F1 copied. `apply` now refuses F1 (alone,
+    or as a two-key binding's first key) for any action but help; `--check-config`
+    says so (unit + render).
+  - A `[[menu]]` row run from the shell takes %f %s %d from the file pane used last
+    (pty). Shell-acting file-group commands (cd the shell here) keep the shell focused,
+    as Alt+X and the key does (render).
+  - Over the viewer only bare F1 opens Commands: `help = ["F1", "q"]` no longer stops q
+    closing the viewer (render).
+  - `--help` and the man page say F1 is Commands and name Config in use (render).
+  - Config in use is a row in F1 (`Extra::ConfigInUse`; recents id `config_in_use`).
+  - **Ranking**: within a tier, rows for where F1 was pressed come first, then
+    runnable everywhere-rows, then the rest (a read-only everywhere-row, a mouse
+    gesture, counts as the rest); then runnable before read-only; then score. In the
+    viewer "close" is the viewer's own Close (read-only: Enter says "Esc · q: the
+    viewer's own key"), never Close pane (render: no pane closed). A read-only row's
+    message now names its key, not its title.
+  - pty: a `[[menu]]` row from F1 with a busy shell asks ("A program is running"), and
+    the program is sent nothing (`cat > typed.txt` stands for the busy program so
+    "nothing" can be read back; `sleep` would not show it). Fails when
+    `run_user_command` calls `send_here` instead of `send_to_shell`.
+  - Nits: recents neither written nor read with `restore_session = false`; the file is
+    deduplicated anywhere in it and ignored above 64 KB (unit, by path, no env var);
+    docs/config.md and CHANGELOG say what `usage = ["Shift+F1", "Alt+x F1"]` does
+    (Usage in the panes; in the shell the program's, Commands by F12 then F1; a render
+    test checks that); names, keys and the filter line are cut by display columns
+    (`unicode-width`, already a dependency).
+  - A first version of the busy-shell pty test hung on quit: the test's own fault
+    (after the question focus is on the shell, so its Ctrl+D went to the panes as the
+    hotlist). Found with the process's thread states, not by retrying.
+  - Checks: fmt, clippy `-D warnings`; `cargo test --workspace` twice (236 unit, 194
+    render, 99 pty, 183 core: all pass); the pty suite 3 more times, clean.
 
 ## Check
 
-- [ ] Keymap A unchanged inside the shell: F1 typed there reaches the program; Alt+X F1
+- [x] Keymap A unchanged inside the shell: F1 typed there reaches the program; Alt+X F1
   opens F1 (pty)
-- [ ] `help` cannot lose F1 (`apply`, `--check-config`)
-- [ ] Context: the rows for where F1 was pressed come first, from a file pane, a list,
-  an archive, the shell and the viewer
-- [ ] Enter runs on what had focus before, including from the shell and over the viewer
-  (pty)
-- [ ] Read-only rows never run; refused rows say why
-- [ ] Alt+1…9 runs the first nine rows; digits go to the filter
-- [ ] Both sizes, narrow widths, a small screen staying small (render)
-- [ ] F1 expanding keeps the filter's text; Esc clears, then closes
-- [ ] "Next time: F5" after a command with a key
-- [ ] `[[menu]]` rows run through the same quoting as Shift+F9
-- [ ] Config in use shows what Settings showed, with a filter; the Help menu reshaped
-- [ ] Ranking 2,000 rows under 5 ms (debug)
+- [x] `help` cannot lose F1 (`apply`, `--check-config`)
+- [x] Context: the rows for where F1 was pressed come first, from a file pane, a list,
+  an archive, the shell and the viewer (file pane, shell, viewer tested; a list and an
+  archive are file panes to F1 and not tested on their own; an archive's refused
+  writes come from `archive_refused`, shared with the keys)
+- [x] Enter runs on what had focus before, including from the shell and over the viewer
+  (shell: pty; viewer: render)
+- [x] Read-only rows never run; refused rows say why
+- [x] Alt+1…9 runs the first nine rows; digits go to the filter
+- [x] Both sizes, narrow widths, a small screen staying small (render)
+- [x] F1 expanding keeps the filter's text; Esc clears, then closes
+- [x] "Next time: F5" after a command with a key
+- [x] `[[menu]]` rows run through the same quoting as Shift+F9
+- [x] Config in use shows what Settings showed, with a filter; the Help menu reshaped
+- [x] Ranking 2,000 rows under 5 ms (debug)
 - [ ] Docs and `docs/keys.md` regenerated; clippy on three targets; the full suite
+  (docs, keys.md, Linux clippy and suite done; windows-gnu and darwin clippy not run
+  here: the targets cannot be downloaded; CI)
 - [ ] The owner: F1 on macOS Terminal.app (Alt+1 without Option as Meta), Windows
   Terminal and a Linux terminal, by hand
 

@@ -943,6 +943,13 @@ root; CI is not).
   (older test hooks, read from the environment); move them behind the `faults` feature
   or a test cfg, and extend the budgets test to them.
 - `/dev/shm/xdevcmd-xdev-*` left by the QA runs removed.
+- **Checks after the fixes:** `cargo fmt --all --check` clean; clippy `-D warnings`
+  with and without `--all-features` clean; `cargo test --workspace` twice in a row, both
+  green (pty suite 108 passed each time); the core suite also as `nobody`, green (264).
+  CI run **43322352193** (at 8e74497): green on all six jobs at the first attempt.
+- **From the QA runs (the reviewer's, recorded here):** 30 kill runs at the seam's
+  phases, 0 files lost or left partial; disk-full (ENOSPC) runs left every file
+  intact.
 
 ## Check
 

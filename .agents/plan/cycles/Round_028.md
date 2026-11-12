@@ -304,6 +304,10 @@ CSS · diff/patch · INI (and `.conf`, `.cfg`, `.properties`, `.gitconfig`, `.ed
   0.7 ms a frame), a changed file's checkpoints dropped, search over selection, the
   selection contrast; fmt, clippy, `cargo test --workspace`; release binary now
   5,454,952 B (5.20 MiB)
+- [x] CI run 43262037502: green after one re-run of Windows, whose first attempt failed
+  `a_confirmation_counts_one_file_in_the_singular` (the Delete dialog drawn without
+  its count line; not the known Ctrl+\\ flake, not touched by this round; passed on
+  the re-run). A new flake to note for pillar 4.
 - [ ] **Not verified**: colours on a real terminal by eye (only screenshots); the
   256- and 16-colour look of the syntax colours beyond the light theme's contrast test
   (the 16-colour theme is ANSI names, so the user's palette decides); Windows and

@@ -1,6 +1,6 @@
 # Round 029: Pillar 1, data correct (v0.4.0-beta.1, part 1 of 4)
 
-**Status**: In Progress (the owner's go, 2026-11-13: "OK, go"; every open decision taken as recommended)
+**Status**: Review (steps 0–8 done, CI green 2026-11-13; the owner's go was 2026-11-13: "OK, go"; every open decision taken as recommended)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md` ("Step 6: three pre-releases", beta.1); pillar 1
 of `memory/2026-11-12-four-pillars-for-rc1.md` (B01–B05, A08's sync gap); the owner's
 decisions of 2026-11-12 and 2026-11-13 (below, §1)
@@ -855,6 +855,18 @@ on macOS and Windows, whose temporary directories ignore case.
   the code (it waited for "zz-target", which the find dialog shows as typed, then
   pressed End before the result row had arrived; Enter went up out of the results).
   Fixed to wait for "1 found"; three local runs green.
+- CI run **43312618853** (at bc6622f): green on all six jobs after one re-run of the
+  failed macOS job: attempt 1 failed on `a_log_keeps_what_scrolled_past_the_scrollback`
+  (Round 027's terminal-log test, "Log to file" not on screen in time; not touched by
+  this round, a macOS pty timing flake like the tab-menu one at 43300172507); attempt 2
+  green. The release-build seam check ran on every system (no "no release build" line).
+  Its measurement step again: macOS 2,000 × 1 KiB 1.817 s vs 0.552 s (3.3×); ubuntu
+  0.692 s vs 0.238 s (2.9×).
+- **Unverified**: the cost on the owner's USB stick and on a real Mac (decision 4 asks
+  for both; the runners are VMs); a power cut itself (only the order is tested, from the
+  seam's trace); the rename-many "no journal" dialog end to end (no test drives
+  Shift+F2's editor); the Windows half of the kill test (`windows_e2e.rs` has no kill
+  test yet); the real `chmod 000` compare test here (root; it runs on CI).
 
 ## Check
 

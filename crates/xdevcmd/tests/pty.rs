@@ -245,6 +245,19 @@ impl Session {
         self.until(&format!("{text:?} on screen"), |s| s.contains(text));
     }
 
+    /// Wait until `text` is drawn below the line holding `title` (a dialog's title):
+    /// the same text elsewhere (the terminal panel under a viewer) does not count, and a
+    /// `locate` right after a title appears could otherwise find that one.
+    fn wait_below(&self, title: &str, text: &str) {
+        self.until(&format!("{text:?} under {title:?}"), |s| {
+            let lines: Vec<&str> = s.lines().collect();
+            lines
+                .iter()
+                .position(|l| l.contains(title))
+                .is_some_and(|t| lines[t + 1..].iter().any(|l| l.contains(text)))
+        });
+    }
+
     fn wait_gone(&self, text: &str) {
         self.until(&format!("{text:?} to go away"), |s| !s.contains(text));
     }
@@ -3833,6 +3846,7 @@ fn panelize_takes_a_whole_line_that_names_a_file() {
     x.wait_for("\u{2502}2026");
     x.send(SHIFT_F12);
     x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}2026");
     let (cx, cy) = x.locate("\u{2502}report:2026.txt");
     x.drag((cx + 2, cy), (cx + 2, cy + 2));
     x.wait_for("3 lines selected");
@@ -3868,6 +3882,7 @@ fn a_list_leaves_out_what_is_outside_the_root() {
     xdevcmd.wait_for("/etc/hosts");
     xdevcmd.send(SHIFT_F12);
     xdevcmd.wait_for("history \u{b7} sh");
+    xdevcmd.wait_below("history \u{b7} sh", "\u{2502}a/x.txt");
     let (x, y) = xdevcmd.locate("\u{2502}a/x.txt");
     xdevcmd.drag((x + 2, y), (x + 2, y + 1));
     xdevcmd.wait_for("2 lines selected");

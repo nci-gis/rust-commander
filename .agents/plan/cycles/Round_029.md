@@ -923,6 +923,12 @@ root; CI is not).
   on the other side; inline `false` without the seam) and
   `a_case_clash_is_left_alone_wherever_the_lookup_finds_the_twin`, which runs on Linux.
   Proved by mutation: with the clash branch disabled it fails (`A.txt`/`a.txt` planned).
+- **7 Two flaky pty tests** (`a_list_leaves_out_what_is_outside_the_root`, and this
+  round's `panelize_takes_a_whole_line_that_names_a_file`): each `locate`d a line right
+  after the history viewer's title appeared, before its rows were drawn, and could find
+  the same text in the terminal panel under it. New `Session::wait_below(title, text)`
+  waits for the text under the title first. A race: no deterministic failing run here;
+  the QA runs saw it. Three runs of both green.
 
 ## Check
 

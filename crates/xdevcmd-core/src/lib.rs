@@ -31,6 +31,7 @@ pub mod rename;
 pub mod sha256;
 pub mod size;
 pub mod sort;
+pub mod syntax;
 pub mod termlog;
 pub mod trashed;
 pub mod undo;

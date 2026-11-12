@@ -304,7 +304,32 @@ objects**, and nothing waits on them.
 
 ## Do
 
-(Starts with step 1.)
+- **2026-11-12, step 1: rows and ranking** (`keys.rs`, new `commands.rs`, core `fuzzy.rs`).
+  - A hand-written `title` on all 87 bindings, unique (a test). Help's is "Commands",
+    `cd_terminal_here` "cd the shell here"; most others are the menu's own label
+    ("Copy as…", "Rename many…"), so F1 and F9 call a command the same.
+  - `Action::place()` (Files, Terminal, Viewer, Everywhere) by exhaustive match;
+    `opens_from_shell()` (Help only), kept apart from `is_global`.
+  - `commands::rows`: bindings by group with live keys, the rebound `•`, the "in the
+    shell: …" note; Settings…, Theme… and About at the end of General; `[[menu]]` as
+    "Your commands" with `Shift+F9 e` in the Key column; the viewer, mouse, safe
+    operations and two-key sections moved from `help.rs` as read-only rows. Go to tab
+    N is read-only with `Alt+1 … Alt+9`.
+  - Ranking, one deviation from §3: fuzzy is loose ("trash" matches "Terminal: Show
+    or hide terminal" letter by letter), so a name match counts above a description
+    only when it reads as words typed (each letter a word start or after the last
+    one, `fuzzy::is_words`). Tiers: key typed as text (two characters or more, so
+    "o" is not the key o) · name as words · description as words · name scattered.
+    A description matched only scattered is dropped. Ties as planned.
+  - `fuzzy`: `Query` prepared once, `score_positions` (the hits to highlight) with no
+    allocation for a name that does not match; the quick filter's scores unchanged
+    (its four tests pass as they were).
+  - **Measured**: ranking 2,000 rows, debug, best of 5 over five queries: 4.0 ms
+    first, 2.2 ms after `Query` and an ASCII fold; release 0.34 ms (before those).
+    F1's real list is ~180 rows.
+  - The module is unused until step 2: `allow(dead_code)` outside tests, removed then.
+  - Not verified: clippy for windows-gnu and darwin — `rustup target add` cannot
+    download here (proxy refuses the tunnel); CI checks them.
 
 ## Check
 

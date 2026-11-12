@@ -7,6 +7,7 @@
 mod app;
 mod bookmarks;
 mod cli_docs;
+mod commands;
 mod config;
 mod config_edit;
 mod crash;

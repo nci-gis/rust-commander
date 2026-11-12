@@ -5230,3 +5230,15 @@ fn quick_view_colours_too() {
     assert_eq!(colours_at(&s, "\"hi there\"").0, DARK_STRING);
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
+
+#[test]
+fn settings_offers_colouring_source_on_by_default() {
+    let (a, b) = fixture();
+    let s = shot_keys("122x34", "F9,Up,Up,Enter,Tab", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Viewer colours source"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains("[x]"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}

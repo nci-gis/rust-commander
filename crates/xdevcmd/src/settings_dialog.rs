@@ -233,6 +233,15 @@ const FIELDS: &[Field] = &[
     f(
         1,
         "viewer",
+        "highlight",
+        "Viewer colours source",
+        "By language, up to 64 MiB (quick view 1 MiB); off under NO_COLOR",
+        Kind::Bool,
+        true,
+    ),
+    f(
+        1,
+        "viewer",
         "images",
         "Pictures in quick view",
         "auto: the terminal's own pictures where it can; blocks: half blocks always",
@@ -347,6 +356,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("files", "git_status") => c.files.git_status.to_string(),
         ("viewer", "wrap") => c.viewer.wrap.to_string(),
         ("viewer", "tab_width") => c.viewer.tab_width.to_string(),
+        ("viewer", "highlight") => c.viewer.highlight.to_string(),
         ("viewer", "images") => c.viewer.images.clone(),
         ("theme", "name") => c.theme.name.clone(),
         ("theme", "colors") => c.theme.colors.clone(),
@@ -389,6 +399,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         ("viewer", "tab_width") => {
             c.viewer.tab_width = n().map_or(c.viewer.tab_width, |x| x as usize)
         }
+        ("viewer", "highlight") => c.viewer.highlight = b,
         ("viewer", "images") => c.viewer.images = v.to_string(),
         ("theme", "name") => c.theme.name = v.to_string(),
         ("theme", "colors") => c.theme.colors = v.to_string(),

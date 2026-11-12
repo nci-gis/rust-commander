@@ -64,6 +64,8 @@ follow = false            # the file pane used last goes where the shell's cd go
 [viewer]
 wrap = true
 tab_width = 4             # 1-16
+highlight = true          # colour source, config files, diffs and logs by language:
+                          # F3 up to 64 MiB, quick view up to 1 MiB; off under NO_COLOR
 images = "auto"           # quick view's pictures: auto, kitty, iterm2, sixel or blocks
                           # (sixel only where the terminal gives its cell size)
 

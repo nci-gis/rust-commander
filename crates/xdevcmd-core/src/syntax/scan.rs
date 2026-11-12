@@ -190,6 +190,9 @@ pub struct Highlighter {
     cancel: Arc<AtomicBool>,
     /// The state at the start of lines lexed recently.
     cache: BTreeMap<usize, State>,
+    /// Lines lexed, for tests that count them.
+    #[cfg(test)]
+    lexed: usize,
 }
 
 impl Highlighter {
@@ -203,6 +206,8 @@ impl Highlighter {
             })),
             cancel: Arc::new(AtomicBool::new(false)),
             cache: BTreeMap::new(),
+            #[cfg(test)]
+            lexed: 0,
         }
     }
 
@@ -271,6 +276,18 @@ impl Highlighter {
     /// cheaply yet (the scan has not reached it): drawn plain until it has. A line over
     /// [`LONG_LINE`] bytes is `Some` and empty.
     pub fn spans(&mut self, doc: &mut Document, i: usize) -> Option<Vec<Span>> {
+        let text = doc.line(i).ok()?;
+        self.spans_for(doc, i, &text)
+    }
+
+    /// [`Highlighter::spans`] when the caller has read line `i` already (`text`, as
+    /// `Document::line` gave it).
+    pub fn spans_for(&mut self, doc: &mut Document, i: usize, text: &str) -> Option<Vec<Span>> {
+        // A long line is drawn plain: once the state after it is known, there is
+        // nothing to lex it for again (each frame did, Round 028's review).
+        if text.len() > LONG_LINE && self.cache.contains_key(&(i + 1)) {
+            return Some(Vec::new());
+        }
         let (mut at, mut state) = {
             let cached = self.cache.range(..=i).next_back().map(|(&l, &s)| (l, s));
             let checkpoint = self.store.lock().ok().map(|s| s.before(i));
@@ -298,20 +315,27 @@ impl Highlighter {
             return None;
         }
         while at < i {
-            let text = doc.line(at).ok()?;
-            state = lex_line(self.lang, state, &text, None);
+            let line = doc.line(at).ok()?;
+            state = self.lex(state, &line, None);
             at += 1;
             self.remember(at, state);
         }
-        let text = doc.line(i).ok()?;
         let mut spans = Vec::new();
         let next = if text.len() > LONG_LINE {
-            lex_line(self.lang, state, &text, None)
+            self.lex(state, text, None)
         } else {
-            lex_line(self.lang, state, &text, Some(&mut spans))
+            self.lex(state, text, Some(&mut spans))
         };
         self.remember(i + 1, next);
         Some(spans)
+    }
+
+    fn lex(&mut self, state: State, text: &str, spans: Option<&mut Vec<Span>>) -> State {
+        #[cfg(test)]
+        {
+            self.lexed += 1;
+        }
+        lex_line(self.lang, state, text, spans)
     }
 
     fn remember(&mut self, line: usize, state: State) {
@@ -518,6 +542,22 @@ mod tests {
         wait(&h);
         let got = h.spans(&mut doc, 200).expect("from a checkpoint");
         assert_eq!(got.len(), 2, "fn and tail: {got:?}");
+    }
+
+    /// A screen of long lines, drawn again: nothing is lexed the second time.
+    #[test]
+    fn long_lines_are_not_lexed_again_on_the_next_frame() {
+        let path = long_lines("frames.rs", 50, 8 * 1024);
+        let mut doc = Document::open(&path).unwrap();
+        let mut h = Highlighter::new(Lang::Rust);
+        for i in 0..50 {
+            assert_eq!(h.spans(&mut doc, i), Some(Vec::new()), "plain");
+        }
+        assert_eq!(h.lexed, 50);
+        for i in (0..50).rev() {
+            h.spans(&mut doc, i);
+        }
+        assert_eq!(h.lexed, 50, "the second frame lexed nothing");
     }
 
     #[test]

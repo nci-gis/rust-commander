@@ -803,7 +803,7 @@ impl Viewer {
             let chars: Vec<char> = shown.chars().collect();
             let pieces_of = match self.syntax.as_mut() {
                 Some(h) => {
-                    let got = h.spans(&mut self.doc, i);
+                    let got = h.spans_for(&mut self.doc, i, &raw);
                     waiting |= got.is_none();
                     got.unwrap_or_default()
                 }

@@ -2346,6 +2346,44 @@ fn a_menu_row_from_the_shell_takes_the_files_from_the_pane() {
     x.quit();
 }
 
+/// A `[[menu]]` row from F1 goes through the same decision as Shift+F9: with a program
+/// running in the shell it asks, and the program is sent nothing. `cat` stands for the
+/// busy program, so anything typed into it would land in its file.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn a_menu_row_in_f1_asks_before_typing_into_a_busy_shell() {
+    let s = Scratch::new("f1-menu-busy");
+    s.file("left/it's here.txt", "x");
+    s.file(
+        "config.toml",
+        "[[menu]]\nkey = \"e\"\nlabel = \"say it\"\ncommand = \"echo GOT %s DONE\"\n",
+    );
+    let flag = format!("--config={}", s.0.join("config.toml").display());
+    let mut x = Session::start_flags(&s, &[&flag]);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"cat > typed.txt\r");
+    std::thread::sleep(Duration::from_millis(300));
+    x.send(F12);
+    x.send(DOWN);
+    x.send(F1);
+    x.wait_for("type to find a command");
+    x.send(b"say it");
+    x.wait_for("Your commands: say it");
+    x.send(ENTER);
+    x.wait_for("A program is running");
+    x.send(b"\x1b"); // cancel: nothing typed anywhere
+    x.wait_gone("A program is running");
+    std::thread::sleep(Duration::from_millis(300));
+    let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
+    assert_eq!(typed, "", "the busy program was sent nothing");
+    // Focus is on the shell, as Shift+F9 leaves it: Ctrl+D ends cat there.
+    x.wait_for("F12 back to files");
+    x.send(b"\x04");
+    x.send(F12);
+    x.quit();
+}
+
 /// Keymap A keeps F1 for the program in the shell; xdevcmd's F1 there is Alt+X F1.
 #[test]
 fn from_the_shell_f1_is_the_programs_and_alt_x_f1_opens_commands() {

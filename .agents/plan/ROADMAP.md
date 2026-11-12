@@ -81,7 +81,7 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 | 2 | **xdevtheme-light** (item 37, part 2), Round [025](cycles/Round_025.md), at Review: Dawn brought back from git and tuned | S |
 | 3 | **Documentation** (item 40), Round [026](cycles/Round_026.md), at Review: Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
 | 4 | **L. Log a terminal tab to a file** (item 35), Round [027](cycles/Round_027.md), at Review: per tab from the tab menu, `text` or `raw`, a bounded writer that stops and says so | S |
-| 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped. Designed with pillar 2's progressive indexing (A03) in mind, or done in one round with it, so the viewer changes once | S–M |
+| 5 | **D. Syntax-highlighted viewer** (item 33), Round [028](cycles/Round_028.md), in progress: measured on day one (syntect 7.25 MiB, over; tree-sitter further over), so a small lexer of our own; checkpoints from a background scan shaped for pillar 2's progressive indexing (A03) | S–M |
 | 6 | **Q. Four pillars** (item 36, part 2; owner, 2026-11-12), each a round: **1. Data correct** (P0) · **2. Responsive and bounded** · **3. Honest contracts** · **4. Release proof** (P0 gate). Contents in the table below; the release bar below is what they must meet. **rc.1 is not cut before pillar 1 is done** | M–L |
 | 7 | *If a day is spare:* **which-key** for the prefix groups (item 39) | S |
 | 8 | **0.4.0-rc.1** (GitHub pre-release) → a week of the owner's real use, fixes only → **0.4.0** → packages → launch (item 10) | — |
@@ -194,7 +194,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 30b | Lists from the shell's output, Alt+F7 into a list, kept lists (was 30, part 2) | M | [021](cycles/Round_021.md) | Review (v0.4.0) |
 | 31 | Windows: ask before starting from a terminal panel; the pid on the menu bar | S | [018](cycles/Round_018.md) | Review (v0.4.0) |
 | 32 | Foundation | S–M | [019](cycles/Round_019.md) | Review (v0.4.0) |
-| 33 | Syntax-highlighted viewer, off by setting and past a size cap | S–M | — | v0.4.0, step 5 |
+| 33 | Syntax-highlighted viewer, off by setting and past a size cap | S–M | [028](cycles/Round_028.md) | In progress (v0.4.0) |
 | 34 | Remote | — | — | none in 0.4.0, mounts instead (owner, 2026-11-11) |
 | 35 | Log a terminal tab to a file | S | — | v0.4.0, step 4, Round 027 |
 | 36 | Stable-quality pass (the release bar) | M | [022](cycles/Round_022.md) (part 1) | part 1 Review; part 2 v0.4.0, step 6 |
@@ -247,7 +247,8 @@ Sizes are relative: **S** a day or two, **M** under a week, **L** one to two wee
   File `0600`, appended. Refused in read-only and restricted modes. The docs' "never
   written to disk" becomes "unless you turn on a log for that tab".
 - **33 Highlighting**: off past a size cap and by setting; measured against the 7 MB
-  budget first.
+  budget first (Round 028: syntect is +2.24 MB, its regex engine, so over even
+  trimmed; our own lexer instead, colours from the theme's slots).
 - **37 xdevtheme-light**: Terminal.app's default profile is light, so it is a first
   impression; a file theme, not the default.
 - **4 Themes, 5 Keymaps, 6 Settings, 7 Logo, 11 Icons**: see their rounds.

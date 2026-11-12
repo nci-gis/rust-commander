@@ -47,7 +47,7 @@ pub const OPTIONS: &[(&str, Arg, &str)] = &[
     (
         "--print-theme",
         Arg::Theme,
-        "print a built-in theme as a file, to start your own",
+        "print a theme (built in, or a file in themes/) as a file",
     ),
     ("--print-keys", Arg::None, "print every key as Markdown"),
     (

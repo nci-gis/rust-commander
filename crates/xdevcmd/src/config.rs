@@ -823,30 +823,45 @@ fn theme_slots<'a>(
     ]
 }
 
-/// A built-in theme written out as a theme file, every colour listed: a start for
-/// one's own (`xdevcmd --print-theme dark > themes/mine.toml`).
+/// A theme written out as a theme file, every colour listed: a start for one's own
+/// (`xdevcmd --print-theme dark > themes/mine.toml`). A built-in theme, or a file in
+/// `themes/`, which is printed whole, so the copy no longer needs it.
 pub fn render_theme(name: &str) -> Result<String, String> {
-    let mut t = crate::theme::built_in(name).ok_or_else(|| {
-        format!(
-            "--print-theme {name}: not a built-in theme; there are {}",
-            crate::theme::BUILT_IN.join(", ")
-        )
-    })?;
+    let (t, kind, base) = match crate::theme::built_in(name) {
+        Some(t) => (t, "built-in theme", name.to_string()),
+        None => {
+            let t = named_theme(name).map_err(|e| format!("--print-theme {name}: {e}"))?;
+            // Every colour is listed and the style is written out, so the base only
+            // has to add nothing: a plain one of the same lightness.
+            let base = if crate::decor::is_light(t.bg) {
+                "light"
+            } else {
+                "dark"
+            };
+            (t, "theme", base.to_string())
+        }
+    };
+    Ok(theme_text(t, name, kind, &base))
+}
+
+/// `t` as a theme file, every colour and the style written out, starting from `base`
+/// (a theme with no style of its own); `kind` and `name` are for the comment on top.
+pub(crate) fn theme_text(mut t: Theme, name: &str, kind: &str, base: &str) -> String {
     let f = ThemeFile::default();
     let mut out = format!(
-        "# The built-in theme \"{name}\", from `xdevcmd --print-theme {name}`.\n\
+        "# The {kind} \"{name}\", from `xdevcmd --print-theme {name}`.\n\
          # Save it as themes/<your-name>.toml beside config.toml, change the colours you\n\
          # want, and pick it in View > Theme... or with [theme] name = \"<your-name>\".\n\
          # A line you delete keeps the base theme's colour.\n\
          # Colours: \"#rrggbb\", \"reset\" (the terminal's own), or \"0\"-\"255\".\n\
-         base = \"{name}\"\n"
+         base = \"{base}\"\n"
     );
     let style = t.decor.to_toml();
     for (slot, field, _) in theme_slots(&mut t, &f) {
         out.push_str(&format!("{field} = \"{}\"\n", color_name(*slot)));
     }
     out.push_str(&style);
-    Ok(out)
+    out
 }
 
 /// The theme the user sees for `name`: the named theme with `[theme]`'s own colours on

@@ -4834,6 +4834,80 @@ fn neon_and_glass_draw_their_styles_and_leave_the_terminal_alone() {
     );
 }
 
+/// xdevtheme-light, the light member of the family, as a file in `themes/`: listed in
+/// View → Theme…, it draws the panes and F1 (small and large) on its own white panel,
+/// and `--print-theme` writes it out as a file that draws the same frame.
+#[test]
+fn xdevtheme_light_is_a_theme_that_draws_on_its_white_panel() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("light-cfg");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+    fs::copy(
+        repo.join("xdevtheme-light.toml"),
+        dir.join("themes/xdevtheme-light.toml"),
+    )
+    .unwrap();
+    let cfg = write_config(&dir, "[theme]\nname = \"xdevtheme-light\"\n");
+    let run = |keys: &str, colour: bool| {
+        let mut c = themed();
+        c.env("XDEVCMD_CONFIG", &cfg)
+            .env("XDEVCMD_COLORS", "truecolor")
+            .args(["--screenshot=110x30", &format!("--keys={keys}")])
+            .arg(&a)
+            .arg(&b);
+        if colour {
+            c.env("XDEVCMD_SCREENSHOT_COLOR", "1");
+        }
+        let out = c.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{keys}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // The panel, #fbfcff, and the background, #eef1f8, as backgrounds.
+    let (panel, background) = ("48;2;251;252;255", "48;2;238;241;248");
+    let s = run("Down,Insert", true);
+    assert!(s.contains(panel) && s.contains(background), "{s}");
+    assert!(
+        !s.contains("48;2;7;9;15"),
+        "not xdevtheme's dark background"
+    );
+    let s = run("Down,Insert", false);
+    assert!(s.contains("\u{256d}\u{2524}"), "xdevtheme's notch\n{s}");
+    for keys in ["F1", "F1,F1"] {
+        let s = run(keys, true);
+        assert!(s.contains(panel), "{keys}\n{s}");
+        assert!(run(keys, false).contains("Commands"), "{keys}");
+    }
+    // View → Theme… lists it.
+    assert!(run("F9,Right,Up,Enter", false).contains("xdevtheme-light"));
+    // Printed, saved under another name and chosen, it draws the same frame.
+    let out = themed()
+        .env("XDEVCMD_CONFIG", &cfg)
+        .args(["--print-theme", "xdevtheme-light"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let printed = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(printed.contains("base = \"light\""), "{printed}");
+    fs::write(dir.join("themes/copy.toml"), &printed).unwrap();
+    // The menu bar's first row carries the process id; the rest must match.
+    let below_menu = |s: String| s.lines().skip(1).collect::<Vec<_>>().join("\n");
+    let before = below_menu(run("Down,Insert,F1", true));
+    write_config(&dir, "[theme]\nname = \"copy\"\n");
+    assert!(
+        below_menu(run("Down,Insert,F1", true)) == before,
+        "the printed copy draws differently\n{printed}"
+    );
+}
+
 /// A config naming a theme whose file was deleted keeps the rest of its settings: the
 /// default theme stands in and the status line says so. `--check-config` still fails.
 #[test]

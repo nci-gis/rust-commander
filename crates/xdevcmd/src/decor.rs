@@ -432,11 +432,25 @@ pub fn shadow(buf: &mut Buffer, area: Rect) {
     }
 }
 
+/// A shadow's colour over `c`: on a light colour a soft grey, not the near-black slab
+/// that reads as a shadow on a dark screen.
 fn darken(c: Color) -> Color {
     match c {
+        Color::Rgb(..) if is_light(c) => mix(c, Color::Rgb(0, 0, 0), 0.14),
         Color::Rgb(..) => mix(c, Color::Rgb(0, 0, 0), 0.6),
         Color::Reset => Color::Rgb(0, 0, 0),
         c => c,
+    }
+}
+
+/// Whether `c` is a light colour (a light theme's panel); anything not a 24-bit colour
+/// is not.
+pub fn is_light(c: Color) -> bool {
+    match c {
+        Color::Rgb(r, g, b) => {
+            u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114 > 128 * 1000
+        }
+        _ => false,
     }
 }
 
@@ -632,9 +646,16 @@ fn cursor(buf: &mut Buffer, area: Rect, skip: &dyn Fn(u16, u16) -> bool, d: &Dec
         let light = |x: u16| along(d, x, y, area).unwrap_or(th.accent);
         match d.cursor {
             Cursor::Glow => {
+                // On a light panel the light is fainter: a dark accent at 40 % would
+                // leave the coloured names on the row unreadable.
+                let (near, far) = if is_light(th.bg_panel) {
+                    (0.8, 0.9)
+                } else {
+                    (0.6, 0.84)
+                };
                 let (from, to) = (
-                    mix(light(x0), th.bg_panel, 0.6),
-                    mix(light(x1), th.bg_panel, 0.84),
+                    mix(light(x0), th.bg_panel, near),
+                    mix(light(x1), th.bg_panel, far),
                 );
                 let span = f32::from((x1 - x0).max(1));
                 for &x in &run {
@@ -924,6 +945,19 @@ mod tests {
         assert_eq!(read("gradient = \"none\"").unwrap().gradient, None);
         assert!(read("gradient = [\"#000000\", \"#111111\", \"#222222\"]").is_err());
         assert!(read("gradient = \"mauve\"").unwrap_err().contains("mauve"));
+    }
+
+    #[test]
+    fn a_shadow_on_a_light_screen_is_a_soft_grey() {
+        let white = Color::Rgb(251, 252, 255);
+        assert!(is_light(white) && !is_light(Color::Rgb(11, 14, 23)));
+        assert!(!is_light(Color::Reset), "the terminal's own: not known");
+        // Not the near-black slab a dark screen's shadow is.
+        let Color::Rgb(r, _, _) = darken(white) else {
+            panic!()
+        };
+        assert!((200..240).contains(&r), "{r}");
+        assert_eq!(darken(Color::Rgb(100, 100, 100)), Color::Rgb(40, 40, 40));
     }
 
     #[test]

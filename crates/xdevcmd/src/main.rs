@@ -76,7 +76,7 @@ Usage:
                                shell function can cd there (Q quits without it)
   xdevcmd --config PATH        use this config file instead of the default one
   xdevcmd --print-config       print every setting at its default, ready to save
-  xdevcmd --print-theme NAME   print a built-in theme as a file, to start your own
+  xdevcmd --print-theme NAME   print a theme as a file, to start your own
   xdevcmd --print-keys         print every key as Markdown (as configured)
   xdevcmd --print-completions SHELL   completions for bash, zsh, fish or powershell
   xdevcmd --print-man          print the manual page (roff): xdevcmd --print-man | man -l -

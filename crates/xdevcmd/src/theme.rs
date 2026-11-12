@@ -389,6 +389,15 @@ mod tests {
             );
             let text = std::fs::read_to_string(&p).unwrap();
             let t = crate::config::theme_from_text(&text, &name).unwrap();
+            // Printed (`--print-theme`) and read back, it is the same theme.
+            let base = if crate::decor::is_light(t.bg) {
+                "light"
+            } else {
+                "dark"
+            };
+            let printed = crate::config::theme_text(t, &name, "theme", base);
+            let back = crate::config::theme_from_text(&printed, &name).unwrap();
+            assert_eq!(back, t, "{name} printed and read back\n{printed}");
             for depth in [Depth::True, Depth::X256] {
                 for (a, ca, b, cb) in apart(&t) {
                     assert_ne!(
@@ -405,6 +414,81 @@ mod tests {
             "the example themes are missing from {}",
             dir.display()
         );
+    }
+
+    /// WCAG's contrast ratio of two 24-bit colours.
+    fn contrast(a: Color, b: Color) -> f64 {
+        let lum = |c: Color| {
+            let Color::Rgb(r, g, b) = c else {
+                panic!("{c:?} is not a 24-bit colour")
+            };
+            let ch = |v: u8| {
+                let v = f64::from(v) / 255.0;
+                if v <= 0.039_28 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// As a 256-colour terminal shows it: the palette entry's colour.
+    fn at_256(c: Color) -> Color {
+        match fit(c, Depth::X256) {
+            Color::Indexed(i) => {
+                let (r, g, b) = xdevcmd_core::color::palette_rgb(i);
+                Color::Rgb(r, g, b)
+            }
+            c => c,
+        }
+    }
+
+    /// The light theme is for reading on white: every name at 4.5:1 or more on the
+    /// panel and on the unfocused cursor row, the titles and keys on the bars, and the
+    /// frames at 3:1, at true colour and at 256 colours (Terminal.app has no more).
+    #[test]
+    fn xdevtheme_light_reads_on_its_own_background() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../themes/xdevtheme-light.toml");
+        let text = std::fs::read_to_string(path).unwrap();
+        let t = crate::config::theme_from_text(&text, "xdevtheme-light").unwrap();
+        let texts = [
+            ("text", t.fg),
+            ("text_dim", t.fg_dim),
+            ("directory", t.dir),
+            ("executable", t.exec),
+            ("symlink", t.link),
+            ("archive", t.archive),
+            ("error", t.err),
+            ("marked", t.mark),
+            ("accent", t.accent),
+        ];
+        let mut pairs: Vec<(&str, Color, &str, Color, f64)> = Vec::new();
+        for (name, c) in texts {
+            pairs.push((name, c, "panel", t.bg_panel, 4.5));
+            pairs.push((name, c, "cursor", t.row_cursor, 4.5));
+        }
+        for (name, c) in [("text", t.fg), ("text_dim", t.fg_dim), ("accent", t.accent)] {
+            pairs.push((name, c, "bar", t.bg_bar, 4.5));
+        }
+        pairs.push(("border", t.border, "panel", t.bg_panel, 3.0));
+        pairs.push(("border_active", t.border_active, "panel", t.bg_panel, 3.0));
+        for (a, ca, b, cb, want) in pairs {
+            for (depth, ca, cb) in [
+                ("true colour", ca, cb),
+                ("256 colours", at_256(ca), at_256(cb)),
+            ] {
+                let got = contrast(ca, cb);
+                assert!(
+                    got >= want,
+                    "{a} on {b} at {depth}: {got:.2}:1, under {want}:1"
+                );
+            }
+        }
     }
 
     #[test]

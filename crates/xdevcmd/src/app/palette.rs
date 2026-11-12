@@ -78,7 +78,9 @@ impl App {
         // A `[[menu]]` command's %f %s %d are the file pane's, whatever it then types
         // into: from the shell, the file pane the shell was entered from.
         let files_first = match run {
-            Run::Act(a) => a.place() == Place::Files,
+            // Not one that acts on the shell (cd here, the last list): from the shell
+            // it acts there, as Alt+X and its key does.
+            Run::Act(a) => a.place() == Place::Files && !a.acts_on_shell(),
             Run::User(_) => true,
             Run::Extra(_) | Run::ReadOnly(_) => false,
         };

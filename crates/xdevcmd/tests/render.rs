@@ -1364,6 +1364,23 @@ fn a_key_added_to_help_is_the_viewers_own_in_the_viewer() {
     assert!(commands_box(&s).is_some(), "{s}");
 }
 
+/// A file-group command that acts on the shell (cd the shell here), run from F1 in the
+/// shell, leaves focus in the shell, as Alt+X then its key does; before, it moved
+/// focus to the file pane.
+#[test]
+fn a_shell_acting_command_from_f1_in_the_shell_keeps_the_shell_focused() {
+    let (a, b) = fixture();
+    let keys = "F12,A-x,F1,c,d,Space,t,h,e,Space,s,h,e,l,l,Enter";
+    let s = shot_keys("200x24", keys, &a, &b);
+    assert!(commands_box(&s).is_none(), "{s}");
+    assert!(
+        status(&s).contains("terminal 1/1"),
+        "the shell kept focus\n{s}"
+    );
+    let s = shot_keys("200x24", "F12,A-x,A-c", &a, &b);
+    assert!(status(&s).contains("terminal 1/1"), "as Alt+X Alt+C\n{s}");
+}
+
 /// The commands run from F1 are kept beside the session, the last first, and come
 /// first in the small list next time (the owner's decision 4). Read-only modes write
 /// nothing.

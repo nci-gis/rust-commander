@@ -11,6 +11,15 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Log a terminal tab to a file.** A terminal tab's right-click menu has **Log to
+  file…**: everything that tab's shell prints goes to a file from then on, including
+  what scrolls past the history. **text** (the default) removes escapes and keeps a
+  line a CR rewrote once, as it ended; **raw** (Tab in the prompt) keeps the bytes. The
+  file is appended to and, when new, readable by you only. The tab shows ● while it is
+  logged; **Stop logging**, closing the tab, `exit` and quitting end it after a last
+  flush. A disk that fails or cannot keep up stops the log, says so on the status line
+  and turns the ● into a red !: never a silent gap. F1 has both ("log tab"). Off in
+  the read-only modes; nothing is logged unless you ask.
 - **F1 is Commands: every command, found by typing, with its key.** Type a few letters
   of a name, a group's name or a key ("f5"), and Enter runs it on the pane you were in;
   the status line then says the key for next time. Alt+1…9 run the first nine rows.

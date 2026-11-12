@@ -34,7 +34,8 @@ The bash version is tested. The fish and PowerShell versions have not been run y
 - It runs your shell (`$SHELL`, or `[terminal] shell` in the config).
 - **F12** moves between the panes and the terminal.
 - **Shift+F12** shows the shell's history in the viewer, to read, search and copy; it is
-  never written to disk. The paths in it can be opened: see
+  never written to disk, unless you turn on a log for that tab
+  ([Logging a tab](#logging-a-tab-to-a-file)). The paths in it can be opened: see
   [Paths in the output](#paths-in-the-output).
 - **Inside the terminal, xdevcmd takes only F12, Shift+F12 and Alt+X**; every other key
   is the program's. Alt+X, then a terminal key (Alt+S split, Alt+W close, Alt+N new tab,
@@ -92,6 +93,34 @@ sh, cmd) silently drops a line longer than about 4 KB.
 Windows the system does not say; only the prompt marks below can tell, and without them
 every send asks.
 
+
+## Logging a tab to a file
+
+A terminal tab's right-click menu has **Log to file…**: from then on, everything that
+tab's shell prints goes to a file too, read straight from the shell before the screen
+sees it, so nothing is lost when it scrolls past `[terminal] scrollback`.
+
+- **Where**: the prompt offers `xdevcmd-<shell>-<date>-<time>.log` in the shell's
+  directory when the system gives it (Linux, macOS), else the file pane's. A name that
+  exists is appended to; a new file is readable by you only (`0600`; on Windows it gets
+  its folder's permissions). A link, a FIFO or a device at that name is refused, and so
+  is anything outside `--root`.
+- **text or raw** (Tab in the prompt). *text* removes colours, titles and other
+  escapes, keeps each line as the terminal left it (a progress bar that rewrote its
+  line with CR is written once, as it ended), writes one line where a full-screen
+  program ran instead of its redraws, and puts a header and a footer around each run.
+  *raw* is the bytes as received, nothing added: `cat` or `less -R` replays it.
+- **The tab** shows **●** while it is logged, and its menu offers **Stop logging**. One
+  log per tab: it follows the shell that had focus when it started; a split opened
+  later is not in it.
+- **Ends** when you stop it, the shell exits, the tab closes or xdevcmd quits; what was
+  queued is written and flushed first.
+- **Never a silent gap.** The shell's output is never held up by the disk for more
+  than half a second. If the disk cannot keep up, or a write fails (a full disk, a
+  removed drive), the log stops there, the status line says why, a text log ends with a
+  line saying so, and the ● becomes a red **!** until you stop it.
+- **Not in read-only or restricted mode.** Turning a log on for every shell
+  (`[terminal] log`) is planned for 0.5.
 ## Paths in the output
 
 In the history (Shift+F12), the paths that exist on disk are underlined: compiler and
@@ -143,7 +172,7 @@ Without prompt marks and with nothing dragged over, nothing is guessed: drag ove
 lines first.
 
 **Lists are kept** for the session, the last 10, in memory only (never written to
-disk, as the history is not):
+disk):
 
 - **Back** (Alt+, or Backspace) after Enter on a row comes back to the list, the cursor
   on that row. Alt+F7's results are kept the same way.

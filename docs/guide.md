@@ -184,12 +184,26 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
   Esc cancels.
 - **Shift+F12** opens the shell's history in the viewer, at its end: read it, search it
   with `/`, drag over lines and press `y` to copy them, **Esc** to go back. It stays in
-  memory; nothing of it is written to disk. **Alt+X F12** does the same where Shift+F12
+  memory; nothing of it is written to disk unless you turn on a log for that tab (below).
+  **Alt+X F12** does the same where Shift+F12
   does not arrive. While a full-screen program (vim, htop) is up, it shows that
   program's screen only, and says so.
 - A **right-click on a terminal tab** opens its menu: View history, Save history as…,
-  Close tab, for that tab whichever has focus. Inside the shell a right-click is left
-  to the program.
+  Log to file… (or Stop logging), List from the last command…, Close tab, for that tab
+  whichever has focus. Inside the shell a right-click is left to the program.
+- **Log to file…** writes everything the tab's shell prints to a file from then on, as
+  PuTTY's session log does, including what scrolls past the history Shift+F12 keeps.
+  It asks where, offering `xdevcmd-<shell>-<date>-<time>.log` in the shell's directory;
+  an existing file is appended to. **Tab** in that prompt switches between **text**
+  (colours and other escapes removed, a progress line a CR rewrote kept once, as it
+  ended; a full-screen program such as vim is one line saying it ran) and **raw** (the
+  bytes as received, for `cat` or `less -R` later). The tab shows **●** while it is
+  logged; **Stop logging** in the same menu ends it. Closing the tab, `exit` and
+  quitting end it too, and every last line is written first. If the disk fails or
+  cannot keep up, the log stops, the status line says why, and the ● becomes a red
+  **!** until you stop it; it never carries on with a gap. F1 has both as rows
+  ("log tab"), acting on the active tab. Off in the read-only modes. A log keeps
+  everything the shell prints: see [security.md](security.md#the-shell-panel).
 - **Alt+C** sends the current directory to the shell (`cd`).
 - **Alt+T** hides or shows the terminal. `exit` closes one.
 - The wheel scrolls back through a shell's history. A full-screen program gets the

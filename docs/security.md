@@ -117,7 +117,7 @@ cleaned up; if one is stuck after five seconds (a hung network drive) it asks ag
 | | normal | read-only | restricted |
 |---|---|---|---|
 | copy, move, delete, rename, edit | yes | no | no |
-| saves anything (session, bookmarks, File → Settings…) | yes | no | no |
+| saves anything (session, bookmarks, File → Settings…, a terminal tab's log) | yes | no | no |
 | open files in other programs, run a file as a program | yes | no | no |
 | view and browse | yes | yes | yes |
 | terminal, clipboard | yes | yes | no |
@@ -172,6 +172,14 @@ What xdevcmd learns about the shell, and how far it trusts each source
   the root; the list stays in memory; and deleting from a list says, in the
   confirmation, which list the names came from. No list is made while ssh runs in the
   shell, whose output names another machine's files.
+- **The shell's output stays in memory** (Shift+F12, lists), never written to disk,
+  unless you turn on a log for that tab (its menu's Log to file…). A log keeps
+  **everything the shell prints**: a password typed at a prompt that does not echo it
+  is not in it, but a token, a key or customer data that a command prints is. New log
+  files are created readable by you only (`0600`; Windows: the folder's permissions);
+  appending to an existing file keeps its permissions, and xdevcmd says so when others
+  can read it. A link, FIFO or device at the chosen name is refused. Off in the
+  read-only modes. Nothing is logged unless you ask, per tab.
 - **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
   character, or one that shell cannot be given safely, is refused whole. Names are
   wrapped in bracketed paste when the shell asked for it, so its line editor takes them

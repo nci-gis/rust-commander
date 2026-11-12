@@ -43,6 +43,9 @@ pub enum Point {
     ReadDir,
     /// An entry's metadata read (compare).
     Stat,
+    /// A name looked up on the other side of a compare: found there means the volume
+    /// ignores case. [`Action::Found`] makes a case-sensitive one answer as if it did.
+    Lookup,
 }
 
 impl Point {
@@ -59,6 +62,7 @@ impl Point {
             Point::JournalSync => "journal-sync",
             Point::ReadDir => "read-dir",
             Point::Stat => "stat",
+            Point::Lookup => "lookup",
         }
     }
 }
@@ -77,6 +81,13 @@ pub fn at(_point: Point, _path: &Path) -> io::Result<()> {
 #[cfg(not(any(test, feature = "faults")))]
 #[inline(always)]
 pub(crate) fn skipped(_point: Point, _path: &Path) -> bool {
+    false
+}
+
+/// No seam in this build: a lookup finds what is there.
+#[cfg(not(any(test, feature = "faults")))]
+#[inline(always)]
+pub(crate) fn found(_point: Point, _path: &Path) -> bool {
     false
 }
 
@@ -141,6 +152,9 @@ mod imp {
         /// Do not make the real call (a sync), every time: the cost of the sync measured
         /// against its absence.
         Skip,
+        /// Say a lookup found something there, every time ([`Point::Lookup`]): a volume
+        /// that ignores case, on one that does not.
+        Found,
     }
 
     /// An error to fail with, built when it is needed (`io::Error` is not `Clone`).
@@ -256,7 +270,7 @@ mod imp {
         for (action, seen) in todo {
             match action {
                 Action::Fail { nth, error } if seen == nth => return Err(error.make()),
-                Action::Fail { .. } | Action::Skip => {}
+                Action::Fail { .. } | Action::Skip | Action::Found => {}
                 Action::Delay(by) => std::thread::sleep(by),
                 Action::Halt { marker } => {
                     let _ = std::fs::write(&marker, point.name());
@@ -272,6 +286,13 @@ mod imp {
             }
         }
         Ok(())
+    }
+
+    /// Whether a rule says a lookup at `point` finds something at `path`.
+    pub(crate) fn found(point: Point, path: &Path) -> bool {
+        lock(&RULES).iter().any(|r| {
+            r.point == point && matches(&r.fragment, path) && matches!(r.action, Action::Found)
+        })
     }
 
     /// Whether a rule says to leave out the real call at `point` on `path`.
@@ -302,7 +323,7 @@ mod imp {
 
     /// The rules in an `XDEVCMD_FAULTS` value; what cannot be read is left out.
     pub fn parse(spec: &str) -> Vec<(Point, String, Action)> {
-        const POINTS: [Point; 10] = [
+        const POINTS: [Point; 11] = [
             Point::Write,
             Point::SyncData,
             Point::SyncDir,
@@ -313,6 +334,7 @@ mod imp {
             Point::JournalSync,
             Point::ReadDir,
             Point::Stat,
+            Point::Lookup,
         ];
         let mut out = Vec::new();
         for rule in spec.split(';').filter(|r| !r.trim().is_empty()) {

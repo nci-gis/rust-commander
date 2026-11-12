@@ -918,6 +918,11 @@ root; CI is not).
   two. No code bug; proved by two mutations, each failing it: (a) the 64th file of a
   batch not synced (`f063: no sync-data`); (b) the file that fills a batch kept out of
   it and its source removed after the flush (`f063`, same). Both reverted.
+- **6 The case-clash rule was tested only where the temporary directory ignores case.**
+  New seam point `Lookup` with `Action::Found` (compare's look-up of a one-sided name
+  on the other side; inline `false` without the seam) and
+  `a_case_clash_is_left_alone_wherever_the_lookup_finds_the_twin`, which runs on Linux.
+  Proved by mutation: with the clash branch disabled it fails (`A.txt`/`a.txt` planned).
 
 ## Check
 

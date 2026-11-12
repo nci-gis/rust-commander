@@ -269,7 +269,10 @@ impl Walk<'_> {
         };
         // A name only on one side that the other side still finds: the other volume
         // ignores case, and holds it under another case. One lookup per such name.
-        let clash = |other: &Path, n: &OsString| other.join(n).symlink_metadata().is_ok();
+        let clash = |other: &Path, n: &OsString| {
+            let p = other.join(n);
+            crate::faults::found(crate::faults::Point::Lookup, &p) || p.symlink_metadata().is_ok()
+        };
         let (mut i, mut j) = (0, 0);
         while i < le.len() || j < re.len() {
             let order = match (le.get(i), re.get(j)) {
@@ -636,6 +639,31 @@ mod tests {
             got.iter().all(|x| format!("{:?}", x.state) == "CaseClash"),
             "{got:?}"
         );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The same clash where the volume keeps case apart (Linux): the seam makes the
+    /// lookup of each name on the other side answer as a volume that ignores case
+    /// would, so every system's CI covers the rule, not only macOS's and Windows'.
+    #[test]
+    fn a_case_clash_is_left_alone_wherever_the_lookup_finds_the_twin() {
+        let d = scratch("case-seam");
+        fs::write(d.join("l/A.txt"), "upper").unwrap();
+        fs::write(d.join("r/a.txt"), "lower").unwrap();
+        let _r = crate::faults::set(
+            crate::faults::Point::Lookup,
+            &d.join("r").join("A.txt").to_string_lossy(),
+            crate::faults::Action::Found,
+        );
+        let _l = crate::faults::set(
+            crate::faults::Point::Lookup,
+            &d.join("l").join("a.txt").to_string_lossy(),
+            crate::faults::Action::Found,
+        );
+        let got = diffs(&d);
+        assert!(plan(&d.join("l"), &d.join("r"), &got).is_empty(), "{got:?}");
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got.iter().all(|x| x.state == State::CaseClash), "{got:?}");
         let _ = fs::remove_dir_all(&d);
     }
 }

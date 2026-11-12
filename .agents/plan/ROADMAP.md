@@ -78,7 +78,7 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 |---|---|---|
 | 0 | ~~CI on all three systems for the whole branch~~ (green, run 43181663296); the owner's hand tests: Linux and Windows done 2026-11-12, macOS to come | S |
 | 1 | **F1 Commands** (item 38), Round [024](cycles/Round_024.md), at Review: the command palette in two sizes; Help menu reshaped; Config in use | M |
-| 2 | **xdevtheme-light** (item 37, part 2): Dawn brought back from git and tuned | S |
+| 2 | **xdevtheme-light** (item 37, part 2), Round [025](cycles/Round_025.md), in progress: Dawn brought back from git and tuned | S |
 | 3 | **Documentation** (item 40): Help → Documentation to `docs/` at the installed version's tag, `docs/README.md` as the index, `docs/` in the release archives | S |
 | 4 | **L. Log a terminal tab to a file** (item 35) | S |
 | 5 | **D. Syntax-highlighted viewer** (item 33): the binary measured on day one; over budget → a small language set, not dropped. Designed with pillar 2's progressive indexing (A03) in mind, or done in one round with it, so the viewer changes once | S–M |
@@ -198,7 +198,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 34 | Remote | — | — | none in 0.4.0, mounts instead (owner, 2026-11-11) |
 | 35 | Log a terminal tab to a file | S | — | v0.4.0, step 4 |
 | 36 | Stable-quality pass (the release bar) | M | [022](cycles/Round_022.md) (part 1) | part 1 Review; part 2 v0.4.0, step 6 |
-| 37 | xdevtheme: the default look, Neon and Glass; **xdevtheme-light** | S | (memory) | part 1 done; light v0.4.0, step 2 |
+| 37 | xdevtheme: the default look, Neon and Glass; **xdevtheme-light** | S | (memory) | part 1 done; light v0.4.0, step 2, Round [025](cycles/Round_025.md) |
 | 38 | F1 Commands: the command palette | M | [024](cycles/Round_024.md) | Review (v0.4.0) |
 | 39 | which-key for prefix groups (Alt+X, Alt+R) | S | — | v0.4.0 if a day is spare, else 0.5 |
 | 40 | Documentation from the app: versioned link, `docs/README.md`, docs in the archives | S | — | v0.4.0, step 3 |

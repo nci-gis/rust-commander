@@ -402,6 +402,7 @@ pub fn start(req: Request) -> Handle {
             journal: None,
             removing: Vec::new(),
             removing_bytes: 0,
+            moved_file: None,
             safe: req.safe,
         };
         w.run(req);
@@ -448,9 +449,16 @@ struct Worker {
     approved: Option<PathBuf>,
     /// A move across devices: copies complete and synced whose sources wait to be
     /// removed, a batch at a time ([`Worker::remove_moved`]).
-    removing: Vec<(PathBuf, PathBuf)>,
+    /// Each with the handle that wrote the copy, still open, to sync it through: a
+    /// handle opened afresh cannot write a read-only copy, and on a network file system
+    /// would not be told of a write that failed on the first (at most
+    /// [`MOVE_BATCH_FILES`] are held). `None`: already synced (a replacement), or a link.
+    removing: Vec<(PathBuf, PathBuf, Option<File>)>,
     /// Their size, in bytes.
     removing_bytes: u64,
+    /// The copy [`Worker::copy_bytes`] just made while moving, still open, for
+    /// [`Worker::moved`] to keep with it.
+    moved_file: Option<File>,
     /// Safe operations: what this job is in the middle of, for the next start if it is
     /// killed. Removed when the job ends.
     journal: Option<crate::journal::Journal>,
@@ -866,8 +874,10 @@ impl Worker {
         if !self.moving || self.sum.done <= done_before {
             return;
         }
+        let file = self.moved_file.take();
         self.removing_bytes += fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
-        self.removing.push((src.to_path_buf(), dst.to_path_buf()));
+        self.removing
+            .push((src.to_path_buf(), dst.to_path_buf(), file));
         if self.removing.len() >= MOVE_BATCH_FILES || self.removing_bytes >= MOVE_BATCH_BYTES {
             self.remove_moved();
         }
@@ -884,35 +894,32 @@ impl Worker {
     /// 10,000 small files to a disk eight times slower. Syncing a batch of files after
     /// writing them all lets the system write them out together.
     fn remove_moved(&mut self) {
-        let mut batch = std::mem::take(&mut self.removing);
+        let batch = std::mem::take(&mut self.removing);
         self.removing_bytes = 0;
         if batch.is_empty() {
             return;
         }
         let mut kept = Vec::with_capacity(batch.len());
-        for (src, dst) in batch {
-            // A link has no data of its own to sync; its name is synced below.
-            let file = fs::symlink_metadata(&dst).is_ok_and(|m| m.is_file());
-            let synced = if file {
-                fs::OpenOptions::new()
-                    .write(true)
-                    .open(&dst)
-                    .and_then(|f| crate::faults::sync_data(&f, &dst))
-            } else {
-                Ok(())
+        for (src, dst, file) in batch {
+            // Through the handle that wrote it; none for a link (no data of its own;
+            // its name is synced below) or a replacement (synced before its rename).
+            let synced = match &file {
+                Some(f) => crate::faults::sync_data(f, &dst),
+                None => Ok(()),
             };
+            drop(file);
             match synced {
                 Ok(()) => kept.push((src, dst)),
                 Err(e) => {
                     // Never synced again (fsyncgate): this copy goes, its source stays,
                     // and a later move copies it afresh.
-                    let _ = fs::remove_file(&dst);
+                    let _ = remove_file_anyway(&dst);
                     self.sum.done = self.sum.done.saturating_sub(1);
                     self.note_error(&dst, &e);
                 }
             }
         }
-        batch = kept;
+        let mut batch: Vec<(PathBuf, PathBuf)> = kept;
         let mut dirs: Vec<PathBuf> = batch
             .iter()
             .filter_map(|(_, d)| d.parent())
@@ -945,7 +952,7 @@ impl Worker {
         }
         for (src, _) in batch {
             if let Err(e) = crate::faults::at(crate::faults::Point::RemoveSource, &src)
-                .and_then(|()| fs::remove_file(&src))
+                .and_then(|()| remove_file_anyway(&src))
             {
                 self.note_error(&src, &e);
             }
@@ -1075,6 +1082,7 @@ impl Worker {
         } else {
             part_name(dst)
         };
+        self.moved_file = None;
         writing_in_test(&target);
         if !in_place {
             if let Some(j) = self.journal.as_mut() {
@@ -1098,16 +1106,25 @@ impl Worker {
                 // A new file is not synced here (the owner's call: new files stay
                 // fast). One whose source is to be removed (a move across devices) is
                 // synced with its batch, before any source goes (`remove_moved`).
+                // Moving: the handle is kept, to be synced through with its batch.
+                let keep = |me: &mut Self, w: File| {
+                    if me.moving {
+                        me.moved_file = Some(w);
+                    }
+                };
                 if in_place {
-                    drop(w);
+                    keep(self, w);
                     Ok(true)
                 } else if new_only {
-                    drop(w);
                     // Taken only if still free: a file that appeared meanwhile is asked
                     // about (the caller goes round again on AlreadyExists).
-                    crate::faults::at(crate::faults::Point::Rename, dst)
+                    let r = crate::faults::at(crate::faults::Point::Rename, dst)
                         .and_then(|()| crate::noreplace::rename_noreplace(&target, dst))
-                        .map(|()| true)
+                        .map(|()| true);
+                    if r.is_ok() {
+                        keep(self, w);
+                    }
+                    r
                 } else {
                     // Removes the temporary file itself on any failure. The file there is
                     // checked once more right before the rename: no portable rename
@@ -1506,6 +1523,29 @@ pub(crate) fn commit_replace(
     })();
     if !matches!(r, Ok(true)) {
         let _ = fs::remove_file(tmp);
+    }
+    r
+}
+
+/// Remove the file `p`. On Windows a read-only file cannot be removed until its
+/// read-only attribute is cleared: a moved read-only source, or a read-only copy that
+/// failed its sync, would otherwise stay.
+fn remove_file_anyway(p: &Path) -> io::Result<()> {
+    let r = fs::remove_file(p);
+    #[cfg(windows)]
+    if let Err(e) = &r {
+        if e.kind() == io::ErrorKind::PermissionDenied {
+            if let Ok(m) = fs::symlink_metadata(p) {
+                let mut perm = m.permissions();
+                if perm.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    perm.set_readonly(false);
+                    if fs::set_permissions(p, perm).is_ok() {
+                        return fs::remove_file(p);
+                    }
+                }
+            }
+        }
     }
     r
 }
@@ -2404,6 +2444,83 @@ mod tests {
         );
         fs::remove_dir_all(&other).unwrap();
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Whether this process can write to a file whatever its mode (root on Unix): a test
+    /// about a read-only file then proves nothing, and says it is skipped.
+    fn writes_anything(tag: &str) -> bool {
+        #[cfg(unix)]
+        if rustix::process::geteuid().is_root() {
+            eprintln!("{tag}: skipped, root writes a read-only file; run it as another user");
+            return true;
+        }
+        let _ = tag;
+        false
+    }
+
+    /// A read-only file moved across devices: its copy is read-only as soon as it is
+    /// written (the mode is copied), so syncing it through a handle opened afresh for
+    /// writing failed (EACCES), the move failed, and on Windows the copy was left. The
+    /// handle that wrote it is the one synced.
+    #[test]
+    fn a_read_only_file_moves_across_devices() {
+        if writes_anything("read-only-move") {
+            return;
+        }
+        let Some(other) = other_device("read-only-move") else {
+            return;
+        };
+        let root = tmp("read-only-move");
+        let f = root.join("ro.txt");
+        fs::write(&f, b"read only").unwrap();
+        let mut perm = fs::metadata(&f).unwrap().permissions();
+        perm.set_readonly(true);
+        fs::set_permissions(&f, perm).unwrap();
+        let (s, _) = run_with(Request::mv(vec![f.clone()], other.clone()), Answer::Yes);
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(!f.exists(), "the source is gone");
+        assert_eq!(fs::read(other.join("ro.txt")).unwrap(), b"read only");
+        assert!(fs::metadata(other.join("ro.txt"))
+            .unwrap()
+            .permissions()
+            .readonly());
+        let mut perm = fs::metadata(other.join("ro.txt")).unwrap().permissions();
+        // Cleaning up: writable again so the directory can go (Windows).
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        let _ = fs::set_permissions(other.join("ro.txt"), perm);
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A write error that surfaces only at the sync (NFS, SMB: at close or at the sync
+    /// of the handle that wrote) keeps that file's source and removes its copy; the rest
+    /// of the batch moves.
+    #[test]
+    fn a_copy_whose_sync_fails_keeps_its_source_and_the_rest_moves() {
+        let Some(other) = other_device("sync-one-fails") else {
+            return;
+        };
+        let root = tmp("sync-one-fails");
+        for n in ["a", "b", "c"] {
+            fs::write(root.join(n), n).unwrap();
+        }
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &other.join("b").to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let srcs = vec![root.join("a"), root.join("b"), root.join("c")];
+        let mut req = Request::mv(srcs, other.clone());
+        req.existing = Existing::Ask;
+        let (s, _) = run_with(req, Answer::YesToAll);
+        assert_eq!((s.done, s.failed), (2, 1), "{s:?}");
+        assert_eq!(fs::read(root.join("b")).unwrap(), b"b", "b's source stays");
+        assert!(!other.join("b").exists(), "b's copy goes");
+        assert!(!root.join("a").exists() && !root.join("c").exists());
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// The cost of the sync rules on a move across devices, measured: `n` files of

@@ -868,6 +868,27 @@ on macOS and Windows, whose temporary directories ignore case.
   Shift+F2's editor); the Windows half of the kill test (`windows_e2e.rs` has no kill
   test yet); the real `chmod 000` compare test here (root; it runs on CI).
 
+### 2026-11-13, review and QA fixes (the coordinator's list)
+
+Each failing test run before its fix; the non-root ones as `nobody` through
+`setpriv --reuid=65534 --regid=65534 --clear-groups <test binary>` (this sandbox is
+root; CI is not).
+
+- **1 (blocker) A move's batch synced each copy through a handle opened afresh.** A
+  read-only copy (its mode is copied before the sync) then failed with EACCES for any
+  normal user, failing the move (Windows: the copy left), and on NFS/SMB a write error
+  told only to the handle that wrote could be missed and the source removed. Now
+  `Worker::removing` holds `(src, dst, Option<File>)`: the handle `copy_bytes` wrote with
+  (`Worker::moved_file`, at most 64 at once), synced through; `None` for a replacement
+  (synced before its rename) and a link. `remove_file_anyway` clears Windows' read-only
+  attribute before removing a read-only source or a failed copy. Failing first, as
+  `nobody`: `a_read_only_file_moves_across_devices`: `done: 0, failed: 1 … Permission
+  denied (os error 13)`; it skips as root with a line saying so. Also
+  `a_copy_whose_sync_fails_keeps_its_source_and_the_rest_moves` (3 files, the second's
+  sync fails at its own handle: its source kept, its copy removed, the others moved;
+  passed before too, through the old path: a guard, not a regression test). The whole
+  core suite passes as root and as `nobody` (the `chmod 000` compare test ran there).
+
 ## Check
 
 ## Act

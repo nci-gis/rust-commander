@@ -28,6 +28,7 @@ use xdevcmd_core::ops::{self, Request};
 use xdevcmd_core::{Document, SortKey};
 
 use crate::bookmarks::{self, expand_tilde, tidy};
+use crate::commands;
 use crate::config::{Mode, Outcome, Settings};
 use crate::find_dialog::{self, FindDialog};
 use crate::help::Help;
@@ -60,6 +61,7 @@ mod lists;
 mod modals;
 mod mouse;
 mod open;
+mod palette;
 mod panes;
 mod persist;
 mod pictures;
@@ -106,6 +108,8 @@ enum ModalAct {
     Background,
     /// Left/Right in a menu-bar menu.
     Bar(isize),
+    /// Enter on a row of F1: run it on what had focus.
+    Palette(usize),
     /// Enter, F3 or F4 on a path in a shell's history.
     Link(viewer::LinkAct, crate::links::Link),
 }

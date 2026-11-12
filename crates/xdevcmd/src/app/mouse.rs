@@ -779,6 +779,13 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Commands(c)) => {
+                act = match c.on_mouse(m) {
+                    commands::Outcome::Stay => ModalAct::None,
+                    commands::Outcome::Close => ModalAct::Close,
+                    commands::Outcome::Run(row) => ModalAct::Palette(row),
+                };
+            }
             Some(Modal::Settings(d)) => {
                 let o = d.on_mouse(m);
                 act = self.settings_outcome(o);

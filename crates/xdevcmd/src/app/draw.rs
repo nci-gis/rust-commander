@@ -69,10 +69,8 @@ impl App {
             Some(("New terminal", A::NewTerminal)),
             Some(("Show or hide terminal", A::ToggleTerminal)),
         ];
-        let help: &[Option<(&str, A)>] = &[
-            Some(("Keys and settings", A::Help)),
-            Some(("Usage", A::Usage)),
-        ];
+        // Commands… and Config in use are put in at the top, below.
+        let help: &[Option<(&str, A)>] = &[Some(("Usage", A::Usage))];
         let list = match i {
             0 => file,
             1 => view,
@@ -100,6 +98,9 @@ impl App {
             items.push(Item::cmd("Theme\u{2026}", "", Cmd::ThemeMenu, true));
         }
         if i == 2 {
+            let f1 = self.footer_key(A::Help).unwrap_or_default();
+            items.insert(0, Item::cmd("Commands\u{2026}", f1, Cmd::Commands, true));
+            items.insert(1, Item::cmd("Config in use", "", Cmd::ConfigInUse, true));
             items.push(Item::sep());
             items.push(Item::cmd("About xdevcmd", "", Cmd::About, true));
         }

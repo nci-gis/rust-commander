@@ -1117,7 +1117,7 @@ fn an_unknown_option_is_refused() {
 // ── help ───────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn f1_lists_keys_and_tab_switches_to_settings() {
+fn f1_lists_keys_and_config_in_use_shows_the_settings() {
     let (a, b) = fixture();
     let cfg = write_config(
         a.parent().unwrap(),
@@ -1125,18 +1125,22 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
     );
 
     let keys = shot_with(&cfg, "F1", &a, &b);
-    assert!(keys.contains("Keys") && keys.contains("Settings"), "{keys}");
-    assert!(keys.contains("Quit xdevcmd"), "{keys}");
+    assert!(keys.contains("\u{250c} Commands"), "{keys}");
+    assert!(keys.contains("type to find a command"), "{keys}");
 
-    // Wherever its group lands as the table grows: the next two pages.
-    let rebound =
-        shot_with(&cfg, "F1,PageDown", &a, &b) + &shot_with(&cfg, "F1,PageDown,PageDown", &a, &b);
+    // A rebound key is listed with its new key, and marked as changed.
+    let rebound = shot_with(&cfg, "F1,c,o,p,y", &a, &b);
+    let row = rebound
+        .lines()
+        .find(|l| l.contains("Files: Copy "))
+        .unwrap_or_else(|| panic!("{rebound}"));
     assert!(
-        rebound.contains("\u{2022} F2"),
-        "a rebound key should be listed, and marked as changed\n{rebound}"
+        row.contains("\u{2022} Files: Copy") && row.contains("F2"),
+        "{row}"
     );
 
-    let settings = shot_with(&cfg, "F1,Tab", &a, &b);
+    // The settings moved to Help → Config in use (F9, Help is left of File).
+    let settings = shot_with(&cfg, "F9,Left,Down,Enter", &a, &b);
     assert!(
         settings.contains("loaded"),
         "the file's status should be shown\n{settings}"
@@ -1144,13 +1148,157 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
 
     // [viewer] sits below the fold at 24 rows; scroll to it the way a user would. Two
     // pages, since the list grows as settings are added.
-    let viewer = shot_with(&cfg, "F1,Tab,PageDown", &a, &b)
-        + &shot_with(&cfg, "F1,Tab,PageDown,PageDown", &a, &b);
+    let viewer = shot_with(&cfg, "F9,Left,Down,Enter,PageDown", &a, &b)
+        + &shot_with(&cfg, "F9,Left,Down,Enter,PageDown,PageDown", &a, &b);
     assert!(
         viewer.contains("\u{2022} tab_width = 8"),
         "a changed value should be marked\n{viewer}"
     );
     let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// The box F1 is drawn in: its top line, and how wide it is.
+fn commands_box(s: &str) -> Option<(usize, usize)> {
+    s.lines().enumerate().find_map(|(y, l)| {
+        let x = l.find("\u{250c} Commands")?;
+        let x = l[..x].chars().count();
+        let w = l.chars().skip(x).take_while(|c| *c != '\u{2510}').count() + 1;
+        Some((y, w))
+    })
+}
+
+/// The line under F1's last row: its message, a description, or its keys.
+fn commands_last_line(s: &str) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    let (top, _) = commands_box(s).expect("F1 on screen");
+    let x = lines[top].find("\u{250c} Commands").unwrap();
+    let col = lines[top][..x].chars().count();
+    let bottom = (top + 1..lines.len())
+        .find(|y| lines[*y].chars().nth(col) == Some('\u{2514}'))
+        .expect("the box's bottom");
+    lines[bottom - 1].to_string()
+}
+
+/// F1 opens small, at the top, no wider than 72; F1 again makes it the whole window,
+/// with the groups to browse and keymap A's rule above them.
+#[test]
+fn f1_opens_small_and_f1_again_makes_it_large() {
+    let (a, b) = fixture();
+    let small = shot_keys("118x34", "F1", &a, &b);
+    let (top, w) = commands_box(&small).unwrap_or_else(|| panic!("{small}"));
+    assert_eq!(top, 1, "at the top, under the menu bar\n{small}");
+    assert_eq!(w, 72, "{small}");
+    assert!(small.contains("type to find a command"), "{small}");
+    assert!(commands_last_line(&small).contains("F1 larger"), "{small}");
+    // In a file pane, the files' commands come first.
+    let first = small.lines().nth(3).unwrap_or_default();
+    assert!(first.contains("1   Files: View"), "{small}");
+
+    // Larger, the selected row still selected (View, in a file pane).
+    let large = shot_keys("118x34", "F1,F1", &a, &b);
+    assert_eq!(commands_box(&large), Some((0, 118)), "{large}");
+    assert!(
+        commands_last_line(&large).contains("[keys] view"),
+        "{large}"
+    );
+    // At its top, the rule for the shell and the groups to browse.
+    let large = shot_keys("118x34", "F1,F1,Home", &a, &b);
+    assert!(large.contains(" General "), "{large}");
+    assert!(
+        large.contains("In the shell, xdevcmd takes only"),
+        "{large}"
+    );
+    // F1 a third time closes it.
+    let closed = shot_keys("118x34", "F1,F1,F1", &a, &b);
+    assert!(commands_box(&closed).is_none(), "{closed}");
+}
+
+/// On a screen where the large size would be no larger (owner's decision 2), F1 stays
+/// small, says nothing of growing, and F1 again closes it.
+#[test]
+fn on_a_small_screen_f1_stays_small() {
+    let (a, b) = fixture();
+    for size in ["80x24", "60x20"] {
+        let s = shot_keys(size, "F1", &a, &b);
+        let (_, w) = commands_box(&s).unwrap_or_else(|| panic!("{s}"));
+        let width: usize = size.split('x').next().unwrap().parse().unwrap();
+        assert_eq!(w, 72.min(width - 4), "{s}");
+        assert!(!commands_last_line(&s).contains("F1 larger"), "{s}");
+        let s = shot_keys(size, "F1,F1", &a, &b);
+        assert!(commands_box(&s).is_none(), "closed\n{s}");
+    }
+}
+
+/// Narrow: Name and Key, the selected row's description on the last line; under 30
+/// columns, the name alone.
+#[test]
+fn f1_at_narrow_widths_keeps_name_and_key_on_the_row() {
+    let (a, b) = fixture();
+    let s = shot_keys("50x20", "F1,c,o,p,y", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Files: Copy "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains("F5"), "{row}");
+    assert!(
+        !row.contains("other pane"),
+        "no description on the row\n{s}"
+    );
+    assert!(
+        commands_last_line(&s).contains("Copy to the other pane"),
+        "{s}"
+    );
+    let s = shot_keys("28x20", "F1,c,o,p,y", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Files: Copy"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(!row.contains("F5"), "the name alone\n{s}");
+}
+
+/// What is typed stays when F1 grows, and so does the selection; Esc clears it, then
+/// closes.
+#[test]
+fn f1_growing_keeps_the_text_and_esc_clears_then_closes() {
+    let (a, b) = fixture();
+    let s = shot_keys("118x34", "F1,s,o,r,t,Down,F1", &a, &b);
+    assert_eq!(commands_box(&s), Some((0, 118)), "large\n{s}");
+    assert!(s.contains("\u{203a} sort"), "{s}");
+    assert!(!s.contains(" General "), "a flat list, not the groups\n{s}");
+    assert!(commands_last_line(&s).contains("[keys] sort_ext"), "{s}");
+    let s = shot_keys("118x34", "F1,s,o,r,t,Esc", &a, &b);
+    assert!(s.contains("type to find a command"), "cleared\n{s}");
+    let s = shot_keys("118x34", "F1,s,o,r,t,Esc,Esc", &a, &b);
+    assert!(commands_box(&s).is_none(), "closed\n{s}");
+    // Tab is not a tab switch any more, nor text.
+    let s = shot_keys("118x34", "F1,s,Tab", &a, &b);
+    assert!(s.contains("\u{203a} s "), "{s}");
+}
+
+/// A command the mode turns off is listed with the reason, and Enter says it on the
+/// last line instead of closing. A read-only row says why it cannot run.
+#[test]
+fn f1_says_why_a_row_cannot_run() {
+    let (a, b) = fixture();
+    let s = shot_flags(&["--read-only"], "F1,c,o,p,y", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Files: Copy "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains("read-only mode"), "{row}");
+    let s = shot_flags(&["--read-only"], "F1,c,o,p,y,Enter", &a, &b);
+    assert!(commands_box(&s).is_some(), "stays open\n{s}");
+    assert!(
+        commands_last_line(&s).contains("copying and moving is turned off"),
+        "{s}"
+    );
+    let s = shot_keys("110x24", "F1,d,o,u,b,l,e,-,c,l,i,c,k,Enter", &a, &b);
+    assert!(commands_box(&s).is_some(), "stays open\n{s}");
+    assert!(commands_last_line(&s).contains("a mouse gesture"), "{s}");
+    // Go to tab N needs its digit: shown with its keys, not run from here.
+    let s = shot_keys("110x24", "F1,g,o,Space,t,o,Space,t,a,b,Enter", &a, &b);
+    assert!(s.contains("Alt+1 \u{2026} Alt+9"), "{s}");
+    assert!(commands_last_line(&s).contains("digit"), "{s}");
 }
 
 // ── mouse ──────────────────────────────────────────────────────────────────────────
@@ -1287,13 +1435,52 @@ fn the_key_bar_and_dialog_buttons_are_clickable() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// F1's rows: a click selects one, a double-click runs it, Enter runs what was
+/// clicked, a click outside closes F1, the wheel scrolls. Located, never hard-coded.
 #[test]
-fn help_tabs_are_clickable() {
+fn f1_rows_are_clickable() {
+    let (a, b) = files(&["alpha.txt", ".hidden.txt"]);
+    // "hidden" finds two rows; Down selects the second, so what runs after a click
+    // on the first is what the click chose.
+    let typed = "F1,h,i,d,d,e,n,Down";
+    let open = shot_keys(SIZE, typed, &a, &b);
+    let (x, y) = locate(&open, "Show or hide hidden files");
+    assert!(open.contains("2   "), "{open}");
+    // One click selects: F1 stays open, nothing run.
+    let s = shot_keys(SIZE, &format!("{typed},click:{x}:{y}"), &a, &b);
+    assert!(s.contains("\u{250c} Commands"), "{s}");
+    assert!(!s.contains(".hidden"), "{s}");
+    // Enter runs what the click selected.
+    let s = shot_keys(SIZE, &format!("{typed},click:{x}:{y},Enter"), &a, &b);
+    assert!(!s.contains("\u{250c} Commands"), "{s}");
+    assert!(s.contains(".hidden"), "{s}");
+    // A double-click runs it.
+    let s = shot_keys(
+        SIZE,
+        &format!("{typed},click:{x}:{y},click:{x}:{y}"),
+        &a,
+        &b,
+    );
+    assert!(status(&s).contains("hidden files shown"), "{s}");
+    // A click outside closes F1.
+    let plain = shot_keys(SIZE, "", &a, &b);
+    let (px, py) = locate(&plain, "alpha");
+    let s = shot_keys(SIZE, &format!("F1,click:{px}:{py}"), &a, &b);
+    assert!(!s.contains("\u{250c} Commands"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn the_wheel_scrolls_f1() {
     let (a, b) = files(&["alpha.txt"]);
-    let open = shot_keys(SIZE, "F1", &a, &b);
-    let (x, y) = locate(&open, "Settings");
-    let s = shot_keys(SIZE, &format!("F1,click:{}:{y}", x + 1), &a, &b);
-    assert!(s.contains("Config file"), "{s}");
+    let open = shot_keys("118x40", "F1,F1,Home", &a, &b);
+    assert!(open.contains(" General "), "{open}");
+    let (x, y) = locate(&open, "General");
+    let s = shot_keys("118x40", &format!("F1,F1,Home,wheel:{x}:{y}:4"), &a, &b);
+    assert!(!s.contains(" General "), "scrolled past it\n{s}");
+    let back = format!("F1,F1,Home,wheel:{x}:{y}:4,wheel:{x}:{y}:-4");
+    let s = shot_keys("118x40", &back, &a, &b);
+    assert!(s.contains(" General "), "and back\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -1355,7 +1542,7 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
     let s = shot_keys(SIZE, "F12,A-n,A-s,A-w,A-t", &a, &b);
     assert!(status(&s).contains("terminal 1/1"), "{s}");
     assert!(!status(&s).contains("split"), "{s}");
-    let help = shot_keys("150x150", "F1", &a, &b);
+    let help = shot_keys("150x150", "F1,F1", &a, &b);
     assert!(
         help.contains("In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x"),
         "{help}"
@@ -1364,7 +1551,7 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
     // Resizing's Alt+R group cannot be opened after Alt+X: F1 names the key that works.
     let resize = help
         .lines()
-        .find(|l| l.contains("resize_left"))
+        .find(|l| l.contains("Move border left"))
         .unwrap_or_default();
     assert!(
         resize.contains("in the shell: Alt+x Alt+Shift+Left"),
@@ -1400,10 +1587,10 @@ fn alt_c_asks_with_three_buttons_when_sending_without_asking_is_off() {
 #[test]
 fn f1_lists_alt_g_as_a_pane_key() {
     let (a, b) = files(&["alpha.txt"]);
-    let help = shot_keys("150x150", "F1", &a, &b);
+    let help = shot_keys("150x150", "F1,F1", &a, &b);
     let row = help
         .lines()
-        .find(|l| l.contains("go_shell_dir"))
+        .find(|l| l.contains("Go to the shell's directory "))
         .unwrap_or_default();
     assert!(row.contains("Alt+g"), "{help}");
     assert!(row.contains("Go to the shell's directory"), "{row}");
@@ -1613,10 +1800,10 @@ fn the_context_menu_types_into_the_shell() {
         .find(|l| l.contains("Type into the shell"))
         .unwrap_or_else(|| panic!("{s}"));
     assert!(line.contains("Alt+Enter"), "{line}");
-    let help = shot_keys("150x150", "F1", &a, &b);
+    let help = shot_keys("150x150", "F1,F1", &a, &b);
     let row = help
         .lines()
-        .find(|l| l.contains("type_names"))
+        .find(|l| l.contains("Type names into the shell"))
         .unwrap_or_default();
     assert!(
         row.contains("Alt+Enter") && row.contains("Ctrl+Enter"),
@@ -1899,7 +2086,8 @@ fn no_layout_at_any_size_panics_or_overflows() {
             shrink.replace("Alt+Shift", "A-x,Alt+Shift")
         ),
         "A-s,A-s,Tab,A-w,A-w,F12,A-x,A-s,A-x,A-w,A-x,A-w".into(),
-        "F1,Tab".into(),
+        "F1,F1".into(),
+        "F1,c,o,p,y".into(),
         "Down,Down,F3,h".into(),
         "Down,Down,F8".into(),
         "Down,Down,S-F6".into(),
@@ -3925,32 +4113,26 @@ fn about_wraps_its_description_instead_of_cutting_it() {
     assert!(!line.contains('\u{2026}'), "not cut in the middle\n{s}");
 }
 
-/// F1 at 80 columns: a key's description too long for its row goes on below, under the
-/// description column, instead of running off the edge.
+/// F1 at 80 columns: a description too long for its row is cut with `…` on the row,
+/// never run off the edge or into the next row, and the selected row's is said whole
+/// on the last line.
 #[test]
-fn f1_wraps_long_descriptions_under_their_column() {
+fn f1_cuts_a_long_description_and_says_it_whole_below() {
     let (a, b) = fixture();
-    let s = shot_keys("80x40", "F1", &a, &b);
+    let s = shot_keys("80x40", "F1,q,u,i,t,Space,w,i,t,h,o,u,t", &a, &b);
     let lines: Vec<&str> = s.lines().collect();
     let at = lines
         .iter()
-        .position(|l| l.contains("quit_no_cd"))
-        .expect("the quit_no_cd row");
-    let desc = lines[at].find("Quit, leaving").expect("its description");
-    let next = lines[at + 1];
-    let col = |l: &str, i: usize| l.chars().skip(i).collect::<String>();
-    // Columns by characters: the borders are one character each, like the spaces.
-    let desc_chars = lines[at][..desc].chars().count();
-    assert!(
-        col(next, desc_chars).starts_with("where it was"),
-        "continued under the description\n{s}"
-    );
-    assert!(
-        next.chars().take(desc_chars).skip(1).all(|c| c == ' '),
-        "nothing left of it\n{s}"
-    );
-    // The intro sentence ends on the page too.
-    assert!(s.contains("is the program's."), "{s}");
+        .position(|l| l.contains("Quit without cd"))
+        .unwrap_or_else(|| panic!("the row\n{s}"));
+    assert!(lines[at].contains("Quit, leaving"), "{s}");
+    assert!(lines[at].contains('\u{2026}'), "cut on its row\n{s}");
+    // Not wrapped: the line under it is the last line, with the whole of it.
+    assert!(lines[at + 1].contains("(with --cwd-file)"), "{s}");
+    let whole = lines
+        .iter()
+        .find(|l| l.contains("Quit, leaving the shell where it was (with --cwd-file)"));
+    assert!(whole.is_some(), "whole on the last line\n{s}");
 }
 
 #[test]

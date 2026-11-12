@@ -61,6 +61,17 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Commands(c)) => {
+                let could_hint = c.option_hint;
+                act = match c.on_key(k) {
+                    commands::Outcome::Stay => ModalAct::None,
+                    commands::Outcome::Close => ModalAct::Close,
+                    commands::Outcome::Run(row) => ModalAct::Palette(row),
+                };
+                if could_hint && !c.option_hint {
+                    self.option_hinted = true;
+                }
+            }
             Some(Modal::Settings(d)) => {
                 let o = d.on_key(k);
                 act = self.settings_outcome(o);
@@ -147,6 +158,13 @@ impl App {
                 self.modal = None;
                 self.perform_cmd(c);
             }
+            ModalAct::Close if matches!(self.modal, Some(Modal::Commands(_))) => {
+                // F1 gives back what it was opened over (the viewer).
+                if let Some(Modal::Commands(mut c)) = self.modal.take() {
+                    self.modal = c.under.take().map(|u| *u);
+                }
+            }
+            ModalAct::Palette(row) => self.run_command_row(row),
             ModalAct::Close => {
                 // A file viewed from a shell's history: back to that history.
                 // So does the menu `P` opened over it, cancelled.

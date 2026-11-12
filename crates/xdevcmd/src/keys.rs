@@ -957,7 +957,6 @@ impl Action {
 }
 
 /// Where a command does its work, for F1's "commands for where you are" (Round 024).
-#[cfg_attr(not(test), allow(dead_code))] // F1's rows use it from step 2 on
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Place {
     /// A file pane: a directory, a list or results tab, an archive.
@@ -971,7 +970,6 @@ pub enum Place {
 }
 
 impl Action {
-    #[cfg_attr(not(test), allow(dead_code))]
     /// Where this action acts. An exhaustive match, so a new action has to say.
     pub fn place(self) -> Place {
         use Action as A;

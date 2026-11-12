@@ -71,6 +71,10 @@ pub enum Cmd {
     Resume(xdevcmd_core::journal::Interrupted),
     /// Help → About.
     About,
+    /// Help → Commands…: F1, opened at its large size.
+    Commands,
+    /// Help → Config in use: the loaded config file, read-only.
+    ConfigInUse,
     /// View → Theme…: the list of themes.
     ThemeMenu,
     /// File → Settings….

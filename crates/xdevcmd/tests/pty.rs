@@ -628,8 +628,8 @@ fn quick_view_draws_iterm2_and_sixel_pictures_and_repaints_them_away() {
         wait_bytes(&x, start, 1);
         // Under a dialog these pictures are cells: the screen is repainted over them, and
         // they are drawn again once it closes.
-        x.send(b"\x1bOP");
-        x.wait_for("Keys");
+        x.send(b"\x1bOP"); // F1, Commands
+        x.wait_for("type to find a command");
         x.send(b"\x1b");
         wait_bytes(&x, start, 2);
         x.quit();

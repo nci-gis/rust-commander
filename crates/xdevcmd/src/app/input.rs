@@ -323,38 +323,46 @@ impl App {
             .then(|| format!("{} mode \u{2014} {what} is turned off", mode.label()))
     }
 
+    /// Why `a` cannot run inside an archive, or `None`. Only reading and extracting
+    /// make sense there: writing into one would mean rewriting the whole file, which
+    /// xdevcmd does not do.
+    pub(super) fn archive_refused(&self, a: Action) -> Option<String> {
+        let writes = matches!(
+            a,
+            Action::Delete
+                | Action::DeletePermanent
+                | Action::Move
+                | Action::Rename
+                | Action::BulkRename
+                | Action::MkDir
+                | Action::Edit
+                | Action::NewFile
+                | Action::CopyAs
+                | Action::Symlink
+                | Action::Permissions
+                | Action::OpenWith
+                | Action::Checksum
+                | Action::Pack
+                | Action::Unpack
+                | Action::FindFiles
+                | Action::TypeNames
+        );
+        if !writes || self.focused_archive().is_none() {
+            return None;
+        }
+        let k = self.footer_key(Action::Copy).unwrap_or_default();
+        Some(format!(
+            "inside an archive you can view and extract ({k}) \u{2014} not that"
+        ))
+    }
+
     pub(super) fn perform(&mut self, a: Action) {
         if let Some(why) = self.refused(a) {
             self.status = why;
             return;
         }
-        // Inside an archive only reading and extracting make sense. Writing into one
-        // would mean rewriting the whole file, which xdevcmd does not do.
-        if self.focused_archive().is_some()
-            && matches!(
-                a,
-                Action::Delete
-                    | Action::DeletePermanent
-                    | Action::Move
-                    | Action::Rename
-                    | Action::BulkRename
-                    | Action::MkDir
-                    | Action::Edit
-                    | Action::NewFile
-                    | Action::CopyAs
-                    | Action::Symlink
-                    | Action::Permissions
-                    | Action::OpenWith
-                    | Action::Checksum
-                    | Action::Pack
-                    | Action::Unpack
-                    | Action::FindFiles
-                    | Action::TypeNames
-            )
-        {
-            let k = self.footer_key(Action::Copy).unwrap_or_default();
-            self.status =
-                format!("inside an archive you can view and extract ({k}) \u{2014} not that");
+        if let Some(why) = self.archive_refused(a) {
+            self.status = why;
             return;
         }
         let full = self.screen;
@@ -453,10 +461,7 @@ impl App {
                     };
                 }
             }
-            Action::Help => {
-                let help = Help::new(&self.settings, &self.config_outcome);
-                self.modal = Some(Modal::Help(Box::new(help)));
-            }
+            Action::Help => self.open_commands(commands::Size::Small, false),
             Action::Refresh => self.with_files(|f| f.reload()),
             Action::ToggleHidden => {
                 if let Some(f) = self.focused_files() {
@@ -660,6 +665,11 @@ impl App {
             }
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
             Cmd::ThemeMenu => self.theme_menu(),
+            Cmd::Commands => self.open_commands(commands::Size::Large, true),
+            Cmd::ConfigInUse => {
+                let help = Help::settings(&self.settings, &self.config_outcome);
+                self.modal = Some(Modal::Help(Box::new(help)));
+            }
             Cmd::Settings => self.open_settings(),
             Cmd::Undo => self.undo(),
             Cmd::SetTheme(name) => self.set_theme(&name),

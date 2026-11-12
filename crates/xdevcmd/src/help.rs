@@ -66,6 +66,13 @@ impl Help {
         }
     }
 
+    /// Opened at its Settings page: Help → Config in use.
+    pub fn settings(settings: &Settings, outcome: &Outcome) -> Self {
+        let mut h = Self::new(settings, outcome);
+        h.tab = 1;
+        h
+    }
+
     fn scroll_by(&mut self, delta: isize) {
         let max = self.shown[self.tab].len().saturating_sub(self.height) as isize;
         let s = &mut self.scroll[self.tab];

@@ -33,6 +33,8 @@ pub enum Modal {
     /// columns of a log would be worse than no viewer.
     View(Box<Viewer>),
     Help(Box<Help>),
+    /// F1: every command, to find by typing and run.
+    Commands(Box<crate::commands::Commands>),
     Menu(Menu),
     Find(Box<FindDialog>),
     /// Shift+F2: rename many with a pattern.
@@ -485,6 +487,13 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut Modal) {
         Modal::Job(j) => render_job(frame, area, j),
         Modal::View(v) => v.render(frame, area),
         Modal::Help(h) => h.render(frame, area),
+        Modal::Commands(c) => {
+            // Over the viewer, the viewer stays on screen under it.
+            if let Some(u) = c.under.as_mut() {
+                render(frame, area, u);
+            }
+            c.render(frame, area);
+        }
         Modal::Menu(m) => m.render(frame, area),
         Modal::Find(d) => find_dialog::render(frame, area, d),
         Modal::Rename(d) => rename_dialog::render(frame, area, d),

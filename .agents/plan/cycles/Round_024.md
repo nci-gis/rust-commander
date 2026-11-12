@@ -330,6 +330,35 @@ objects**, and nothing waits on them.
   - The module is unused until step 2: `allow(dead_code)` outside tests, removed then.
   - Not verified: clippy for windows-gnu and darwin — `rustup target add` cannot
     download here (proxy refuses the tunnel); CI checks them.
+- **2026-11-12, step 2: the palette, small and large** (`commands.rs` `Commands`,
+  `Modal::Commands`, `app/palette.rs`, `modals.rs`, `mouse.rs`).
+  - F1 opens the small size: top-centre under the menu bar, `min(72, width − 4)` wide,
+    up to 12 rows, the filter on top, a last line (bar colour) below. F1 again: the
+    whole window, keymap A's two sentences above the groups. Below 90×30 F1 stays
+    small and the second F1 closes; "F1 larger" is said only where it would grow.
+  - Small, empty filter: recent (step 3), then this place's rows (the Files group
+    first in a file pane), then the rest under a dim "elsewhere". F1 itself is left
+    out of that list. Large, empty: every group under its name, as the old F1.
+  - Rows: number (first nine) · rebound `•` · Name · Key · Description at 70 inner
+    columns and more; Name · Key under 70, the selected description on the last line;
+    Name alone under 30. Keys and descriptions are cut with `…`, never wrapped; a
+    description cut on its row is said whole on the last line. A refused row shows its
+    reason in the description column, dimmed; read-only and "elsewhere" rows dimmed.
+    The large size's last line names the selected row's `[keys]` name, since the
+    name column is gone and rebinding needs it.
+  - Keys: ↑/↓, PageUp/PageDown; Home/End go to the list's ends while the filter is
+    empty (with text they move along it); Esc clears, then closes; Tab does nothing.
+    Mouse: click selects, double-click runs, the wheel scrolls (the selection follows
+    into view), a click outside closes.
+  - The filter also looks at the Key column, so "double-click" finds the mouse rows.
+  - **Deviation**: Help menu already has Commands… (large) and Config in use, the
+    latter opening the old Help on its Settings page until step 5 replaces it, so the
+    settings stay reachable in every commit.
+  - Tests updated honestly: the old "F1 then Tab" settings test now goes through
+    Help → Config in use and finds the rebound `• … Copy … F2` by typing; the help-tab
+    click test became F1's click/double-click/outside test; the 80-column wrap test
+    became "cut on the row, whole on the last line"; keymap A's tests read the large
+    size (F1 F1) and find rows by title. The sixel pty test waited for "Keys".
 
 ## Check
 

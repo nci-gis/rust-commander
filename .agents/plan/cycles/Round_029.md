@@ -1,6 +1,6 @@
 # Round 029: Pillar 1, data correct (v0.4.0-beta.1, part 1 of 4)
 
-**Status**: Planning — waiting for the owner's go
+**Status**: In Progress (the owner's go, 2026-11-13: "OK, go"; every open decision taken as recommended)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md` ("Step 6: three pre-releases", beta.1); pillar 1
 of `memory/2026-11-12-four-pillars-for-rc1.md` (B01–B05, A08's sync gap); the owner's
 decisions of 2026-11-12 and 2026-11-13 (below, §1)

@@ -1,0 +1,506 @@
+# Round 029: Pillar 1, data correct (v0.4.0-beta.1, part 1 of 4)
+
+**Status**: Planning — waiting for the owner's go
+**Part of**: v0.4.0, step 6 of `ROADMAP.md` ("Step 6: three pre-releases", beta.1); pillar 1
+of `memory/2026-11-12-four-pillars-for-rc1.md` (B01–B05, A08's sync gap); the owner's
+decisions of 2026-11-12 and 2026-11-13 (below, §1)
+**Date started**: YYYY-MM-DD
+**Date completed**: YYYY-MM-DD
+
+## Goal
+
+Before the Smart Planner is built on top of it, make the engine it stands on keep its
+word: **before any step that cannot be undone, everything needed to recover is on
+disk**; a journal that cannot be written is never taken for one that was; a plan made
+from a directory that could not be read is never carried out; a file replaced after the
+user agreed to replace something else is asked about again; and the two small selection
+and parsing bugs the review found are gone. Every fix starts as a test that fails on
+`feat/v0.4.0` today.
+
+This is the data-safety core of the first stable release. Nothing here is visible as a
+feature; what changes for a user is that a power cut, a full disk, a busy NAS or an
+unreadable directory no longer has a quiet way to lose a file.
+
+## Plan (kickoff review)
+
+### 1. What changed, and where things stand
+
+- **beta.1 is four rounds** (owner, 2026-11-13: "beta.1 = pillar 1 + Smart Planner v1,
+  không vội"; GitHub pre-release only). The split, and why:
+
+  | Round | What | Why here |
+  |---|---|---|
+  | **029** (this) | Pillar 1: B01–B05, the sync rules, a journal that is durable and says when it fails, the fault seam every later test uses | The planner's journal format, its re-check before each target and its "unreadable" rows are built from this round's pieces. Bugs first, each with a test that fails today |
+  | [030](Round_030.md) | Smart Planner v1, the core: scan → plan → confirm → execute; modes by measured scan time; pre-checks; three warning levels; the journal holds the plan; exact resume | The one large new piece; lands and is used before anything consumes its plan |
+  | [031](Round_031.md) | Smart Planner v1, around the executor: undo for a copy, replace into the trash, a network error pauses and asks, ETA, kept lists follow a move | Each consumes 030's plan (what was created or replaced, which device, which rows are left); small enough to land separately and to cut if beta.1 runs late |
+  | [032](Round_032.md) | Pre-release plumbing and the cut: `release.yml` takes `-beta.N`/`-rc.N` from `dev`, `docs/development.md`, the beta.1 hand tests, the tag | Exercised only by a tag; last, so the tag carries everything |
+
+  Item 42 is two rounds rather than one because a round must be "independently
+  landable" (`DoD.md`) and reviewable in a sitting; 030 alone is about two weeks.
+- **The owner's decisions this round carries out** (binding, 2026-11-12/13):
+  - `sync_data` the temporary file before a rename that replaces an existing file; sync
+    before deleting a source in a move across devices, every file; the journal's line
+    synced before such steps and at job start. New files on the same device: no sync.
+  - Pillar 1's fixes: B01 (an unreadable directory or a non-UTF-8 name never becomes a
+    sync plan; `OsString` paths; Missing / Unreadable / Incomplete), B02 (the cursor lands
+    on the chosen file after a slow move: the selection intent is resolved when the move
+    completes), B04 (journal write, flush and begin failures surfaced, rename many too),
+    B03 (panelize takes a whole line that exists, whole, before the `:line` heuristics),
+    B05 (one fault test: the target replaced after confirm).
+  - No new crates unless unavoidable; `#![forbid(unsafe_code)]` stays in our crates.
+- **Since the review** (pinned at `c4f51c4`; checked again at `70ee6fa` in the
+  four-pillars memory): Rounds 024–028 landed on `feat/v0.4.0` (F1, light theme, docs,
+  tab logging, highlighting); none touched `ops.rs`, `journal.rs`, `compare.rs` or
+  `batch_rename.rs`. Re-read for this kickoff at `0fcb2c7`, with three findings the
+  review did not have (§4, marked **new**).
+
+### 2. Map: the code each step touches
+
+**Core, `crates/xdevcmd-core/src/`**
+
+- **`ops.rs`** (2,311 lines)
+  - `Request` (`existing`, `overwrite_confirmed`, `pairs`, `safe`), `Request::sync`.
+  - `Worker::run`: `Journal::begin` (~400; a failure becomes `sum.journal_off`, said only
+    at the end); the sync path builds `planned` from **whatever exists when the job
+    starts** (~428–436: `.filter(|dst| dst.symlink_metadata().is_ok())`).
+  - `resolve_conflict` (~556): the user's Yes is about the file it described
+    (`existing_bytes`), but nothing remembers which file that was.
+  - `copy_file` (~733) → `copy_bytes` (~792): a replacement is written to `part_name(dst)`,
+    `flush`ed, `drop(w)` (a close error is lost), then `fs::rename(&target, dst)`. **No
+    `sync_data`.** A new file with safe operations goes `part` → `rename_noreplace`.
+  - `write_all_from` (~840): `BUF` = 256 KiB, `w.flush()` (a no-op for `File`).
+  - `copy_symlink` (Unix, ~708): `let _ = fs::remove_file(dst);` then `symlink`: an
+    approved replacement removes the old entry **before** making the new one.
+  - `moved` (~699): during a move across devices, `fs::remove_file(src)` right after the
+    copy is counted done. **No sync of the copy, no sync of its directory, no journal
+    line.** `copy_node` removes an emptied source directory the same way.
+  - `move_into` (~859): `fs::rename(src, &dst)` when the destination was approved;
+    `is_cross_device` (~1216, EXDEV / ERROR_NOT_SAME_DEVICE) falls back to copy + delete.
+  - `identical` / `Same` (~1031–1072): `Existing::Resume`'s size-and-date test.
+  - Test seams already there: `appear_in_test`, `writing_in_test` (`#[cfg(test)]` statics);
+    `other_device` in the tests (`/dev/shm`).
+- **`journal.rs`** (934 lines)
+  - `Journal::begin_in` (~180): `.new` → locked → renamed; lines written by `line`.
+  - `line` (~238): `let _ = writeln!(…); let _ = flush();` **errors dropped, nothing
+    synced**; `part`, `renamed`, `unrenamed` return `()`.
+  - The module comment says lines are "written and flushed, not synced", on purpose.
+  - `recover_in` / `claim` / `tidy`: tolerant of unknown tags (`_ => {}`), so new tags are
+    read by 0.3.0 as nothing and by this version as facts.
+- **`batch_rename.rs`** `apply` (~96): `Journal::begin(…).and_then(Result::ok)` turns a
+  failure into `None` silently; `ren` lines unsynced before the files are parked under
+  `.xdevcmd-rename-<run>-<i>`.
+- **`archive.rs`**: extraction's replacement `fs::rename(&part, dst)` (~479) and pack's
+  `fs::rename(&part, dest)` (~628): the same replace, the same missing sync.
+- **`document.rs`** `save_bytes` / `write_new` (~335–370) already `sync_all`s before its
+  rename, as does `session.rs` (~126): the pattern exists in two places; this round makes
+  one helper of it.
+- **`compare.rs`** (325 lines)
+  - `entries` (~64): `read_dir(..).unwrap_or_default()`, `to_string_lossy` names, entries
+    whose `symlink_metadata` fails dropped silently.
+  - `Diff { rel: String, .. }`, `/`-joined; `Walk::walk` merges two sorted `String` lists.
+  - `plan` (~208): `(left.join(&d.rel), parent(right, &d.rel))`: a lossy name joins into
+    a path that does not exist.
+- **`noreplace.rs`**: `rename_noreplace`; on Windows and on file systems without
+  `RENAME_NOREPLACE` or hard links (FAT, exFAT, some SMB) it falls back to
+  check-then-`rename`. Read only here; its window goes into the contract (pillar 3).
+- **`found.rs`** `paths_in` / `candidate` (~57, ~150): the `path:line` split.
+
+**App, `crates/xdevcmd/src/`**
+
+- **`app/compare.rs`**: `compare_panes` (Alt+K marks), `begin_sync` / `poll_comparing`,
+  `show_sync_plan` (the plan dialog, `Cmd::Sync(pairs)`).
+- **`app/jobs.rs`**: `recover_interrupted` (the "Interrupted" dialog), `resume`
+  (`Existing::Resume`), `remember_job`, `pump_job`.
+- **`app/input.rs`** ~802 and **`app/jobs.rs`** ~370: `batch_rename::apply(&moves,
+  ops::safe())`, the result shown as an `Outcome`.
+- **`app/modals.rs`** / **`modal.rs`**: the job box's question for `ops::Question` (a new
+  variant must be drawn and answered there).
+- **`pane/files.rs`**
+  - `activate` (~943): in results, `set_cwd(dir)` then `self.cwd.join(name)` and
+    `select_path`: **B02**: after a slow move `cwd` is still the results' directory.
+  - `navigate` / `read_bounded` (~1009–1045): `Reading { select: None, .. }`, always
+    `None`; `poll_reading` (~1047) already selects `r.select` on arrival: the slot exists
+    and nobody fills it.
+  - `test_delay` (~143, `XDEVCMD_TEST_SLOW_DIR`): the slow-directory hook Round 022 added.
+- The same set-then-select pattern in four more places: `app/shell.rs` ~244 (a link's
+  Go), `app/file_ops.rs` ~283 (a typed path to a file), `app/panes.rs` ~194 (both panes
+  on one directory), and `pane/files.rs` `activate` above.
+- **`links.rs`** `Links::paths` (~100) and **`viewer.rs`** ~324 (panelize gathers
+  `paths(i, shown)` per line); **`lists.rs`** (`fresh`, `checked`, `tidy_rows`) and
+  `pane/files.rs` `poll_results` (~441–470): rows from a shell are checked on a thread
+  and dropped quietly if they never existed.
+
+**CI and tests**
+
+- `.github/workflows/ci.yml`: one `test` job on ubuntu-latest, ubuntu-24.04-arm,
+  windows-latest, macos-latest; `cargo clippy --all-targets --all-features`.
+- `ops.rs` tests: `other_device` (`/dev/shm`), `run_answering`,
+  `a_replacement_cancelled_part_way_keeps_the_old_file`,
+  `a_move_across_devices_keeps_what_was_skipped`, `resuming_*`.
+- `tests/pty.rs`: `an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start`,
+  `resume_from_app_does_not_replace_a_kept_newer_source_file`.
+
+### 3. Outside check (2026-11-13), only what applies to this round
+
+The planner's references (robocopy `/L`, `rsync --itemize-changes`, Explorer's conflict
+dialog, Total Commander's overwrite options) belong to Round 030 and are there.
+
+- **SQLite, "Atomic Commit In SQLite"**: the rollback journal is written **and
+  flushed to the platter** before the database file is changed; on Unix the
+  **directory** is synced after the journal is created, or the journal itself can vanish
+  in a power cut; deleting the journal is the commit. Taken: (1) the journal synced at
+  job start, **its directory too** (Unix), before the first step it protects; (2) a
+  line synced before the step it describes; (3) the end of a job is the journal's removal,
+  which needs no sync (a journal that comes back after a power cut offers a finished job
+  again, and Resume skips what is identical). Not taken: a journal of old contents (a
+  rollback journal); the trash plays that part in Round 031.
+- **PostgreSQL's fsync errors ("fsyncgate", 2018)**: on Linux a failed `fsync` may drop
+  the dirty pages and clear the error, so **a retried `fsync` can succeed with the data
+  gone**. PostgreSQL now panics rather than retry. Taken: a sync that fails means the
+  temporary file is lost; it is removed and the copy started again from the source,
+  never synced a second time.
+- **rsync** writes each file under a temporary name beside it and renames it into
+  place, as xdevcmd does since 0.2.1; it does not sync by default, and a `--fsync`
+  option was long carried as a patch (rsync-patches, `fsync.diff`). The default trade
+  is the same as the owner's: new files fast, durability where it is asked for.
+- **ext4's `auto_da_alloc`** (2009) flushes a file renamed over another, which made
+  "write then rename" safe there without `fsync`; XFS and others give no such promise.
+  The explicit `sync_data` makes it true everywhere, not only on ext4's defaults.
+- **macOS**: `fsync` does not empty the drive's cache; `F_FULLFSYNC` does, at a cost of
+  milliseconds. To verify in step 2 by reading std's source: Rust's `sync_all` and
+  `sync_data` on Apple targets call `fcntl(F_FULLFSYNC)`. If so, a replace and a move
+  across devices pay a full flush per file there; measured, not guessed.
+- **Windows**: `FlushFileBuffers` (std's `sync_data`/`sync_all`) works on files; a
+  directory cannot be synced from std, and `MoveFileEx(MOVEFILE_WRITE_THROUGH)` would
+  need `unsafe` or a new crate. NTFS journals its metadata, so a rename is either there
+  or not after a crash, but the newest one may be lost. Written into the contract
+  (pillar 3), not worked around.
+- **robocopy `/Z`** (restartable mode) resumes a file from its middle; xdevcmd resumes
+  whole files only. Unchanged here (Smart Planner v2, item 43).
+- Sources:
+  - [SQLite: Atomic Commit In SQLite](https://www.sqlite.org/atomiccommit.html)
+  - [PostgreSQL wiki: Fsync Errors](https://wiki.postgresql.org/wiki/Fsync_Errors)
+  - [Dan Luu: fsyncgate, the thread](https://danluu.com/fsyncgate/)
+  - [rsync-patches: fsync.diff](https://mattmccutchen.net/rsync/rsync-patches.git/blob/HEAD:/fsync.diff)
+
+### 4. Critique: what must be got right
+
+**Durability (the owner's principle)**
+
+- **The order for a replace**, in one helper used by every replacing write (`ops`
+  `copy_bytes`, `archive` extract and pack, `document::save_bytes`):
+  write the temporary file → `sync_data` it, **the `File` still open** (today `drop(w)`
+  comes first and a close error is lost; the sync is what surfaces NFS and SMB write
+  errors) → the journal's line for the step synced → re-check the target (B05) → `rename`.
+  A sync that fails: the temporary file is removed and the step reported as failed, with
+  Retry meaning "copy it again from the source" (fsyncgate), never a second sync.
+- **The order for a move across devices**, per file: copy (under a temporary name, or in
+  place with safe operations off) → `sync_data` the copy → rename into place → **sync
+  the destination's directory** (Unix: `File::open(dir)?.sync_all()`; without it the
+  synced file can still lose its name in a power cut, and the source is gone) → journal
+  line `moved <src> <dst>` synced → remove the source. A source directory is removed only
+  once empty, as today. Windows: the directory sync is not available (§3); said in the
+  contract.
+- **What is not synced, on purpose** (the owner's call): a new file on the same device,
+  and the end of a job. **Said plainly, a consequence (new)**: with safe operations on,
+  a *kill* never leaves a short file under a real name, but a *power cut* can (the data
+  of a new file may not be on disk when its rename is). And Resume's "identical" test is
+  size and date only; a file whose size and date reached the disk but whose data did not
+  would be taken as done. Not fixed here; decision 6 and the contract (pillar 3).
+- **The journal at job start**: the file synced, and on Unix its directory, before the
+  job's first step. One sync per job (a few milliseconds), not per file.
+- **The sync rules apply whatever the safe-operations setting** (decision 1): the
+  temporary name for a replace was already "kept always" (Round 014); the setting decides
+  only whether there is a journal and whether a new file goes under a temporary name.
+- **Cost, to measure before deciding (decision 4)**: a replace or a cross-device move
+  now pays a sync per file (and on macOS possibly a full flush). The owner's measure is
+  10,000 × 1 KiB and 300 MiB, as Round 014's: on `/dev/shm` the sync is free; on a USB
+  stick or an SD card it is not. The numbers go in Do.
+
+**The journal (B04)**
+
+- `Journal::line` returns `io::Result<()>`; so do `part`, `renamed`, `unrenamed`, and a
+  new `commit()` (sync the lines written since the last one; nothing to do if none). A
+  journal that failed once is **broken** and stays so: a later line could succeed and
+  make it look whole.
+- **A broken journal before a step that cannot be undone**: the worker stops and asks
+  `Question::NoJournal { error }`: "Safe operations cannot write their journal (disk
+  full?). Without it, a kill or power cut now cannot be tidied up or resumed." Buttons:
+  **Stop** (the default: nothing more that cannot be undone is done) · Continue without
+  the journal (once for the job; the summary says so). Never asked twice in one job.
+- **A journal that cannot be begun** (state directory full, read-only, a file where the
+  directory goes): asked **at the start**, before anything is done, the same question
+  (decision 2). Today the job runs and says so at the end.
+- **Rename many** (`batch_rename::apply`): the files are under temporary names between
+  its two steps, so its journal is its whole safety. Every `ren` line is written and
+  **synced once before the first file moves**; a `begin` or that sync failing means
+  nothing is renamed and the dialog says why, with "rename anyway" as a second button
+  (decision 3). An `unren` line failing later is harmless (`tidy` skips a temporary name
+  that no longer exists) and is not asked about.
+- **Old journals**: new tags (`moved`, a `v 2` line) are ignored by 0.3.0's `tidy`, and
+  this version reads 0.3.0's journals as before. A test reads a 0.3.0 journal.
+
+**B05: the file that was agreed to is the file replaced**
+
+- **Identity**: `Ident { kind, len, mtime, dev+ino on Unix }` (Windows: kind, len,
+  mtime, creation time; std has no stable file index). Taken when the question is asked
+  (what the user saw) or when a plan is made; checked again right before the rename that
+  replaces. Different → `Question::Conflict` again, with "it changed since you answered".
+  "Replace all" and Update are rules, not a file: they are re-applied to what is there,
+  not compared with a snapshot.
+- **New: the sync plan replaces files nobody agreed to replace.** `Worker::run` builds
+  `planned` from every destination that exists **when the job starts**. A file created
+  at a "only on the left" destination between Alt+Y's compare and Enter is overwritten
+  without a question. The plan must carry what it expected per row (`Absent` or
+  `Replace(Ident)`); the worker compares, and anything else is asked.
+- **New: names that differ only in case (macOS, Windows).** `compare` sorts by exact
+  `String`; on a case-insensitive volume `A.txt` (left) and `a.txt` (right) are "only
+  left" and "only right", and with the bug above each copy silently replaces the other:
+  one file's content is lost on both sides. Fixed twice: the plan's `Absent` row now
+  asks, and compare looks a one-sided name up on the other side (one `symlink_metadata`):
+  found means a clash, shown and left to a person.
+- **New: replacing a link is not atomic.** `copy_symlink` removes the destination, then
+  makes the link; a failure in between (permission, a full directory) loses the old
+  file. The link is made under a temporary name and renamed over, like a file.
+- **What cannot be closed**: between the re-check and the rename another program can
+  still replace the target; no portable rename compares first. The window shrinks from
+  "the whole copy" to microseconds; the contract says so. `rename_noreplace`'s fallback
+  on Windows and FAT has the same kind of window (check, then rename).
+
+**B01: compare**
+
+- **Names are `OsString`** end to end: `Diff.rel` becomes a relative `PathBuf` (the
+  display text is made where it is drawn); both sides sort by the same `OsStr` order.
+  Two non-UTF-8 names that read the same lossily are two rows.
+- **States for what could not be decided**: `Unreadable(side, error)` (a directory whose
+  `read_dir` fails: the whole subtree is one row, and **neither side's entries under it
+  are planned**, since "only on the other side" means nothing there), `Missing(side)` (a
+  directory gone while compared), `Incomplete(side)` (some entries could not be read or
+  stated: a one-sided name in that directory is not planned, because its twin may be one
+  of the unread). A root that cannot be read is an error, not a plan.
+- **Shown**, in the sync dialog as rows with ⚠ and a count in the title, never as
+  "nothing to do"; Alt+K marks nothing under them and its status line names them.
+- A test **as root** cannot make a directory unreadable with `chmod 000`; that test
+  skips when the effective uid is 0 (the sandbox here is root; CI is not), and the seam
+  (§7) covers the same path everywhere.
+
+**B02, B03**
+
+- **B02**: one entry point, `FilePane::go_to_file(dir, name)`, which stores the intent
+  (`Select::Name(OsString)`) on the pending move and resolves it **against the listing
+  that arrives** (`cwd.join(name)` after canonicalising, so a link in the path works).
+  A move that replaces the pending one drops its intent; Esc drops it; an intent wins
+  over "came up out of a directory". The five call sites in §2 move to it. A name that
+  is not in the new listing (hidden, filtered) leaves the cursor at the top and says so.
+- **B03**: a line that **as a whole** names something that exists is that path, before
+  any heuristic. Lookups must not run on the UI thread for 10,000 lines, so the line's
+  candidates go to the list as a group (`whole`, `parts`) and the list's existing check
+  thread decides: `whole` exists → the parts are dropped; otherwise `whole` is dropped
+  quietly and the parts are checked as today. A line with only one candidate is
+  unchanged. Trailing whitespace: the line as shown, then without trailing spaces.
+
+**Tests**
+
+- **Each fix first lands its test failing** on today's code (the commit message names
+  the run that failed), as Round 014 did; `cargo test` stays green at each commit.
+- **Order is tested, not trusted**: the seam records the calls it sees, so a test can
+  assert "sync, then journal sync, then rename, then remove source". Without that, a
+  sync moved after the rename would pass every content check.
+
+### 5. Steps
+
+Each step is one commit with its tests; the failing test is written first. Sizes: S a
+day or less, M two to three days. Clippy on Linux, windows-gnu and darwin and the full
+suite at each step.
+
+0. **The fault seam and the test places** (`faults.rs` new in core; `ci.yml`): §7's
+   seam, `#[cfg(any(test, feature = "faults"))]`, a no-op otherwise; `XDEVCMD_FAULTS`
+   read only with the feature (pty tests); a call trace for order tests; CI mounts a
+   small file system (Linux: tmpfs by `sudo mount`; macOS: a RAM disk by `hdiutil`) and
+   sets `XDEVCMD_TEST_SMALL_FS`, `XDEVCMD_TEST_OTHER_DEV` (Windows: the runner's D:).
+   Tests: the seam fails the n-th write of a path and only that path; a release build
+   holds no `XDEVCMD_FAULTS` string (`budgets.rs`, after the build). **S.**
+1. **B04, a journal that is durable and says when it fails** (`journal.rs`,
+   `ops::Worker::run`, `Question::NoJournal`, the job box, `batch_rename::apply`, the
+   rename-many dialog). `line → Result`, `commit()`, `begin` synced with its directory,
+   `v 2` line. Failing first: (a) the seam fails a journal line before a replace →
+   today the replace goes ahead and nothing is said; (b) rename many with a file where
+   the journal directory goes → today the files are renamed with no journal and no word;
+   (c) `begin` fails → today asked nothing until the end. Also: a 0.3.0 journal is still
+   tidied. **M.**
+2. **A replace is durable** (`ops::commit_replace`, the one helper; `copy_bytes`,
+   `archive` extract and pack, `document::save_bytes`; `copy_symlink` through a
+   temporary link). Failing first: the call trace of a replace has no `SyncData` before
+   `Rename`; a link replace whose creation fails loses the old file. Also: a sync error
+   removes the temporary file, keeps the old one, and Retry copies again (the trace
+   shows a second write, not a second sync). Verify std's Apple `sync_data`. **M.**
+3. **A move across devices is durable** (`Worker::moved`, `copy_node`'s directory
+   removal, `journal` `moved` lines, `Interrupted` and its dialog). Failing first: the
+   trace has `RemoveSource` with no `SyncData`/`SyncDir`/`JournalSync` before it.
+   Kill test (pty, Unix): the seam halts after the journal commit, the test kills the
+   process, the next start says both the source and its complete copy are there. A sync
+   failure keeps the source and removes the copy. Measured: 10,000 × 1 KiB and 300 MiB to
+   `/dev/shm`, the owner's USB stick by hand (decision 4). **M.**
+4. **B01, compare never plans what it could not read** (`compare.rs` `entries`, `Walk`,
+   `Diff`, `State`, `plan`; `app/compare.rs` marks, plan dialog, status). Failing first:
+   a `chmod 000` directory on the right makes today's plan copy everything into it; two
+   non-UTF-8 names (Linux) plan a source that does not exist; the seam makes a stat fail
+   mid-walk and the other side's file is planned. **M.**
+5. **B05, the file agreed to is the file replaced** (`Ident`; `resolve_conflict` keeps
+   it; `commit_replace` and `move_into` re-check; `Request::sync` carries `Expect` per
+   pair, `planned` removed; compare's case-clash lookup). Failing first: **the fault
+   test**: the hook replaces the target after the user answered Yes → today it is
+   overwritten; a file appearing at a planned "only left" target → today overwritten;
+   `A.txt`/`a.txt` (runs where the temp directory ignores case: macOS and Windows CI).
+   **M.**
+6. **B02, the cursor lands on the chosen file** (`FilePane::go_to_file`, `Reading.select`,
+   five call sites). Failing first, with `XDEVCMD_TEST_SLOW_DIR`: Enter on a file in
+   results whose directory is slow → today the cursor is on `..`. Also: a second move
+   drops the first's intent; Esc drops it. **S.**
+7. **B03, a whole line that exists is taken whole** (`links.rs` `paths` → groups,
+   `lists.rs` first check, `pane/files.rs` `poll_results`). Failing first: lines
+   `report:2026.txt`, `a b.txt`, `2026` (all three exist) panelize into the wrong rows
+   today. Also: a line that does not exist as a whole gives today's rows. **S.**
+8. **Docs** (`docs/security.md` "Safe operations": what is synced and when, the new
+   question, what a power cut can still do; `docs/guide.md`: compare's new rows; the
+   CHANGELOG). The full recovery contract is pillar 3 (rc.1); this writes only the facts
+   that changed. **S.**
+
+About two weeks (5 M, 4 S). Steps 6 and 7 do not depend on the others and can be taken
+first if a short step is wanted to start.
+
+### 6. The owner's decisions
+
+Settled: §1. Open below; **the coder follows each recommendation unless the owner
+objects**, and nothing waits on them except decision 4's measurement.
+
+1. **The sync rules and the setting.** *Recommended:* they apply whether safe operations
+   are on or off; the setting decides only the journal and new files' temporary names.
+   A replace already goes through a temporary name either way.
+2. **A journal that cannot be begun.** *Recommended:* asked at the start ("continue
+   without / stop", stop the default), not only said at the end as today. Alternative:
+   asked only before the first step that cannot be undone (no question for a copy of
+   new files).
+3. **Rename many without its journal.** *Recommended:* nothing renamed, the reason shown,
+   and a second button "rename anyway". Alternative: refuse outright.
+4. **A sync per file in a move across devices.** *Recommended:* per file first, measured
+   (10,000 × 1 KiB) on the owner's USB stick and on macOS; if the move becomes more than
+   twice as slow there, this round batches (copy and sync up to 64 files or 64 MiB, one
+   journal line for the batch, then remove those sources), which keeps "every file
+   synced before its source goes". Otherwise batching waits for v2's group commit.
+5. **Failure points compiled into the shipped binary?** *Recommended:* no: a cargo
+   feature `faults` (`#[doc(hidden)]`), on only for tests; the release build is checked
+   not to have it. Delays may stay plain environment hooks, as `XDEVCMD_TEST_SLOW_DIR`
+   is today, since they only ever wait.
+6. **After a power cut, Resume trusts size and date.** *Recommended:* say it in the
+   contract now; in Round 030, where the journal holds the plan, record Linux's
+   `boot_id` and, after a reboot, copy again the files the dead run itself created
+   (their creation time after its start) instead of taking them as done. Alternative:
+   sync new files too (the owner decided against it for speed).
+7. **Windows: no directory sync.** *Recommended:* accept and write it down; no `unsafe`,
+   no new crate for `MoveFileEx(WRITE_THROUGH)`.
+8. **Case-only clashes in compare.** *Recommended:* found by looking the name up on the
+   other side, shown as "same name, different case: left alone", never planned. On a
+   case-sensitive disk the lookup finds nothing and the row stays one-sided, as today.
+9. **CI's small file systems.** *Recommended:* yes (Linux tmpfs via `sudo mount`, macOS
+   RAM disk via `hdiutil`), about ten seconds a run; tests skip when the variables are
+   unset, so a developer's machine needs nothing.
+
+### 7. The beta.1 test plan (all four rounds)
+
+**Principles.** No `unsafe`, no root on a developer's machine, nothing mounted by a test
+itself. Every fault has two kinds of proof where possible: the seam (every platform,
+deterministic) and one real kernel error (where CI can make one). Order is asserted from
+the seam's trace, not inferred from results.
+
+**The fault seam** (`xdevcmd-core/src/faults.rs`, step 0)
+
+- `faults::at(Point, &Path) -> io::Result<()>`, called before each real call it guards:
+  `Write` (each chunk in `write_all_from`), `SyncData`, `SyncDir`, `Rename`,
+  `RemoveSource`, `JournalBegin`, `JournalLine`, `JournalSync`, `ReadDir` and `Stat`
+  (compare and the planner's scan), and in Round 031 `Read` for network errors.
+- Rules, process-wide (the worker runs on its own thread, so not thread-local), each
+  matching a path fragment so parallel tests in their own temporary directories never
+  meet: `Fail { point, path, nth, error }` (an `io::Error` built from an `ErrorKind`,
+  `StorageFull` included, or a raw OS code: ENOSPC, EIO, ETIMEDOUT, ESTALE, ENOTCONN;
+  `from_raw_os_error` is safe), `Delay { point, path, by }` (network latency, Round
+  031), `Halt { point, path }` (writes a marker file and blocks, for kill tests), and
+  `Swap { point, path, with }` (B05: replaces the target at that moment).
+- A trace of `(Point, path)` per matching rule set, for order tests.
+- Compiled with `cfg(any(test, feature = "faults"))`; otherwise `at` is an inline
+  `Ok(())`. The `xdevcmd` crate enables the feature in its dev-dependencies, so the
+  binary the pty tests run has it (to confirm in step 0: dev-dependency features apply
+  to the test build's binary target under resolver 2), and parses `XDEVCMD_FAULTS` (for
+  example `fail:sync-data:b.txt:28`, `halt:remove-source:a.txt`). A test in `budgets.rs`
+  checks the release binary has no such string.
+
+**Real errors, without root**
+
+- **EFBIG** (Linux and macOS, every machine): a pty test starts xdevcmd through
+  `sh -c 'trap "" XFSZ; ulimit -f N; exec xdevcmd …'`. A write past N blocks fails with
+  EFBIG from the kernel instead of killing the process (the ignored SIGXFSZ survives
+  `exec`): the real error path through std, not the seam's. Checked here: `dd` under it
+  gets "File too large" and exits normally.
+- **ENOSPC** on CI: GitHub's Linux runners allow `sudo`, so a step mounts
+  `tmpfs -o size=4m` at `/mnt/xdev-small` and hands it to the runner user; macOS
+  attaches a RAM disk (`hdiutil attach -nomount ram://8192`, `diskutil erasevolume`).
+  `XDEVCMD_TEST_SMALL_FS` names it; tests skip without it. A user-namespace mount would
+  avoid `sudo`, but Ubuntu 24.04 restricts unprivileged namespaces; `sudo` on CI is
+  simpler and honest. `/dev/full` (Linux) gives ENOSPC on every write, for a writer unit
+  test that takes any `Write`.
+- **Permission denied**: `chmod 000` on Unix, skipped when running as root.
+
+**Across devices**
+
+- Linux: `/dev/shm` (tmpfs), already used by `other_device`; on CI also the small tmpfs.
+- macOS: the RAM disk. Windows: the runner's two volumes (`C:` temp, `D:` workspace),
+  named by `XDEVCMD_TEST_OTHER_DEV`. A test needing a second device skips without one,
+  and says so in its output.
+
+**Kills and power cuts**
+
+- **A kill at each phase** (pty, Unix): `Halt` at the point, wait for its marker, kill
+  the process with SIGKILL, start again, assert what the "Interrupted" dialog says and
+  what is on disk. Phases: mid-write of a new file; after the sync, before the rename of
+  a replace; after the journal's `moved` line, before the source is removed; between
+  rename many's two steps. Windows: the same through `windows_e2e.rs` where it can kill
+  (`TerminateProcess` via `taskkill /F`), else by hand.
+- **A power cut cannot be made in CI.** What is checked is the order (trace tests) and
+  the reasoning in the contract. A later candidate, not in beta.1: LazyFS (a FUSE file
+  system that drops unsynced data on command), runnable on GitHub's Linux runners with
+  `sudo`; noted for pillar 4.
+
+**Network** (Round 031)
+
+- The seam's `Delay` and `Fail` with ETIMEDOUT / ESTALE / ENOTCONN / EIO (Windows: 59,
+  64, 121) at `Read`/`Write`, n-th time then succeeding: the job pauses, asks, retries
+  with backoff, and carries on; a fake clock for the backoff and the ETA so no test
+  sleeps for seconds. A real mount stays a hand test (the owner's NAS over SMB and an
+  sshfs mount), with the checklist in Round 032.
+
+**Platforms**
+
+- CI runs everything on Linux x86_64 and ARM, macOS and Windows; the seam tests run on
+  all four. What only one platform can show: non-UTF-8 names (Linux; Windows with an
+  unpaired surrogate built by `OsString::from_wide`), case-insensitive clashes (macOS,
+  Windows), EFBIG (Linux, macOS), directory sync (Unix).
+- By hand, per pre-release (the checklist in Round 032): a USB stick (FAT32 and exFAT)
+  for the 4 GB check, the sync cost and case clashes; an SMB share for pause and retry;
+  pulling the stick mid-copy (the nearest thing to a power cut on a laptop).
+
+### Not doing (this round)
+
+- The Smart Planner itself (Round 030); undo for a copy, replace into the trash, network
+  pause and ETA, kept lists following a move (Round 031); the release plumbing (032).
+- The recovery contract as a document (A08's contract, pillar 3, rc.1): this round only
+  updates the facts in `docs/security.md`.
+- Syncing new files, group commit, resuming a file from its middle (v2, item 43).
+- `MoveFileEx(WRITE_THROUGH)` and a directory sync on Windows; closing
+  `rename_noreplace`'s check-then-rename fallback on FAT and Windows (contract).
+- Panelize's NUL mode (`find -print0`), 0.5. Pillar 2 (A06, A07, B08), beta.2.
+
+## Do
+
+## Check
+
+## Act

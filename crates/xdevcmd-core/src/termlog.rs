@@ -298,7 +298,7 @@ impl TextFilter {
             self.line.resize(self.col, ' ');
             self.line.push(c);
         }
-        self.col += 1;
+        self.col = self.col.saturating_add(1);
         if self.line.len() >= MAX_LINE {
             self.emit(out);
         }
@@ -354,15 +354,15 @@ impl TextFilter {
             b'K' => match n {
                 0 => self.line.truncate(self.col),
                 1 => {
-                    let upto = (self.col + 1).min(self.line.len());
+                    let upto = self.col.saturating_add(1).min(self.line.len());
                     for c in &mut self.line[..upto] {
                         *c = ' ';
                     }
                 }
                 _ => self.line.clear(),
             },
-            b'G' => self.col = (count - 1).min(MAX_LINE - 1),
-            b'C' => self.col = (self.col + count).min(MAX_LINE - 1),
+            b'G' => self.col = count.saturating_sub(1).min(MAX_LINE - 1),
+            b'C' => self.col = self.col.saturating_add(count).min(MAX_LINE - 1),
             b'D' => self.col = self.col.saturating_sub(count),
             _ => {}
         }
@@ -399,6 +399,21 @@ impl Shared {
                 *s = Status::Failed(why);
             }
         }
+    }
+}
+
+/// Set when the writer thread ends, by returning or by panicking.
+struct Ended<'a>(&'a Shared);
+
+impl Drop for Ended<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.fail("the log's writer stopped".into());
+        }
+        if let Ok(mut d) = self.0.done.lock() {
+            *d = true;
+        }
+        self.0.done_cv.notify_all();
     }
 }
 
@@ -440,11 +455,11 @@ impl Log {
         {
             let shared = shared.clone();
             std::thread::spawn(move || {
+                // Whether the loop returns or panics, the log is seen to end: a panic
+                // is a failure said as one, and `done` is set, so nothing waits on a
+                // writer that is gone.
+                let _ended = Ended(&shared);
                 write_loop(rx, sink, mode, &shared, &about.label);
-                if let Ok(mut d) = shared.done.lock() {
-                    *d = true;
-                }
-                shared.done_cv.notify_all();
             });
         }
         Arc::new(Log {
@@ -499,7 +514,9 @@ impl Log {
             match tx.try_send(item) {
                 Ok(()) => return true,
                 Err(TrySendError::Disconnected(_)) => {
-                    // The writer stopped (a failed write): it said why.
+                    // The writer stopped: it said why, unless it could not (then this
+                    // says it; a reason already given is kept).
+                    self.shared.fail("the log's writer stopped".into());
                     self.drop_sender();
                     return false;
                 }
@@ -743,6 +760,25 @@ mod tests {
         assert_eq!(lines.iter().map(|l| l.len()).sum::<usize>(), long.len());
     }
 
+    /// A count no terminal would send must not overflow the column (a panic in a debug
+    /// build, a wrap in release): the cursor stops at the line's bound.
+    #[test]
+    fn a_huge_cursor_count_is_bounded() {
+        let max = usize::MAX.to_string();
+        let input = format!("ab\x1b[{max}Cz\r\x1b[{max}Dy\x1b[{max}G\x1b[{max}K\n");
+        let got = text(&[input.as_bytes()]);
+        let lines: Vec<&str> = got.lines().collect();
+        // `z` lands on the last column, which fills the line and writes it.
+        assert!(
+            lines[0].starts_with("ab") && lines[0].ends_with('z'),
+            "{}",
+            lines[0].len()
+        );
+        assert_eq!(lines[0].chars().count(), MAX_LINE);
+        // Back to 0, `y`, to the last column, the line erased: an empty line.
+        assert_eq!(&lines[1..], [""]);
+    }
+
     #[test]
     fn a_full_screen_program_is_one_line() {
         let got = text(&[
@@ -923,6 +959,44 @@ mod tests {
         assert!(log
             .close(Duration::from_secs(1))
             .starts_with("log stopped: cannot write"));
+    }
+
+    /// A sink whose write panics, as a bug in the writer's path would.
+    struct Panics;
+    impl Write for Panics {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            panic!("a bug in the writer");
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A writer thread that panics is a failed log, said, not one left "running" with
+    /// nobody writing it: `done` is set, so closing does not wait out its bound.
+    #[test]
+    fn a_writer_that_panics_is_a_failed_log() {
+        let log = Log::start("x.log".into(), Mode::Raw, Box::new(Panics), about());
+        log.tap(&vec![b'x'; 128 * 1024]);
+        assert!(
+            log.wait(Duration::from_secs(5)),
+            "the writer is seen to end"
+        );
+        assert_eq!(
+            log.status(),
+            Status::Failed("the log's writer stopped".into())
+        );
+        assert!(!log.tap(b"more"));
+        let t = Instant::now();
+        let said = log.close(Duration::from_secs(2));
+        assert!(
+            t.elapsed() < Duration::from_secs(1),
+            "no wait for a dead writer"
+        );
+        assert!(
+            said.starts_with("log stopped: the log's writer stopped"),
+            "{said}"
+        );
     }
 
     /// A disk that does not answer until let go.

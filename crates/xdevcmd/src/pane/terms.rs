@@ -48,12 +48,27 @@ impl Tab {
         v
     }
 
+    /// What the tab bar shows for this tab's log, if it has one.
+    fn log_mark(&self) -> Option<LogMark> {
+        self.logged().map(|(_, l)| match l.status() {
+            termlog::Status::Failed(_) => LogMark::Failed,
+            _ => LogMark::Running,
+        })
+    }
+
     /// The shell in this tab whose output is being logged, and its log. One at most.
     fn logged(&self) -> Option<(PaneId, Arc<Log>)> {
         self.terms
             .iter()
             .find_map(|(id, t)| t.log().map(|l| (*id, l)))
     }
+}
+
+/// The mark on a logged tab: ● running, ! failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogMark {
+    Running,
+    Failed,
 }
 
 /// How long ending a log waits for its writer: a hung disk must not hang a close or
@@ -732,8 +747,7 @@ impl TermPanel {
                 (false, _) => Style::new().fg(th.fg_dim),
             };
             // ● while the tab is logged; ! in the error colour once its log failed.
-            let failed = |l: Arc<Log>| matches!(l.status(), termlog::Status::Failed(_));
-            let mark = tab.logged().map(|(_, l)| failed(l));
+            let mark = tab.log_mark().map(|m| m == LogMark::Failed);
             let label = match mark {
                 Some(_) => format!(" \u{2302} {} {}", i + 1, tab.label()),
                 None => format!(" \u{2302} {} {} ", i + 1, tab.label()),
@@ -793,5 +807,60 @@ impl TermPanel {
             }
         }
         self.rects = rects;
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// A sink whose write panics, as a bug in the writer's path would.
+    struct Panics;
+    impl std::io::Write for Panics {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            panic!("a bug in the writer");
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A log whose writer panics: said once on the status line, and the tab's ● turns
+    /// into the !, which stays until Stop logging.
+    #[test]
+    fn a_log_whose_writer_dies_is_said_once_and_marked() {
+        let dir = std::env::temp_dir();
+        let mut p = TermPanel::new(&dir, 10, 40, "sh", 100).expect("a shell");
+        let log = Log::start(
+            "x.log".into(),
+            termlog::Mode::Raw,
+            Box::new(Panics),
+            termlog::About { label: "sh".into() },
+        );
+        {
+            let tab = &p.tabs[0];
+            tab.terms[&tab.focus].set_log(log.clone());
+            assert_eq!(tab.log_mark(), Some(LogMark::Running));
+        }
+        log.tap(&vec![b'x'; 128 * 1024]);
+        assert!(log.wait(Duration::from_secs(5)));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let notes = loop {
+            let n = p.take_notes();
+            if !n.is_empty() || Instant::now() > deadline {
+                break n;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(
+            notes,
+            ["log stopped: the log's writer stopped \u{2014} x.log"]
+        );
+        assert!(p.take_notes().is_empty(), "said once");
+        assert_eq!(p.tabs[0].log_mark(), Some(LogMark::Failed));
+        let said = p.stop_log(0).expect("a log to stop");
+        assert!(said.starts_with("log stopped"), "{said}");
+        assert_eq!(p.tabs[0].log_mark(), None);
     }
 }

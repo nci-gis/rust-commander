@@ -1,6 +1,6 @@
 # Round 024: F1 Commands, the command palette (v0.4.0, step 1, item 38)
 
-**Status**: In Progress (the owner's go, 2026-11-12: "can go")
+**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
 **Part of**: v0.4.0, step 1 of `ROADMAP.md` ("Next"); item 38, design C as decided by
 the owner on 2026-11-12 (ROADMAP, "Notes on the items → 38 F1 Commands")
 **Date started**: 2026-11-12
@@ -477,6 +477,8 @@ objects**, and nothing waits on them.
     render, 99 pty, 183 core: all pass); the pty suite 3 more times, clean.
 
 - 2026-11-12, **CI's ARM runner failed the ranking budget in debug** (7.3 ms against 5 ms, run 43212193039; x86_64, Windows and macOS green). The work is fine: 0.28 ms in release on x86_64. The test keeps 5 ms for a release build and allows 50 ms in debug, where CI runs it on shared machines. Renamed `ranking_two_thousand_rows_takes_under_a_frame`.
+
+- 2026-11-12, **set aside at Review**: steps 1–6 and every review and QA finding done; CI green on all six jobs (run 43213754246). The owner's hand tests next; Round 025 (xdevtheme-light) starts from it.
 
 ## Check
 

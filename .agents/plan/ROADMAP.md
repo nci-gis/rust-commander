@@ -184,7 +184,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 35 | Log a terminal tab to a file | S | — | v0.4.0, step 4 |
 | 36 | Stable-quality pass (the release bar) | M | [022](cycles/Round_022.md) (part 1) | part 1 Review; part 2 v0.4.0, step 6 |
 | 37 | xdevtheme: the default look, Neon and Glass; **xdevtheme-light** | S | (memory) | part 1 done; light v0.4.0, step 2 |
-| 38 | F1 Commands: the command palette | M | [024](cycles/Round_024.md) | in progress (v0.4.0, step 1) |
+| 38 | F1 Commands: the command palette | M | [024](cycles/Round_024.md) | Review (v0.4.0) |
 | 39 | which-key for prefix groups (Alt+X, Alt+R) | S | — | v0.4.0 if a day is spare, else 0.5 |
 | 40 | Documentation from the app: versioned link, `docs/README.md`, docs in the archives | S | — | v0.4.0, step 3 |
 | 41 | Useful commands (readiness) | M | — | 0.5 |

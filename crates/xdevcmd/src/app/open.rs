@@ -383,7 +383,7 @@ impl App {
         let menu = &self.settings.config.menu;
         if menu.is_empty() {
             self.status =
-                "no commands yet \u{2014} add [[menu]] entries to config.toml (F1, Settings)"
+                "no commands yet \u{2014} add [[menu]] entries to config.toml (Help \u{203a} Config in use shows it)"
                     .into();
             return;
         }

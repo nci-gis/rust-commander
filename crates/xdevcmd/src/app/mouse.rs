@@ -774,11 +774,7 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
-            Some(Modal::Help(h)) => {
-                if matches!(h.on_mouse(m), viewer::Action::Close) {
-                    act = ModalAct::Close;
-                }
-            }
+            Some(Modal::Config(c)) => c.on_mouse(m),
             Some(Modal::Commands(c)) => {
                 act = match c.on_mouse(m) {
                     commands::Outcome::Stay => ModalAct::None,

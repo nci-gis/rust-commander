@@ -668,8 +668,8 @@ impl App {
             Cmd::ThemeMenu => self.theme_menu(),
             Cmd::Commands => self.open_commands(commands::Size::Large, true),
             Cmd::ConfigInUse => {
-                let help = Help::settings(&self.settings, &self.config_outcome);
-                self.modal = Some(Modal::Help(Box::new(help)));
+                let v = crate::config_view::ConfigView::new(&self.settings, &self.config_outcome);
+                self.modal = Some(Modal::Config(Box::new(v)));
             }
             Cmd::Settings => self.open_settings(),
             Cmd::Undo => self.undo(),

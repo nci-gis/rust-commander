@@ -17,7 +17,6 @@ use xdevcmd_core::format::{elide_middle, human_size};
 use xdevcmd_core::ops::{self, Answer, Question, Request, Summary};
 
 use crate::find_dialog::{self, FindDialog};
-use crate::help::Help;
 use crate::line_edit::LineEdit;
 use crate::menu::{Cmd, Menu};
 use crate::rename_dialog::{self, RenameDialog};
@@ -32,7 +31,8 @@ pub enum Modal {
     /// Takes the whole area rather than a centred box: a viewer that showed sixty
     /// columns of a log would be worse than no viewer.
     View(Box<Viewer>),
-    Help(Box<Help>),
+    /// Help → Config in use.
+    Config(Box<crate::config_view::ConfigView>),
     /// F1: every command, to find by typing and run.
     Commands(Box<crate::commands::Commands>),
     Menu(Menu),
@@ -486,7 +486,7 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut Modal) {
         Modal::Input(i) => render_input(frame, area, i),
         Modal::Job(j) => render_job(frame, area, j),
         Modal::View(v) => v.render(frame, area),
-        Modal::Help(h) => h.render(frame, area),
+        Modal::Config(c) => c.render(frame, area),
         Modal::Commands(c) => {
             // Over the viewer, the viewer stays on screen under it.
             if let Some(u) = c.under.as_mut() {

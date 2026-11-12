@@ -12,7 +12,7 @@ impl App {
             ))
         } else if let Outcome::Rejected { .. } = self.config_outcome {
             Some(
-                "config.toml has an error (F1 \u{203a} Settings says which): fix it by hand first"
+                "config.toml has an error (Help \u{203a} Config in use says which): fix it by hand first"
                     .into(),
             )
         } else {
@@ -52,7 +52,7 @@ impl App {
         // A config.toml that is a link (dotfiles managed with stow, chezmoi) is
         // written where it points, so the link stays a link. Through `paths::canonical`:
         // std's gives Windows' verbatim form (`\\?\C:\…`), which then showed in the
-        // status line and in F1's Settings page.
+        // status line and in Help → Config in use.
         let path = xdevcmd_core::paths::canonical(&path)
             .or_else(|_| {
                 // A link whose target does not exist yet (stow before the first save):

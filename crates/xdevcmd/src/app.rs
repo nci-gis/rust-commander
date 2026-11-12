@@ -31,7 +31,6 @@ use crate::bookmarks::{self, expand_tilde, tidy};
 use crate::commands;
 use crate::config::{Mode, Outcome, Settings};
 use crate::find_dialog::{self, FindDialog};
-use crate::help::Help;
 use crate::keys::Action;
 use crate::layout::{Axis, Divider, Node, PaneId};
 use crate::line_edit::LineEdit;

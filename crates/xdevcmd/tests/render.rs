@@ -1440,6 +1440,63 @@ fn alt_x_f1_opens_commands_from_the_shell_and_the_panes() {
     assert!(commands_box(&s).is_none() && s.contains("Usage"), "{s}");
 }
 
+/// The Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · ─ · About.
+#[test]
+fn the_help_menu_is_commands_config_in_use_usage_and_about() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "F9,Left", &a, &b);
+    let row = |label: &str| {
+        s.lines()
+            .find(|l| l.contains(label))
+            .unwrap_or_else(|| panic!("{label}\n{s}"))
+            .to_string()
+    };
+    assert!(row("Commands\u{2026}").contains("F1"), "{s}");
+    assert!(row("Usage").contains("Shift+F1"), "{s}");
+    let at = |label: &str| s.lines().position(|l| l.contains(label)).unwrap();
+    assert!(at("Commands\u{2026}") < at("Config in use"));
+    assert!(at("Config in use") < at("Usage"));
+    assert!(at("Usage") < at("About xdevcmd"));
+    assert!(!s.contains("Keys and settings"), "{s}");
+    // Commands… opens F1 at its large size.
+    let s = shot_keys("118x34", "F9,Left,Enter", &a, &b);
+    assert_eq!(commands_box(&s), Some((0, 118)), "{s}");
+}
+
+/// Config in use: the loaded file, a changed value marked, a filter that keeps the
+/// lines it matches under their section's name; Esc clears it, then closes.
+#[test]
+fn config_in_use_marks_changes_and_filters_to_a_section() {
+    let (a, b) = fixture();
+    let cfg = write_config(
+        a.parent().unwrap(),
+        "[viewer]\ntab_width = 8\n[keys]\ncopy = [\"F2\"]\n",
+    );
+    let open = "F9,Left,Down,Enter";
+    let s = shot_with(&cfg, &format!("{open},t,a,b,_,w"), &a, &b);
+    assert!(s.contains("\u{250c} Config in use"), "{s}");
+    assert!(s.contains("[viewer]"), "its section\n{s}");
+    assert!(s.contains("\u{2022} tab_width = 8"), "marked\n{s}");
+    assert!(!s.contains("[general]"), "other sections gone\n{s}");
+    // A section's name keeps the whole section: [keys], as written.
+    let s = shot_with(&cfg, &format!("{open},[,k,e,y,s,]"), &a, &b);
+    assert!(s.contains("copy = [\"F2\"]"), "{s}");
+    let s = shot_with(&cfg, &format!("{open},t,a,b,Esc"), &a, &b);
+    assert!(s.contains("[general]"), "cleared\n{s}");
+    let s = shot_with(&cfg, &format!("{open},t,a,b,Esc,Esc"), &a, &b);
+    assert!(!s.contains("\u{250c} Config in use"), "closed\n{s}");
+}
+
+/// A config with an error is IGNORED, and Config in use says so and why.
+#[test]
+fn config_in_use_says_a_rejected_file_was_ignored() {
+    let (a, b) = fixture();
+    let cfg = write_config(a.parent().unwrap(), "[files]\nsort = \"colour\"\n");
+    let s = shot_with(&cfg, "F9,Left,Down,Enter", &a, &b);
+    assert!(s.contains("IGNORED"), "{s}");
+    assert!(s.contains("sort"), "says why\n{s}");
+}
+
 // ── mouse ──────────────────────────────────────────────────────────────────────────
 //
 // Coordinates are found by locating text in a first screenshot rather than hardcoded,

@@ -411,6 +411,18 @@ objects**, and nothing waits on them.
     older copy test waits for its marks to clear; 3 clean full runs since.
   - Not done: Terminal.app sends nothing for Shift+F1, so Usage there is reached by
     F1 or Help → Usage, no longer by key; docs say so in step 6.
+- **2026-11-12, step 5: Config in use and the Help menu** (`help.rs` → `config_view.rs`,
+  `Modal::Config`, `app/settings.rs`, `app/open.rs`).
+  - `help.rs` is gone: its Settings page is `config_view.rs`, a window of its own over
+    the whole screen, read-only, with a filter (plain substring, case ignored) that
+    keeps matching lines under their section's heading; a matching `[section]` keeps
+    the whole section. Esc clears, then closes; ↑/↓, PageUp/PageDown, Home/End (empty
+    filter), the wheel. Enter does nothing (0.5).
+  - `[keys]` is shown now, as written (the old page left it out because the Keys tab
+    had it).
+  - Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · ─ · About.
+  - The two "F1 › Settings" messages and Shift+F9's "(F1, Settings)" now name
+    Help › Config in use.
 
 ## Check
 

@@ -63,8 +63,8 @@ impl App {
                 viewer::Action::MakeList(req, add) => return self.make_list(req, add),
                 viewer::Action::Stay => {}
             },
-            Some(Modal::Help(h)) => {
-                if matches!(h.on_key(k), viewer::Action::Close) {
+            Some(Modal::Config(c)) => {
+                if matches!(c.on_key(k), crate::config_view::Act::Close) {
                     act = ModalAct::Close;
                 }
             }

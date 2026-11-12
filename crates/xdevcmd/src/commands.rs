@@ -8,6 +8,8 @@
 
 use std::collections::HashSet;
 
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 use crate::config::MenuItem;
 use crate::keys::{self, Action, Keymap, Place};
 
@@ -726,16 +728,31 @@ pub struct Commands {
 }
 
 /// A string cut to `w` characters, with `…` where it was cut.
+/// Counted in columns, not characters: a CJK character takes two.
 fn cut(s: &str, w: usize) -> String {
-    if s.chars().count() <= w {
-        s.to_string()
-    } else if w == 0 {
-        String::new()
-    } else {
-        let mut out: String = s.chars().take(w - 1).collect();
-        out.push('\u{2026}');
-        out
+    if width(s) <= w {
+        return s.to_string();
     }
+    if w == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let cw = c.width().unwrap_or(0);
+        if used + cw > w - 1 {
+            break;
+        }
+        out.push(c);
+        used += cw;
+    }
+    out.push('\u{2026}');
+    out
+}
+
+/// Columns `s` takes on screen.
+fn width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
 }
 
 impl Commands {
@@ -1027,13 +1044,25 @@ impl Commands {
         )];
         let chars = self.edit.chars();
         let cur = self.edit.cursor();
+        // In columns: from the first character that still lets the cursor show.
         let room = usize::from(inner.width).saturating_sub(3);
-        let start = if cur >= room { cur + 1 - room } else { 0 };
-        for idx in start..(start + room) {
+        let cw = |c: char| c.width().unwrap_or(0);
+        let mut start = cur;
+        let mut used = 1; // the cursor's cell
+        while start > 0 && used + cw(chars[start - 1]) <= room {
+            start -= 1;
+            used += cw(chars[start]);
+        }
+        let mut used = 0;
+        for idx in start.. {
             let at_cursor = idx == cur;
             let Some(c) = chars.get(idx).copied().or(at_cursor.then_some(' ')) else {
                 break;
             };
+            used += cw(c).max(1);
+            if used > room {
+                break;
+            }
             let style = if at_cursor {
                 Style::new().fg(th.bg).bg(th.fg)
             } else {
@@ -1075,9 +1104,9 @@ impl Commands {
             Item::Row { row, tagged, .. } => {
                 let r = &self.rows[*row];
                 if *tagged {
-                    r.name.chars().count()
+                    width(&r.name)
                 } else {
-                    r.title.chars().count()
+                    width(&r.title)
                 }
             }
             _ => 0,
@@ -1087,7 +1116,7 @@ impl Commands {
             .items
             .iter()
             .filter_map(|it| match it {
-                Item::Row { row, .. } => Some(self.rows[*row].key_text.chars().count()),
+                Item::Row { row, .. } => Some(width(&self.rows[*row].key_text)),
                 _ => None,
             })
             .max()
@@ -1188,8 +1217,9 @@ impl Commands {
                     ];
                     let name = if *tagged { &r.name } else { &r.title };
                     let shown = cut(name, name_w);
-                    let cut_at = if shown.chars().count() < name.chars().count() {
-                        name_w.saturating_sub(1)
+                    // Cut: the `…` is not a matched letter.
+                    let cut_at = if shown != *name {
+                        shown.chars().count().saturating_sub(1)
                     } else {
                         usize::MAX
                     };
@@ -1204,7 +1234,7 @@ impl Commands {
                         };
                         spans.push(Span::styled(c.to_string(), st));
                     }
-                    let pad = name_w.saturating_sub(shown.chars().count());
+                    let pad = name_w.saturating_sub(width(&shown));
                     if key_w > 0 {
                         spans.push(Span::raw(" ".repeat(pad + 1)));
                         let k = cut(&r.key_text, key_w);
@@ -1213,7 +1243,7 @@ impl Commands {
                         } else {
                             Style::new().fg(th.fg).add_modifier(Modifier::BOLD)
                         };
-                        let kpad = key_w.saturating_sub(k.chars().count());
+                        let kpad = key_w.saturating_sub(width(&k));
                         spans.push(Span::styled(k, kst));
                         spans.push(Span::raw(" ".repeat(kpad)));
                     }
@@ -1248,10 +1278,10 @@ impl Commands {
         } else {
             Style::new().fg(th.fg_dim)
         };
-        let rw = right.chars().count();
+        let rw = width(&right);
         let room = usize::from(w).saturating_sub(if rw > 0 { rw + 3 } else { 1 });
         let left = cut(&format!(" {left}"), room);
-        let gap = usize::from(w).saturating_sub(left.chars().count() + rw + 1);
+        let gap = usize::from(w).saturating_sub(width(&left) + rw + 1);
         let mut spans = vec![Span::styled(left, st)];
         if rw > 0 && usize::from(w) > rw + 12 {
             spans.push(Span::raw(" ".repeat(gap)));
@@ -1291,8 +1321,8 @@ impl Commands {
         // mouse's) cut on its row: the sentence, whole.
         if let Some(r) = sel.map(|row| &self.rows[row]) {
             let shown = match self.items.get(self.sel.unwrap_or(0)) {
-                Some(Item::Row { tagged: true, .. }) => r.name.chars().count(),
-                _ => r.title.chars().count(),
+                Some(Item::Row { tagged: true, .. }) => width(&r.name),
+                _ => width(&r.title),
             };
             if r.about.is_empty() && shown > name_w {
                 return (r.title.clone(), grow.to_string());
@@ -1301,7 +1331,7 @@ impl Commands {
         // Narrow: the description has no column; or it was cut on its row.
         let cut_on_row = full
             .as_ref()
-            .is_some_and(|d| d.chars().count() > usize::from(w).saturating_sub(desc_x));
+            .is_some_and(|d| width(d) > usize::from(w).saturating_sub(desc_x));
         if let Some(d) = full.filter(|d| !d.is_empty() && (w < THREE_COLUMNS || cut_on_row)) {
             return (d, grow.to_string());
         }
@@ -1853,5 +1883,15 @@ mod tests {
         std::fs::write(&p, "recent = [\"copy\"]\n").unwrap();
         assert_eq!(load_recent_from(&p, &[]), ["copy"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cut_counts_columns_so_wide_characters_fit() {
+        // Six CJK characters are twelve columns: cut to seven, five fit with the `…`.
+        let c = cut("日本語のコマ", 7);
+        assert_eq!(c, "日本語\u{2026}");
+        assert!(width(&c) <= 7);
+        assert_eq!(cut("日本語", 6), "日本語");
+        assert_eq!(cut("copy", 3), "co\u{2026}");
     }
 }

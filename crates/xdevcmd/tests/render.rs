@@ -1410,6 +1410,36 @@ fn close_typed_in_the_viewers_f1_closes_no_pane() {
     );
 }
 
+/// A wide (CJK) name is cut by columns: its row ends at F1's border, as every row does.
+#[test]
+fn f1_cuts_wide_names_by_columns() {
+    let (a, b) = fixture();
+    let cfg = write_config(
+        a.parent().unwrap(),
+        "[[menu]]\nkey = \"j\"\nlabel = \"日本語のとても長いコマンドの名前です\"\ncommand = \"echo x\"\n",
+    );
+    // 60 columns: Name and Key; the name, 51 columns wide, has room for 39.
+    let out = isolated()
+        .arg("--config")
+        .arg(&cfg)
+        .arg("--screenshot=60x20")
+        .arg("--keys=F1,日,本")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .expect("xdevcmd should run");
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    let row = s
+        .lines()
+        .find(|l| l.contains("Your commands"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains('\u{2026}'), "cut\n{s}");
+    assert!(
+        row.contains("Shift+F9 j"),
+        "the key not pushed off the row\n{s}"
+    );
+}
+
 /// The commands run from F1 are kept beside the session, the last first, and come
 /// first in the small list next time (the owner's decision 4). Read-only modes write
 /// nothing.

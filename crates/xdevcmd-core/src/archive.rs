@@ -480,8 +480,13 @@ fn write_entry(
         if !free {
             // Synced, then renamed over the old file (ops::commit_replace).
             return crate::ops::commit_replace(file, &part, dst, || {
+                // The journal first, the look at the target last, right before the
+                // rename.
+                if !hooks.durable(dst) {
+                    return Ok(false);
+                }
                 hooks.recheck(dst)?;
-                Ok(hooks.durable(dst))
+                Ok(true)
             });
         }
         drop(file);
@@ -652,9 +657,12 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
                 let existing = dest.symlink_metadata().is_ok();
                 crate::ops::commit_replace(f, &part, dest, || {
                     if existing {
+                        if !hooks.durable(dest) {
+                            return Ok(false);
+                        }
                         hooks.recheck(dest)?;
                     }
-                    Ok(!existing || hooks.durable(dest))
+                    Ok(true)
                 })
             })
             .map(|_| ())

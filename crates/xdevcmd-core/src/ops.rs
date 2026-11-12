@@ -1131,7 +1131,9 @@ impl Worker {
                     // compares first, so a window of microseconds is left, not the
                     // whole copy.
                     return commit_replace(w, &target, dst, || {
-                        Ok(self.still_agreed(Some(src), dst) && self.durable(dst))
+                        // The journal first: its question can be open for minutes, and
+                        // the look at the target is the last thing before the rename.
+                        Ok(self.durable(dst) && self.still_agreed(Some(src), dst))
                     });
                 }
             }
@@ -1199,12 +1201,13 @@ impl Worker {
             appear_in_test(&dst);
             let r = if free {
                 crate::noreplace::rename_noreplace(src, &dst)
-            } else if !self.still_agreed(Some(src), &dst) {
-                // Changed since it was agreed to: back to the question.
-                self.approved = None;
-                continue;
             } else if !self.durable(&dst) {
                 return;
+            } else if !self.still_agreed(Some(src), &dst) {
+                // Changed since it was agreed to (or while the journal was asked
+                // about): back to the question.
+                self.approved = None;
+                continue;
             } else {
                 fs::rename(src, &dst)
             };
@@ -2725,6 +2728,47 @@ mod tests {
             1,
             "no temporary file left"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The re-check is the last thing before the rename: the journal's question can be
+    /// open for minutes, and a file replaced while it is was overwritten on a check made
+    /// before it. Asked again instead.
+    #[test]
+    fn a_file_replaced_while_the_journal_question_is_open_is_asked_about_again() {
+        journals();
+        let root = tmp("swap-during-nojournal");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("sq-a1.txt"), b"ours").unwrap();
+        fs::write(dst.join("sq-a1.txt"), b"seen").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            ".sq-a1.txt.xdevcmd-part",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let target = dst.join("sq-a1.txt");
+        let mut req = Request::copy(vec![root.join("sq-a1.txt")], dst.clone());
+        req.safe = true;
+        let (_, asked) = run_answering(req, |q| {
+            let q = format!("{q:?}");
+            if q.starts_with("NoJournal") {
+                // Another program replaces it while the question is open.
+                fs::remove_file(&target).unwrap();
+                fs::write(&target, b"replaced while asked, longer").unwrap();
+                Answer::Yes
+            } else if q.contains("changed: true") {
+                Answer::Skip
+            } else {
+                Answer::Yes
+            }
+        });
+        assert!(
+            asked.iter().any(|q| q.contains("changed: true")),
+            "{asked:?}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"replaced while asked, longer");
         fs::remove_dir_all(&root).unwrap();
     }
 

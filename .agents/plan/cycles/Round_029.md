@@ -888,6 +888,13 @@ root; CI is not).
   sync fails at its own handle: its source kept, its copy removed, the others moved;
   passed before too, through the old path: a guard, not a regression test). The whole
   core suite passes as root and as `nobody` (the `chmod 000` compare test ran there).
+- **2 The re-check ran before the journal step.** `durable` can wait minutes on the
+  `NoJournal` question; the rename then ran on a look taken before it. Now `durable`
+  first and `still_agreed` / `Hooks::recheck` last, right before `Rename`, in
+  `copy_bytes`, `move_into`, archive `write_entry` and `pack` (§4's order). Failing
+  first: `a_file_replaced_while_the_journal_question_is_open_is_asked_about_again`:
+  asked `Conflict`, `NoJournal` and nothing more; the file replaced while the question
+  was open was overwritten.
 
 ## Check
 

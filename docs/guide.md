@@ -255,4 +255,10 @@ panes (as often as you like; Enter when done), **Alt+J** opens the directory his
   from the default. Type to filter; a `[section]`'s name keeps the whole section.
 - **Shift+F1** shows what xdevcmd is using: memory, CPU, and whether memory keeps growing.
   It is in F1 and in the Help menu too, for terminals with no Shift+F1.
+- **Help → Documentation** says where the documentation for *your* version is: first
+  the copy in `docs/` beside xdevcmd, when you installed from a release archive (Enter
+  reads its index in the viewer), then the link to these pages at your version's tag
+  (C, or Enter when there is no copy, puts it on the clipboard). xdevcmd opens no
+  connection itself, so it never starts a browser. A build from source carries the
+  version of the last release until the next one, so its link is that release's docs.
 - **Shift+F9** runs your own commands. See [config.md](config.md#your-own-commands).

@@ -187,3 +187,40 @@ fn cargo_binstall_finds_the_archive_release_yml_makes() {
         );
     }
 }
+
+/// Every archive carries `docs/` beside the binary and `themes/` (Help → Documentation
+/// names it first), and its index, `docs/README.md`, lists every page.
+#[test]
+fn every_archive_carries_the_docs_beside_the_binary() {
+    let Ok(yml) = fs::read_to_string(top().join(".github/workflows/release.yml")) else {
+        eprintln!("no release.yml here; skipped");
+        return;
+    };
+    let package = yml
+        .split("- name: package")
+        .nth(1)
+        .and_then(|s| s.split("- uses:").next())
+        .expect("release.yml has a package step");
+    for line in [
+        "cp -r themes \"$name/\"",
+        "mkdir \"$name/docs\"",
+        "cp docs/*.md \"$name/docs/\"",
+    ] {
+        assert!(package.contains(line), "the package step lost: {line}");
+    }
+    // Before the archive is made, for both kinds of archive.
+    let docs_at = package.find("cp docs/*.md").unwrap();
+    assert!(docs_at < package.find("7z a").unwrap());
+    assert!(docs_at < package.find("tar czf").unwrap());
+
+    let index = fs::read_to_string(top().join("docs/README.md")).expect("docs/README.md");
+    for e in fs::read_dir(top().join("docs")).unwrap().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".md") && name != "README.md" {
+            assert!(
+                index.contains(&format!("]({name})")),
+                "docs/README.md does not list {name}"
+            );
+        }
+    }
+}

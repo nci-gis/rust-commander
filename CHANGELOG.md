@@ -21,6 +21,11 @@ that heading and starts a new, empty one here. -->
   viewer, F1 lists the viewer's keys and Esc gives it back.
 - **Help → Config in use**: the config in effect in its own read-only window, with a
   filter; what F1's Settings tab showed, `[keys]` included.
+- **Help → Documentation** (and a row in F1): the docs for the version you have. The
+  release archives now carry `docs/` beside the program, and the window names that copy
+  first (Enter reads it); then the link to `docs/` at your version's tag, not `main`,
+  which C copies. Nothing is opened: no network. `docs/README.md` gives the reading
+  order. F1's link to troubleshooting follows the version too.
 - **A slow directory no longer freezes the screen.** A directory that takes more than
   150 ms to read (a network mount, a sleeping disk, a huge folder) is read in the
   background: the pane keeps what it showed, a bar on its bottom edge names what is

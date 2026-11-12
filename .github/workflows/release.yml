@@ -94,6 +94,10 @@ jobs:
           cp LICENSE README.md THIRD-PARTY.md "$name/"
           # Example themes: read from themes/ beside the binary, so they work unpacked.
           cp -r themes "$name/"
+          # This version's documentation, for a machine without a browser or a network:
+          # Help → Documentation names docs/ beside the binary first.
+          mkdir "$name/docs"
+          cp docs/*.md "$name/docs/"
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             cp "target/${{ matrix.target }}/release/xdevcmd.exe" "$name/"
             7z a -tzip "$name.zip" "$name" > /dev/null

@@ -121,7 +121,7 @@ so **every `cargo release` before step 5 says `--no-publish`**.
    dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (x86_64
    glibc and static musl, ARM64 static musl), macOS (ARM and Intel) and Windows, and opens
    a **draft** release with the archives (each holding `LICENSE`, `README.md`,
-   `THIRD-PARTY.md` and the example `themes/`),
+   `THIRD-PARTY.md`, the example `themes/` and this version's `docs/`),
    `SHA256SUMS`, and that CHANGELOG section as its notes.
    Read it, then Publish.
 5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a

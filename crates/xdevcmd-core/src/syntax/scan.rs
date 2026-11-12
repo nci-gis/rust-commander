@@ -44,6 +44,8 @@ const CACHE: usize = 16_384;
 pub struct Checkpoints {
     states: Vec<(usize, State)>,
     done: bool,
+    /// The file changed while it was scanned: the checkpoints were dropped.
+    dropped: bool,
 }
 
 impl Default for Checkpoints {
@@ -51,6 +53,7 @@ impl Default for Checkpoints {
         Self {
             states: vec![(0, State::Normal)],
             done: false,
+            dropped: false,
         }
     }
 }
@@ -78,6 +81,11 @@ impl Checkpoints {
 
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
+    }
+
+    /// The file changed while it was scanned, so its checkpoints were dropped.
+    pub fn was_dropped(&self) -> bool {
+        self.dropped
     }
 
     /// The scan has ended: at the file's end, cancelled, or on an error.
@@ -190,6 +198,8 @@ pub struct Highlighter {
     cancel: Arc<AtomicBool>,
     /// The state at the start of lines lexed recently.
     cache: BTreeMap<usize, State>,
+    /// The scan's checkpoints were dropped, and the cache with them.
+    dropped_seen: bool,
     /// Lines lexed, for tests that count them.
     #[cfg(test)]
     lexed: usize,
@@ -203,9 +213,11 @@ impl Highlighter {
             store: Arc::new(Mutex::new(Checkpoints {
                 states: vec![(0, State::Normal)],
                 done: true,
+                dropped: false,
             })),
             cancel: Arc::new(AtomicBool::new(false)),
             cache: BTreeMap::new(),
+            dropped_seen: false,
             #[cfg(test)]
             lexed: 0,
         }
@@ -226,12 +238,26 @@ impl Highlighter {
     pub fn scan_file(&mut self, path: &Path, lines: usize) {
         // Not there any more: nothing to scan, and lines past the top stay plain.
         if let Ok(f) = std::fs::File::open(path) {
-            self.scan_from(f, lines);
+            let path = path.to_path_buf();
+            let before = stamp(&path);
+            self.scan_checked(f, lines, Box::new(move || stamp(&path) == before));
         }
     }
 
     /// Scan what `reader` gives, in the background.
-    pub fn scan_from(&mut self, mut reader: impl Read + Send + 'static, lines: usize) {
+    pub fn scan_from(&mut self, reader: impl Read + Send + 'static, lines: usize) {
+        self.scan_checked(reader, lines, Box::new(|| true));
+    }
+
+    /// [`Highlighter::scan_from`], and at the end `unchanged` says whether what was
+    /// read is still what is there; if not, the checkpoints are dropped (a file
+    /// rewritten while scanned is not coloured from states of its old contents).
+    fn scan_checked(
+        &mut self,
+        mut reader: impl Read + Send + 'static,
+        lines: usize,
+        unchanged: Box<dyn Fn() -> bool + Send>,
+    ) {
         let store = Arc::new(Mutex::new(Checkpoints::default()));
         self.store = Arc::clone(&store);
         self.cache.clear();
@@ -241,7 +267,7 @@ impl Highlighter {
             .name("syntax".into())
             .spawn(move || {
                 let _done = DoneOnDrop(Arc::clone(&store));
-                let mut scan = Scan::new(lang, lines, store);
+                let mut scan = Scan::new(lang, lines, Arc::clone(&store));
                 let mut buf = vec![0u8; 1 << 20];
                 while !cancel.load(Ordering::Relaxed) {
                     match reader.read(&mut buf) {
@@ -256,6 +282,12 @@ impl Highlighter {
                     }
                 }
                 scan.finish();
+                if !unchanged() {
+                    if let Ok(mut s) = store.lock() {
+                        s.states.truncate(1);
+                        s.dropped = true;
+                    }
+                }
             });
         if spawned.is_err() {
             if let Ok(mut s) = self.store.lock() {
@@ -290,7 +322,14 @@ impl Highlighter {
         }
         let (mut at, mut state) = {
             let cached = self.cache.range(..=i).next_back().map(|(&l, &s)| (l, s));
-            let checkpoint = self.store.lock().ok().map(|s| s.before(i));
+            let checkpoint = self.store.lock().ok().map(|s| {
+                if s.dropped && !self.dropped_seen {
+                    // States lexed from the dropped checkpoints go with them.
+                    self.dropped_seen = true;
+                    self.cache.clear();
+                }
+                s.before(i)
+            });
             match (cached, checkpoint) {
                 (Some(c), Some(k)) => {
                     if c.0 >= k.0 {
@@ -344,6 +383,12 @@ impl Highlighter {
         }
         self.cache.insert(line, state);
     }
+}
+
+/// What tells a file has changed: its length and when it was last written.
+fn stamp(path: &Path) -> Option<(u64, Option<std::time::SystemTime>)> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.len(), m.modified().ok()))
 }
 
 impl Drop for Highlighter {
@@ -558,6 +603,38 @@ mod tests {
             h.spans(&mut doc, i);
         }
         assert_eq!(h.lexed, 50, "the second frame lexed nothing");
+    }
+
+    /// A file rewritten while it was scanned: its checkpoints are dropped at the end,
+    /// and lines far from the top are plain rather than coloured from the old text.
+    #[test]
+    fn a_file_changed_while_scanned_loses_its_checkpoints() {
+        let mut f = String::new();
+        for _ in 0..3000 {
+            f.push_str("int x; /* c */\n");
+        }
+        let path = temp("changed.c", f.as_bytes());
+        let mut doc = Document::open(&path).unwrap();
+        let mut h = Highlighter::new(Lang::C);
+        h.scan_checked(
+            std::fs::File::open(&path).unwrap(),
+            doc.line_count(),
+            Box::new(|| false),
+        );
+        wait(&h);
+        let store = h.checkpoints();
+        assert!(store.lock().unwrap().was_dropped());
+        assert_eq!(h.progress().0, 1, "line 0's only");
+        assert_eq!(h.spans(&mut doc, 2900), None);
+        // The real check: a different length or time is a change.
+        let before = stamp(&path);
+        std::fs::write(&path, "int y;\n").unwrap();
+        assert_ne!(stamp(&path), before);
+        // Unchanged, they are kept.
+        let mut h = Highlighter::new(Lang::C);
+        h.scan_file(&path, 1);
+        wait(&h);
+        assert!(!h.checkpoints().lock().unwrap().was_dropped());
     }
 
     #[test]

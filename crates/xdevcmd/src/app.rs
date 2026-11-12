@@ -592,7 +592,11 @@ impl App {
         let notice = outcome.message().or_else(|| settings.theme_note.clone());
         let settings_height = settings.config.terminal.height_percent;
         let theme_name = settings.theme_name.clone();
-        let recent_commands = commands::load_recent(&settings.config.menu);
+        let recent_commands = if settings.config.general.restore_session {
+            commands::load_recent(&settings.config.menu)
+        } else {
+            Vec::new()
+        };
         let mut panes = BTreeMap::new();
         panes.insert(
             0,

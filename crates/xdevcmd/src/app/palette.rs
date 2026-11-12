@@ -107,8 +107,9 @@ impl App {
             self.status = format!("Next time: {h}");
         }
         commands::remember(&mut self.recent_commands, &id);
-        // Read-only modes write nothing, this included; the list lives for the session.
-        if !self.settings.mode.read_only() {
+        // Read-only modes write nothing, this included, and `restore_session = false`
+        // keeps nothing between runs, as the session; the list lives for this one.
+        if !self.settings.mode.read_only() && self.settings.config.general.restore_session {
             let _ = commands::save_recent(&self.recent_commands);
         }
     }

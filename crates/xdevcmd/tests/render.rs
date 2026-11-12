@@ -1448,6 +1448,15 @@ fn f1_remembers_recent_commands_across_restarts() {
     run(&["--read-only"], "F1,s,o,r,t,Space,b,y,Space,n,a,m,e,Enter");
     let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
     assert!(!kept.contains("sort_name"), "{kept}");
+    // `restore_session = false` keeps nothing between runs: not written, not read.
+    let cfg = write_config(a.parent().unwrap(), "[general]\nrestore_session = false\n");
+    let flags = ["--config", cfg.to_str().unwrap()];
+    run(&flags, "F1,s,o,r,t,Space,b,y,Space,n,a,m,e,Enter");
+    let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
+    assert!(!kept.contains("sort_name"), "not written\n{kept}");
+    let s = run(&flags, "F1");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(!first.contains("Sort by"), "not read\n{s}");
 }
 
 /// `help` keeps F1: a `[keys] help` without it is refused, and `--check-config` says

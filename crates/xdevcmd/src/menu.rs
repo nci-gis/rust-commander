@@ -46,6 +46,12 @@ pub enum Cmd {
     ApplyRule(usize, PathBuf),
     /// A checked plan from Shift+F2: each file and its new path.
     BatchRename(Vec<(PathBuf, PathBuf)>),
+    /// The same without safe operations' journal, which could not be written: the user
+    /// said rename anyway. `undoing`: the plan is an undo of the last rename.
+    BatchRenameAnyway {
+        moves: Vec<(PathBuf, PathBuf)>,
+        undoing: bool,
+    },
     /// Entry `n` of `[[menu]]`.
     UserCommand(usize),
     /// Put this text on the clipboard (OSC 52).

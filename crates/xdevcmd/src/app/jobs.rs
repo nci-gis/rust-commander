@@ -352,6 +352,77 @@ impl App {
         }));
     }
 
+    /// Rename many: `moves`, with safe operations' journal when `safe`. `None` when its
+    /// journal could not be written: nothing was renamed, and a dialog says why and
+    /// offers to rename without it (`undoing`: this is an undo).
+    fn rename_many(
+        &mut self,
+        moves: Vec<(PathBuf, PathBuf)>,
+        safe: bool,
+        undoing: bool,
+    ) -> Option<xdevcmd_core::batch_rename::Outcome> {
+        let out = xdevcmd_core::batch_rename::apply(&moves, safe);
+        let Some(why) = out.no_journal else {
+            self.reload_all();
+            return Some(out);
+        };
+        self.status = "nothing renamed: safe operations cannot write their journal".into();
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Rename many".into(),
+            body: vec![
+                "Nothing was renamed: safe operations cannot write their journal".into(),
+                format!("({why})."),
+                String::new(),
+                "Rename many first moves every file to a temporary name. Without the".into(),
+                "journal, a kill or a power cut between its two steps leaves them under".into(),
+                "those names, and the next start cannot put them back.".into(),
+            ],
+            danger: true,
+            yes: Some((
+                "rename anyway".into(),
+                Cmd::BatchRenameAnyway { moves, undoing },
+            )),
+            buttons: Vec::new(),
+            also: None,
+            footnote: None,
+            pictures: Vec::new(),
+        }));
+        None
+    }
+
+    /// Shift+F2's plan, carried out; it becomes the one step undo takes back.
+    pub(super) fn batch_rename(&mut self, moves: Vec<(PathBuf, PathBuf)>, safe: bool) {
+        let Some(out) = self.rename_many(moves.clone(), safe, false) else {
+            return;
+        };
+        self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves));
+        self.status = match (out.renamed, out.errors.first()) {
+            (n, None) => format!("renamed {n}"),
+            (n, Some(e)) => format!("renamed {n}, {} failed \u{2014} {e}", out.errors.len()),
+        };
+    }
+
+    /// Undo of a rename many: the names put back.
+    pub(super) fn undo_rename(&mut self, moves: Vec<(PathBuf, PathBuf)>, safe: bool) {
+        let what = self
+            .last_undo
+            .as_ref()
+            .map(|u| u.describe())
+            .unwrap_or_else(|| "rename".into());
+        let Some(out) = self.rename_many(moves, safe, true) else {
+            return;
+        };
+        self.status = match out.errors.first() {
+            None => format!("undone: {what}"),
+            Some(e) => format!(
+                "undo: {} renamed back, {} failed \u{2014} {e}",
+                out.renamed,
+                out.errors.len()
+            ),
+        };
+        self.last_undo = None;
+    }
+
     /// Carry out the undo, checking the disk once more.
     pub(super) fn undo(&mut self) {
         use xdevcmd_core::undo::Plan;
@@ -367,15 +438,8 @@ impl App {
         };
         match plan {
             Plan::Rename(moves) => {
-                let out = xdevcmd_core::batch_rename::apply(&moves, xdevcmd_core::ops::safe());
-                self.status = match out.errors.first() {
-                    None => format!("undone: {}", u.describe()),
-                    Some(e) => format!(
-                        "undo: {} renamed back, {} failed \u{2014} {e}",
-                        out.renamed,
-                        out.errors.len()
-                    ),
-                };
+                self.undo_rename(moves, xdevcmd_core::ops::safe());
+                return;
             }
             Plan::Move { back, into } => {
                 let request = Request::mv(back, into);

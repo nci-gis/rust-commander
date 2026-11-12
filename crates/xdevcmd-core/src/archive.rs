@@ -287,6 +287,11 @@ pub trait Hooks {
     /// A temporary file is about to be made (`made`), or is gone: for safe
     /// operations' journal.
     fn part(&mut self, _p: &Path, _made: bool) {}
+    /// About to replace `dst`, which cannot be undone: `false` stops here (the journal
+    /// cannot be written and the user said stop).
+    fn durable(&mut self, _dst: &Path) -> bool {
+        true
+    }
 }
 
 /// Where `rel` goes under `dest`, refusing a path whose existing directories include a
@@ -475,6 +480,8 @@ fn write_entry(
                     e
                 }
             })?;
+        } else if !hooks.durable(dst) {
+            return Ok(false);
         } else {
             fs::rename(&part, dst)?;
         }
@@ -625,6 +632,10 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
     hooks.part(&part, true);
     let result = write_archive(fmt, &part, &files, hooks);
     let out = match result {
+        Ok(true) if dest.symlink_metadata().is_ok() && !hooks.durable(dest) => {
+            let _ = fs::remove_file(&part);
+            Ok(())
+        }
         Ok(true) => fs::rename(&part, dest),
         Ok(false) => {
             let _ = fs::remove_file(&part);

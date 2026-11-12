@@ -291,6 +291,11 @@ pub fn options(q: &Question) -> Vec<(&'static str, &'static str, Answer)> {
             ("S", "skip", Answer::Skip),
             ("Esc", "abort", Answer::Abort),
         ],
+        // Stop first: it is the safe answer, and the one Esc gives.
+        Question::NoJournal { .. } => vec![
+            ("S", "stop", Answer::Abort),
+            ("C", "continue without the journal", Answer::Yes),
+        ],
     }
 }
 
@@ -343,6 +348,16 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
         Question::Failed { path, error } => (
             "Failed".to_string(),
             vec![path.display().to_string(), String::new(), error.clone()],
+        ),
+        Question::NoJournal { error } => (
+            "Safe operations: no journal".to_string(),
+            vec![
+                "Safe operations cannot write their journal (disk full?):".to_string(),
+                error.clone(),
+                String::new(),
+                "Without it, a kill or a power cut from now on cannot be tidied up".to_string(),
+                "or resumed at the next start. Stop leaves everything as it is now.".to_string(),
+            ],
         ),
     }
 }
@@ -802,7 +817,7 @@ fn render_question(frame: &mut Frame, area: Rect, q: &Question) -> Vec<(Answer, 
     let opts = options(q);
     let danger = matches!(
         q,
-        Question::TrashUnavailable { .. } | Question::Failed { .. }
+        Question::TrashUnavailable { .. } | Question::Failed { .. } | Question::NoJournal { .. }
     );
     let accent = if danger { th.err } else { th.mark };
 

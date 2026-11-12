@@ -623,6 +623,7 @@ impl App {
             | Cmd::RemoveBookmark(_)
             | Cmd::OpenFile(_)
             | Cmd::BatchRename(_)
+            | Cmd::BatchRenameAnyway { .. }
             | Cmd::Sync(_)
                 if self.settings.mode.read_only() =>
             {
@@ -798,17 +799,15 @@ impl App {
                     None => "nothing to save".into(),
                 };
             }
-            Cmd::BatchRename(moves) => {
-                let out = xdevcmd_core::batch_rename::apply(&moves, xdevcmd_core::ops::safe());
-                self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves.clone()));
-                self.reload_all();
-                self.status = match (out.renamed, out.errors.first()) {
-                    (n, None) => format!("renamed {n}"),
-                    (n, Some(e)) => {
-                        format!("renamed {n}, {} failed \u{2014} {e}", out.errors.len())
-                    }
-                };
-            }
+            Cmd::BatchRename(moves) => self.batch_rename(moves, xdevcmd_core::ops::safe()),
+            Cmd::BatchRenameAnyway {
+                moves,
+                undoing: false,
+            } => self.batch_rename(moves, false),
+            Cmd::BatchRenameAnyway {
+                moves,
+                undoing: true,
+            } => self.undo_rename(moves, false),
             Cmd::Transfer {
                 kind,
                 sources,

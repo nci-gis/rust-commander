@@ -195,6 +195,10 @@ pub enum Question {
     TrashUnavailable { path: PathBuf, reason: String },
     /// Something went wrong and the user decides whether it is fatal.
     Failed { path: PathBuf, error: String },
+    /// Safe operations' journal cannot be written (`error`): at the start, or before a
+    /// step that cannot be undone. [`Answer::Yes`] goes on without it for the rest of the
+    /// job; anything else stops the job there. Asked once per job.
+    NoJournal { error: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -400,18 +404,19 @@ impl Worker {
             match crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash)
             {
                 Some(Ok(j)) => self.journal = Some(j),
-                // The job runs all the same, as it would with safe operations off: but
-                // the summary says so, once, rather than leave the user believing a kill
-                // now would be tidied up.
-                Some(Err(e)) => self.sum.journal_off = Some(e.to_string()),
+                // Asked before anything is done (the owner's decision, Round 029): go on
+                // as with safe operations off, said in the summary, or stop now.
+                Some(Err(e)) if !self.go_without_journal(e.to_string()) => {
+                    self.finish();
+                    return;
+                }
+                Some(Err(_)) => {}
                 None => {}
             }
         }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
-            self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
-            self.sum.bytes = self.bytes_done;
-            let _ = self.tx.send(Event::Done(self.sum.clone()));
+            self.finish();
             return;
         }
         match req.existing {
@@ -445,9 +450,7 @@ impl Worker {
                 }
                 self.copy_into(src, into, None);
             }
-            self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
-            self.sum.bytes = self.bytes_done;
-            let _ = self.tx.send(Event::Done(self.sum.clone()));
+            self.finish();
             return;
         }
         let (files, bytes) = scan(&req.sources);
@@ -474,13 +477,51 @@ impl Worker {
             }
         }
 
-        self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
-        self.sum.bytes = self.bytes_done;
-        let _ = self.tx.send(Event::Done(self.sum.clone()));
+        self.finish();
     }
 
     fn stopped(&self) -> bool {
         self.abort || self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// The job is over: say how it went. A journal that broke on a line no step needed
+    /// synced (a new file's) is said here, since nobody was asked about it.
+    fn finish(&mut self) {
+        self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
+        self.sum.bytes = self.bytes_done;
+        if let Some(why) = self.journal.as_ref().and_then(|j| j.broken()) {
+            self.sum.journal_off = Some(format!("its journal failed: {why}"));
+        }
+        let _ = self.tx.send(Event::Done(self.sum.clone()));
+    }
+
+    /// Before a step that cannot be undone, about `about`: the journal's lines are on
+    /// disk. A journal that cannot be (now or before) is asked about, once: go on
+    /// without it, or stop here (`false`; the job ends).
+    fn durable(&mut self, about: &Path) -> bool {
+        let Some(j) = self.journal.as_mut() else {
+            return true;
+        };
+        let Err(e) = j.commit(about) else {
+            return true;
+        };
+        self.go_without_journal(e.to_string())
+    }
+
+    /// Ask whether to go on without the journal, which cannot be written (`why`). Its
+    /// file goes either way: half a journal is not one.
+    fn go_without_journal(&mut self, why: String) -> bool {
+        self.journal = None;
+        match self.ask(Question::NoJournal { error: why.clone() }) {
+            Answer::Yes | Answer::YesToAll => {
+                self.sum.journal_off = Some(why);
+                true
+            }
+            _ => {
+                self.abort = true;
+                false
+            }
+        }
     }
 
     /// Extract or pack, through `archive.rs`, with this worker answering its hooks so
@@ -698,6 +739,9 @@ impl Worker {
     /// of done items went up). A skipped or failed copy leaves it.
     fn moved(&mut self, src: &Path, done_before: u64) {
         if self.moving && self.sum.done > done_before {
+            if !self.durable(src) {
+                return;
+            }
             if let Err(e) = fs::remove_file(src) {
                 self.note_error(src, &e);
             }
@@ -712,6 +756,9 @@ impl Worker {
                     if !self.abort {
                         self.sum.skipped += 1;
                     }
+                    return;
+                }
+                if dst.symlink_metadata().is_ok() && !self.durable(dst) {
                     return;
                 }
                 let _ = fs::remove_file(dst);
@@ -801,7 +848,8 @@ impl Worker {
         writing_in_test(&target);
         if !in_place {
             if let Some(j) = self.journal.as_mut() {
-                j.part(&target);
+                // A failure breaks the journal; asked about before a step that needs it.
+                let _ = j.part(&target);
             }
         }
         let mut w = fs::OpenOptions::new()
@@ -824,6 +872,8 @@ impl Worker {
                     // Taken only if still free: a file that appeared meanwhile is asked
                     // about (the caller goes round again on AlreadyExists).
                     crate::noreplace::rename_noreplace(&target, dst).map(|()| true)
+                } else if !self.durable(dst) {
+                    Ok(false)
                 } else {
                     fs::rename(&target, dst).map(|()| true)
                 }
@@ -892,6 +942,8 @@ impl Worker {
             appear_in_test(&dst);
             let r = if free {
                 crate::noreplace::rename_noreplace(src, &dst)
+            } else if !self.durable(&dst) {
+                return;
             } else {
                 fs::rename(src, &dst)
             };
@@ -1007,8 +1059,11 @@ impl crate::archive::Hooks for Worker {
         // Only what is made is written down: a later start removes only what is
         // still there.
         if let Some(j) = self.journal.as_mut().filter(|_| made) {
-            j.part(p);
+            let _ = j.part(p);
         }
+    }
+    fn durable(&mut self, dst: &Path) -> bool {
+        Worker::durable(self, dst)
     }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
@@ -1730,6 +1785,111 @@ mod tests {
             "no temporary file left"
         );
         fs::remove_dir_all(&small).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Journals for these tests, in a directory of their own (set once per test run).
+    fn journals() {
+        crate::journal::init(
+            std::env::temp_dir().join(format!("xdevcmd-test-journals-{}", std::process::id())),
+        );
+    }
+
+    /// The journal's line for a replacement cannot be written (disk full, say): the
+    /// replacement is not made until the user says go on without it, and Stop keeps the
+    /// old file. Before Round 029 the line's error was dropped and the file replaced.
+    #[test]
+    fn a_journal_that_fails_before_a_replace_is_asked_about_and_stop_keeps_the_old_file() {
+        journals();
+        let root = tmp("journal-line");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("jl-a1.txt"), b"new").unwrap();
+        fs::write(dst.join("jl-a1.txt"), b"old").unwrap();
+        // The line naming the temporary file's directory, written as the copy starts.
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            ".jl-a1.txt.xdevcmd-part",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("jl-a1.txt")], dst.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |q| match q {
+            Question::Conflict { .. } => Answer::Yes,
+            _ => Answer::Abort,
+        });
+        assert!(
+            asked.iter().any(|q| q.starts_with("NoJournal")),
+            "asked before replacing: {asked:?}"
+        );
+        assert_eq!(fs::read(dst.join("jl-a1.txt")).unwrap(), b"old", "{s:?}");
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        // Go on without it: replaced, and the summary says the job ran without one.
+        drop(_f);
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            ".jl-a1.txt.xdevcmd-part",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("jl-a1.txt")], dst.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |_| Answer::Yes);
+        let asked_once = asked.iter().filter(|q| q.starts_with("NoJournal")).count();
+        assert_eq!(asked_once, 1, "{asked:?}");
+        assert_eq!(fs::read(dst.join("jl-a1.txt")).unwrap(), b"new");
+        assert!(
+            s.describe(Kind::Copy).contains("safe operations off"),
+            "{s:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The journal cannot be begun: asked before anything is done. Stop does nothing;
+    /// go on copies and says it ran without one. Before Round 029 nothing was asked and
+    /// only the summary said so, once the job was over.
+    #[test]
+    fn a_journal_that_cannot_be_begun_is_asked_about_before_anything_is_done() {
+        journals();
+        let root = tmp("journal-begin");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("a"), b"a").unwrap();
+        let frag = root.to_string_lossy().into_owned();
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalBegin,
+            &frag,
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("a")], dst.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |_| Answer::Abort);
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].starts_with("NoJournal"), "{asked:?}");
+        assert!(!dst.join("a").exists(), "stopped before anything: {s:?}");
+        assert!(s.cancelled);
+        drop(_f);
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalBegin,
+            &frag,
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("a")], dst.clone());
+        req.safe = true;
+        let (s, _) = run_answering(req, |_| Answer::Yes);
+        assert_eq!(fs::read(dst.join("a")).unwrap(), b"a");
+        assert!(
+            s.describe(Kind::Copy)
+                .contains("safe operations off for this job"),
+            "{s:?}"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

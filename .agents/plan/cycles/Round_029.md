@@ -539,6 +539,50 @@ the fix, kept here because the commit carries test and fix together.
   place works; checked here with a 4 MiB tmpfs mounted by hand, and skipped without it).
 - Nothing to fail first in this step: it adds the seam, no fix.
 
+### 2026-11-13, step 1: B04, a journal that is durable and says when it fails
+
+- `journal.rs`: `line`, `part`, `renamed`, `unrenamed` return `io::Result`; new
+  `commit(about)` syncs the lines written since the last one (`sync_data`), nothing if
+  none; a failed line or sync sets `broken` and every later call fails (`broken()` says
+  why). `begin_in` passes `JournalBegin`, writes a `v 2` line after `host`, then syncs
+  the file and (Unix) its directory before returning; any failure there drops the
+  half-made journal (its `Drop` removes the file). Module comment rewritten: "flushed,
+  not synced" is no longer the rule.
+- `ops.rs`: `Question::NoJournal { error }`; `Worker::go_without_journal` asks it once
+  (Yes goes on and fills `journal_off`; anything else stops, `abort`), and drops the
+  journal file either way. Asked at the start when `begin` fails (decision 2) and, through
+  `Worker::durable(about)` (= `commit`), before each step that cannot be undone: the
+  rename that replaces in `copy_bytes`, a link replaced in `copy_symlink`, the same-device
+  `fs::rename` over an approved destination in `move_into`, the source removal in `moved`,
+  and archive extract/pack replacing (new `archive::Hooks::durable`). A `part` line that
+  fails breaks the journal without a question (a new file is not irreversible); the
+  summary then says "its journal failed: …" (`Worker::finish`, now the one place a job
+  ends).
+- `batch_rename::apply` → `apply_with(moves, Option<io::Result<Journal>>)`: every `ren`
+  line written and **one commit** before the first file moves; `begin`, a line or that
+  sync failing → nothing renamed, `Outcome::no_journal`. `unren` failures ignored (tidy
+  skips a temporary name that is gone). The journal now names the files as its sources.
+- App: the job box draws `NoJournal` ("Safe operations: no journal", **S** stop / Esc,
+  **C** continue without the journal; red, like Failed). Rename many and its undo go
+  through `App::rename_many`: on `no_journal` a dialog says nothing was renamed and why,
+  with **rename anyway** (`Cmd::BatchRenameAnyway { moves, undoing }`, refused in
+  read-only like `BatchRename`).
+- Failing first (each run against the step-0 commit in a worktree, tests compiled there
+  unchanged by asserting on `{:?}` text):
+  - (a) `a_journal_that_fails_before_a_replace_is_asked_about_and_stop_keeps_the_old_file`:
+    asked only `Conflict`, no `NoJournal`; the file was replaced.
+  - (b) `rename_many_whose_journal_cannot_be_begun_renames_nothing_and_says_why`:
+    `Outcome { renamed: 2, errors: [] }`.
+  - (c) `a_journal_that_cannot_be_begun_is_asked_about_before_anything_is_done`: nothing
+    asked (`[]`), the file copied.
+- Also: `rename_many_with_a_file_where_its_journal_goes_renames_nothing` (the real
+  ENOTDIR, and a `ren` line failing), `a_journal_that_failed_once_stays_broken`,
+  `a_journal_of_0_3_0_is_still_tidied_and_new_tags_are_skipped`. The pty test
+  `a_job_without_its_journal_says_so` became `…_asks_first_and_says_so` (Stop copies
+  nothing; continue copies and says so).
+- Not tested end to end: the rename-many dialog itself (the suite has no test driving
+  Shift+F2's editor); the core outcome it shows is.
+
 ## Check
 
 ## Act

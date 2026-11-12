@@ -862,9 +862,10 @@ fn quitting_with_a_copy_running_cancels_it_cleans_up_and_ends() {
 }
 
 /// Safe operations on, but the journal cannot be made (its directory's name is taken by a
-/// file): the copy is done, and the summary says it ran without safe operations.
+/// file): asked before anything is done (Round 029). Stop copies nothing; continue
+/// copies, and the summary says it ran without safe operations.
 #[test]
-fn a_job_without_its_journal_says_so() {
+fn a_job_without_its_journal_asks_first_and_says_so() {
     let s = Scratch::new("no-journal");
     s.file("left/a.txt", "a");
     s.file("journal", "a file where the journal directory goes");
@@ -873,6 +874,17 @@ fn a_job_without_its_journal_says_so() {
     x.send(F5);
     x.wait_for("[Enter] go");
     x.send(ENTER);
+    x.wait_for("cannot write their journal");
+    x.send(b"s");
+    x.wait_for("0 copied (cancelled)");
+    assert!(!s.right().join("a.txt").exists(), "stopped before anything");
+    x.send(ENTER);
+    x.wait_gone("[Enter] close");
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    x.wait_for("cannot write their journal");
+    x.send(b"c");
     wait_file(&s.right().join("a.txt"), "copied", |c| c.is_some());
     x.wait_for("safe operations off for this job");
     x.quit();

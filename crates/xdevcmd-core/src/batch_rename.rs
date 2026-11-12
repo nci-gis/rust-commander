@@ -90,31 +90,70 @@ fn same_file(a: &Path, b: &Path) -> bool {
 pub struct Outcome {
     pub renamed: usize,
     pub errors: Vec<String>,
+    /// Safe operations were on and the journal could not be written (why): nothing was
+    /// renamed. [`apply`] with `safe` off renames without it, if the user says so.
+    pub no_journal: Option<String>,
 }
 
 /// Carry out a plan from [`plan`]. `safe`: safe operations for this batch (a journal
 /// of the temporary names), taken from the setting by the caller.
+///
+/// Between its two steps the files are under temporary names, so with safe operations
+/// the journal is its whole safety: every temporary name is written down and synced
+/// before the first file moves, and a journal that cannot be begun or written means
+/// nothing is renamed ([`Outcome::no_journal`]).
 pub fn apply(moves: &[(PathBuf, PathBuf)], safe: bool) -> Outcome {
+    let journal = if safe {
+        let sources: Vec<PathBuf> = moves.iter().map(|(f, _)| f.clone()).collect();
+        crate::journal::Journal::begin("rename", &sources, None, false)
+    } else {
+        None
+    };
+    apply_with(moves, journal)
+}
+
+fn apply_with(
+    moves: &[(PathBuf, PathBuf)],
+    journal: Option<std::io::Result<crate::journal::Journal>>,
+) -> Outcome {
     let mut out = Outcome::default();
     if let Err(e) = crate::policy::guard_write() {
         out.errors.push(e.to_string());
         return out;
     }
     let tag = crate::journal::run_tag();
+    let tmp_of = |i: usize, from: &Path| {
+        let dir = from.parent().unwrap_or(Path::new("."));
+        dir.join(format!(".xdevcmd-rename-{tag}-{i}"))
+    };
     // Safe operations: between the two steps the files are under temporary names; a run
-    // killed there has them put back at the next start.
-    let mut journal = if safe {
-        crate::journal::Journal::begin("rename", &[], None, false).and_then(Result::ok)
-    } else {
-        None
+    // killed there has them put back at the next start. All of them written down, and
+    // synced, before the first moves.
+    let mut journal = match journal {
+        None => None,
+        Some(Ok(mut j)) => {
+            let written = moves
+                .iter()
+                .enumerate()
+                .try_for_each(|(i, (from, _))| j.renamed(&tmp_of(i, from), from))
+                .and_then(|()| {
+                    let first = moves.first().map(|(f, _)| f.as_path());
+                    j.commit(first.unwrap_or(Path::new(".")))
+                });
+            if let Err(e) = written {
+                out.no_journal = Some(e.to_string());
+                return out;
+            }
+            Some(j)
+        }
+        Some(Err(e)) => {
+            out.no_journal = Some(e.to_string());
+            return out;
+        }
     };
     let mut parked: Vec<(PathBuf, &PathBuf, &PathBuf)> = Vec::new();
     for (i, (from, to)) in moves.iter().enumerate() {
-        let dir = from.parent().unwrap_or(Path::new("."));
-        let tmp = dir.join(format!(".xdevcmd-rename-{tag}-{i}"));
-        if let Some(j) = journal.as_mut() {
-            j.renamed(&tmp, from);
-        }
+        let tmp = tmp_of(i, from);
         if let Err(e) = crate::noreplace::rename_noreplace(from, &tmp) {
             out.errors.push(format!("{}: {e}", show(from)));
             // Put back what had already moved: half a batch is worse than none.
@@ -163,8 +202,10 @@ struct Unrename<'a>(Option<&'a mut crate::journal::Journal>, &'a Path);
 
 impl Drop for Unrename<'_> {
     fn drop(&mut self) {
+        // A line that fails is harmless here: tidying up skips a temporary name that
+        // no longer exists.
         if let Some(j) = self.0.as_mut() {
-            j.unrenamed(self.1);
+            let _ = j.unrenamed(self.1);
         }
     }
 }
@@ -191,6 +232,37 @@ mod tests {
         fs::read_to_string(p).unwrap()
     }
 
+    /// Journals for these tests, in a directory of their own (set once per test run).
+    fn journals() {
+        crate::journal::init(
+            std::env::temp_dir().join(format!("xdevcmd-test-journals-{}", std::process::id())),
+        );
+    }
+
+    /// Safe operations on and the journal cannot be begun: nothing is renamed, and the
+    /// outcome says why. Before Round 029 the files were renamed without a journal, and
+    /// nothing said so.
+    #[test]
+    fn rename_many_whose_journal_cannot_be_begun_renames_nothing_and_says_why() {
+        journals();
+        let (d, paths) = dir("no-journal", &["a", "b"]);
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalBegin,
+            "xdevcmd-batch-no-journal-",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let moves = plan(&paths, "b\na\n").unwrap();
+        let out = apply(&moves, true);
+        assert_eq!(out.renamed, 0, "{out:?}");
+        assert!(format!("{out:?}").contains("no_journal: Some"), "{out:?}");
+        assert_eq!(
+            (body(&d.join("a")), body(&d.join("b"))),
+            ("a".into(), "b".into())
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn unchanged_lines_are_left_alone_and_changed_ones_renamed() {
         let (d, paths) = dir("basic", &["a.txt", "b.txt", "c.txt"]);
@@ -209,7 +281,7 @@ mod tests {
             apply(&moves, false),
             Outcome {
                 renamed: 2,
-                errors: vec![]
+                ..Outcome::default()
             }
         );
         assert_eq!(
@@ -272,6 +344,46 @@ mod tests {
         let (d, paths) = dir("bad", &["a", "b"]);
         assert!(plan(&paths, "sub/a\nb\n").is_err());
         assert!(plan(&paths, "\nb\n").is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The same with a real error: a file where the journal's directory goes.
+    #[test]
+    fn rename_many_with_a_file_where_its_journal_goes_renames_nothing() {
+        let (d, paths) = dir("journal-file", &["a", "b"]);
+        let blocked = d.join("journal");
+        fs::write(&blocked, "a file").unwrap();
+        let moves = plan(&paths, "b\na\n").unwrap();
+        let journal = crate::journal::Journal::begin_in(&blocked, "rename", &paths, None, false);
+        let out = apply_with(&moves, Some(journal));
+        assert_eq!(out.renamed, 0);
+        assert!(out.no_journal.is_some(), "{out:?}");
+        assert_eq!(
+            (body(&d.join("a")), body(&d.join("b"))),
+            ("a".into(), "b".into())
+        );
+        // A line that cannot be written before the first move: the same.
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            "xdevcmd-batch-journal-file-",
+            6,
+            crate::faults::Fault::Os(5),
+        );
+        let jdir = d.join("journals");
+        let journal = crate::journal::Journal::begin_in(&jdir, "rename", &paths, None, false);
+        assert!(
+            journal.is_ok(),
+            "the sixth line is the first after the header's five"
+        );
+        let out = apply_with(&moves, Some(journal));
+        assert_eq!(out.renamed, 0);
+        assert!(out.no_journal.is_some(), "{out:?}");
+        assert_eq!(body(&d.join("a")), "a");
+        assert_eq!(
+            fs::read_dir(&jdir).unwrap().count(),
+            0,
+            "the broken journal is gone"
+        );
         let _ = fs::remove_dir_all(&d);
     }
 }

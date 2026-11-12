@@ -23,8 +23,22 @@
 //! rename many's temporary names, so a later process given the same pid never matches a
 //! dead run's files, nor a dead run's journal a live process's files.
 //!
-//! Lines are written and flushed, not synced: losing the last lines in a power cut
-//! leaves a part file unknown to the journal, never a wrong action on the user's files.
+//! **Durable where it matters** (Round 029, after SQLite's rollback journal). At the
+//! start the journal is synced, and on Unix its directory too, before the job's first
+//! step. Later lines are written and flushed as they come, and synced by
+//! [`Journal::commit`] right before a step that cannot be undone (a rename that replaces
+//! a file, a source removed after its copy, rename many's first step): what that step
+//! needs to be recovered is on disk before it is taken. A new file's temporary name is
+//! not synced on its own: lost in a power cut, it leaves a part file unknown to the
+//! journal, never a wrong action on the user's files.
+//!
+//! **A journal that fails is broken for good.** A line or a sync that fails marks it
+//! broken and every later call fails too: a later line that went through would make a
+//! journal with a hole in it look whole. The job is told (the error comes back) and asks
+//! the user before its next step that cannot be undone.
+//!
+//! `v 2` names this layout; `moved` lines are new in it. Both are unknown tags to 0.3.0's
+//! tidy-up, which skips them, and this version reads 0.3.0's journals as before.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -77,6 +91,10 @@ pub struct Journal {
     file: File,
     /// Directories already written down.
     dirs: std::collections::HashSet<PathBuf>,
+    /// Why a line or a sync failed: once it has, the journal is not to be trusted.
+    broken: Option<String>,
+    /// Lines written since the last sync.
+    dirty: bool,
 }
 
 /// What trying a journal's lock found.
@@ -167,7 +185,8 @@ fn probe_lock(file: &File) -> Lock {
 impl Journal {
     /// Start a journal for a job of `kind` ("copy", "move", "delete", "extract", "pack",
     /// "sync", "rename"). `None` when journals are off; an error when the file cannot be
-    /// made, for the job to say it runs without one.
+    /// made or synced, for the job to ask whether to go on without one. Returned synced,
+    /// with its directory (Unix): on disk before the job's first step.
     pub fn begin(
         kind: &str,
         sources: &[PathBuf],
@@ -177,7 +196,7 @@ impl Journal {
         Some(Self::begin_in(DIR.get()?, kind, sources, dest, to_trash))
     }
 
-    fn begin_in(
+    pub(crate) fn begin_in(
         dir: &Path,
         kind: &str,
         sources: &[PathBuf],
@@ -185,6 +204,13 @@ impl Journal {
         to_trash: bool,
     ) -> std::io::Result<Self> {
         static N: AtomicU64 = AtomicU64::new(0);
+        // What the seam knows the job by: its first source, else its destination.
+        let about = sources
+            .first()
+            .map(PathBuf::as_path)
+            .or(dest)
+            .unwrap_or(dir);
+        crate::faults::at(crate::faults::Point::JournalBegin, about)?;
         fs::create_dir_all(dir)?;
         // A journal names the user's files by their full paths: the user's to read only,
         // also when an older xdevcmd made the directory open to others.
@@ -216,47 +242,103 @@ impl Journal {
             let _ = fs::remove_file(&new);
             return Err(e);
         }
+        // From here a failure drops `j`, which removes the file.
         let mut j = Self {
             path,
             file,
             dirs: std::collections::HashSet::new(),
+            broken: None,
+            dirty: false,
         };
-        j.line(&format!("host {}", enc(Path::new(&hostname()))));
-        j.line(&format!("kind {kind}"));
+        j.line(&format!("host {}", enc(Path::new(&hostname()))), about)?;
+        j.line("v 2", about)?;
+        j.line(&format!("kind {kind}"), about)?;
         for s in sources {
-            j.line(&format!("src {}", enc(s)));
+            j.line(&format!("src {}", enc(s)), about)?;
         }
         if let Some(d) = dest {
-            j.line(&format!("dest {}", enc(d)));
+            j.line(&format!("dest {}", enc(d)), about)?;
         }
         if to_trash {
-            j.line("trash");
+            j.line("trash", about)?;
         }
+        // The file, then the name it has in its directory: without the second, a power
+        // cut can lose the journal itself (SQLite syncs the directory for this).
+        j.commit(about)?;
+        crate::faults::sync_dir(dir)?;
         Ok(j)
     }
 
-    fn line(&mut self, s: &str) {
-        let _ = writeln!(self.file, "{s}");
-        let _ = self.file.flush();
-    }
-
-    /// About to make `p`, a temporary name: its directory is written down, once.
-    pub fn part(&mut self, p: &Path) {
-        if let Some(dir) = p.parent() {
-            if self.dirs.insert(dir.to_path_buf()) {
-                self.line(&format!("dir {}", enc(dir)));
+    /// Write one line about `about` (a path, for the fault seam). A journal that has
+    /// failed once fails every line after.
+    fn line(&mut self, s: &str, about: &Path) -> std::io::Result<()> {
+        if let Some(why) = &self.broken {
+            return Err(std::io::Error::other(why.clone()));
+        }
+        let r = crate::faults::at(crate::faults::Point::JournalLine, about)
+            .and_then(|()| writeln!(self.file, "{s}"))
+            .and_then(|()| self.file.flush());
+        match r {
+            Ok(()) => {
+                self.dirty = true;
+                Ok(())
+            }
+            Err(e) => {
+                self.broken = Some(e.to_string());
+                Err(e)
             }
         }
     }
 
+    /// Sync the lines written since the last time, before the step about `about` that
+    /// cannot be undone. Nothing to do when none were. A failed sync breaks the journal:
+    /// its lines may be gone from the disk with the error cleared (Linux), so it is never
+    /// synced again and taken for whole.
+    pub fn commit(&mut self, about: &Path) -> std::io::Result<()> {
+        if let Some(why) = &self.broken {
+            return Err(std::io::Error::other(why.clone()));
+        }
+        if !self.dirty {
+            return Ok(());
+        }
+        let r = crate::faults::at(crate::faults::Point::JournalSync, about)
+            .and_then(|()| self.file.sync_data());
+        match r {
+            Ok(()) => {
+                self.dirty = false;
+                Ok(())
+            }
+            Err(e) => {
+                self.broken = Some(e.to_string());
+                Err(e)
+            }
+        }
+    }
+
+    /// Why this journal can no longer be trusted, if it cannot.
+    pub fn broken(&self) -> Option<&str> {
+        self.broken.as_deref()
+    }
+
+    /// About to make `p`, a temporary name: its directory is written down, once.
+    pub fn part(&mut self, p: &Path) -> std::io::Result<()> {
+        if let Some(dir) = p.parent() {
+            if !self.dirs.contains(dir) {
+                self.line(&format!("dir {}", enc(dir)), p)?;
+                self.dirs.insert(dir.to_path_buf());
+            }
+        }
+        Ok(())
+    }
+
     /// About to rename `orig` to the temporary name `tmp` (rename many).
-    pub fn renamed(&mut self, tmp: &Path, orig: &Path) {
-        self.line(&format!("ren {} {}", enc(tmp), enc(orig)));
+    pub fn renamed(&mut self, tmp: &Path, orig: &Path) -> std::io::Result<()> {
+        self.line(&format!("ren {} {}", enc(tmp), enc(orig)), orig)
     }
 
     /// `tmp` has been renamed on: nothing to put back.
-    pub fn unrenamed(&mut self, tmp: &Path) {
-        self.line(&format!("unren {}", enc(tmp)));
+    pub fn unrenamed(&mut self, tmp: &Path) -> std::io::Result<()> {
+        self.line(&format!("unren {}", enc(tmp)), tmp)
     }
 }
 
@@ -928,6 +1010,67 @@ mod tests {
             fs::read_dir(&jdir).unwrap().count(),
             0,
             "the journal is gone"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A journal written by 0.3.0 (no `v` line, no `moved`) is tidied up as before; one
+    /// of this version, with lines 0.3.0 does not know, is read by the same rules.
+    #[test]
+    fn a_journal_of_0_3_0_is_still_tidied_and_new_tags_are_skipped() {
+        let d = dir("v030");
+        let jdir = d.join("journal");
+        fs::create_dir_all(&jdir).unwrap();
+        let part = d.join(".a.xdevcmd-part-2147483646-0");
+        fs::write(&part, "half").unwrap();
+        let old = format!(
+            "host {}\nkind copy\nsrc {}\ndest {}\ndir {}\n",
+            enc(Path::new(&hostname())),
+            enc(&d.join("a")),
+            enc(&d),
+            enc(&d),
+        );
+        orphan(&jdir, &old);
+        let got = recover_in(&jdir);
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].kind.as_str(), got[0].cleaned), ("copy", 1));
+        assert!(!part.exists());
+        let new = format!(
+            "{old}v 2\nmoved {} {}\nzzz unknown\n",
+            enc(&d.join("a")),
+            enc(&d.join("b"))
+        );
+        let it = tidy(&new, "2147483646");
+        assert_eq!(it.kind, "copy");
+        assert_eq!(it.sources, vec![d.join("a")]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A journal begun is on disk with its header; a line or a sync that fails breaks it
+    /// for good, so a later line that would go through is refused too.
+    #[test]
+    fn a_journal_that_failed_once_stays_broken() {
+        let d = dir("broken");
+        let mut j =
+            Journal::begin_in(&d, "copy", &[d.join("broken-src")], Some(&d), false).unwrap();
+        let text = fs::read_to_string(&j.path).unwrap();
+        assert!(text.contains("\nv 2\n"), "{text}");
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalSync,
+            "broken-part",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        j.part(&d.join("sub/.x.broken-part")).unwrap();
+        assert!(j.commit(&d.join("broken-part")).is_err());
+        assert!(j.broken().is_some());
+        assert!(
+            j.part(&d.join("other/.y")).is_err(),
+            "a later line is refused"
+        );
+        assert!(
+            j.commit(&d.join("anything")).is_err(),
+            "and never synced again"
         );
         let _ = fs::remove_dir_all(&d);
     }

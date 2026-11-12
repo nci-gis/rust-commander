@@ -178,8 +178,8 @@ What xdevcmd learns about the shell, and how far it trusts each source
   is not in it, but a token, a key or customer data that a command prints is. New log
   files are created readable by you only (`0600`; Windows: the folder's permissions);
   appending to an existing file keeps its permissions, and xdevcmd says so when others
-  can read it. A link, FIFO or device at the chosen name is refused. Off in the
-  read-only modes. Nothing is logged unless you ask, per tab.
+  can read it. A link, FIFO or device at the chosen name is refused, and so is a file
+  another user owns (Unix). Off in the read-only modes. Nothing is logged unless you ask, per tab.
 - **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
   character, or one that shell cannot be given safely, is refused whole. Names are
   wrapped in bracketed paste when the shell asked for it, so its line editor takes them

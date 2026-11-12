@@ -203,6 +203,32 @@ without the user being told.
   coloured build output in 0.34 s (148 MB/s), about 50 times the reader's rate, so the
   queue does not fill on a working disk.
 
+- **Independent review, 2026-11-12, fixes** (one commit each, each test shown to fail
+  with its fix reverted):
+  - `e5fbf7c` A cursor count of `usize::MAX` (`ESC[…C`) overflowed the column (panic in
+    debug, wrap in release): saturating arithmetic for the column and counts. A writer
+    thread that panicked left the log Running with `done` unset, so Stop waited 2 s and
+    said "may be incomplete": a drop guard now marks it Failed ("the log's writer
+    stopped") and sets `done`; the reader's Disconnected branch says the same if nothing
+    else did. Tests: the huge counts; a panicking sink in core; in `TermPanel` (a real
+    `sh`), said once, the mark Running → Failed, Stop clears it.
+  - `7c4bcd2` `open` looked, then opened: a link or a FIFO swapped in between was
+    followed, or blocked the UI thread. Now a new file is `create_new` (`O_EXCL`), an
+    existing one `append` with `O_NOFOLLOW | O_NONBLOCK | O_NOCTTY` (libc constants, no
+    unsafe), then `fstat` must say regular file. `O_NONBLOCK` is left set: it changes
+    nothing for a regular file. Windows: `FILE_FLAG_OPEN_REPARSE_POINT`, so a link is
+    opened as itself and refused by the check (not tested on Windows). Test: a FIFO
+    (nobody reading) refused within 2 s, a link refused, its target untouched.
+  - `d4c964a` Appending to a file another user owns is refused (Unix, `uid` ≠ `geteuid`).
+    The test needs root to make such a file: it runs fully here (root), and on GitHub's
+    runners (not root) checks only that one's own file is accepted.
+  - `bdcd54e` Text filter: U+009B is CSI; U+0090/0098/009D/009E/009F start a string,
+    ended by U+009C (0xC2 0x9C), ESC \ or BEL; ESC N / ESC O skip the next byte; a tab
+    moves the cursor to the next multiple of 8 without writing. Tests split anywhere.
+  - Docs (this commit): Stop, closing a tab and quitting can each wait up to 2 s per log
+    on a disk that has stopped answering; a crash of xdevcmd itself loses the footer and
+    what was still queued (up to about 2 MB); another user's file refused.
+
 ## Check
 
 - [x] Text filter: escapes, CR overwrite (`CSI K` too), split UTF-8 and escapes at every
@@ -219,6 +245,9 @@ without the user being told.
 - [x] Throughput with logging off vs on (above)
 - [x] CI on three systems: run 43234324692 green first time (Linux x86_64 and ARM,
   Windows, macOS, cargo-deny, the windows-gnu/darwin cross-check); no flake seen
+- [x] Review fixes: huge counts, a dying writer (core and panel), the open race (FIFO,
+  link), another user's file, C1/SS2/SS3/tab; fmt, clippy, workspace tests, pty 2×;
+  CI: see below
 - [ ] **Not verified**: Windows and macOS logging by hand (CI compiles and runs the
   render test there; the pty tests are Unix-only and ran on Linux here, macOS in CI);
   a real full disk (simulated by a failing writer) and a real slow disk (simulated by

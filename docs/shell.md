@@ -103,8 +103,9 @@ sees it, so nothing is lost when it scrolls past `[terminal] scrollback`.
 - **Where**: the prompt offers `xdevcmd-<shell>-<date>-<time>.log` in the shell's
   directory when the system gives it (Linux, macOS), else the file pane's. A name that
   exists is appended to; a new file is readable by you only (`0600`; on Windows it gets
-  its folder's permissions). A link, a FIFO or a device at that name is refused, and so
-  is anything outside `--root`.
+  its folder's permissions). A link, a FIFO or a device at that name is refused (by the
+  open itself, so one swapped in at the last moment is refused too), and so is a file
+  another user owns (Unix) and anything outside `--root`.
 - **text or raw** (Tab in the prompt). *text* removes colours, titles and other
   escapes, keeps each line as the terminal left it (a progress bar that rewrote its
   line with CR is written once, as it ended), writes one line where a full-screen
@@ -114,7 +115,11 @@ sees it, so nothing is lost when it scrolls past `[terminal] scrollback`.
   log per tab: it follows the shell that had focus when it started; a split opened
   later is not in it.
 - **Ends** when you stop it, the shell exits, the tab closes or xdevcmd quits; what was
-  queued is written and flushed first.
+  queued is written and flushed first. On a disk that has stopped answering (a hung
+  network mount), Stop logging, closing the tab and quitting each wait up to 2 seconds
+  per log for that, then go on and say the log may be incomplete. If xdevcmd itself
+  crashes, the log's footer and whatever was still queued (up to about 2 MB) are lost;
+  what was written before stays.
 - **Never a silent gap.** The shell's output is never held up by the disk for more
   than half a second. If the disk cannot keep up, or a write fails (a full disk, a
   removed drive), the log stops there, the status line says why, a text log ends with a

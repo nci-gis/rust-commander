@@ -782,6 +782,50 @@ the fix, kept here because the commit carries test and fix together.
   sent by hand: lands by name; a second move drops the intent; Esc drops it; a hidden
   name: top and a notice).
 
+### 2026-11-13, step 7: B03, a whole line that exists is taken whole
+
+- `Links::line_paths(i, shown)`: the line's wholes (as shown, then without trailing
+  spaces, resolved like any path; none when the line holds control characters or a
+  URL, or when the whole is one of the paths found) and the paths `found::paths_in`
+  finds, as a `find::Group`. Panelize (`viewer.rs`) gathers them per line into
+  `ListRequest { paths, groups, .. }`; `lists::List.groups` keeps them until the first
+  check, which runs `find::check_grouped` on the list's own thread (never the screen's):
+  each line's wholes first, in order: the first that is there is the row and the
+  line's other candidates go as `Gone` (dropped quietly: never-checked rows); a path
+  found in lines that were all taken whole goes too; everything else is checked as
+  before. `lists::add` keeps only groups of rows it newly added (a row the list had
+  stays whatever a new line says).
+- Counting: a line's whole is a row to decide, not a path yet, so "Add N paths to…" and
+  "N added, M already there" count the paths found (or, with none, the lines). Seen
+  through the existing pty test `the_last_commands_output_makes_a_list_…`, which said
+  "Add 2 paths" (the prompt line `$ ` became a whole) until counting was made so.
+- Failing first (against the step-6 commit): pty
+  `panelize_takes_a_whole_line_that_names_a_file` (lines `report:2026.txt`, `a b.txt`,
+  `2026`, all files; `b.txt` there too): the list held only `b.txt`.
+- Also: `find::tests::a_whole_line_that_exists_wins_over_the_paths_found_in_it` (a line
+  not there whole gives today's rows; a path also named by a line not taken whole
+  stays); `lists` tests updated.
+- Not done: a list of many lines can reach the 10,000-row cap sooner, since wholes are
+  rows until checked (said here; no test).
+
+**CI between steps.** Run 43300172507 (at step 3): Linux x86/ARM failed on
+`a_file_on_another_volume_goes_to_that_volumes_trash_and_back`, which hard-coded
+`/dev/shm` and now got CI's `/mnt/xdev-other`: fixed in 62f634b (the volume's top is the
+place's parent). macOS failed on `the_tab_menu_follows_its_tab_when_an_earlier_one_ends`
+(a terminal-tab timing test, untouched here; passed on the next run). Run 43304134468
+(at step 5): **all green** on the four systems. Its opt-in measurement step:
+
+| Runner, RAM disk → runner's disk | synced (batched) | no sync | ratio |
+|---|---|---|---|
+| macOS (APFS, `F_FULLFSYNC`), 2,000 × 1 KiB | 2.111 s | 0.664 s | 3.2× |
+| macOS, 1 × 32 MiB | 0.028 s | 0.017 s | 1.6× |
+| ubuntu-latest, 2,000 × 1 KiB | 0.935 s | 0.311 s | 3.0× |
+| ubuntu-latest, 1 × 32 MiB | 0.032 s | 0.020 s | 1.6× |
+
+About 0.7 ms per small file on the macOS runner (a VM: its full flush may not reach a
+real drive's cache; a real Mac is still to measure). The case-clash compare test passed
+on macOS and Windows, whose temporary directories ignore case.
+
 ## Check
 
 ## Act

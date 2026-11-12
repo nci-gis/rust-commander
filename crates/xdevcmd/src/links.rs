@@ -104,6 +104,30 @@ impl Links {
             .collect()
     }
 
+    /// Line `i`'s candidates for a list: the whole line (as shown, then without
+    /// trailing spaces), resolved, and the paths found in it ([`Links::paths`]). The
+    /// wholes are empty when the line's one path is the line itself: nothing to decide.
+    /// Whether a whole is there is decided on the list's check thread
+    /// (`find::check_grouped`): a line that names a file whole is that file.
+    pub fn line_paths(&self, i: usize, shown: &str) -> xdevcmd_core::find::Group {
+        let parts = self.paths(i, shown);
+        if shown.chars().any(|c| c.is_control() && c != '\t') {
+            return (Vec::new(), parts);
+        }
+        let mut wholes: Vec<PathBuf> = Vec::new();
+        for text in [shown, shown.trim_end()] {
+            if text.trim().is_empty() || text.contains("://") {
+                continue;
+            }
+            if let Some((p, _)) = self.resolve(i, text) {
+                if !wholes.contains(&p) && !parts.contains(&p) {
+                    wholes.push(p);
+                }
+            }
+        }
+        (wholes, parts)
+    }
+
     /// The directory line `i`'s relative paths are taken from.
     pub fn base_dir(&self, i: usize) -> Option<PathBuf> {
         self.base_of(i).map(|(d, _)| d.to_path_buf())

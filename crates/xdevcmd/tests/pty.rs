@@ -3813,6 +3813,45 @@ fn no_list_is_made_while_ssh_runs() {
     xdevcmd.quit();
 }
 
+/// B03 (Round 029): a line that names a file whole is that file, before the `path:line`
+/// rules split it: `report:2026.txt` is not `report` at line 2026, `a b.txt` is not `a`
+/// and `b.txt`, and `2026` is a file too. Each was a wrong row, or none, before.
+#[test]
+fn panelize_takes_a_whole_line_that_names_a_file() {
+    let s = Scratch::new("list-whole");
+    for name in ["report:2026.txt", "a b.txt", "2026"] {
+        s.file(&format!("left/{name}"), "x");
+    }
+    // What the split would find, there too: it must not be taken instead.
+    s.file("left/b.txt", "x");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    let left = s.left().display().to_string();
+    x.send(format!("cd '{left}'\r").as_bytes());
+    x.send(b"printf '%s\\n' report:2026.txt 'a b.txt' 2026\r");
+    x.wait_for("\u{2502}2026");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    let (cx, cy) = x.locate("\u{2502}report:2026.txt");
+    x.drag((cx + 2, cy), (cx + 2, cy + 2));
+    x.wait_for("3 lines selected");
+    x.send(b"p");
+    x.wait_for("lines 3\u{2013}5");
+    x.wait_for("4 items");
+    let screen = x.screen();
+    for name in ["report:2026", "a b", "2026"] {
+        assert!(screen.contains(name), "{name} is a row\n{screen}");
+    }
+    assert!(
+        !screen
+            .lines()
+            .any(|l| l.contains("\u{2502} b ") || l.contains("\u{2502}b ")),
+        "b.txt is not a row\n{screen}"
+    );
+    x.quit();
+}
+
 /// `--root`: a path outside it is left out of a list, and the title counts it.
 #[test]
 fn a_list_leaves_out_what_is_outside_the_root() {

@@ -366,7 +366,7 @@ impl FilePane {
         self.all = vec![parent_entry(&self.cwd)];
         self.results = Some(Results {
             what: l.source.clone(),
-            search: Some(find::list(l.rows.clone())),
+            search: Some(find::list_grouped(l.rows.clone(), l.groups.clone())),
             scanned: 0,
             unreadable: 0,
             list: Some(id),
@@ -406,6 +406,7 @@ impl FilePane {
                     capped,
                     outside,
                     true,
+                    Vec::new(),
                 ));
             }
         }

@@ -35,10 +35,35 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListRequest {
     pub paths: Vec<std::path::PathBuf>,
+    /// Each line's candidates, for the list's first check to choose between: a line
+    /// that names a file whole is that file (B03).
+    pub groups: Vec<xdevcmd_core::find::Group>,
     /// "sh · tab 1 · rg -l foo", or "… · lines 12–40".
     pub source: String,
     /// The directory the first line's relative paths were taken from.
     pub base: Option<std::path::PathBuf>,
+}
+
+impl ListRequest {
+    /// How many paths it offers, before any is looked up: the paths found in the
+    /// lines. A line's whole is one choice with them, decided when the list is
+    /// checked; only when no line holds a path found by the rules is each line that
+    /// may name something whole counted, as one.
+    pub fn count(&self) -> usize {
+        let wholes: std::collections::HashSet<&std::path::PathBuf> =
+            self.groups.iter().flat_map(|(w, _)| w).collect();
+        let mut seen = std::collections::HashSet::new();
+        let parts = self
+            .paths
+            .iter()
+            .filter(|p| !wholes.contains(p) && seen.insert(*p))
+            .count();
+        if parts > 0 {
+            parts
+        } else {
+            self.groups.len()
+        }
+    }
 }
 
 /// What to do with a path chosen in a shell's history.
@@ -318,10 +343,16 @@ impl Viewer {
             what = command_text(&self.shown(t));
         }
         let mut paths = Vec::new();
+        let mut groups = Vec::new();
         for i in lines.clone() {
             let shown = self.shown(i);
             if let Some(l) = self.links.as_ref() {
-                paths.extend(l.paths(i, &shown));
+                let (wholes, parts) = l.line_paths(i, &shown);
+                paths.extend(wholes.iter().cloned());
+                paths.extend(parts.iter().cloned());
+                if !wholes.is_empty() {
+                    groups.push((wholes, parts));
+                }
             }
         }
         if paths.is_empty() {
@@ -338,6 +369,7 @@ impl Viewer {
         Action::MakeList(
             ListRequest {
                 paths,
+                groups,
                 source,
                 base,
             },

@@ -38,7 +38,7 @@ impl App {
     pub(super) fn make_list(&mut self, req: ListRequest, add: bool) {
         let kept = lists::all();
         if add && !kept.is_empty() {
-            let n = req.paths.len();
+            let n = req.count();
             let mut items: Vec<Item> = kept
                 .iter()
                 .enumerate()
@@ -84,7 +84,7 @@ impl App {
         }
         let fallback = req.base.unwrap_or_else(|| self.focused_cwd());
         let root = lists::common_root(&rows, &fallback);
-        let id = lists::keep(req.source, root, rows, capped, outside, false);
+        let id = lists::keep(req.source, root, rows, capped, outside, false, req.groups);
         self.close_history();
         self.show_list(Some(id));
     }
@@ -97,7 +97,7 @@ impl App {
         let Some(id) = id else {
             return self.new_list(req);
         };
-        match lists::add(id, req.paths, &req.source) {
+        match lists::add(id, req.paths, req.groups, &req.source) {
             Some((added, had)) => {
                 self.close_history();
                 self.show_list(Some(id));

@@ -36,6 +36,9 @@ pub struct List {
     /// been files. The first check drops those quietly; only a row that was there and
     /// went is named.
     pub fresh: std::collections::HashSet<PathBuf>,
+    /// Lines' candidates for the first check to choose between ([`find::Group`]); gone
+    /// once it has.
+    pub groups: Vec<xdevcmd_core::find::Group>,
 }
 
 #[derive(Default)]
@@ -88,6 +91,7 @@ pub fn keep(
     capped: bool,
     outside: usize,
     checked: bool,
+    groups: Vec<xdevcmd_core::find::Group>,
 ) -> Id {
     let mut s = store();
     s.next += 1;
@@ -106,6 +110,7 @@ pub fn keep(
         capped,
         outside,
         fresh,
+        groups,
     });
     s.lists.truncate(KEPT);
     id
@@ -160,26 +165,49 @@ pub fn checked(id: Id, gone: &[PathBuf]) -> Vec<PathBuf> {
         .cloned()
         .collect();
     l.fresh.clear();
+    l.groups.clear();
     went
 }
 
 /// Add `paths` to list `id`: rows already there stay where they are, the rest go at
 /// the end, up to [`ROWS`]. `source` is added to the list's own. Returns how many
 /// were added and how many it already had; `None` if the list is no longer kept.
-pub fn add(id: Id, paths: Vec<PathBuf>, source: &str) -> Option<(usize, usize)> {
+///
+/// `groups`: the new lines' candidates. Only rows added here are decided between: a row
+/// the list already had stays whatever a new line says.
+pub fn add(
+    id: Id,
+    paths: Vec<PathBuf>,
+    groups: Vec<xdevcmd_core::find::Group>,
+    source: &str,
+) -> Option<(usize, usize)> {
     let (paths, capped, outside) = tidy_rows(paths);
     let mut s = store();
     let l = s.lists.iter_mut().find(|l| l.id == id)?;
+    // A line's whole is a row to decide when the list is checked (most lines name
+    // nothing whole: a prompt, a message), not a path to count yet.
+    let choices: std::collections::HashSet<PathBuf> =
+        groups.iter().flat_map(|(w, _)| w.iter().cloned()).collect();
     let (mut added, mut had) = (0, 0);
     for p in paths {
+        let counted = !choices.contains(&p);
         if l.rows.contains(&p) {
-            had += 1;
+            had += usize::from(counted);
         } else if l.rows.len() < ROWS {
             l.fresh.insert(p.clone());
             l.rows.push(p);
-            added += 1;
+            added += usize::from(counted);
         } else {
             l.capped = true;
+        }
+    }
+    for (wholes, parts) in groups {
+        let new = |v: Vec<PathBuf>| -> Vec<PathBuf> {
+            v.into_iter().filter(|p| l.fresh.contains(p)).collect()
+        };
+        let (wholes, parts) = (new(wholes), new(parts));
+        if !wholes.is_empty() {
+            l.groups.push((wholes, parts));
         }
     }
     l.capped |= capped;
@@ -242,7 +270,15 @@ mod tests {
 
     #[test]
     fn a_list_is_kept_and_the_one_used_last_is_active() {
-        let a = keep("a".into(), "/".into(), vec!["/x".into()], false, 0, true);
+        let a = keep(
+            "a".into(),
+            "/".into(),
+            vec!["/x".into()],
+            false,
+            0,
+            true,
+            Vec::new(),
+        );
         let b = keep(
             "b".into(),
             "/".into(),
@@ -250,6 +286,7 @@ mod tests {
             false,
             0,
             false,
+            Vec::new(),
         );
         assert!(touch(a));
         let order: Vec<Id> = all()
@@ -277,21 +314,35 @@ mod tests {
             false,
             0,
             true,
+            Vec::new(),
         );
         let got = add(
             a,
-            vec!["/q".into(), "/r".into(), "/r".into()],
+            vec!["/q".into(), "/r".into(), "/r".into(), "/w".into()],
+            vec![(vec!["/w".into()], vec!["/q".into(), "/r".into()])],
             "tab 2 · find",
         );
-        assert_eq!(got, Some((1, 1)), "r added once; q was there");
+        assert_eq!(
+            got,
+            Some((1, 1)),
+            "r added once; q was there; w is a line's whole, decided later"
+        );
         let l = get(a).unwrap();
-        assert_eq!(l.rows, [PathBuf::from("/p"), "/q".into(), "/r".into()]);
+        assert_eq!(
+            l.rows,
+            [PathBuf::from("/p"), "/q".into(), "/r".into(), "/w".into()]
+        );
         assert_eq!(l.source, "tab 1 · rg + tab 2 · find");
         assert!(
             l.fresh.contains(&PathBuf::from("/r")),
             "added rows are checked quietly first"
         );
-        assert_eq!(add(0, vec![], "x"), None, "no such list");
+        assert_eq!(
+            l.groups,
+            [(vec![PathBuf::from("/w")], vec![PathBuf::from("/r")])],
+            "/q was there before: a new line's whole does not decide it"
+        );
+        assert_eq!(add(0, vec![], vec![], "x"), None, "no such list");
     }
 
     #[test]

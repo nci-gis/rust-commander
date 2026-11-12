@@ -11,6 +11,24 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Data safety, the first part of 0.4.0's** (Round 029). A file replaced is synced to
+  the disk before it is renamed over the old one; a move across drives removes each
+  source only once its copy, the copy's folder and the journal's line are on disk (a
+  batch at a time); safe operations' journal is synced at the start of a job and before
+  each step that cannot be undone. With safe operations off too. See
+  [docs/security.md](docs/security.md#safe-operations) for what survives a kill and a
+  power cut.
+- **A journal that cannot be written is asked about**: before the job starts, or before
+  the next step that cannot be undone. Stop (the default) or continue without it. Rename
+  many renames nothing without its journal, and offers "rename anyway".
+- **A file is replaced only if it is still the one you agreed to.** Right before the
+  rename, xdevcmd looks again; a file another program changed or replaced meanwhile is
+  asked about again. Alt+Y's plan remembers what it saw at each file it replaces, and
+  asks about a file that appeared where it saw none.
+- **Compare shows what it could not read.** A folder that cannot be read is a ⚠ row,
+  never "only on the other side", and nothing under it is copied; names that differ only
+  in case on a drive that ignores case are a clash, left alone. Names that are not UTF-8
+  are compared as they are.
 - **The viewer colours source code.** F3 and quick view colour Rust, Python,
   JavaScript/TypeScript, JSON, TOML, YAML, Markdown, shell, C/C++, Go, Java, Kotlin, C#,
   HTML/XML, CSS, SQL, INI, diffs and logs, chosen by the file's name or its first line,
@@ -128,6 +146,19 @@ that heading and starts a new, empty one here. -->
   itself, started in any other window.
 
 ### Fixed
+- **Alt+Y no longer copies into a folder it could not read** (as if it were empty), nor
+  plans two non-UTF-8 names that read alike as one path that does not exist, nor copies
+  a file onto its twin on the other side when that twin could not be looked at.
+- **Alt+Y no longer replaces a file that appeared after the compare** at a place the
+  plan saw empty (it took every file there when the job started for one it named).
+- **A link copied over a file no longer loses the file** when making the link fails: it
+  is made under a temporary name and renamed over.
+- **A journal write that fails is no longer silent** (it was dropped, and a kill then
+  left nothing to tidy up with).
+- **Enter on a search result in a slow folder lands on the file**, not on `..`, once the
+  folder has been read; so do a typed path, a link's Go and "both panes here".
+- **Panelize takes a line whole when it names a file**: `report:2026.txt`, `a b.txt` and
+  `2026` are those files, not `report` at line 2026, `a` and `b.txt`, or nothing.
 - A path in the shell's history was shown as joined, not resolved (`src/../lib/a.rs`);
   it is shown, and acted on, as the file it is.
 - **A theme that is not there no longer throws away the whole config.** A `[theme] name`

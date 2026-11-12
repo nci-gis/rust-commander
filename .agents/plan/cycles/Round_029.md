@@ -826,6 +826,23 @@ About 0.7 ms per small file on the macOS runner (a VM: its full flush may not re
 real drive's cache; a real Mac is still to measure). The case-clash compare test passed
 on macOS and Windows, whose temporary directories ignore case.
 
+### 2026-11-13, step 8: docs
+
+- `docs/security.md` "Safe operations": **corrected** the old claim that no file is ever
+  left short under its real name after "a power cut" (true for a kill only: a new file
+  is not synced, decision 6); new paragraphs "When the journal cannot be written",
+  "What is synced, and when", "What survives a kill, and what survives a power cut",
+  "Replaced only if it is still the file you agreed to", "Windows" (no directory sync,
+  decision 7; FAT's check-then-rename), and limits for macOS's `F_FULLFSYNC` and
+  compare's ⚠ rows. The full recovery contract stays pillar 3.
+- `docs/guide.md` (Find, filter, compare): the ⚠ / ? / ≠ rows and the plan's re-check.
+- `CHANGELOG.md` Unreleased: Added (durability, the journal question, re-check before
+  replace, compare's unknown rows) and Fixed (B01–B05, the link replace, B02, B03).
+- `.agents/memory/2026-11-13-fault-seam-for-tests.md`: how a data-safety test is written,
+  with a promotion candidate for `reference/testing.md` (read-only for agents).
+- No test needed: `every_toml_example_in_the_docs_is_a_valid_config` and the docs tests
+  pass.
+
 ## Check
 
 ## Act

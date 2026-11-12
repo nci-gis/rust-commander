@@ -172,6 +172,15 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 - **Alt+Y** makes two folder trees match. It shows the plan first; nothing happens until
   you say yes. A big tree takes a moment to compare: the status line counts, and
   **Esc** stops it.
+- What compare could not decide is shown, never copied: **⚠** a folder that could not be
+  read (nothing under it is copied, either way), one that went away while compared, or
+  one only partly read; **?** a name whose twin may be among what could not be read;
+  **≠** two files with the same time and a different size, or two names that differ only
+  in case on a drive that ignores case (macOS, Windows), where copying would replace
+  one with the other. The plan's title counts the ⚠ rows; Alt+K names them on the
+  status line.
+- A file the plan said it would replace is replaced only if it is still that file; if
+  it changed, or a file appeared where the plan saw none, you are asked.
 
 ## Archives
 

@@ -298,11 +298,10 @@ impl Journal {
         if let Some(why) = &self.broken {
             return Err(std::io::Error::other(why.clone()));
         }
-        if !self.dirty {
-            return Ok(());
-        }
+        // Passed whether or not there is anything to sync: a test can then count on it
+        // before every step that cannot be undone.
         let r = crate::faults::at(crate::faults::Point::JournalSync, about).and_then(|()| {
-            if crate::faults::skipped(crate::faults::Point::JournalSync, about) {
+            if !self.dirty || crate::faults::skipped(crate::faults::Point::JournalSync, about) {
                 return Ok(());
             }
             self.file.sync_data()

@@ -895,6 +895,15 @@ root; CI is not).
   first: `a_file_replaced_while_the_journal_question_is_open_is_asked_about_again`:
   asked `Conflict`, `NoJournal` and nothing more; the file replaced while the question
   was open was overwritten.
+- **3 Stop at the journal's question still removed a batch's sources.**
+  `go_without_journal` dropped the journal and set `abort`, and the next
+  `remove_moved` (end of a directory, end of a source) found no journal, so `durable`
+  said yes. `durable` now says no once `abort` is set: after Stop, or Abort at any
+  question, copies waiting in the batch keep their sources (both are there; Resume
+  leaves such a source and says so). The `JournalSync` point is now passed on every
+  `commit`, also with nothing to sync, so a test can count the steps it guards. Failing
+  first: `stop_at_the_journal_question_keeps_the_sources_of_a_move`: `b`'s source was
+  removed (`done: 2, cancelled: true`).
 
 ## Check
 

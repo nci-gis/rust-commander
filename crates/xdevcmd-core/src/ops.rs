@@ -580,6 +580,11 @@ impl Worker {
     /// disk. A journal that cannot be (now or before) is asked about, once: go on
     /// without it, or stop here (`false`; the job ends).
     fn durable(&mut self, about: &Path) -> bool {
+        // Stopped (Stop at the journal's question, Abort): nothing more that cannot be
+        // undone, with or without a journal: a batch's sources are kept.
+        if self.abort {
+            return false;
+        }
         let Some(j) = self.journal.as_mut() else {
             return true;
         };
@@ -2522,6 +2527,51 @@ mod tests {
         assert_eq!(fs::read(root.join("b")).unwrap(), b"b", "b's source stays");
         assert!(!other.join("b").exists(), "b's copy goes");
         assert!(!root.join("a").exists() && !root.join("c").exists());
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Stop at the journal's question means nothing more that cannot be undone: a source
+    /// whose copy was waiting in the batch is kept. Before, the batch was still flushed
+    /// once the journal was gone (no journal: nothing to wait for), and its sources went.
+    #[test]
+    fn stop_at_the_journal_question_keeps_the_sources_of_a_move() {
+        journals();
+        let Some(other) = other_device("stop-keeps") else {
+            return;
+        };
+        let root = tmp("stop-keeps");
+        let tag = format!("stopkeep-{}", std::process::id());
+        fs::create_dir_all(root.join(&tag)).unwrap();
+        fs::create_dir_all(other.join(&tag)).unwrap();
+        for n in ["a", "b"] {
+            fs::write(root.join(&tag).join(n), b"ours").unwrap();
+            fs::write(other.join(&tag).join(n), b"theirs").unwrap();
+        }
+        // The job's start (1), the move onto the existing directory (2), the first
+        // replacement (3), the second (4) fails.
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalSync,
+            &tag,
+            4,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::mv(vec![root.join(&tag)], other.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |q| match q {
+            Question::NoJournal { .. } => Answer::Abort,
+            _ => Answer::YesToAll,
+        });
+        assert!(
+            asked.iter().any(|q| q.starts_with("NoJournal")),
+            "{asked:?}"
+        );
+        for n in ["a", "b"] {
+            assert!(
+                root.join(&tag).join(n).exists(),
+                "{n}'s source is kept: {s:?}"
+            );
+        }
         let _ = fs::remove_dir_all(&other);
         let _ = fs::remove_dir_all(&root);
     }

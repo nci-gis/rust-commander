@@ -85,6 +85,18 @@ pub fn open(path: &Path) -> io::Result<(File, bool)> {
         ));
     }
     let (f, existed) = open_append(path)?;
+    #[cfg(unix)]
+    if existed {
+        // Someone else's file, writable by us (a shared log directory): what this
+        // shell prints would land in a file they own and control. Refused.
+        use std::os::unix::fs::MetadataExt as _;
+        if f.metadata()?.uid() != rustix::process::geteuid().as_raw() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "that file belongs to another user \u{2014} choose another name",
+            ));
+        }
+    }
     Ok((f, existed))
 }
 
@@ -927,6 +939,28 @@ mod tests {
         let e = open_append(&d.join("link")).unwrap_err();
         assert!(e.to_string().contains("a link"), "{e}");
         assert_eq!(std::fs::read_to_string(d.join("target")).unwrap(), "x");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Appending to a file another user owns is refused. Making such a file needs root
+    /// (this container runs as root; GitHub's runners do not); as anyone else it says so and
+    /// checks only that one's own file is accepted.
+    #[cfg(unix)]
+    #[test]
+    fn appending_to_another_users_file_is_refused() {
+        let d = scratch("owner");
+        let p = d.join("theirs.log");
+        std::fs::write(&p, "theirs\n").unwrap();
+        if rustix::process::geteuid().is_root() {
+            let nobody = rustix::process::Uid::from_raw(65534);
+            rustix::fs::chown(&p, Some(nobody), None).unwrap();
+            let e = open(&p).unwrap_err();
+            assert!(e.to_string().contains("another user"), "{e}");
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), "theirs\n");
+        } else {
+            eprintln!("not root: another user's file cannot be made here");
+            assert!(open(&p).is_ok());
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 

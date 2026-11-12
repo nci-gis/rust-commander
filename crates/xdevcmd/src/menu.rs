@@ -75,6 +75,10 @@ pub enum Cmd {
     Commands,
     /// Help → Config in use: the loaded config file, read-only.
     ConfigInUse,
+    /// Help → Documentation: the local copy of `docs/` and the link at this version.
+    Documentation,
+    /// Read this file in the viewer (the local docs' index), as F3 would.
+    ViewFile(PathBuf),
     /// View → Theme…: the list of themes.
     ThemeMenu,
     /// File → Settings….

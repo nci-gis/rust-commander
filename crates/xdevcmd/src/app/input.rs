@@ -671,6 +671,8 @@ impl App {
                 let v = crate::config_view::ConfigView::new(&self.settings, &self.config_outcome);
                 self.modal = Some(Modal::Config(Box::new(v)));
             }
+            Cmd::Documentation => self.documentation(),
+            Cmd::ViewFile(p) => self.view_path(&p),
             Cmd::Settings => self.open_settings(),
             Cmd::Undo => self.undo(),
             Cmd::SetTheme(name) => self.set_theme(&name),

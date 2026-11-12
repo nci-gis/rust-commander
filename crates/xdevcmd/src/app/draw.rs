@@ -69,7 +69,8 @@ impl App {
             Some(("New terminal", A::NewTerminal)),
             Some(("Show or hide terminal", A::ToggleTerminal)),
         ];
-        // Commands… and Config in use are put in at the top, below.
+        // Commands… and Config in use are put in at the top, Documentation and About
+        // at the end, below.
         let help: &[Option<(&str, A)>] = &[Some(("Usage", A::Usage))];
         let list = match i {
             0 => file,
@@ -101,6 +102,7 @@ impl App {
             let f1 = self.footer_key(A::Help).unwrap_or_default();
             items.insert(0, Item::cmd("Commands\u{2026}", f1, Cmd::Commands, true));
             items.insert(1, Item::cmd("Config in use", "", Cmd::ConfigInUse, true));
+            items.push(Item::cmd("Documentation", "", Cmd::Documentation, true));
             items.push(Item::sep());
             items.push(Item::cmd("About xdevcmd", "", Cmd::About, true));
         }

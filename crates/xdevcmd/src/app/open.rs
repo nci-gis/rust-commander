@@ -18,12 +18,17 @@ impl App {
             self.status = "F3 views a file, not a directory".into();
             return;
         };
+        self.view_path(&path);
+    }
+
+    /// Read `path` in the viewer, as F3 does: within the root, or not at all.
+    pub(super) fn view_path(&mut self, path: &Path) {
         // A link inside the root can point anywhere; what it points at is what F3 reads.
-        if !xdevcmd_core::policy::get().allows(&path) {
+        if !xdevcmd_core::policy::get().allows(path) {
             self.status = "that file is outside the root xdevcmd is confined to".into();
             return;
         }
-        match Document::open(&path) {
+        match Document::open(path) {
             Ok(doc) => {
                 let v = &self.settings.config.viewer;
                 let viewer = Viewer::open(doc, v.wrap, v.tab_width);
@@ -487,6 +492,63 @@ fn editor_args(
         }
         "notepad++" => (vec![format!("-n{line}").into(), file], true),
         _ => (vec![file], false),
+    }
+}
+
+impl App {
+    /// Help → Documentation: the copy of `docs/` beside xdevcmd first, when a release
+    /// archive put one there, then the link at this version's tag. Nothing is opened:
+    /// Enter reads the local index in the viewer, C copies the link (OSC 52).
+    pub(super) fn documentation(&mut self) {
+        let url = crate::docs::docs_url(None);
+        let local = crate::docs::local_copy();
+        let mut body = Vec::new();
+        match &local {
+            Some(dir) => {
+                body.push("On this computer, beside xdevcmd:".to_string());
+                body.push(format!("  {}", dir.display()));
+                body.push(String::new());
+            }
+            None => {
+                body.push(
+                    "No copy on this computer: the release archives carry one in docs/ \
+                     beside xdevcmd; cargo install does not."
+                        .to_string(),
+                );
+                body.push(String::new());
+            }
+        }
+        body.push(format!(
+            "Online, for xdevcmd {}:",
+            env!("CARGO_PKG_VERSION")
+        ));
+        body.push(format!("  {url}"));
+        body.push(String::new());
+        body.push(
+            "README.md gives the reading order; troubleshooting.md the known problems.".into(),
+        );
+        body.push("xdevcmd opens no connection: copy the link into a browser.".into());
+        let copy = ("copy link".to_string(), Cmd::CopyText(url));
+        let (yes, also) = match local {
+            Some(dir) => (
+                (
+                    "read README.md".to_string(),
+                    Cmd::ViewFile(dir.join("README.md")),
+                ),
+                Some(('c', copy.0, copy.1)),
+            ),
+            None => (copy, None),
+        };
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Documentation".into(),
+            body,
+            danger: false,
+            yes: Some(yes),
+            also,
+            buttons: Vec::new(),
+            footnote: None,
+            pictures: Vec::new(),
+        }));
     }
 }
 

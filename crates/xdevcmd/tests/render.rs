@@ -1568,9 +1568,10 @@ fn alt_x_f1_opens_commands_from_the_shell_and_the_panes() {
     assert!(commands_box(&s).is_some(), "{s}");
 }
 
-/// The Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · ─ · About.
+/// The Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · Documentation ·
+/// ─ · About.
 #[test]
-fn the_help_menu_is_commands_config_in_use_usage_and_about() {
+fn the_help_menu_is_commands_config_in_use_usage_documentation_and_about() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "F9,Left", &a, &b);
     let row = |label: &str| {
@@ -1584,11 +1585,102 @@ fn the_help_menu_is_commands_config_in_use_usage_and_about() {
     let at = |label: &str| s.lines().position(|l| l.contains(label)).unwrap();
     assert!(at("Commands\u{2026}") < at("Config in use"));
     assert!(at("Config in use") < at("Usage"));
-    assert!(at("Usage") < at("About xdevcmd"));
+    assert!(at("Usage") < at("Documentation"));
+    assert!(at("Documentation") < at("About xdevcmd"));
     assert!(!s.contains("Keys and settings"), "{s}");
     // Commands… opens F1 at its large size.
     let s = shot_keys("118x34", "F9,Left,Enter", &a, &b);
     assert_eq!(commands_box(&s), Some((0, 118)), "{s}");
+}
+
+/// Help → Documentation without a copy beside the binary (a build, as cargo install
+/// makes): it says where a copy comes from and gives the link at this version's tag,
+/// never `main`; Enter copies it, nothing is opened.
+#[test]
+fn documentation_gives_the_link_at_this_versions_tag() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x30", "F9,Left,Up,Up,Enter", &a, &b);
+    assert!(s.contains("\u{250c} Documentation"), "{s}");
+    let url = format!(
+        "{}/tree/v{}/docs",
+        env!("CARGO_PKG_REPOSITORY"),
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(s.contains(&url), "{url}\n{s}");
+    assert!(!s.contains("/main/"), "{s}");
+    assert!(s.contains("No copy on this computer"), "{s}");
+    assert!(s.contains("[Enter] copy link"), "{s}");
+    let s = shot_keys("110x30", "F9,Left,Up,Up,Enter,Enter", &a, &b);
+    assert!(!s.contains("\u{250c} Documentation"), "closed\n{s}");
+    assert!(s.contains("copied 1 line to the clipboard"), "{s}");
+}
+
+/// Documentation is a row in F1, found by typing.
+#[test]
+fn documentation_is_a_row_in_f1() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x30", "F1,d,o,c,u,m,e,n,t,a,t,i,o,n,Enter", &a, &b);
+    assert!(s.contains("\u{250c} Documentation"), "{s}");
+}
+
+/// A release archive's layout: `docs/` beside the binary. The window names that copy
+/// first, and Enter reads its index in the viewer.
+#[test]
+fn documentation_names_the_copy_beside_the_binary_first() {
+    let dir =
+        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("archive-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("docs")).unwrap();
+    let exe = dir.join(
+        std::path::Path::new(env!("CARGO_BIN_EXE_xdevcmd"))
+            .file_name()
+            .unwrap(),
+    );
+    // A link, not a copy, where the file system allows: the debug binary is large.
+    if fs::hard_link(env!("CARGO_BIN_EXE_xdevcmd"), &exe).is_err() {
+        fs::copy(env!("CARGO_BIN_EXE_xdevcmd"), &exe).unwrap();
+    }
+    fs::write(
+        dir.join("docs").join("README.md"),
+        "# xdevcmd documentation\n\nRead in this order.\n",
+    )
+    .unwrap();
+    let (a, b) = fixture();
+    let run = |keys: &str| {
+        // The same isolation, another program: the one in the archive's layout.
+        let c = isolated();
+        let mut c2 = Command::new(&exe);
+        for (k, v) in c.get_envs() {
+            match v {
+                Some(v) => c2.env(k, v),
+                None => c2.env_remove(k),
+            };
+        }
+        let out = c2
+            .arg("--screenshot=110x30")
+            .arg(format!("--keys={keys}"))
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .expect("xdevcmd should run");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let s = run("F9,Left,Up,Up,Enter");
+    let local = s
+        .lines()
+        .position(|l| l.contains("On this computer"))
+        .unwrap_or_else(|| panic!("{s}"));
+    let online = s.lines().position(|l| l.contains("Online, for")).unwrap();
+    assert!(local < online, "the local copy first\n{s}");
+    assert!(s.contains("[Enter] read README.md"), "{s}");
+    assert!(s.contains("[C] copy link"), "{s}");
+    let s = run("F9,Left,Up,Up,Enter,Enter");
+    assert!(
+        s.contains("Read in this order."),
+        "the index, in the viewer\n{s}"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// Config in use: the loaded file, a changed value marked, a filter that keeps the

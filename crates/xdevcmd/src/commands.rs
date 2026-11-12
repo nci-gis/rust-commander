@@ -14,10 +14,8 @@ use crate::config::MenuItem;
 use crate::keys::{self, Action, Keymap, Place};
 
 /// Known problems by system, and what to do; F1 points there rather than repeating it.
-const TROUBLESHOOTING: &str = concat!(
-    env!("CARGO_PKG_REPOSITORY"),
-    "/blob/main/docs/troubleshooting.md"
-);
+/// At this version's tag, as Help → Documentation is (`docs.rs`).
+const TROUBLESHOOTING: &str = crate::docs::docs_page!("troubleshooting.md");
 
 /// Commands with no key and no `Action`: they live in the menus only, and are rows
 /// here too, or "every command by typing" would not be true.
@@ -27,6 +25,7 @@ pub enum Extra {
     Theme,
     About,
     ConfigInUse,
+    Documentation,
 }
 
 /// What Enter on a row does.
@@ -182,6 +181,12 @@ pub fn rows(
                     "The loaded config file and the settings in effect, read-only",
                     Extra::ConfigInUse,
                     "config_in_use",
+                ),
+                (
+                    "Documentation",
+                    "The docs for this version: the copy beside xdevcmd, and the link",
+                    Extra::Documentation,
+                    "documentation",
                 ),
                 (
                     "About xdevcmd",

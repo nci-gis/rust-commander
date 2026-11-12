@@ -13,6 +13,7 @@ mod config_edit;
 mod config_view;
 mod crash;
 mod decor;
+mod docs;
 mod find_dialog;
 mod git;
 mod graphics;

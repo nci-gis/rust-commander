@@ -278,12 +278,8 @@ impl App {
                         let (Some(parent), Some(name)) = (p.parent(), p.file_name()) else {
                             return;
                         };
-                        let name = name.to_os_string();
-                        self.with_files(|f| {
-                            f.set_cwd(parent);
-                            let target = f.cwd.join(&name);
-                            f.select_path(&target);
-                        });
+                        let (parent, name) = (parent.to_path_buf(), name.to_os_string());
+                        self.with_files(|f| f.go_to_file(&parent, &name));
                     }
                     Err(e) => {
                         self.modal = Some(Modal::Input(Input {

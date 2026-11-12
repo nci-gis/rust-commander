@@ -102,7 +102,18 @@ struct Reading {
     started: Instant,
     count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     /// Where the cursor goes once a move arrives (Enter on a search result, Go to).
-    select: Option<PathBuf>,
+    select: Option<Select>,
+}
+
+/// Where the cursor is to land in a listing still on its way.
+#[derive(Debug, Clone)]
+enum Select {
+    /// This path, as the listing will name it.
+    Path(PathBuf),
+    /// The entry of this name, in whatever directory the move arrives in: the path the
+    /// move was asked for may not be the one the listing has (a link resolved, /var on
+    /// macOS being /private/var).
+    Name(std::ffi::OsString),
 }
 
 /// Read `path` on a thread: its real path when `resolve`, its time, and its entries
@@ -973,12 +984,7 @@ impl FilePane {
         if self.results.is_some() && !e.is_dir() {
             let file = e.path.clone();
             if let (Some(dir), Some(name)) = (file.parent(), file.file_name()) {
-                self.set_cwd(dir);
-                // By name in the directory as it now reads: set_cwd resolves links, so
-                // the path the search found (/var/… on macOS) may not be the path the
-                // listing has (/private/var/…).
-                let here = self.cwd.join(name);
-                self.select_path(&here);
+                self.go_to_file(dir, name);
             }
             return None;
         }
@@ -1002,6 +1008,44 @@ impl FilePane {
 
     pub fn set_cwd(&mut self, path: &Path) {
         self.navigate(path, true);
+    }
+
+    /// Go to `dir` with the cursor on the entry `name`: the one way to land on a file
+    /// (Enter on a search result, a typed path, a link's Go, both panes on one place).
+    /// The name is resolved against the listing that arrives, however late: before,
+    /// a slow directory was still the old one when the cursor was placed, and it landed
+    /// on `..`. A move that replaces this one, or Esc, drops the intent with it.
+    pub fn go_to_file(&mut self, dir: &Path, name: &std::ffi::OsStr) {
+        if !self.navigate(dir, true) {
+            return;
+        }
+        match self
+            .reading
+            .as_mut()
+            .filter(|r| matches!(r.why, ReadFor::Move { .. }))
+        {
+            Some(r) => r.select = Some(Select::Name(name.to_os_string())),
+            None => self.select_name(name),
+        }
+    }
+
+    /// The cursor on the entry `name` of the listing as it is; at the top, and said,
+    /// when it is not shown (hidden, filtered out, gone).
+    fn select_name(&mut self, name: &std::ffi::OsStr) {
+        match self
+            .entries
+            .iter()
+            .position(|e| e.path.file_name() == Some(name))
+        {
+            Some(i) => self.cursor = i,
+            None => {
+                self.cursor = 0;
+                self.notice = Some(format!(
+                    "{} is not shown here (hidden or filtered out?)",
+                    name.to_string_lossy()
+                ));
+            }
+        }
     }
 
     /// Go to `path`. `record` puts the directory being left on the back list, which
@@ -1054,8 +1098,10 @@ impl FilePane {
                 match r.why {
                     ReadFor::Move { record } => {
                         if self.arrive(read, record) {
-                            if let Some(p) = r.select {
-                                self.select_path(&p);
+                            match r.select {
+                                Some(Select::Path(p)) => self.select_path(&p),
+                                Some(Select::Name(n)) => self.select_name(&n),
+                                None => {}
                             }
                         }
                     }
@@ -1256,7 +1302,7 @@ impl FilePane {
             .as_mut()
             .filter(|r| matches!(r.why, ReadFor::Move { .. }))
         {
-            r.select = Some(path.to_path_buf());
+            r.select = Some(Select::Path(path.to_path_buf()));
             return;
         }
         if let Some(i) = self.entries.iter().position(|e| e.path == path) {
@@ -1956,6 +2002,83 @@ mod tests {
         let got: Vec<(u16, u16)> = c.iter().map(|(r, _)| (r.x, r.width)).collect();
         assert_eq!(got, [(0, 1), (1, 4), (6, 3)]);
     }
+    /// A move whose read is slow, as `navigate` leaves it: the read is sent by the test.
+    fn slow_move(f: &mut FilePane, to: &Path, select: Select) -> std::sync::mpsc::Sender<Read> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        f.reading = Some(Reading {
+            target: to.to_path_buf(),
+            why: ReadFor::Move { record: true },
+            rx,
+            started: Instant::now(),
+            count: Default::default(),
+            select: Some(select),
+        });
+        tx
+    }
+
+    fn read_of(dir: &Path) -> Read {
+        Read {
+            dir: dir.to_path_buf(),
+            mtime: dir_mtime(dir),
+            entries: Some(xdevcmd_core::read_dir_counted(
+                dir,
+                false,
+                &Default::default(),
+            )),
+        }
+    }
+
+    /// B02: the name is found in the listing that arrives, whatever its path; a move
+    /// made meanwhile drops the intent with the read; so does Esc; a name that is not
+    /// listed leaves the cursor at the top and says so.
+    #[test]
+    fn a_file_to_land_on_is_found_in_the_listing_that_arrives() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-land-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for (dir, names) in [
+            ("a", &["x"][..]),
+            ("b", &["aa", "target"]),
+            ("c", &["target", "zz"]),
+        ] {
+            std::fs::create_dir_all(d.join(dir)).unwrap();
+            for n in names {
+                std::fs::write(d.join(dir).join(n), "").unwrap();
+            }
+        }
+        let mut f = FilePane::new(&d.join("a"), Sort::default(), false);
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name("target".into()));
+        tx.send(read_of(&d.join("b"))).unwrap();
+        assert!(f.poll_reading());
+        assert_eq!(f.current().map(|e| e.name.as_str()), Some("target"));
+
+        // A second move before the first arrives: its intent goes with it.
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name("aa".into()));
+        f.set_cwd(&d.join("c"));
+        let _ = tx.send(read_of(&d.join("b")));
+        f.poll_reading();
+        assert_eq!(f.cwd, xdevcmd_core::paths::canonical(d.join("c")).unwrap());
+        assert_eq!(f.cursor, 0, "not on c's own `target`: nobody chose it");
+
+        // Esc: the same.
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name("aa".into()));
+        assert!(f.stop_reading().is_some());
+        let _ = tx.send(read_of(&d.join("b")));
+        assert!(!f.poll_reading());
+        assert_eq!(f.cwd, xdevcmd_core::paths::canonical(d.join("c")).unwrap());
+
+        // Not listed (hidden): the top, and a word why.
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name(".hidden".into()));
+        tx.send(read_of(&d.join("b"))).unwrap();
+        f.poll_reading();
+        assert_eq!(f.cursor, 0);
+        assert!(
+            f.notice.as_deref().is_some_and(|n| n.contains(".hidden")),
+            "{:?}",
+            f.notice
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     use std::io::Read as _;
 
     fn big_tar(dir: &Path) -> PathBuf {

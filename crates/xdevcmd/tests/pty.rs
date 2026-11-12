@@ -3879,6 +3879,45 @@ fn a_slow_directory_shows_a_bar_and_esc_stops_it() {
     xdevcmd.quit();
 }
 
+/// B02 (Round 029): Enter on a search result whose directory is slow to read lands on
+/// that file once the listing arrives. Before, the cursor was placed while the old
+/// listing was still up, by a path made from it, and ended on `..`.
+#[test]
+fn enter_on_a_result_in_a_slow_directory_lands_on_the_file() {
+    let s = Scratch::new("slow-result");
+    std::fs::create_dir_all(s.left().join("slowdir")).unwrap();
+    s.file("left/slowdir/aa-first.txt", "x");
+    s.file("left/slowdir/zz-target.txt", "x");
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_TEST_SLOW_DIR", "slowdir")]);
+    x.send(b"\x1b[18;3~"); // Alt+F7
+    x.wait_for("Find");
+    x.send(b"zz-target*");
+    x.send(ENTER);
+    x.wait_for("zz-target");
+    x.wait_gone("searching");
+    x.send(b"\x1b[F"); // End: the result
+    x.send(ENTER);
+    x.wait_for("opening slowdir\u{2026}");
+    x.wait_for("aa-first");
+    x.wait_gone("Esc stops");
+    let status = |x: &Session| {
+        let screen = x.screen();
+        let lines: Vec<String> = screen.lines().map(str::to_string).collect();
+        lines[lines.len() - 2].clone()
+    };
+    let start = Instant::now();
+    while !status(&x).contains("zz-target") {
+        assert!(
+            start.elapsed() < PATIENCE,
+            "the cursor is not on the file:\n{}",
+            x.screen()
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    x.quit();
+}
+
 /// Round 027: start logging tab 1 from its menu into `path`, `raw` switched on with Tab
 /// in the prompt; returns once the status line says it started.
 fn start_log(xdevcmd: &mut Session, path: &Path, raw: bool) {

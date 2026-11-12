@@ -759,6 +759,29 @@ the fix, kept here because the commit carries test and fix together.
   replace the target (no portable compare-and-rename); microseconds instead of the whole
   copy. For the contract (pillar 3).
 
+### 2026-11-13, step 6: B02, the cursor lands on the chosen file
+
+- `FilePane::go_to_file(dir, name)`: moves, and puts the intent on the pending move as
+  `Select::Name(OsString)` (the slot `Reading.select`, now `Option<Select>`, which
+  `select_path` already filled with a path that was wrong for a slow move), resolved by
+  name against the listing that arrives, so a link in the path, or macOS's
+  `/var` → `/private/var`, still lands. A name not in that listing (hidden, filtered
+  out, gone) leaves the cursor at the top with a notice "… is not shown here". A move
+  that replaces the pending one, and Esc, drop the intent with the read (`navigate`
+  clears `reading`; `stop_reading` takes it); the intent is applied after `arrive`, so
+  it wins over "came up out of a directory".
+- Call sites moved to it: Enter on a result (`activate`), a typed path to a file
+  (`app/file_ops.rs`), a link's Go (`app/shell.rs`), both panes on one directory
+  (`app/panes.rs`, now skipping `..` under the cursor). The fifth in §2 is `activate`
+  itself; `select_path` stays for a path in the listing as it is (after a rename, a
+  new file, leaving an archive).
+- Failing first (against the step-5 commit): pty
+  `enter_on_a_result_in_a_slow_directory_lands_on_the_file` (`XDEVCMD_TEST_SLOW_DIR`):
+  status line ` ..  ·  3 items`: the cursor on `..`.
+- Also: unit test `a_file_to_land_on_is_found_in_the_listing_that_arrives` (a read
+  sent by hand: lands by name; a second move drops the intent; Esc drops it; a hidden
+  name: top and a notice).
+
 ## Check
 
 ## Act

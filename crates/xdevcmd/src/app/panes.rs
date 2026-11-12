@@ -189,11 +189,12 @@ impl App {
             .get(&self.focus)
             .and_then(Pane::as_files)
             .and_then(|f| f.current())
+            .filter(|e| !e.is_parent())
             .map(|e| e.path.clone());
         if let Some(f) = self.panes.get_mut(&other).and_then(Pane::as_files_mut) {
-            f.set_cwd(&cwd);
-            if let Some(p) = at {
-                f.select_path(&p);
+            match at.as_deref().and_then(Path::file_name) {
+                Some(name) => f.go_to_file(&cwd, name),
+                None => f.set_cwd(&cwd),
             }
         }
         self.status = format!("both panes on {}", tidy(&cwd));

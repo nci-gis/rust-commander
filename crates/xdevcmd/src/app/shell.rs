@@ -242,9 +242,10 @@ impl App {
                 };
                 if link.dir {
                     f.set_cwd(&canonical);
-                } else if let Some(parent) = canonical.parent() {
-                    f.set_cwd(parent);
-                    f.select_path(&canonical);
+                } else if let (Some(parent), Some(name)) =
+                    (canonical.parent(), canonical.file_name())
+                {
+                    f.go_to_file(parent, name);
                 }
                 self.modal = None;
                 self.return_to = None;

@@ -619,6 +619,12 @@ impl App {
             true,
         ));
         items.push(Item::cmd("Copy path", "", Cmd::CopyPath, true));
+        items.push(Item::cmd(
+            "Copy relative path",
+            "",
+            Cmd::CopyRelativePath,
+            true,
+        ));
         items.push(Item::act(
             "Terminal here",
             k(Action::CdTerminalHere),
@@ -653,7 +659,7 @@ impl App {
         for it in &mut items {
             match &it.cmd {
                 Some(Cmd::Act(a)) if self.refused(*a).is_some() => it.enabled = false,
-                Some(Cmd::CopyPath) if restricted => it.enabled = false,
+                Some(Cmd::CopyPath | Cmd::CopyRelativePath) if restricted => it.enabled = false,
                 _ => {}
             }
         }

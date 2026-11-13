@@ -48,6 +48,11 @@ impl App {
             Run::Act(a) => self.refused(*a).or_else(|| self.archive_refused(*a)),
             Run::User(_) => self.refused(Action::UserMenu),
             Run::Extra(Extra::LogTab) => self.refused(Action::CopyAs),
+            Run::Extra(Extra::CopyPath | Extra::CopyRelativePath)
+                if self.settings.mode == Mode::Restricted =>
+            {
+                Some("restricted mode \u{2014} the clipboard is turned off".into())
+            }
             Run::Extra(_) | Run::ReadOnly(_) => None,
         }
     }
@@ -83,6 +88,7 @@ impl App {
             // it acts there, as Alt+X and its key does.
             Run::Act(a) => a.place() == Place::Files && !a.acts_on_shell(),
             Run::User(_) => true,
+            Run::Extra(Extra::CopyPath | Extra::CopyRelativePath) => true,
             Run::Extra(_) | Run::ReadOnly(_) => false,
         };
         if in_shell && files_first {
@@ -101,6 +107,8 @@ impl App {
             Run::Extra(Extra::About) => self.perform_cmd(Cmd::About),
             Run::Extra(Extra::ConfigInUse) => self.perform_cmd(Cmd::ConfigInUse),
             Run::Extra(Extra::Documentation) => self.perform_cmd(Cmd::Documentation),
+            Run::Extra(Extra::CopyPath) => self.perform_cmd(Cmd::CopyPath),
+            Run::Extra(Extra::CopyRelativePath) => self.perform_cmd(Cmd::CopyRelativePath),
             Run::Extra(e @ (Extra::LogTab | Extra::StopLog)) => {
                 let active = self.panel().and_then(|p| p.tab_id(p.active_tab()));
                 match (active, e) {

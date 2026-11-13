@@ -25,6 +25,9 @@ pub enum Extra {
     Theme,
     About,
     ConfigInUse,
+    /// The right-click menu's Copy path and Copy relative path (item 48).
+    CopyPath,
+    CopyRelativePath,
     Documentation,
     /// The active terminal tab's menu: Log to file….
     LogTab,
@@ -165,6 +168,41 @@ pub fn rows(
                 parsed: Vec::new(),
                 hay: String::new(),
             });
+        }
+        if group == "Files" {
+            for (title, about, extra, id) in [
+                (
+                    "Copy path",
+                    "The selected paths (or this folder's), whole, to the clipboard",
+                    Extra::CopyPath,
+                    "copy_path",
+                ),
+                (
+                    "Copy relative path",
+                    "The same, from the repository's root, or from this folder outside one",
+                    Extra::CopyRelativePath,
+                    "copy_relative_path",
+                ),
+            ] {
+                let run = Run::Extra(extra);
+                out.push(Row {
+                    title: title.into(),
+                    group: group.into(),
+                    keys: Vec::new(),
+                    key_text: String::new(),
+                    about: about.into(),
+                    note: None,
+                    place: Place::Files,
+                    refused: refuse(&run),
+                    run,
+                    rebound: false,
+                    keys_name: None,
+                    id: id.into(),
+                    name: format!("{group}: {title}"),
+                    parsed: Vec::new(),
+                    hay: String::new(),
+                });
+            }
         }
         if group == "General" {
             for (title, about, extra, id) in [

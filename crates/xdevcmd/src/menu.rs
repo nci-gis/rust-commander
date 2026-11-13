@@ -21,6 +21,8 @@ pub enum Cmd {
     Act(Action),
     /// Put the selected paths on the clipboard through the terminal (OSC 52).
     CopyPath,
+    /// The same, written from the repository's root or the pane's folder (item 48).
+    CopyRelativePath,
     /// The end of a drag-and-drop: the sources and destination are already known.
     Transfer {
         kind: ops::Kind,

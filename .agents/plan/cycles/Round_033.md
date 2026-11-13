@@ -300,6 +300,38 @@ after), so a check before `syncfs` is a guess, not a guarantee.
   exit 1). It does not count in the start-up budget, since it comes after the first
   frame.
 
+### 2026-11-13, the sync sweep on CI (run 43458792575), and item 48
+
+1,000 files of 1 KiB, `File::sync_data` on N threads, the median of three:
+
+| Threads | Linux (ext4) | macOS (APFS) | Windows (NTFS) |
+|---|---|---|---|
+| 1 | 334 ms | 861 ms | 103 ms |
+| 4 | 88 (3.8×) | 535 (1.6×) | 1,203 (0.1×) |
+| 8 | 47 (7.2×) | 364 (2.4×) | 1,190 (0.1×) |
+| 16 | 35 (9.7×) | 361 (2.4×) | 1,228 (0.1×) |
+| 32 | 20 (16×) | 356 (2.4×) | 1,194 (0.1×) |
+| 64 | 21 (16×) | 360 (2.4×) | 1,351 (0.1×) |
+
+- **The shape differs by system, and that settles auto-adjust.**
+  - Linux keeps gaining up to 32.
+  - macOS stops at 8 (2.4×).
+  - Windows is **twelve times slower** with any parallelism. 0.1 ms a sync on one
+    thread also suggests the runner's virtual disk does not wait for its flush, so the
+    owner's laptop must confirm. Parallel `FlushFileBuffers` on NTFS clearly contend,
+    though.
+- Proposal: a number per system, measured, not adjusted at run time:
+  - Linux 16 (the owner's figure; 32 would gain 1.7× more);
+  - macOS 8;
+  - Windows 1, today's sequential syncs.
+
+  Auto-adjust would only rediscover these. On Windows it would first try several
+  threads and lose.
+- **Item 48** (Copy relative path): `relpath.rs` (`.git` looked for upward, a file
+  counts, for worktrees), `Cmd::CopyRelativePath` in the right-click menu, and Copy
+  path and Copy relative path as F1 rows in Files (refused in restricted mode; from the
+  shell they act on the file pane). Unit and render tests.
+
 ## Check
 
 ## Act

@@ -30,6 +30,7 @@ mod modal;
 mod opener;
 mod pane;
 mod quiet;
+mod relpath;
 mod rename_dialog;
 mod safety;
 mod scrollbar;

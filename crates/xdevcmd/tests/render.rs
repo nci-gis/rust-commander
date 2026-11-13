@@ -4110,6 +4110,30 @@ fn messages_keeps_what_the_status_line_said() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Item 48: Copy relative path writes from the repository's root, or from the folder
+/// outside one, and the status line says which.
+#[test]
+fn copy_relative_path_says_what_it_is_relative_to() {
+    let (a, b) = fixture();
+    let keys = "Down,F1,c,o,p,y,Space,r,e,l,Enter";
+    let s = shot_keys("110x20", keys, &a, &b);
+    assert!(
+        s.contains("copied victim.txt, relative to this folder (not in a repository)"),
+        "{s}"
+    );
+    fs::create_dir(a.parent().unwrap().join(".git")).unwrap();
+    let s = shot_keys("110x20", keys, &a, &b);
+    let rel = std::path::Path::new("a")
+        .join("victim.txt")
+        .display()
+        .to_string();
+    assert!(
+        s.contains(&format!("copied {rel}, relative to the repository")),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn bulk_rename_is_off_in_read_only_mode() {
     let (a, b) = fixture();

@@ -611,7 +611,7 @@ impl App {
     pub(super) fn perform_cmd(&mut self, c: Cmd) {
         match c {
             Cmd::Act(a) => self.perform(a),
-            Cmd::CopyPath if self.settings.mode == Mode::Restricted => {
+            Cmd::CopyPath | Cmd::CopyRelativePath if self.settings.mode == Mode::Restricted => {
                 self.status = "restricted mode \u{2014} the clipboard is turned off".into();
             }
             Cmd::Transfer { .. } if self.settings.mode.read_only() => {
@@ -633,7 +633,8 @@ impl App {
                     self.settings.mode.label()
                 );
             }
-            Cmd::CopyPath => self.copy_path(),
+            Cmd::CopyPath => self.copy_path(false),
+            Cmd::CopyRelativePath => self.copy_path(true),
             Cmd::ShowList(id) => self.show_list(Some(id)),
             Cmd::AddToList(id) => self.add_to_list(id),
             Cmd::GoTo(p) => {
@@ -860,22 +861,27 @@ impl App {
     /// are sitting at — including across SSH, which nothing running on the server could
     /// do any other way. Whether it works is the terminal's call: Windows Terminal,
     /// iTerm2, kitty and WezTerm allow it; tmux needs `set-clipboard on`.
-    pub(super) fn copy_path(&mut self) {
+    /// Copy path, or with `relative` Copy relative path (item 48): from the
+    /// repository's root, else from the pane's folder, and the status line says which.
+    pub(super) fn copy_path(&mut self, relative: bool) {
         let mut paths = self.selection();
+        let cwd = self.focused_cwd();
         if paths.is_empty() {
-            paths.push(self.focused_cwd());
+            paths.push(cwd.clone());
         }
-        let text = paths
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let (texts, base) = if relative {
+            let (t, b) = crate::relpath::relative(&paths, &cwd);
+            (t, Some(b))
+        } else {
+            (
+                paths.iter().map(|p| p.display().to_string()).collect(),
+                None,
+            )
+        };
+        let text = texts.join("\n");
         // Pasted into a terminal, a control character in a path runs commands just as
         // typing it would. Refuse rather than strip: a stripped path is a wrong path.
-        if let Some(why) = paths
-            .iter()
-            .find_map(|p| crate::safety::unsafe_to_type(&p.display().to_string()))
-        {
+        if let Some(why) = texts.iter().find_map(|t| crate::safety::unsafe_to_type(t)) {
             self.status = why;
             return;
         }
@@ -885,9 +891,10 @@ impl App {
             let _ = out.write_all(seq.as_bytes());
             let _ = out.flush();
         }
-        self.status = match paths.as_slice() {
-            [one] => format!("sent {} to the clipboard", one.display()),
-            many => format!("sent {} paths to the clipboard", many.len()),
+        self.status = match (&base, texts.as_slice()) {
+            (Some(b), _) => crate::relpath::said(&texts, b),
+            (None, [one]) => format!("sent {one} to the clipboard"),
+            (None, many) => format!("sent {} paths to the clipboard", many.len()),
         };
     }
 

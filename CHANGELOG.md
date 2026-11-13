@@ -19,6 +19,11 @@ that heading and starts a new, empty one here. -->
 - **Messages (Alt+M, Help → Messages, and in F1)**: the status line's last 50 messages,
   each whole and with its time, in the viewer. The status line stays one row.
 
+- **Copy relative path** (the right-click menu, and Copy path too, now in F1): the
+  selected paths from the repository's root when the folder is in one (a `.git` above
+  it), else from the folder itself; the status line says which ("copied src/main.rs,
+  relative to the repository proj").
+
 ### Changed
 - **F1's own row, chosen inside F1, switches between the small and the large window**
   instead of closing and opening F1 again.

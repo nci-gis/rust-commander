@@ -225,7 +225,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 40 | Documentation from the app: versioned link, `docs/README.md`, docs in the archives | S | [026](cycles/Round_026.md) | Review (v0.4.0) |
 | 41 | Useful commands (readiness) | M | — | 0.5 |
 | 42 | **Smart Planner v1** (trust): scan → plan → confirm → execute, the executor unchanged | M–L | [030](cycles/Round_030.md), [031](cycles/Round_031.md) | Planning (0.4.0-beta.1; pillar 1 first, [029](cycles/Round_029.md)) |
-| 43 | **Smart Planner v2** (speed): lanes, adaptive concurrency, group commit, checkpointed resume, item 22 | M–L | — | 0.4.0-beta.2, scope after beta.1's numbers |
+| 43 | **Smart Planner v2** (speed): lanes, adaptive concurrency, group commit, checkpointed resume, item 22 | M–L | [033](cycles/Round_033.md) | 0.4.0-beta.2, scope after beta.1's numbers |
 | 44 | The planner hands work to trusted tools (rsync, robocopy, rclone) | M | — | 0.5 |
 | 45 | `o` says what happened: "opening …" only after 300 ms, "opened" when the system's opener hands it over, its error otherwise; it gives up waiting after about 5 s (some openers wait for the program) | S | — | 0.4.0-beta.2 |
 | 46 | The status line's past: the last messages with their times, each whole; the line itself stays one row (`[general] status_lines = 2` for those who want two) | S | — | 0.4.0-beta.2 |

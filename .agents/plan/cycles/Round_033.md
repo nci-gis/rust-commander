@@ -147,6 +147,16 @@ group commit against beta.1's "replace small files" and "copy small files".
 - Asked of the owner: which action "probe" was (the F5/F6 check, a folder's size, or the
   copy itself); whether a second run is as slow (a cold cache); and whether the folder
   is excluded from Defender. Goes with pillar 2 and item 43.
+- The owner's answer: slow only the first time, about as fast after; the folder is not
+  excluded from Defender.
+- **This fits a first-open scan.** Defender scans a file when it is first opened and
+  remembers the verdict until the file changes; a cold disk cache would do the same.
+  Either way, every file the planner stats on Windows is opened once.
+- Planned: on Windows, the walk takes size and times from `DirEntry::metadata()`
+  (FindFirstFile's data, no open) and calls `symlink_metadata` only where the entry
+  cannot say, such as reparse points. It must then be measured on Windows: first run
+  and second run, against beta.1's numbers. Part F, first. Not verifiable from this
+  Linux sandbox.
 
 ## Check
 

@@ -23,6 +23,9 @@ that heading and starts a new, empty one here. -->
   selected paths from the repository's root when the folder is in one (a `.git` above
   it), else from the folder itself; the status line says which ("copied src/main.rs,
   relative to the repository proj").
+- **A config file with a mistake is asked about at start** instead of only named on
+  the status line: continue with the defaults (Enter), edit it (E; checked again when
+  the editor closes) or quit (Q).
 
 ### Changed
 - **F1's own row, chosen inside F1, switches between the small and the large window**

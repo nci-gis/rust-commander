@@ -80,6 +80,11 @@ pub enum Cmd {
     QuitAnyway,
     /// Quit now, though cancelled jobs have not finished stopping (a hung drive).
     QuitNow,
+    /// A config file that failed to load, opened in the editor (item 49); checked
+    /// again when the editor closes.
+    EditConfig(PathBuf),
+    /// Only a message for the status line.
+    Note(String),
     /// Run an interrupted job again (safe operations' journal), "replace only if older".
     Resume(Box<xdevcmd_core::journal::Interrupted>),
     /// Help → About.

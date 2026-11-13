@@ -47,6 +47,11 @@ impl App {
         // temporary names above all) is put right even if safe operations were turned
         // off since. Without journals this finds nothing.
         self.recover_interrupted();
+        // What a killed run left comes first; a config that failed is said on the status
+        // line then, as before, and kept in Messages.
+        if self.modal.is_none() {
+            self.ask_about_config();
+        }
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
         // What a killed run left, tidied up, and the shell panel started, if it was open.
@@ -143,6 +148,7 @@ impl App {
                 yes: Some(("quit anyway".into(), Cmd::QuitNow)),
                 buttons: Vec::new(),
                 also: None,
+                more: None,
                 footnote: None,
                 pictures: Vec::new(),
             }));
@@ -234,6 +240,10 @@ impl App {
                 input.quiet()?;
             }
             self.edit_externally(terminal, &path)?;
+            if self.recheck_config.as_deref() == Some(path.as_path()) {
+                self.recheck_config = None;
+                self.config_checked_again(&path);
+            }
             // F4 from a shell's history: the history is still up, over the status line.
             if let Some(Modal::View(v)) = self.modal.as_mut() {
                 v.note(&self.status);

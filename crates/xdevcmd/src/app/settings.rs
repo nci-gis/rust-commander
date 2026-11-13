@@ -162,4 +162,70 @@ impl App {
             Err(e) => self.status = e,
         }
     }
+
+    /// Item 49: at start, a config file that could not be used is said in a dialog,
+    /// not only on the status line, where it is easy to miss: the file, the error, and
+    /// Enter to go on with the defaults, E to edit it, Q to quit. Never when nobody can
+    /// answer (`--screenshot`).
+    pub(super) fn ask_about_config(&mut self) {
+        if !self.interactive {
+            return;
+        }
+        let Outcome::Rejected { path, error } = &self.config_outcome else {
+            return;
+        };
+        let mut d = config_dialog(path, error, "could not be used");
+        // Read-only and restricted modes edit nothing, this file included.
+        if self.refused(Action::Edit).is_some() {
+            d.also = None;
+        }
+        self.modal = Some(Modal::Ask(d));
+    }
+
+    /// The config file edited from that dialog, read again: right now, said so (it
+    /// takes effect at the next start); still wrong, the dialog again with the new error.
+    pub(super) fn config_checked_again(&mut self, path: &Path) {
+        match crate::config::load(Some(path)).1 {
+            Outcome::Rejected { path, error } => {
+                self.modal = Some(Modal::Ask(config_dialog(
+                    &path,
+                    &error,
+                    "still has a mistake",
+                )));
+            }
+            _ => {
+                self.status = format!(
+                    "{} is right now \u{2014} restart xdevcmd to use it",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+/// The dialog about a config file that `what` ("could not be used"): its path, the
+/// error, and what each key does.
+fn config_dialog(path: &Path, error: &str, what: &str) -> modal::Ask {
+    let mut body = vec![format!("{} {what}:", path.display()), String::new()];
+    body.extend(error.lines().map(|l| format!("  {l}")));
+    body.push(String::new());
+    body.push("xdevcmd runs with the default settings, and saves nothing over the file.".into());
+    body.push("Help \u{203a} Config in use shows it again.".into());
+    modal::Ask {
+        title: "Config not loaded".into(),
+        body,
+        danger: false,
+        yes: Some((
+            "continue with the defaults".into(),
+            Cmd::Note(format!(
+                "defaults in use \u{2014} {} {what} (Help \u{203a} Config in use)",
+                path.display()
+            )),
+        )),
+        also: Some(('e', "edit it".into(), Cmd::EditConfig(path.to_path_buf()))),
+        more: Some(('q', "quit".into(), Cmd::QuitNow)),
+        buttons: Vec::new(),
+        footnote: None,
+        pictures: Vec::new(),
+    }
 }

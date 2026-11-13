@@ -134,6 +134,16 @@ impl App {
             },
             Some(Modal::Ask(a)) => match k.code {
                 KeyCode::Char(c)
+                    if a.more
+                        .as_ref()
+                        .is_some_and(|(key, _, _)| key.eq_ignore_ascii_case(&c)) =>
+                {
+                    act = match a.more.take() {
+                        Some((_, _, c)) => ModalAct::Run(c),
+                        None => ModalAct::Close,
+                    }
+                }
+                KeyCode::Char(c)
                     if a.also
                         .as_ref()
                         .is_some_and(|(key, _, _)| key.eq_ignore_ascii_case(&c)) =>

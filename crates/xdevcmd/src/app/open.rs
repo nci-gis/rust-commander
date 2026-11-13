@@ -554,6 +554,7 @@ impl App {
             yes: Some(yes),
             also,
             buttons: Vec::new(),
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));

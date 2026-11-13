@@ -707,6 +707,7 @@ impl App {
                     yes: None,
                     buttons: Vec::new(),
                     also: None,
+                    more: None,
                     footnote: Some(format!(
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
@@ -737,6 +738,11 @@ impl App {
                 self.quit_cd = true;
             }
             Cmd::Resume(it) => self.resume(*it),
+            Cmd::EditConfig(p) => {
+                self.recheck_config = Some(p.clone());
+                self.pending_edit = Some(p);
+            }
+            Cmd::Note(n) => self.status = n,
             Cmd::Sync(pairs) => {
                 let pairs_len = pairs.len();
                 let req = Request::sync(pairs);

@@ -468,6 +468,24 @@ the rest. One job of 1,000 files, the median of three:
   with the real job (`cargo xtask bench`).
 - Docs: `docs/security.md` "What is synced, and when"; CHANGELOG.
 
+### 2026-11-13, item 49: a config that fails to load is asked about
+
+- At start, after recovery's question (if any), a config with a mistake opens a dialog
+  **Config not loaded**: the path, the error, "xdevcmd runs with the default settings,
+  and saves nothing over the file":
+  - **Enter** continues on the defaults; the status line keeps saying so and points to
+    Help › Config in use;
+  - **E** opens the file in the editor (hidden in read-only and restricted modes).
+    When the editor closes, the file is read again: right → "… is right now — restart
+    xdevcmd to use it"; still wrong → the dialog again with the new error;
+  - **Q** quits.
+- `modal::Ask` has a third button (`more`, its key and its click) for Quit; every other
+  dialog leaves it `None`. New `Cmd::EditConfig`, `Cmd::Note`.
+- Only for an interactive start: `--check-config` and the like still print and exit 1.
+- **Tests** (pty): the dialog, Enter → defaults, Q → a clean exit; E with a stand-in
+  editor that mends the file → "is right now".
+- Docs: `docs/config.md`, CHANGELOG.
+
 ## Check
 
 ## Act

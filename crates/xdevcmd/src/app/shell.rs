@@ -588,6 +588,7 @@ impl App {
                         yes: Some(("Replace".into(), Cmd::SaveReplacing(dest))),
                         buttons: Vec::new(),
                         also: None,
+                        more: None,
                         footnote: None,
                         pictures: Vec::new(),
                     }));
@@ -778,6 +779,7 @@ impl App {
             yes: Some(yes),
             also,
             buttons: Vec::new(),
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));

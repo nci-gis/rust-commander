@@ -379,6 +379,59 @@ fn starts_draws_both_panes_and_quits_cleanly() {
     xdevcmd.quit();
 }
 
+/// A config with a mistake (item 49): a dialog at start, never a silent fallback.
+/// Enter continues on the defaults and says so; q quits.
+#[test]
+fn a_config_with_a_mistake_is_asked_about_at_start() {
+    let s = Scratch::new("bad-config");
+    let cfg = s.file("bad.toml", "[general\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("Config not loaded");
+    x.wait_below("Config not loaded", "could not be used");
+    x.send(ENTER);
+    x.wait_gone("Config not loaded");
+    x.wait_for("defaults in use");
+    x.quit();
+
+    // Again, and q on the dialog ends xdevcmd at once.
+    let x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("Config not loaded");
+    x.quit();
+}
+
+/// E on that dialog opens the file in the editor; mended there, xdevcmd says so.
+#[test]
+fn a_config_mended_from_the_dialog_is_checked_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("mend-config");
+    let cfg = s.file("bad.toml", "[general\n");
+    let editor = s.file("mend.sh", "#!/bin/sh\n: > \"$1\"\n");
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cfg_s = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        Some(&editor),
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg_s)],
+    );
+    x.wait_for("Config not loaded");
+    x.send(b"e");
+    x.wait_for("is right now");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "");
+    x.quit();
+}
+
 /// How long start-up took: on the status line with XDEVCMD_TIMINGS, step by step up to
 /// the first frame; in Help → Usage (Shift+F1) always.
 #[test]

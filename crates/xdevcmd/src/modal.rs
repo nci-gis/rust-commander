@@ -58,6 +58,8 @@ pub struct Ask {
     /// A second way forward, between `yes` and cancel: its key (a letter), its verb,
     /// and what it does. "Send to this shell" in the question before typing into one.
     pub also: Option<(char, String, Cmd)>,
+    /// A third, after `also`: "Quit" in the dialog about a config that failed.
+    pub more: Option<(char, String, Cmd)>,
     pub buttons: Vec<Rect>,
     /// A quiet line at the bottom right, on the buttons' row: a credit, not content.
     pub footnote: Option<String>,
@@ -922,18 +924,23 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
         .also
         .as_ref()
         .map(|(k, _, _)| k.to_ascii_uppercase().to_string());
+    let more_key = a
+        .more
+        .as_ref()
+        .map(|(k, _, _)| k.to_ascii_uppercase().to_string());
     a.buttons = match (&a.yes, &a.also, &also_key) {
-        (Some((verb, _)), Some((_, also, _)), Some(key)) => buttons(
-            frame,
-            inner.x,
-            y,
-            inner.width,
-            &[
+        (Some((verb, _)), Some((_, also, _)), Some(key)) => {
+            let mut b = vec![
                 ("Enter", verb.as_str(), accent),
                 (key.as_str(), also.as_str(), th.accent),
-                ("Esc", "cancel", th.accent),
-            ],
-        ),
+            ];
+            if let (Some((_, more, _)), Some(k)) = (&a.more, &more_key) {
+                b.push((k.as_str(), more.as_str(), th.accent));
+            } else {
+                b.push(("Esc", "cancel", th.accent));
+            }
+            buttons(frame, inner.x, y, inner.width, &b)
+        }
         (Some((verb, _)), _, _) => buttons(
             frame,
             inner.x,

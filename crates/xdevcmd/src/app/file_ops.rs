@@ -524,6 +524,7 @@ impl App {
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -688,6 +689,7 @@ impl App {
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));

@@ -421,6 +421,9 @@ pub struct App {
     /// Set by F4. Handled in `run`, which is the only place that can hand the real
     /// terminal over to another program and take it back.
     pending_edit: Option<PathBuf>,
+    /// The config file opened by the dialog about a config that failed (item 49): read
+    /// again when the editor closes.
+    recheck_config: Option<PathBuf>,
     /// The line (and column) F4 on a path in a shell's history asks the editor for.
     edit_at: Option<(u32, Option<u32>)>,
     settings: Settings,
@@ -646,6 +649,7 @@ impl App {
             last_click: None,
             modal: None,
             pending_edit: None,
+            recheck_config: None,
             edit_at: None,
             settings,
             config_outcome: outcome,

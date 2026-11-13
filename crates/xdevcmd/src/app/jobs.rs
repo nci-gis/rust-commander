@@ -143,6 +143,7 @@ impl App {
             yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -272,6 +273,7 @@ impl App {
             yes,
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -471,6 +473,7 @@ impl App {
             yes: Some(("undo".into(), Cmd::Undo)),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -508,6 +511,7 @@ impl App {
             )),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));

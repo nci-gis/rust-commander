@@ -15,9 +15,11 @@ wins: `$XDEVCMD_CONFIG`,
 `$XDG_CONFIG_HOME/xdevcmd/config.toml`, `%APPDATA%\xdevcmd\config.toml` (Windows),
 `~/.config/xdevcmd/config.toml`.
 
-**If the file has a mistake**, xdevcmd ignores the whole file, starts with the defaults,
-and the status line names the problem. **Help → Config in use** shows what is in use,
-and why a file was ignored.
+**If the file has a mistake**, xdevcmd ignores the whole file and asks at start
+(**Config not loaded**, with the error): **Enter** goes on with the defaults, **E** opens
+the file in your editor and checks it again when you close it (a mended file is used
+from the next start), **Q** quits. Nothing is ever saved over the file.
+**Help → Config in use** shows what is in use, and why a file was ignored.
 
 **File → Settings…** inside xdevcmd changes the common settings and saves them here,
 writing only the lines that changed. Everything else, keys included, is set in this

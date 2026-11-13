@@ -776,6 +776,12 @@ impl App {
                         Some((_, _, c)) => ModalAct::Run(c),
                         None => ModalAct::Close,
                     };
+                } else if cancel == 2 && a.more.is_some() && hit(&a.buttons, 2) {
+                    // [yes] [also] [more]: the third is `more`, not cancel.
+                    act = match a.more.take() {
+                        Some((_, _, c)) => ModalAct::Run(c),
+                        None => ModalAct::Close,
+                    };
                 } else if hit(&a.buttons, cancel) {
                     act = ModalAct::Close;
                 }

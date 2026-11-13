@@ -179,6 +179,62 @@ group commit against beta.1's "replace small files" and "copy small files".
 - Not changed: the job's own walk still stats each file as it copies. Reading the file
   opens it anyway.
 
+### 2026-11-13, part F: A01, A07, A06
+
+- **A01**: marks were already a `HashSet<PathBuf>` (`pane/files.rs`). Nothing to do.
+- **A07** (8fa2d7a): the watcher's callback folds events into one entry per watched
+  directory (first and latest change), replacing the unbounded channel. A directory is
+  due after 100 ms of quiet, or 1 s after its first change in a storm. An error or a
+  `need_rescan` event marks every watched directory. Unit test with synthetic times.
+  - **A deadlock was found and fixed on the way**: `sync` held the `watched` lock
+    across notify's `watch`, which waits on notify's event thread. Five pty tests hung.
+    No lock is held across notify calls now; the lock order is `watched`, then `dirty`.
+  - The pty suite passed three runs in a row afterwards.
+- **A06** (6942212): stale results were already dropped (one `reading` per pane,
+  replaced by the next). What was unbounded is the threads: a read stuck in a dead
+  mount cannot be stopped, and each new move left one. Now at most 16 run at once
+  across panes (`ReadSlot`); past that a move or reload is refused with a note, and the
+  periodic check waits. Unit test on a local counter.
+- Left of pillar 2: B08 (one shared budget) and A03 (the viewer's progressive index).
+
+### 2026-11-13, part G: group commit, measured, and the design (for the owner)
+
+Measured in this sandbox (ext4), 1,000 files of 1 KiB written then made durable:
+
+| Way | Time |
+|---|---|
+| `fdatasync` each, one after another (today) | 5,946 ms |
+| `fdatasync` on 8 threads | 1,300 ms |
+| `fdatasync` on 32 threads (ext4's journal commits them together) | 326 ms |
+| one `syncfs` on the file system | 11 ms |
+
+Design. It changes the order of Round 029's steps for small replacements only:
+1. A replacement of a small file (≤ 1 MiB) on a local target is written to its
+   temporary name as today (journal `part` line), and its handle is kept in a batch:
+   up to 64 files, 16 MiB, or 1 s.
+2. **One durability step per batch**:
+   - Linux: `syncfs` on the destination's file system (rustix, safe);
+   - macOS and Windows: each file's sync on up to 16 threads.
+3. Then for each file, in order, exactly today's last steps: the journal's `swap`
+   line, `durable`, the target checked once more, the old file to the trash, the
+   rename. Nothing is renamed before its data is on disk. The invariant is unchanged;
+   only how many syncs it costs.
+4. **A failed batch sync renames nothing.** Each file of the batch is written again from
+   its source and synced alone, today's path (a failed sync is never tried again on the
+   same file: fsyncgate).
+5. A kill between 2 and 3 leaves complete temporaries named in the journal, removed at
+   the next start, as a kill before a rename is today. Cancel removes them.
+6. Unchanged:
+   - big files;
+   - network targets (each file's error matters there, with retries);
+   - new files (not synced, the owner's earlier call);
+   - moves (already batched).
+
+Expected: 1,000 small replaces from about 7 s to well under 1 s on ext4. Measured with
+`cargo xtask bench` ("replace small files") here and on the owner's machine. `syncfs`
+also flushes other programs' dirty data on that file system; on a busy disk it can take
+longer than the files alone, but it is never slower than the sum of their syncs.
+
 ## Check
 
 ## Act

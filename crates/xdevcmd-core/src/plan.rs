@@ -1280,45 +1280,51 @@ mod tests {
         for x in [&a, &b, &to] {
             fs::create_dir_all(x).unwrap();
         }
-        fs::write(a.join("bad:name"), "x").unwrap();
         fs::write(a.join("X.txt"), "x").unwrap();
         fs::write(b.join("x.txt"), "y").unwrap();
         fs::write(a.join("README"), "new").unwrap();
         fs::write(to.join("Readme"), "old").unwrap();
-        fs::create_dir_all(a.join("dir?/deep")).unwrap();
-        fs::write(a.join("dir?/deep/f"), "z").unwrap();
         let big = fs::File::create(a.join("big")).unwrap();
         big.set_len(FAT_MAX + 1).unwrap();
-        let sources = [
-            a.join("bad:name"),
+        let mut sources = vec![
             a.join("X.txt"),
             b.join("x.txt"),
             a.join("README"),
-            a.join("dir?"),
             a.join("big"),
         ];
+        // Names Windows' own drives cannot hold cannot be made there to begin with.
+        let bad = cfg!(unix);
+        if bad {
+            fs::write(a.join("bad:name"), "x").unwrap();
+            fs::create_dir_all(a.join("dir?/deep")).unwrap();
+            fs::write(a.join("dir?/deep/f"), "z").unwrap();
+            sources.push(a.join("bad:name"));
+            sources.push(a.join("dir?"));
+        }
         let p = plan_on(FAT, Kind::Copy, &sources, &to);
-        assert!(matches!(
-            row(&p, "bad:name").blocked,
-            Some(Blocked::BadName(_))
-        ));
         assert_eq!(row(&p, "big").blocked, Some(Blocked::TooBig));
-        // A directory that cannot be made: one row, nothing under it planned.
-        assert!(matches!(row(&p, "dir?").blocked, Some(Blocked::BadName(_))));
-        assert!(
-            !p.rows.iter().any(|r| r.src.ends_with("deep")),
-            "{:?}",
-            p.rows
-        );
+        if bad {
+            assert!(matches!(
+                row(&p, "bad:name").blocked,
+                Some(Blocked::BadName(_))
+            ));
+            // A directory that cannot be made: one row, nothing under it planned.
+            assert!(matches!(row(&p, "dir?").blocked, Some(Blocked::BadName(_))));
+            assert!(
+                !p.rows.iter().any(|r| r.src.ends_with("deep")),
+                "{:?}",
+                p.rows
+            );
+        }
         assert_eq!(row(&p, "X.txt").warn, None);
         assert_eq!(row(&p, "x.txt").warn, Some(Warn::CaseClash("X.txt".into())));
         assert_eq!(
             row(&p, "README").warn,
             Some(Warn::CaseClash("Readme".into()))
         );
-        assert_eq!(p.totals.blocked, 3);
+        assert_eq!(p.totals.blocked, if bad { 3 } else { 1 });
         assert_eq!(p.totals.warned, 2);
-        assert_eq!(p.totals.items, 8);
+        assert_eq!(p.totals.items, if bad { 8 } else { 4 });
         assert!(p.needs_deciding());
         // Where case is kept apart, the same names are fine.
         let ext = Target {
@@ -1326,7 +1332,7 @@ mod tests {
             ignores_case: Some(false),
             ..FAT
         };
-        let p = plan_on(ext, Kind::Copy, &sources[1..3], &to);
+        let p = plan_on(ext, Kind::Copy, &sources[..2], &to);
         assert_eq!(p.totals.warned, 0);
         assert!(!p.needs_deciding());
     }

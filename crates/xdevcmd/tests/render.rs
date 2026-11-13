@@ -5284,3 +5284,71 @@ fn the_search_term_stays_lit_inside_a_selection() {
     );
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
+
+// ── the Smart Planner's confirm table (Round 030) ─────────────────────────────────────
+
+/// A copy onto files that are there: one older, one newer, one identical, one new.
+fn planned_trees() -> (PathBuf, PathBuf) {
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let root = scratch(&format!("plan-{n}"));
+    let _ = fs::remove_dir_all(&root);
+    let (a, b) = (root.join("a"), root.join("b"));
+    aged(&a.join("older.txt"), "new body", 10);
+    aged(&b.join("older.txt"), "old", 3600);
+    aged(&a.join("newer.txt"), "x", 3600);
+    aged(&b.join("newer.txt"), "y", 10);
+    aged(&a.join("same.txt"), "same", 600);
+    aged(&b.join("same.txt"), "same", 600);
+    aged(&a.join("fresh.txt"), "fresh", 10);
+    (a, b)
+}
+
+#[test]
+fn a_copy_onto_files_that_are_there_shows_the_plan_once_per_group() {
+    for size in ["118x34", "80x24", "60x20"] {
+        let (a, b) = planned_trees();
+        let s = shot_keys(size, "*,F5", &a, &b);
+        for line in [
+            "would replace a newer file  [skip]",
+            "would replace an older file  [skip]",
+            "1 already there, identical: left as it is",
+            "Space changes what is done",
+        ] {
+            assert!(s.contains(line), "{size}: {line}\n{s}");
+        }
+        assert!(s.contains("create 1"), "{size}: the summary\n{s}");
+        // The U line of the plain dialog is gone: the table decides per group.
+        assert!(!s.contains("(U changes)"), "{size}\n{s}");
+        // Nothing has been touched while the dialog is open.
+        assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "old");
+    }
+}
+
+#[test]
+fn the_table_changes_a_group_and_the_copy_does_what_it_says() {
+    let (a, b) = planned_trees();
+    // Down from the first group (newer) to older; Space: replace. Enter, then wait.
+    let s = shot_keys("118x34", "*,F5,Down,Space", &a, &b);
+    assert!(s.contains("would replace an older file  [replace]"), "{s}");
+    assert!(s.contains("would replace a newer file  [skip]"), "{s}");
+    assert!(s.contains("replace 1"), "{s}");
+    let _ = shot_keys("118x34", "*,F5,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert_eq!(
+        fs::read_to_string(b.join("newer.txt")).unwrap(),
+        "y",
+        "kept"
+    );
+    assert_eq!(fs::read_to_string(b.join("fresh.txt")).unwrap(), "fresh");
+}
+
+#[test]
+fn a_copy_with_nothing_to_decide_is_the_dialog_it_always_was() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,Insert,F5", &a, &b);
+    assert!(s.contains("1 file \u{2022} 7 bytes"), "{s}");
+    assert!(s.contains("if a file is there: ask  (U changes)"), "{s}");
+    for not in ["create ", "Space changes", "\u{26a0}", "identical"] {
+        assert!(!s.contains(not), "{not}\n{s}");
+    }
+}

@@ -316,6 +316,31 @@ impl App {
             self.show_extracted(out, tmp, name);
             changed = true;
         }
+        // The plan for the open confirmation: how far it has got, or the plan itself.
+        if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
+            let mut done = None;
+            if let Some((p, line)) = c.planning.as_ref() {
+                while let Ok(m) = p.rx.try_recv() {
+                    match m {
+                        xdevcmd_core::plan::Msg::Progress { items, .. } => {
+                            if let Some(l) = c.body.get_mut(*line) {
+                                *l = format!("counting\u{2026} {items} so far");
+                            }
+                            changed = true;
+                        }
+                        xdevcmd_core::plan::Msg::Done(plan) => {
+                            done = Some(plan);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(plan) = done {
+                let count = Self::count_label(plan.totals.files, plan.totals.bytes);
+                c.planned(plan, count);
+                changed = true;
+            }
+        }
         // A count for the open confirmation, if it has come in.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             let got = c.counting.as_ref().and_then(|(n, _)| n.rx.try_recv().ok());

@@ -289,6 +289,40 @@ rows with a decision are kept.
   a move on one device; an unwritable destination (skipped as root); the case lookup
   through the seam. Core 277 passed; clippy for Linux, windows-gnu, darwin.
 
+### 2026-11-13, step 3: the confirm table (and the executor's `Expect::Skip`)
+
+- F5/F6 plan on `plan::start` instead of `ops::count`; the dialog opens at once as
+  before ("counting…", then "counting… N so far" on a big tree). **Enter before the plan
+  ends starts the job as before, asking as it goes** (Start now, decision 2). Tab plans
+  again for the other pane.
+- Plan in, nothing to decide (`Plan::has_questions`): the count line as always, and the
+  U line; identical files only add "(N already there, identical: left as they are)".
+  Something to decide: the body becomes the table: a summary line (`create · replace ·
+  skip [· ask] · needs X, Y free`), ⛔ lines for an unwritable destination or too
+  little space, then a line per group, worst first: ⛔ cannot be done (left out), ⚠ newer
+  / older / another size / file where a folder is / folder where a file is / differs
+  only in case, ℹ identical. ↑↓ choose a group, Space (or ←→) cycles skip → replace →
+  ask each; the default is never the one that loses data (skip). Enter on an
+  unwritable destination says so and does not start (key and click).
+- Core: `plan::{Group, Level, Choice}`, `Plan::groups`, `has_questions`,
+  `expectations` → `Request::expect`: skip → new `Expect::Skip` (the worker leaves the
+  file, whatever is there now), replace → `Expect::Replace(Ident)` (Round 029's
+  re-check), ask → nothing, so the job asks. `Totals::files` counts as `ops::count` did.
+- Size-and-date equality is "identical" (rsync's and robocopy's quick check, FAT's two
+  seconds as everywhere else here): such a file is now left without a question. The pty
+  test `copying_over_a_file_asks_first_then_overwrites` used two 3-byte files written
+  the same second, so it now uses different sizes and goes through the table (Space
+  twice → ask each → Enter → the old question).
+- `--screenshot` waits for a plan after each key, so a test sees the same dialog
+  however fast the disk; `job_working` counts a plan being made.
+- Tests: render (the table at 118×34, 80×24, 60×20; a group changed and the copy doing
+  exactly that; nothing to decide → the plain dialog, no table words); pty (default
+  skip keeps the old file, never asked; the overwrite test through the table). The
+  "F5 stays instant" timing guard is not needed as planned: the plan runs off the UI
+  thread and the dialog opens before it. fmt; clippy ×3; `cargo test --workspace` green.
+- Not yet: Shift+F5 (copy as, no confirm dialog today) and Alt+Y go to step 4; the
+  "needs" figure is an upper bound (it counts every conflict as written).
+
 ## Check
 
 ## Act

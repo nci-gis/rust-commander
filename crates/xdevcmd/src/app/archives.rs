@@ -68,6 +68,9 @@ impl App {
             counting,
             permanent: false,
             existing_line: None,
+            plans: false,
+            planning: None,
+            table: None,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);

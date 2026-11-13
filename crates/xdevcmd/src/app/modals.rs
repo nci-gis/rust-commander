@@ -27,6 +27,36 @@ impl App {
                     act = ModalAct::Close;
                 }
             }
+            Some(Modal::Confirm(c))
+                if c.table.is_some()
+                    && matches!(
+                        k.code,
+                        KeyCode::Up
+                            | KeyCode::Down
+                            | KeyCode::Char(' ')
+                            | KeyCode::Left
+                            | KeyCode::Right
+                    ) =>
+            {
+                if let Some(t) = c.table.as_mut() {
+                    match k.code {
+                        KeyCode::Up => t.move_sel(false),
+                        KeyCode::Down => t.move_sel(true),
+                        _ => t.cycle(),
+                    }
+                }
+                c.redraw_table();
+            }
+            // Nothing can be written there: said, and the job is not started.
+            Some(Modal::Confirm(c))
+                if matches!(k.code, KeyCode::Enter | KeyCode::Char('y' | 'Y'))
+                    && c.table
+                        .as_ref()
+                        .is_some_and(|t| t.plan.target.writable == Some(false)) =>
+            {
+                self.status =
+                    "you cannot write there: Tab for the other pane, Esc to cancel".into();
+            }
             Some(Modal::Confirm(c)) => match k.code {
                 KeyCode::Tab => c.next_destination(),
                 // What cannot be undone is never one Enter away: Enter is what a hand
@@ -194,6 +224,17 @@ impl App {
                 }
             }
             ModalAct::Start => {
+                // A click on [Enter] too: nothing can be written there.
+                if let Some(Modal::Confirm(c)) = &self.modal {
+                    if c.table
+                        .as_ref()
+                        .is_some_and(|t| t.plan.target.writable == Some(false))
+                    {
+                        self.status =
+                            "you cannot write there: Tab for the other pane, Esc to cancel".into();
+                        return;
+                    }
+                }
                 if let Some(Modal::Confirm(c)) = self.modal.take() {
                     let kind = c.request.kind;
                     self.remember_job(&c.request);

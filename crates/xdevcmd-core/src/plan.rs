@@ -51,7 +51,8 @@ pub enum Class {
 }
 
 impl Class {
-    /// Whether this row puts a file where one is: a decision to make.
+    /// Whether something is at this row's destination that the job must not simply
+    /// write over: kept past the cap, and carried to the executor.
     pub fn conflicts(self) -> bool {
         !matches!(self, Class::New | Class::Merge)
     }
@@ -109,6 +110,123 @@ impl Row {
     pub fn needs_deciding(&self) -> bool {
         self.blocked.is_some() || self.warn.is_some() || self.class.conflicts()
     }
+
+    /// The group of the confirm table this row is counted in, if any.
+    pub fn group(&self) -> Option<Group> {
+        if self.blocked.is_some() {
+            return Some(Group::Blocked);
+        }
+        if self.warn.is_some() {
+            return Some(Group::CaseClash);
+        }
+        Some(match self.class {
+            Class::New | Class::Merge => return None,
+            Class::Identical => Group::Identical,
+            Class::Older => Group::Older,
+            Class::Newer => Group::Newer,
+            Class::Differs => Group::Differs,
+            Class::FileOverDir => Group::FileOverDir,
+            Class::DirOverFile => Group::DirOverFile,
+        })
+    }
+}
+
+/// How bad a group is (Round 030, item 42): what cannot be done at all; what would lose
+/// data for good; what is only said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    Cannot,
+    Loses,
+    Info,
+}
+
+/// One line of the confirm table: rows that share a question, asked once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Group {
+    Blocked,
+    CaseClash,
+    Newer,
+    Older,
+    Differs,
+    FileOverDir,
+    DirOverFile,
+    Identical,
+}
+
+/// What to do with a group's rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Choice {
+    /// Leave what is there.
+    Skip,
+    /// Replace it, while it is still the file the plan saw.
+    Replace,
+    /// Ask about each one while the job runs, as before the planner.
+    Ask,
+}
+
+impl Choice {
+    pub fn label(self) -> &'static str {
+        match self {
+            Choice::Skip => "skip",
+            Choice::Replace => "replace",
+            Choice::Ask => "ask each",
+        }
+    }
+}
+
+impl Group {
+    pub fn level(self) -> Level {
+        match self {
+            Group::Blocked => Level::Cannot,
+            Group::Identical => Level::Info,
+            _ => Level::Loses,
+        }
+    }
+
+    /// What the user can choose for it, the default first: never the one that loses
+    /// data (owner, 2026-11-13). Empty: nothing to choose.
+    pub fn choices(self) -> &'static [Choice] {
+        match self {
+            Group::Blocked | Group::Identical => &[],
+            // A file and a folder cannot replace each other in one step.
+            Group::FileOverDir | Group::DirOverFile | Group::CaseClash => {
+                &[Choice::Skip, Choice::Ask]
+            }
+            _ => &[Choice::Skip, Choice::Replace, Choice::Ask],
+        }
+    }
+
+    /// The choice it starts with.
+    pub fn default_choice(self) -> Choice {
+        self.choices().first().copied().unwrap_or(Choice::Skip)
+    }
+
+    /// The table's words for `n` rows of it.
+    pub fn describe(self, n: u64) -> String {
+        let s = |one: &str, many: &str| {
+            if n == 1 {
+                one.to_string()
+            } else {
+                many.to_string()
+            }
+        };
+        match self {
+            Group::Blocked => format!("{n} {} done", s("cannot be", "cannot be")),
+            Group::CaseClash => format!(
+                "{n} {} only in case from a name there",
+                s("differs", "differ")
+            ),
+            Group::Newer => format!("{n} would replace a newer file"),
+            Group::Older => format!("{n} would replace an older file"),
+            Group::Differs => format!("{n} would replace a file of another size"),
+            Group::FileOverDir => format!("{n} {} where a folder is", s("file", "files")),
+            Group::DirOverFile => format!("{n} {} where a file is", s("folder", "folders")),
+            Group::Identical => format!(
+                "{n} already there, identical: left as {}",
+                s("it is", "they are")
+            ),
+        }
+    }
 }
 
 /// The counts a plan's summary line is made of.
@@ -130,6 +248,8 @@ pub struct Totals {
     pub dropped: u64,
     /// Bytes the job writes at the destination (what is identical is not copied).
     pub writes: u64,
+    /// Files and links, as the F5 dialog has always counted them.
+    pub files: u64,
 }
 
 /// What a copy or move will do, from one scan.
@@ -164,6 +284,49 @@ impl Plan {
         } else {
             self.totals.writes
         }
+    }
+
+    /// The confirm table's groups, worst first, with how many rows each has. Rows past
+    /// the cap are all new, so no group loses any.
+    pub fn groups(&self) -> Vec<(Group, u64)> {
+        let mut n: std::collections::BTreeMap<Group, u64> = Default::default();
+        for g in self.rows.iter().filter_map(Row::group) {
+            *n.entry(g).or_default() += 1;
+        }
+        n.into_iter().collect()
+    }
+
+    /// Whether a table is needed: something cannot be done, would lose data, or the
+    /// destination cannot take the job. Identical files alone are only said.
+    pub fn has_questions(&self) -> bool {
+        self.target.writable == Some(false)
+            || self.short_of_space().is_some()
+            || self.groups().iter().any(|(g, _)| g.level() != Level::Info)
+    }
+
+    /// What the executor is told, from the choice for each group: a row skipped is
+    /// left; a row replaced is replaced only while it is the file the plan saw; a row
+    /// asked about gets no word, so the job asks.
+    pub fn expectations(
+        &self,
+        choice: impl Fn(Group) -> Choice,
+    ) -> HashMap<PathBuf, crate::ops::Expect> {
+        use crate::ops::Expect;
+        let mut out = HashMap::new();
+        for r in &self.rows {
+            let Some(g) = r.group() else { continue };
+            let e = match (g, choice(g)) {
+                // Never written: a blocked row's place is left as it is.
+                (Group::Blocked | Group::Identical, _) | (_, Choice::Skip) => Expect::Skip,
+                (_, Choice::Replace) => match r.target {
+                    Some(id) => Expect::Replace(id),
+                    None => continue,
+                },
+                (_, Choice::Ask) => continue,
+            };
+            out.insert(r.dst.clone(), e);
+        }
+        out
     }
 
     /// `(needed, free)` when the destination has less free than the job writes.
@@ -695,6 +858,9 @@ impl Scan<'_> {
 
     fn push(&mut self, row: Row) {
         self.totals.items += 1;
+        if !row.dir {
+            self.totals.files += 1;
+        }
         if row.blocked.is_none() && row.warn.is_some() {
             self.totals.warned += 1;
         }

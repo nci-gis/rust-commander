@@ -15,6 +15,7 @@ use ratatui::Frame;
 
 use xdevcmd_core::format::{elide_middle, human_size};
 use xdevcmd_core::ops::{self, Answer, Question, Request, Summary};
+use xdevcmd_core::plan::{self, Choice, Group, Level, Plan};
 
 use crate::find_dialog::{self, FindDialog};
 use crate::line_edit::LineEdit;
@@ -87,6 +88,157 @@ pub struct Confirm {
     /// Copy and move: the body line that says what happens to files already there, which
     /// U changes.
     pub existing_line: Option<usize>,
+    /// Copy and move are planned (Round 030): a new destination plans again.
+    pub plans: bool,
+    /// The plan being made, and the body line its count goes in. Enter before it ends
+    /// starts the job as before the planner, asking as it goes ("Start now").
+    pub planning: Option<(plan::Planning, usize)>,
+    /// The plan, once it has something to decide: the confirm table.
+    pub table: Option<Table>,
+}
+
+/// A size with its unit: "10 bytes" under a KiB, as the F5 dialog's count says it.
+fn bytes(n: u64) -> String {
+    if n < 1024 {
+        format!("{n} bytes")
+    } else {
+        human_size(n)
+    }
+}
+
+/// The confirm table: a plan with something to decide, a line per group, each with its
+/// choice; asked once per group, before the first byte.
+pub struct Table {
+    pub plan: Box<Plan>,
+    /// Each group, worst first: how many rows, what was chosen.
+    pub groups: Vec<(Group, u64, Choice)>,
+    /// The group the arrows are on (one with choices).
+    pub sel: usize,
+    /// The body line of the first group.
+    pub first_line: usize,
+}
+
+impl Table {
+    pub fn new(plan: Box<Plan>) -> Self {
+        let groups: Vec<_> = plan
+            .groups()
+            .into_iter()
+            .map(|(g, n)| (g, n, g.default_choice()))
+            .collect();
+        let sel = groups
+            .iter()
+            .position(|(g, ..)| !g.choices().is_empty())
+            .unwrap_or(0);
+        Self {
+            plan,
+            groups,
+            sel,
+            first_line: 0,
+        }
+    }
+
+    pub fn choice(&self, g: Group) -> Choice {
+        self.groups
+            .iter()
+            .find(|(x, ..)| *x == g)
+            .map_or(g.default_choice(), |(.., c)| *c)
+    }
+
+    /// What the executor is told, from the choices as they are now.
+    pub fn expect(&self) -> std::collections::HashMap<PathBuf, ops::Expect> {
+        self.plan.expectations(|g| self.choice(g))
+    }
+
+    /// Up or down to the next group that has something to choose.
+    pub fn move_sel(&mut self, down: bool) {
+        let n = self.groups.len();
+        let mut i = self.sel;
+        for _ in 0..n {
+            i = if down { (i + 1) % n } else { (i + n - 1) % n };
+            if !self.groups[i].0.choices().is_empty() {
+                self.sel = i;
+                return;
+            }
+        }
+    }
+
+    /// Space: the selected group's next choice.
+    pub fn cycle(&mut self) {
+        let Some((g, _, c)) = self.groups.get_mut(self.sel) else {
+            return;
+        };
+        let all = g.choices();
+        if let Some(i) = all.iter().position(|x| x == c) {
+            *c = all[(i + 1) % all.len()];
+        }
+    }
+
+    /// `create 120 · replace 4 · skip 7 · ask 2 · needs 1.2 MB, 30 GB free`.
+    pub fn summary(&self) -> String {
+        let (mut replace, mut skip, mut ask) = (0, 0, 0);
+        for (g, n, c) in &self.groups {
+            match (g.choices().is_empty(), c) {
+                (true, _) | (false, Choice::Skip) => skip += n,
+                (false, Choice::Replace) => replace += n,
+                (false, Choice::Ask) => ask += n,
+            }
+        }
+        let t = &self.plan.totals;
+        let mut out = format!(
+            "create {} \u{b7} replace {replace} \u{b7} skip {skip}",
+            t.new
+        );
+        if ask > 0 {
+            out.push_str(&format!(" \u{b7} ask {ask}"));
+        }
+        let needed = bytes(self.plan.needed());
+        match self.plan.target.free {
+            Some(free) => out.push_str(&format!(" \u{b7} needs {needed}, {} free", bytes(free))),
+            None => out.push_str(&format!(" \u{b7} needs {needed}")),
+        }
+        out
+    }
+
+    /// The table's lines: the summary, what stops the whole job, a line per group.
+    pub fn lines(&self) -> (Vec<String>, Vec<String>) {
+        let mut head = vec![self.summary()];
+        if self.plan.target.writable == Some(false) {
+            head.push(format!(
+                "\u{26d4} you cannot write to {}",
+                self.plan.dest.display()
+            ));
+        }
+        if let Some((needed, free)) = self.plan.short_of_space() {
+            head.push(format!(
+                "\u{26d4} it needs {}, and only {} is free there",
+                bytes(needed),
+                bytes(free)
+            ));
+        }
+        let groups = self
+            .groups
+            .iter()
+            .map(|(g, n, c)| {
+                let icon = match g.level() {
+                    Level::Cannot => "\u{26d4}",
+                    Level::Loses => "\u{26a0}",
+                    Level::Info => "\u{2139}",
+                };
+                let what = g.describe(*n);
+                if g.choices().is_empty() {
+                    let tail = if *g == Group::Blocked {
+                        ": left out"
+                    } else {
+                        ""
+                    };
+                    format!("{icon} {what}{tail}")
+                } else {
+                    format!("{icon} {what}  [{}]", c.label())
+                }
+            })
+            .collect();
+        (head, groups)
+    }
 }
 
 /// What the confirmation says for each choice of what to do with existing files.
@@ -147,6 +299,86 @@ impl Confirm {
     pub fn next_destination(&mut self) {
         if self.choices.len() > 1 {
             self.set_destination((self.choice + 1) % self.choices.len());
+            self.replan();
+        }
+    }
+
+    /// Plan again, for the destination now chosen: the old plan and its table go.
+    pub fn replan(&mut self) {
+        if !self.plans {
+            return;
+        }
+        let Some(dest) = self.request.dest.clone() else {
+            return;
+        };
+        self.table = None;
+        self.request.expect.clear();
+        if let Some(l) = self.body.get_mut(3) {
+            *l = "counting\u{2026}".into();
+        }
+        self.planning = Some((
+            plan::start(
+                self.request.kind,
+                self.request.sources.clone(),
+                dest,
+                self.request.rename_to.clone(),
+            ),
+            3,
+        ));
+    }
+
+    /// The plan has come in. Nothing to decide: the count goes in its line and the
+    /// dialog stays the one it always was. Otherwise the body becomes the table.
+    pub fn planned(&mut self, plan: Box<Plan>, count: String) {
+        let Some((_, line)) = self.planning.take() else {
+            return;
+        };
+        if !plan.has_questions() {
+            let same: u64 = plan
+                .groups()
+                .iter()
+                .filter(|(g, _)| *g == Group::Identical)
+                .map(|(_, n)| n)
+                .sum();
+            self.request.expect = plan.expectations(Group::default_choice);
+            if let Some(l) = self.body.get_mut(line) {
+                *l = if same > 0 {
+                    format!("{count}  ({})", Group::Identical.describe(same))
+                } else {
+                    count
+                };
+            }
+            return;
+        }
+        let mut t = Table::new(plan);
+        self.request.expect = t.expect();
+        self.body.truncate(3);
+        let (head, groups) = t.lines();
+        self.body.extend(head);
+        self.body.push(String::new());
+        t.first_line = self.body.len();
+        self.body.extend(groups);
+        self.body.push(String::new());
+        self.body
+            .push("\u{2191}\u{2193} a group \u{b7} Space changes what is done".into());
+        self.existing_line = None;
+        self.table = Some(t);
+    }
+
+    /// The table's lines again, after a choice changed.
+    pub fn redraw_table(&mut self) {
+        let Some(t) = &self.table else {
+            return;
+        };
+        self.request.expect = t.expect();
+        let (head, groups) = t.lines();
+        if let Some(l) = self.body.get_mut(3) {
+            *l = head[0].clone();
+        }
+        for (i, g) in groups.into_iter().enumerate() {
+            if let Some(l) = self.body.get_mut(t.first_line + i) {
+                *l = g;
+            }
         }
     }
 }
@@ -667,7 +899,23 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
     let r = centered(area, w, h);
     let inner = frame_box(frame, r, &c.title, accent);
     for (i, line) in c.body.iter().enumerate() {
-        put(frame, inner, i as u16, line, Style::new().fg(th.fg));
+        let mut style = Style::new().fg(th.fg);
+        if let Some(t) = &c.table {
+            if let Some(k) = i.checked_sub(t.first_line).filter(|k| *k < t.groups.len()) {
+                let g = t.groups[k].0;
+                style = match g.level() {
+                    Level::Cannot => Style::new().fg(th.err),
+                    Level::Loses => Style::new().fg(th.mark),
+                    Level::Info => Style::new().fg(th.fg_dim),
+                };
+                if k == t.sel && !g.choices().is_empty() {
+                    style = style.bg(th.row_cursor_active).add_modifier(Modifier::BOLD);
+                }
+            } else if line.starts_with('\u{26d4}') {
+                style = Style::new().fg(th.err);
+            }
+        }
+        put(frame, inner, i as u16, line, style);
     }
     let y = inner.y + inner.height.saturating_sub(1);
     let first = if c.permanent {

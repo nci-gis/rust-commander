@@ -112,13 +112,17 @@ impl App {
             choices,
             choice: 0,
             source_dir: Some(self.focused_cwd()),
-            counting: Some((ops::count(sources), 3)),
+            counting: None,
             permanent: false,
             // set_destination writes the line, after the destination's own lines.
             existing_line: Some(0),
+            plans: true,
+            planning: None,
+            table: None,
         }));
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             c.set_destination(0);
+            c.replan();
         }
     }
 
@@ -185,6 +189,9 @@ impl App {
             counting,
             permanent,
             existing_line: None,
+            plans: false,
+            planning: None,
+            table: None,
         }));
     }
 

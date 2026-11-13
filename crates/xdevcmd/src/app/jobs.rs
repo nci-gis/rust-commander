@@ -7,7 +7,16 @@ impl App {
     /// for it before the last frame, rather than ending the process under it.
     pub fn job_working(&self) -> bool {
         let working = |j: &Job| j.done.is_none() && j.question.is_none();
-        matches!(&self.modal, Some(Modal::Job(j)) if working(j)) || self.jobs.iter().any(working)
+        matches!(&self.modal, Some(Modal::Job(j)) if working(j))
+            || self.jobs.iter().any(working)
+            // A plan being made for the open confirmation: `--screenshot` waits for it.
+            || matches!(&self.modal, Some(Modal::Confirm(c)) if c.planning.is_some())
+    }
+
+    /// A plan is being made for the open confirmation (`--screenshot` lets it finish
+    /// before the next key, so a test sees the same dialog however fast the disk).
+    pub fn planning(&self) -> bool {
+        matches!(&self.modal, Some(Modal::Confirm(c)) if c.planning.is_some())
     }
 
     /// The viewer has lines on screen drawn plain until its scan reaches them

@@ -503,6 +503,11 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
         // click lands on what is now on screen.
         std::thread::sleep(Duration::from_millis(30));
         app.tick();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while app.planning() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+            app.tick();
+        }
         terminal.draw(|f| app.draw(f))?;
     }
     // A job the last key started finishes before the frame is taken (a slow machine

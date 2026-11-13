@@ -243,6 +243,9 @@ pub enum Expect {
     Absent,
     /// This file, which the copy replaces.
     Replace(Ident),
+    /// Whatever is there is left as it is (a planned skip: the user's choice for its
+    /// group, or a row the plan found cannot be done).
+    Skip,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -694,7 +697,11 @@ impl Worker {
         if self.overwrite_all {
             return Some(true);
         }
-        // The plan's word holds for the file it saw, and for nothing else.
+        // The plan's word holds for the file it saw, and for nothing else. A skip is
+        // safe whatever is there now.
+        if self.expect.get(dst) == Some(&Expect::Skip) {
+            return Some(false);
+        }
         match self.expect.get(dst) {
             Some(Expect::Replace(id)) if *id == now && self.changed.as_deref() != Some(dst) => {
                 self.agreed = Some((dst.to_path_buf(), now));

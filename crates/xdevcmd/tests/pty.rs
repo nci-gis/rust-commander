@@ -397,18 +397,24 @@ fn the_shell_pane_runs_commands() {
 fn copying_over_a_file_asks_first_then_overwrites() {
     let s = Scratch::new("overwrite");
     s.file("left/report.txt", "NEW");
-    let target = s.file("right/report.txt", "OLD");
+    let target = s.file("right/report.txt", "OLDER");
     let mut xdevcmd = Session::start(&s, None);
 
     xdevcmd.send(DOWN);
     xdevcmd.send(INSERT);
     xdevcmd.send(F5);
-    xdevcmd.wait_for("[Enter] go");
+    // The plan says it before the start, once for the group: skip by default; Space
+    // turns it to replace, then to asking about each one as the job runs.
+    xdevcmd.wait_for("would replace a file of another size  [skip]");
+    xdevcmd.send(b" ");
+    xdevcmd.wait_for("[replace]");
+    xdevcmd.send(b" ");
+    xdevcmd.wait_for("[ask each]");
     xdevcmd.send(ENTER);
     xdevcmd.wait_for("Already exists");
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
-        "OLD",
+        "OLDER",
         "not before the answer"
     );
 
@@ -422,6 +428,33 @@ fn copying_over_a_file_asks_first_then_overwrites() {
     // Marks clear once a job is done, or the next F8 would include this file too.
     xdevcmd.wait_gone("Already exists");
     xdevcmd.until("marks to clear", |scr| !scr.contains('\u{2022}'));
+    xdevcmd.quit();
+}
+
+#[test]
+fn copying_over_a_file_skips_it_unless_told_otherwise() {
+    let s = Scratch::new("overwrite-skip");
+    s.file("left/report.txt", "NEW");
+    s.file("left/other.txt", "x");
+    let target = s.file("right/report.txt", "OLDER");
+    let mut xdevcmd = Session::start(&s, None);
+
+    // Mark both only once the pane lists them.
+    xdevcmd.wait_for("other ");
+    xdevcmd.send(b"*");
+    xdevcmd.wait_for("2 selected");
+    xdevcmd.send(F5);
+    xdevcmd.wait_for("create 1 \u{b7} replace 0 \u{b7} skip 1");
+    xdevcmd.send(ENTER);
+    wait_file(&s.right().join("other.txt"), "copied", |c| {
+        c.as_deref() == Some("x")
+    });
+    xdevcmd.wait_gone("Already exists");
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "OLDER",
+        "never asked, kept"
+    );
     xdevcmd.quit();
 }
 

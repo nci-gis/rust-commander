@@ -159,7 +159,7 @@ so **every `cargo release` before step 5 says `--no-publish`**.
    Read it, then Publish.
 5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a
    crates.io token kept on the owner's machine, never in a workflow). Check first that
-   `cargo package --workspace` passes (CI does it on Linux):
+   `cargo package --workspace --exclude xtask` passes (CI does it on Linux):
 
    ```bash
    cargo release publish                 # look: xdevcmd-core, then xdevcmd

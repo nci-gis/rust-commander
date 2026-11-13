@@ -293,6 +293,12 @@ Round 030 closed first, then "go as recommended": all five as the kickoff recomm
   with `cargo xtask bench` (release build). Windows failed `render.rs`
   `tilde_goes_home_and_ctrl_backslash_to_the_root` in the same run: no source changed
   in aa410e7, and it passed on 4d4892b; taken as a flake, watched on the next run.
+- CI run 43410360888 (578ac72): Windows passed (no flake this time); the start-up
+  tripwire passed. `cargo package --workspace` failed on xtask: `publish = false` does
+  not keep a member out of `cargo package`, and its path dependency has no version.
+  Critique 1 was wrong there. CI and development.md now pass `--exclude xtask`. The
+  owner set the rule for CI on 2026-11-13: run it before a round closes or a PR opens,
+  not per commit.
 - First quick run (this sandbox, 3 runs; not saved as a baseline, not the owner's
   machine): binary 5.39 MiB, 277 crates in the lock; list 10,000 8.9 ms; plan 10,000
   8.3 ms; copy 2,000 × 1 KiB 47 ms; one 32 MiB file 9.9 ms; undo 2,000 8.3 ms; start-up

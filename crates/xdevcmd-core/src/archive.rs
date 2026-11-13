@@ -590,9 +590,7 @@ fn check_room(
             total / packed
         )));
     }
-    #[cfg(unix)]
-    if let Ok(st) = rustix::fs::statvfs(dest) {
-        let free = st.f_bavail.saturating_mul(st.f_frsize);
+    if let Some(free) = crate::plan::free_space(dest) {
         if total > free {
             return Err(io::Error::other(format!(
                 "it needs {}, and only {} is free there",
@@ -601,8 +599,6 @@ fn check_room(
             )));
         }
     }
-    #[cfg(not(unix))]
-    let _ = dest;
     Ok(())
 }
 

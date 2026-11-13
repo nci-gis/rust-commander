@@ -11,6 +11,8 @@
 //! its progress. Past [`CAP`] rows only the rows with something to decide are kept, the
 //! rest counted.
 
+use std::collections::hash_map::{Entry, HashMap};
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,6 +68,22 @@ pub enum Blocked {
     IntoItself,
     /// The source is its own destination.
     SameFile,
+    /// A name the destination cannot hold (Windows' rules, on Windows or on a FAT,
+    /// exFAT or NTFS drive): why.
+    BadName(&'static str),
+    /// A name longer than the destination allows: 255 bytes, or 255 UTF-16 units where
+    /// Windows' rules apply.
+    TooLong,
+    /// A file of 4 GiB or more, onto a FAT drive, which cannot hold one.
+    TooBig,
+}
+
+/// Something the user is told before the job, and asked about: data that would be lost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Warn {
+    /// The destination ignores case and already holds, or is also getting, this other
+    /// name that differs only in case: the two would be one file there.
+    CaseClash(OsString),
 }
 
 /// One thing the job will do.
@@ -83,12 +101,13 @@ pub struct Row {
     /// replacing it (Round 029's `Ident`).
     pub target: Option<Ident>,
     pub blocked: Option<Blocked>,
+    pub warn: Option<Warn>,
 }
 
 impl Row {
     /// Whether the user has something to decide about this row, or to be told.
     pub fn needs_deciding(&self) -> bool {
-        self.blocked.is_some() || self.class.conflicts()
+        self.blocked.is_some() || self.warn.is_some() || self.class.conflicts()
     }
 }
 
@@ -105,8 +124,12 @@ pub struct Totals {
     pub conflicts: u64,
     /// Rows that cannot be done.
     pub blocked: u64,
+    /// Rows with a [`Warn`].
+    pub warned: u64,
     /// New rows counted but not kept, past [`CAP`].
     pub dropped: u64,
+    /// Bytes the job writes at the destination (what is identical is not copied).
+    pub writes: u64,
 }
 
 /// What a copy or move will do, from one scan.
@@ -119,14 +142,268 @@ pub struct Plan {
     /// Whether the sources are on the destination's device: a move there is a rename,
     /// elsewhere a copy and a delete. `None`: it could not be told.
     pub same_device: Option<bool>,
+    /// What the destination is and allows, as far as it could be told.
+    pub target: Target,
 }
 
 impl Plan {
     /// Whether anything in it needs a decision before the job starts; when nothing
     /// does, the F5 dialog is the one it always was.
     pub fn needs_deciding(&self) -> bool {
-        self.totals.conflicts > 0 || self.totals.blocked > 0
+        self.totals.conflicts > 0
+            || self.totals.blocked > 0
+            || self.totals.warned > 0
+            || self.target.writable == Some(false)
+            || self.short_of_space().is_some()
     }
+
+    /// The bytes the destination needs free: none for a move on one device (a rename).
+    pub fn needed(&self) -> u64 {
+        if self.kind == Kind::Move && self.same_device == Some(true) {
+            0
+        } else {
+            self.totals.writes
+        }
+    }
+
+    /// `(needed, free)` when the destination has less free than the job writes.
+    pub fn short_of_space(&self) -> Option<(u64, u64)> {
+        let free = self.target.free?;
+        let needed = self.needed();
+        (needed > free).then_some((needed, free))
+    }
+}
+
+/// The largest file a FAT drive holds.
+const FAT_MAX: u64 = u32::MAX as u64;
+
+/// What kind of file system a destination is, as far as names and sizes go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fs {
+    /// FAT12/16/32: files under 4 GiB, Windows' names, case ignored.
+    Fat,
+    Exfat,
+    Ntfs,
+    Other,
+    /// It could not be told (Windows, for beta.1: owner, 2026-11-13).
+    Unknown,
+}
+
+/// What a destination is and allows. Each `None` is "unknown", never "fine".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Target {
+    pub fs: Fs,
+    /// Bytes free for this user.
+    pub free: Option<u64>,
+    pub writable: Option<bool>,
+    /// Whether two names that differ only in case are one file there.
+    pub ignores_case: Option<bool>,
+}
+
+impl Target {
+    /// Nothing known.
+    pub const UNKNOWN: Target = Target {
+        fs: Fs::Unknown,
+        free: None,
+        writable: None,
+        ignores_case: None,
+    };
+
+    /// Whether Windows' rules for names apply there.
+    pub fn windows_names(&self) -> bool {
+        cfg!(windows) || matches!(self.fs, Fs::Fat | Fs::Exfat | Fs::Ntfs)
+    }
+}
+
+/// Look at the directory `dest`: its file system, free space, whether this user can
+/// write there, whether it ignores case. Reads only.
+pub fn target(dest: &Path) -> Target {
+    let fs = fs_kind(dest);
+    Target {
+        fs,
+        free: free_space(dest),
+        writable: writable(dest),
+        ignores_case: ignores_case(dest, fs),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn fs_kind(dest: &Path) -> Fs {
+    let Ok(st) = rustix::fs::statfs(dest) else {
+        return Fs::Unknown;
+    };
+    #[allow(clippy::unnecessary_cast)]
+    match st.f_type as i64 {
+        0x4d44 => Fs::Fat,
+        0x2011_bab0 => Fs::Exfat,
+        0x5346_544e | 0x7366_746e => Fs::Ntfs,
+        // ntfs-3g and exfat-fuse are both "fuseblk": not told apart.
+        0x6573_5546 => Fs::Unknown,
+        _ => Fs::Other,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn fs_kind(dest: &Path) -> Fs {
+    let Ok(st) = rustix::fs::statfs(dest) else {
+        return Fs::Unknown;
+    };
+    let name: Vec<u8> = st
+        .f_fstypename
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    match name.as_slice() {
+        b"msdos" => Fs::Fat,
+        b"exfat" => Fs::Exfat,
+        b"ntfs" | b"ufsd_NTFS" => Fs::Ntfs,
+        _ => Fs::Other,
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn fs_kind(_: &Path) -> Fs {
+    Fs::Unknown
+}
+
+/// Bytes free at `dest` for this user; `None` where it cannot be asked (Windows).
+pub fn free_space(dest: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        let st = rustix::fs::statvfs(dest).ok()?;
+        Some(st.f_bavail.saturating_mul(st.f_frsize))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dest;
+        None
+    }
+}
+
+fn writable(dest: &Path) -> Option<bool> {
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        match rustix::fs::access(dest, rustix::fs::Access::WRITE_OK) {
+            Ok(()) => Some(true),
+            Err(e) if e == Errno::ACCESS || e == Errno::ROFS || e == Errno::PERM => Some(false),
+            Err(_) => None,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dest;
+        None
+    }
+}
+
+/// Whether `dest` ignores case: Windows and FAT/exFAT do; elsewhere `dest` is looked up
+/// under its own name with the case of its letters turned over (macOS' default volume
+/// ignores case, Linux' file systems do not). `None` when its name has no letters.
+fn ignores_case(dest: &Path, fs: Fs) -> Option<bool> {
+    if cfg!(windows) || matches!(fs, Fs::Fat | Fs::Exfat) {
+        return Some(true);
+    }
+    let name = dest.file_name()?.to_string_lossy().into_owned();
+    let flipped: String = name
+        .chars()
+        .flat_map(|c| {
+            if c.is_lowercase() {
+                c.to_uppercase().collect::<Vec<_>>()
+            } else {
+                c.to_lowercase().collect::<Vec<_>>()
+            }
+        })
+        .collect();
+    if flipped == name {
+        return None;
+    }
+    let other = dest.with_file_name(&flipped);
+    if faults::found(Point::Lookup, &other) {
+        return Some(true);
+    }
+    match (Ident::at(dest), Ident::at(&other)) {
+        (Some(a), Some(b)) => Some(a == b),
+        (Some(_), None) => Some(false),
+        _ => None,
+    }
+}
+
+/// Why `name` cannot be made at a destination, if it cannot: `windows` when Windows'
+/// rules apply there.
+pub fn name_problem(name: &OsStr, windows: bool) -> Option<Blocked> {
+    if !windows {
+        return (name.len() > 255).then_some(Blocked::TooLong);
+    }
+    let s = name.to_string_lossy();
+    if s.chars()
+        .any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\\') || c < ' ')
+    {
+        return Some(Blocked::BadName(
+            "it holds a character Windows does not allow (< > : \" | ? * \\ or a control character)",
+        ));
+    }
+    if s.ends_with('.') || s.ends_with(' ') {
+        return Some(Blocked::BadName("it ends with a dot or a space"));
+    }
+    let stem = s
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0');
+    if reserved {
+        return Some(Blocked::BadName("Windows keeps that name for a device"));
+    }
+    (s.encode_utf16().count() > 255).then_some(Blocked::TooLong)
+}
+
+/// The names in one destination directory, folded, where the destination ignores case:
+/// what is there already and what the job brings.
+struct Names {
+    on: bool,
+    seen: HashMap<String, OsString>,
+}
+
+impl Names {
+    /// `dir`'s names, read once (none when it is new, or case is not ignored).
+    fn of(dir: &Path, new: bool, t: &Target) -> Self {
+        let on = t.ignores_case == Some(true);
+        let mut seen = HashMap::new();
+        if on && !new {
+            if let Ok(it) = fs::read_dir(dir) {
+                for e in it.flatten() {
+                    let n = e.file_name();
+                    seen.insert(fold(&n), n);
+                }
+            }
+        }
+        Self { on, seen }
+    }
+
+    /// Take `name` for an incoming row: the other name it clashes with, if one does.
+    fn claim(&mut self, name: &OsStr) -> Option<OsString> {
+        if !self.on {
+            return None;
+        }
+        match self.seen.entry(fold(name)) {
+            Entry::Occupied(o) => (o.get().as_os_str() != name).then(|| o.get().clone()),
+            Entry::Vacant(v) => {
+                v.insert(name.to_os_string());
+                None
+            }
+        }
+    }
+}
+
+fn fold(n: &OsStr) -> String {
+    n.to_string_lossy().to_lowercase()
 }
 
 /// What the scan sends while it runs.
@@ -184,9 +461,20 @@ pub fn plan_until(
     stop: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Option<Plan> {
-    plan_capped(kind, sources, dest, rename, stop, progress, CAP)
+    plan_capped(
+        kind,
+        sources,
+        dest,
+        rename,
+        stop,
+        progress,
+        target(dest),
+        CAP,
+    )
 }
 
+// The scan with what `plan_until` looks up given, for tests to choose the destination.
+#[allow(clippy::too_many_arguments)]
 fn plan_capped(
     kind: Kind,
     sources: &[PathBuf],
@@ -194,6 +482,7 @@ fn plan_capped(
     rename: Option<&std::ffi::OsStr>,
     stop: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
+    target: Target,
     cap: usize,
 ) -> Option<Plan> {
     let mut s = Scan {
@@ -203,7 +492,9 @@ fn plan_capped(
         progress,
         cap,
         seen: 0,
+        t: target,
     };
+    let mut top = Names::of(dest, false, &target);
     for src in sources {
         let Some(name) = rename.or(src.file_name()) else {
             continue;
@@ -217,7 +508,7 @@ fn plan_capped(
             s.blocked(src, &dst, true, Blocked::IntoItself);
             continue;
         }
-        if !s.node(src, &dst, false) {
+        if !s.node(src, &dst, false, &mut top) {
             return None;
         }
     }
@@ -229,6 +520,7 @@ fn plan_capped(
         rows: s.rows,
         totals: s.totals,
         same_device,
+        target,
     })
 }
 
@@ -239,12 +531,13 @@ struct Scan<'a> {
     progress: &'a mut dyn FnMut(u64, u64),
     cap: usize,
     seen: u64,
+    t: Target,
 }
 
 impl Scan<'_> {
     /// Plan `src` onto `dst`. `parent_new`: `dst`'s directory is itself new, so nothing
     /// can be there and it is not looked at. `false` once stopped.
-    fn node(&mut self, src: &Path, dst: &Path, parent_new: bool) -> bool {
+    fn node(&mut self, src: &Path, dst: &Path, parent_new: bool, names: &mut Names) -> bool {
         if self.stop.load(Ordering::Relaxed) {
             return false;
         }
@@ -280,15 +573,19 @@ impl Scan<'_> {
                 Some(d) => compare_files(src, &meta, dst, d),
             };
             self.totals.bytes += meta.len();
-            self.push(Row {
-                src: src.to_path_buf(),
-                dst: dst.to_path_buf(),
-                dir: false,
-                bytes: meta.len(),
-                class,
-                target,
-                blocked: None,
-            });
+            self.push_vetted(
+                names,
+                Row {
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                    dir: false,
+                    bytes: meta.len(),
+                    class,
+                    target,
+                    blocked: None,
+                    warn: None,
+                },
+            );
             return true;
         }
         let class = match &there {
@@ -301,15 +598,19 @@ impl Scan<'_> {
             let (items, bytes) = subtree(src, self.stop);
             self.totals.bytes += bytes;
             self.totals.items += items.saturating_sub(1);
-            self.push(Row {
-                src: src.to_path_buf(),
-                dst: dst.to_path_buf(),
-                dir: true,
-                bytes,
-                class,
-                target,
-                blocked: None,
-            });
+            self.push_vetted(
+                names,
+                Row {
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                    dir: true,
+                    bytes,
+                    class,
+                    target,
+                    blocked: None,
+                    warn: None,
+                },
+            );
             return !self.stop.load(Ordering::Relaxed);
         }
         let entries = match faults::at(Point::ReadDir, src).and_then(|()| fs::read_dir(src)) {
@@ -319,7 +620,7 @@ impl Scan<'_> {
                 return true;
             }
         };
-        self.push(Row {
+        let mut row = Row {
             src: src.to_path_buf(),
             dst: dst.to_path_buf(),
             dir: true,
@@ -327,12 +628,23 @@ impl Scan<'_> {
             class,
             target,
             blocked: None,
-        });
+            warn: None,
+        };
+        self.vet(&mut row, names);
+        if row.blocked.is_some() {
+            // A directory that cannot be made there: nothing under it can go either.
+            let (items, _) = subtree(src, self.stop);
+            self.totals.items += items.saturating_sub(1);
+            self.push(row);
+            return !self.stop.load(Ordering::Relaxed);
+        }
+        self.push(row);
         let new = class == Class::New;
+        let mut inner = Names::of(dst, new, &self.t);
         for ent in entries {
             match ent {
                 Ok(ent) => {
-                    if !self.node(&ent.path(), &dst.join(ent.file_name()), new) {
+                    if !self.node(&ent.path(), &dst.join(ent.file_name()), new, &mut inner) {
                         return false;
                     }
                 }
@@ -354,11 +666,44 @@ impl Scan<'_> {
             class: Class::New,
             target: None,
             blocked: Some(why),
+            warn: None,
         });
+    }
+
+    /// The destination's rules on a row's name and size, then [`Scan::push`].
+    fn push_vetted(&mut self, names: &mut Names, mut row: Row) {
+        self.vet(&mut row, names);
+        self.push(row);
+    }
+
+    fn vet(&mut self, row: &mut Row, names: &mut Names) {
+        let Some(name) = row.dst.file_name() else {
+            return;
+        };
+        if let Some(why) = name_problem(name, self.t.windows_names()) {
+            row.blocked = Some(why);
+            return;
+        }
+        if !row.dir && self.t.fs == Fs::Fat && row.bytes > FAT_MAX {
+            row.blocked = Some(Blocked::TooBig);
+            return;
+        }
+        if let Some(other) = names.claim(name) {
+            row.warn = Some(Warn::CaseClash(other));
+        }
     }
 
     fn push(&mut self, row: Row) {
         self.totals.items += 1;
+        if row.blocked.is_none() && row.warn.is_some() {
+            self.totals.warned += 1;
+        }
+        if row.blocked.is_none()
+            && row.class != Class::Identical
+            && (!row.dir || row.class == Class::DirOverFile)
+        {
+            self.totals.writes += row.bytes;
+        }
         if row.blocked.is_some() {
             self.totals.blocked += 1;
         } else if row.class.conflicts() {
@@ -659,7 +1004,17 @@ mod tests {
         fs::write(to.join("f9"), "older").unwrap();
         let sources: Vec<PathBuf> = (0..10).map(|i| src.join(format!("f{i}"))).collect();
         let stop = AtomicBool::new(false);
-        let p = plan_capped(Kind::Copy, &sources, &to, None, &stop, &mut |_, _| {}, 3).unwrap();
+        let p = plan_capped(
+            Kind::Copy,
+            &sources,
+            &to,
+            None,
+            &stop,
+            &mut |_, _| {},
+            Target::UNKNOWN,
+            3,
+        )
+        .unwrap();
         assert_eq!(p.rows.len(), 4, "{:?}", p.rows);
         assert_eq!(p.totals.dropped, 6);
         assert_eq!(p.totals.items, 10);
@@ -684,5 +1039,185 @@ mod tests {
         assert!(progress >= 1);
         assert_eq!(plan.totals.items, PROGRESS_EVERY + 11);
         assert_eq!(plan.kind, Kind::Move);
+    }
+
+    fn plan_on(t: Target, kind: Kind, sources: &[PathBuf], dest: &Path) -> Plan {
+        let stop = AtomicBool::new(false);
+        plan_capped(kind, sources, dest, None, &stop, &mut |_, _| {}, t, CAP).unwrap()
+    }
+
+    const FAT: Target = Target {
+        fs: Fs::Fat,
+        free: None,
+        writable: Some(true),
+        ignores_case: Some(true),
+    };
+
+    #[test]
+    fn windows_names_are_refused_by_their_rules() {
+        let bad = |n: &str| name_problem(OsStr::new(n), true);
+        for n in [
+            "a:b",
+            "a?",
+            "q\"x",
+            "a|b",
+            "a*",
+            "a<b",
+            "tab\there",
+            "dot.",
+            "space ",
+        ] {
+            assert!(matches!(bad(n), Some(Blocked::BadName(_))), "{n}");
+        }
+        for n in ["CON", "nul.txt", "Com1", "LPT9.log", "aux "] {
+            assert!(matches!(bad(n), Some(Blocked::BadName(_))), "{n}");
+        }
+        for n in [
+            "CONSOLE",
+            "COM0",
+            "COM10",
+            "a.b",
+            "Tiếng Việt.txt",
+            "日本語",
+        ] {
+            assert_eq!(bad(n), None, "{n}");
+        }
+        assert_eq!(bad(&"é".repeat(255)), None);
+        assert_eq!(bad(&"é".repeat(256)), Some(Blocked::TooLong));
+        // Elsewhere only the length, in bytes.
+        assert_eq!(name_problem(OsStr::new("a:b"), false), None);
+        assert_eq!(
+            name_problem(OsStr::new(&"é".repeat(128)), false),
+            Some(Blocked::TooLong)
+        );
+    }
+
+    #[test]
+    fn a_fat_drive_refuses_bad_names_and_big_files_and_sees_case_clashes() {
+        let d = tmp("fat");
+        let (a, b, to) = (d.join("a"), d.join("b"), d.join("to"));
+        for x in [&a, &b, &to] {
+            fs::create_dir_all(x).unwrap();
+        }
+        fs::write(a.join("bad:name"), "x").unwrap();
+        fs::write(a.join("X.txt"), "x").unwrap();
+        fs::write(b.join("x.txt"), "y").unwrap();
+        fs::write(a.join("README"), "new").unwrap();
+        fs::write(to.join("Readme"), "old").unwrap();
+        fs::create_dir_all(a.join("dir?/deep")).unwrap();
+        fs::write(a.join("dir?/deep/f"), "z").unwrap();
+        let big = fs::File::create(a.join("big")).unwrap();
+        big.set_len(FAT_MAX + 1).unwrap();
+        let sources = [
+            a.join("bad:name"),
+            a.join("X.txt"),
+            b.join("x.txt"),
+            a.join("README"),
+            a.join("dir?"),
+            a.join("big"),
+        ];
+        let p = plan_on(FAT, Kind::Copy, &sources, &to);
+        assert!(matches!(
+            row(&p, "bad:name").blocked,
+            Some(Blocked::BadName(_))
+        ));
+        assert_eq!(row(&p, "big").blocked, Some(Blocked::TooBig));
+        // A directory that cannot be made: one row, nothing under it planned.
+        assert!(matches!(row(&p, "dir?").blocked, Some(Blocked::BadName(_))));
+        assert!(
+            !p.rows.iter().any(|r| r.src.ends_with("deep")),
+            "{:?}",
+            p.rows
+        );
+        assert_eq!(row(&p, "X.txt").warn, None);
+        assert_eq!(row(&p, "x.txt").warn, Some(Warn::CaseClash("X.txt".into())));
+        assert_eq!(
+            row(&p, "README").warn,
+            Some(Warn::CaseClash("Readme".into()))
+        );
+        assert_eq!(p.totals.blocked, 3);
+        assert_eq!(p.totals.warned, 2);
+        assert_eq!(p.totals.items, 8);
+        assert!(p.needs_deciding());
+        // Where case is kept apart, the same names are fine.
+        let ext = Target {
+            fs: Fs::Other,
+            ignores_case: Some(false),
+            ..FAT
+        };
+        let p = plan_on(ext, Kind::Copy, &sources[1..3], &to);
+        assert_eq!(p.totals.warned, 0);
+        assert!(!p.needs_deciding());
+    }
+
+    #[test]
+    fn free_space_counts_what_is_written_and_a_move_on_one_device_needs_none() {
+        let d = tmp("space");
+        let (src, to) = (d.join("src"), d.join("to"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        fs::write(src.join("a"), "12345").unwrap();
+        fs::write(src.join("same"), "123").unwrap();
+        fs::copy(src.join("same"), to.join("same")).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(to.join("same"))
+            .unwrap()
+            .set_modified(fs::metadata(src.join("same")).unwrap().modified().unwrap())
+            .unwrap();
+        let tight = Target {
+            free: Some(4),
+            ..Target::UNKNOWN
+        };
+        let sources = [src.join("a"), src.join("same")];
+        let p = plan_on(tight, Kind::Copy, &sources, &to);
+        // The identical file is not written.
+        assert_eq!(p.needed(), 5);
+        assert_eq!(p.short_of_space(), Some((5, 4)));
+        assert!(p.needs_deciding());
+        let p = plan_on(tight, Kind::Move, &sources[..1], &to);
+        assert_eq!(p.same_device, Some(true));
+        assert_eq!(p.needed(), 0);
+        assert_eq!(p.short_of_space(), None);
+        // The real look at a temporary directory: something free, not FAT.
+        let t = target(&to);
+        #[cfg(unix)]
+        assert!(t.free.is_some_and(|f| f > 0));
+        assert!(!matches!(t.fs, Fs::Fat));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_destination_this_user_cannot_write_to_is_said_before_the_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("ro");
+        let to = d.join("to");
+        fs::create_dir_all(&to).unwrap();
+        fs::write(d.join("f"), "x").unwrap();
+        fs::set_permissions(&to, fs::Permissions::from_mode(0o555)).unwrap();
+        let t = target(&to);
+        fs::set_permissions(&to, fs::Permissions::from_mode(0o755)).unwrap();
+        if t.writable == Some(true) {
+            eprintln!("skipped: this user (root?) writes anywhere");
+            return;
+        }
+        assert_eq!(t.writable, Some(false));
+        let p = plan_on(t, Kind::Copy, &[d.join("f")], &to);
+        assert!(p.needs_deciding());
+    }
+
+    #[test]
+    fn whether_case_is_ignored_is_looked_up_not_guessed() {
+        let d = tmp("CaseProbe");
+        let t = target(&d);
+        if cfg!(windows) {
+            assert_eq!(t.ignores_case, Some(true));
+            return;
+        }
+        let real = t.ignores_case;
+        assert!(real.is_some(), "{t:?}");
+        // The lookup is of the whole name turned over: "XDEVCMD-PLAN-cASEpROBE-…".
+        let _g = faults::set(Point::Lookup, "cASEpROBE", faults::Action::Found);
+        assert_eq!(target(&d).ignores_case, Some(true));
     }
 }

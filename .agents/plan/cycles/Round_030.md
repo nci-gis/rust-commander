@@ -267,6 +267,28 @@ rows with a decision are kept.
   `Stat`); into itself and onto itself; Shift+F5's rename; a stopped scan; the cap; the
   thread's progress and end. fmt; clippy for Linux, windows-gnu and darwin.
 
+### 2026-11-13, step 2: the pre-checks
+
+- `plan::target(dest)`: the file system (Linux `statfs` f_type: vfat, exFAT, NTFS/ntfs3;
+  `fuseblk` unknown; macOS `f_fstypename`; Windows unknown, decision 1), free space
+  (`statvfs`, now shared with `archive.rs`'s extract check), whether this user can write
+  there (`access(W_OK)`), whether it ignores case (Windows, FAT, exFAT; elsewhere `dest`
+  looked up under its own name with the case turned over, through the seam's `Lookup`).
+- Each row is vetted before the cap: `name_problem` (Windows' characters and control
+  characters, a trailing dot or space, CON/PRN/AUX/NUL/COM1-9/LPT1-9 with any extension,
+  255 UTF-16 units; elsewhere 255 bytes) → `Blocked::BadName`/`TooLong`; a file over
+  4 GiB onto FAT → `TooBig`; a directory that cannot be made blocks its whole subtree as
+  one row. Case clashes: each destination directory read once (critique 4), folded
+  names claimed by incoming rows → `Warn::CaseClash(other)`.
+- `Plan::needed` (bytes written, identical files excluded, a move on one device none),
+  `short_of_space`, and `needs_deciding` now also true for a warning, an unwritable
+  destination, or too little space.
+- Tests (+5): Windows' name rules; a FAT target (bad name, 4 GiB sparse file, a bad
+  directory with a subtree, two incoming names and an existing one differing in case,
+  the same names fine where case is kept apart); free space with an identical file and
+  a move on one device; an unwritable destination (skipped as root); the case lookup
+  through the seam. Core 277 passed; clippy for Linux, windows-gnu, darwin.
+
 ## Check
 
 ## Act

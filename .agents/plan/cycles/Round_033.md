@@ -332,6 +332,30 @@ after), so a check before `syncfs` is a guess, not a guarantee.
   path and Copy relative path as F1 rows in Files (refused in restricted mode; from the
   shell they act on the file pane). Unit and render tests.
 
+### 2026-11-13, the owner's probe, measured on CI (run 43461538732)
+
+The owner's idea: in a job of 1,000 or more small files, the job's own first files
+synced on 1, 8 and 16 threads in turn (16, 32 and 64 files), and the fastest kept for
+the rest. One job of 1,000 files, the median of three:
+
+| Way | Linux | macOS | Windows |
+|---|---|---|---|
+| fixed 1 | 231 ms | 1,648 ms | 180 ms |
+| fixed default (16 / 8 / 1) | 48 ms | 483 ms | 175 ms |
+| probe | 52 ms (chose 16) | 414 ms (chose 16, 16, 8) | 467 ms (chose 1) |
+
+- **It always chose right**, and on macOS beat the fixed 8 (that runner is noisy: 16
+  threads measured 763 ms in the sweep and better here).
+- **Its cost is the trying.** On Linux about 4 ms. On Windows about 290 ms, since its
+  8- and 16-thread steps are the slow ones there: 2.7× the fixed default on 1,000
+  files. The same 290 ms on a 10,000-file job is about 15 %.
+- Options for the owner:
+  1. fixed per system only;
+  2. probe from 1,000 files;
+  3. probe, but start from the system's default, and drop a candidate after its first
+     round if it is already clearly slower (twice the default's time per file). On
+     Windows that cuts the cost to a round of each, about 40 ms.
+
 ## Check
 
 ## Act

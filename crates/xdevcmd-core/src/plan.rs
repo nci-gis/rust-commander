@@ -876,6 +876,82 @@ fn plan_capped(
     })
 }
 
+/// What a directory listing says of an entry, kept so the walk does not stat it again.
+/// On Windows this matters: a stat opens the file, and Defender scans a file the first
+/// time it is opened, the bigger the longer (the owner's beta.1 test on Windows 11: about
+/// 1,500 documents of 500 MB took 1–1.5 s the first time, and as many small files a few
+/// ms). The listing's data (FindFirstFile's) opens nothing. On Unix a listing's
+/// `metadata()` is the same `lstat` a stat is.
+fn listed(ent: &fs::DirEntry) -> Option<fs::Metadata> {
+    ent.metadata().ok().filter(listing_will_do)
+}
+
+/// Whether a listing's metadata is as good as a stat's. On Windows not for a reparse
+/// point (a link, a junction, a cloud placeholder): those are stat'ed as before.
+#[cfg(windows)]
+fn listing_will_do(m: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+#[cfg(not(windows))]
+fn listing_will_do(_: &fs::Metadata) -> bool {
+    true
+}
+
+/// A destination directory that exists, listed once: what is there under each name.
+/// Folded where the destination ignores case, since a stat of `README.txt` there finds
+/// `Readme.txt`.
+struct There {
+    fold: bool,
+    /// Whether a name missing here can be trusted to be absent: not when it is unknown
+    /// whether case is ignored, nor when an entry's data could not be kept.
+    complete: bool,
+    entries: HashMap<OsString, Option<fs::Metadata>>,
+}
+
+impl There {
+    fn list(dir: &Path, t: &Target) -> Option<Self> {
+        let folded = t.ignores_case != Some(false);
+        let mut complete = t.ignores_case.is_some();
+        let mut entries = HashMap::new();
+        for e in fs::read_dir(dir).ok()? {
+            let Ok(e) = e else {
+                complete = false;
+                continue;
+            };
+            let key = if folded {
+                OsString::from(fold(&e.file_name()))
+            } else {
+                e.file_name()
+            };
+            entries.insert(key, listed(&e));
+        }
+        Some(Self {
+            fold: folded,
+            complete,
+            entries,
+        })
+    }
+
+    /// `None`: ask the file system (a stat). `Some(None)`: nothing there.
+    /// `Some(Some(m))`: what is there.
+    fn get(&self, name: &OsStr) -> Option<Option<fs::Metadata>> {
+        let key = if self.fold {
+            OsString::from(fold(name))
+        } else {
+            name.to_os_string()
+        };
+        match self.entries.get(&key) {
+            Some(Some(m)) => Some(Some(m.clone())),
+            Some(None) => None,
+            None if self.complete => Some(None),
+            None => None,
+        }
+    }
+}
+
 struct Scan<'a> {
     rows: Vec<Row>,
     totals: Totals,
@@ -890,6 +966,20 @@ impl Scan<'_> {
     /// Plan `src` onto `dst`. `parent_new`: `dst`'s directory is itself new, so nothing
     /// can be there and it is not looked at. `false` once stopped.
     fn node(&mut self, src: &Path, dst: &Path, parent_new: bool, names: &mut Names) -> bool {
+        self.node_listed(src, dst, parent_new, names, None, None)
+    }
+
+    /// [`Self::node`], with what the listings already said: `src_meta` from `src`'s
+    /// directory, `there` from `dst`'s. Each is stat'ed only when they cannot say.
+    fn node_listed(
+        &mut self,
+        src: &Path,
+        dst: &Path,
+        parent_new: bool,
+        names: &mut Names,
+        src_meta: Option<fs::Metadata>,
+        there_dir: Option<&There>,
+    ) -> bool {
         if self.stop.load(Ordering::Relaxed) {
             return false;
         }
@@ -897,7 +987,10 @@ impl Scan<'_> {
         if self.seen.is_multiple_of(PROGRESS_EVERY) {
             (self.progress)(self.totals.items, self.totals.bytes);
         }
-        let meta = match faults::at(Point::Stat, src).and_then(|()| fs::symlink_metadata(src)) {
+        let meta = match faults::at(Point::Stat, src).and_then(|()| match src_meta {
+            Some(m) => Ok(m),
+            None => fs::symlink_metadata(src),
+        }) {
             Ok(m) => m,
             Err(e) => {
                 self.blocked(src, dst, false, Blocked::Unreadable(e.to_string()));
@@ -912,9 +1005,12 @@ impl Scan<'_> {
         let there = if parent_new {
             None
         } else {
-            faults::at(Point::Stat, dst)
-                .ok()
-                .and_then(|()| fs::symlink_metadata(dst).ok())
+            faults::at(Point::Stat, dst).ok().and_then(|()| {
+                match there_dir.zip(dst.file_name()).and_then(|(d, n)| d.get(n)) {
+                    Some(known) => known,
+                    None => fs::symlink_metadata(dst).ok(),
+                }
+            })
         };
         let target = there.as_ref().map(Ident::of);
         let is_dir = ft.is_dir();
@@ -993,10 +1089,21 @@ impl Scan<'_> {
         self.push(row);
         let new = class == Class::New;
         let mut inner = Names::of(dst, new, &self.t);
+        // What is in the destination directory, read once rather than stat'ed per name.
+        let listing = if new { None } else { There::list(dst, &self.t) };
         for ent in entries {
             match ent {
                 Ok(ent) => {
-                    if !self.node(&ent.path(), &dst.join(ent.file_name()), new, &mut inner) {
+                    let name = ent.file_name();
+                    let m = listed(&ent);
+                    if !self.node_listed(
+                        &ent.path(),
+                        &dst.join(&name),
+                        new,
+                        &mut inner,
+                        m,
+                        listing.as_ref(),
+                    ) {
                         return false;
                     }
                 }
@@ -1502,6 +1609,84 @@ mod tests {
             name_problem(OsStr::new(&"é".repeat(128)), false),
             Some(Blocked::TooLong)
         );
+    }
+
+    /// Round 033 (part F): inside a directory the walk takes what the listings say
+    /// instead of a stat per name (on Windows a stat opens the file, and Defender scans
+    /// it). The plan must be the same: each name planned from inside its directory
+    /// (listings) and on its own as a source (stats) gets the same class, size and
+    /// target.
+    #[test]
+    fn the_listings_plan_what_a_stat_per_name_plans() {
+        let d = tmp("listed");
+        let (s, to) = (d.join("s").join("d"), d.join("to").join("d"));
+        fs::create_dir_all(&s).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        let at = |p: &Path, secs: u64| {
+            let f = fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        let both = |name: &str, here: &str, there: &str, t_here: u64, t_there: u64| {
+            fs::write(s.join(name), here).unwrap();
+            fs::write(to.join(name), there).unwrap();
+            at(&s.join(name), t_here);
+            at(&to.join(name), t_there);
+        };
+        both("same", "abc", "abc", 1_000_000, 1_000_000);
+        both("newer", "abc", "abc", 2_000_000, 1_000_000);
+        both("older", "abc", "abc", 1_000_000, 2_000_000);
+        both("size", "abcd", "abc", 1_000_000, 1_000_000);
+        fs::write(s.join("new"), "n").unwrap();
+        fs::write(s.join("file-over-dir"), "f").unwrap();
+        fs::create_dir(to.join("file-over-dir")).unwrap();
+        fs::create_dir(s.join("dir-over-file")).unwrap();
+        fs::write(s.join("dir-over-file").join("x"), "x").unwrap();
+        fs::write(to.join("dir-over-file"), "f").unwrap();
+        fs::create_dir(s.join("merge")).unwrap();
+        fs::create_dir(to.join("merge")).unwrap();
+        fs::write(to.join("only-there"), "o").unwrap();
+
+        let t = Target {
+            fs: Fs::Other,
+            ignores_case: Some(false),
+            ..FAT
+        };
+        let listed = plan_on(t, Kind::Copy, std::slice::from_ref(&s), &d.join("to"));
+        let names = [
+            "same",
+            "newer",
+            "older",
+            "size",
+            "new",
+            "file-over-dir",
+            "dir-over-file",
+            "merge",
+        ];
+        let sources: Vec<PathBuf> = names.iter().map(|n| s.join(n)).collect();
+        let stated = plan_on(t, Kind::Copy, &sources, &to);
+        for n in names {
+            let (a, b) = (row(&listed, n), row(&stated, n));
+            assert_eq!(
+                (a.class, a.bytes, a.target, a.dir),
+                (b.class, b.bytes, b.target, b.dir),
+                "{n}"
+            );
+        }
+        assert_eq!(row(&listed, "same").class, Class::Identical);
+        assert_eq!(row(&listed, "new").class, Class::New);
+        assert_eq!(row(&listed, "file-over-dir").class, Class::FileOverDir);
+
+        // Where case is ignored, `README` finds `Readme` in the listing, as a stat
+        // there would (a case-sensitive disk under this test cannot show the stat).
+        fs::write(s.join("README"), "new").unwrap();
+        fs::write(to.join("Readme"), "old").unwrap();
+        let p = plan_on(FAT, Kind::Copy, std::slice::from_ref(&s), &d.join("to"));
+        let r = row(&p, "README");
+        assert_ne!(r.class, Class::New, "{r:?}");
+        assert!(r.target.is_some(), "{r:?}");
+        assert_eq!(r.warn, Some(Warn::CaseClash("Readme".into())));
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

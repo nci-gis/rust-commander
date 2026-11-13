@@ -24,6 +24,10 @@ that heading and starts a new, empty one here. -->
   instead of closing and opening F1 again.
 
 ### Fixed
+- **F5 and F6 check faster on Windows the first time**: inside a folder, what a file is
+  (size, times) is taken from the folder's listing instead of opening each file, which
+  Windows Defender scanned on first open (1,500 documents of 500 MB took 1–1.5 s; as
+  many small files a few ms). Links and other reparse points are still opened.
 - **`~` on Windows when `HOME` is not a Windows path** (left by Cygwin or an old MSYS,
   `/home/ann`): it goes to `USERPROFILE` instead of saying there is no home directory.
 

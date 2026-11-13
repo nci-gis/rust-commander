@@ -158,6 +158,27 @@ group commit against beta.1's "replace small files" and "copy small files".
   and second run, against beta.1's numbers. Part F, first. Not verifiable from this
   Linux sandbox.
 
+### 2026-11-13, part F begins: the planner's walk from the listings
+
+- `plan.rs`: inside a directory, a source's metadata comes from its `DirEntry`, and the
+  destination directory is listed once (`There`: folded where case is ignored, so
+  `README` finds `Readme` as a stat there would; a name missing from the listing is
+  trusted to be absent only when case handling is known). On Windows a reparse point
+  is still stat'ed. Top-level sources and their destinations are stat'ed as before.
+  The fault seam's `Stat` points are unchanged.
+- Test `the_listings_plan_what_a_stat_per_name_plans`: each name planned from inside
+  its directory and on its own as a source gets the same class, size, target and kind
+  (identical, newer, older, other size, new, file over folder, folder over file,
+  merge), plus the case-folded lookup.
+- Quick bench, this sandbox (Linux, where a stat opens nothing): plan of 10,000 entries
+  7.5 ms (8.3 ms on beta.1). **The Windows effect is not measured**: the owner's run on
+  Windows 11 decides (the same folder, first run, against beta.1).
+- A risk accepted: NTFS can show a listing's size and time late for a file open for
+  writing elsewhere. Then the target looks changed when it is checked again right
+  before the replace, and the job asks or skips: the safe side.
+- Not changed: the job's own walk still stats each file as it copies. Reading the file
+  opens it anyway.
+
 ## Check
 
 ## Act

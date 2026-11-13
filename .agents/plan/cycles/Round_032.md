@@ -317,6 +317,47 @@ Round 030 closed first, then "go as recommended": all five as the kickoff recomm
   disk; the trash step itself is a rename. Input for beta.2's group commit (item 43),
   which today is planned for moves only.
 
+### 2026-11-13, step 6: the cut
+
+- CI run 43412469493 on `feat/v0.4.0` (8b8823b): all 7 jobs green. PR #17 opened no run
+  of its own: its head commit carried `[skip ci]`, which GitHub applies to the pull
+  request's runs too. Merged into `dev` (3b6752f; the owner: "Bro thực hiện merge và
+  release beta.1 nhé").
+- On `dev`: ROADMAP items 45–47 (6d0e566, logged in promotions.md); then `cargo release
+  0.4.0-beta.1 --no-tag --no-push --no-publish`. Its first run changed the version but
+  not the CHANGELOG: cargo-release skips `pre-release-replacements` for a pre-release
+  unless each says `prerelease = true` (added, 77ec013). It also took the author from
+  `GIT_AUTHOR_*`: rerun with them unset. That first commit was never pushed. Release
+  commit d4ce202, heading `## [0.4.0-beta.1] - 2026-11-13`; crates.io still shows
+  0.3.0 only.
+- Tag `v0.4.0-beta.1` on d4ce202. Release run 43435343362: the check, licences, six
+  builds, the draft, all green. The draft: six archives and SHA256SUMS, marked
+  pre-release; the Linux gnu archive matched its sum and printed `xdevcmd
+  0.4.0-beta.1`.
+- **The release run does not wait for CI**: a tag push starts it at once, in parallel
+  with `dev`'s CI (43435314756). This time the draft was published only after that run
+  was green (13:51 UTC), so nothing unchecked was published. The gap belongs in the
+  release workflow (beta.2): its check job should refuse a tag whose commit has no
+  green `ci` run.
+- Published as a pre-release, not Latest (0.3.0 stays Latest), at the owner's word.
+
 ## Check
+
+- Goal met: `v0.4.0-beta.1` on `dev` built the six archives and a release marked
+  pre-release; nothing went to crates.io, Scoop or winget.
+- The harness exists (`cargo xtask bench`); its first numbers are this sandbox's
+  only. **Not done**: beta.1's baseline on the owner's machine (`cargo xtask bench
+  --host <name> --save-baseline`), and the hand tests in `docs/testing-by-hand.md` on
+  Windows, macOS and Linux. Both are the owner's, during beta.1's week.
+- Wrong in the kickoff, found in Do:
+  - critique 1: `publish = false` keeps xtask out of `cargo package`. It does not.
+  - critique 3: 150 ms holds on a CI runner. It does not; CI now has a 1 s tripwire.
+  - critique 4: keys wait during the terminal check. They are swallowed; decision 4
+    was kept as it is.
+- Found for beta.2:
+  - replaces cost about 7 ms a file in fdatasync, so group commit should cover them;
+  - the release run should wait for a green CI;
+  - items 45 and 46.
+
 
 ## Act

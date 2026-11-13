@@ -252,6 +252,30 @@ Round 030 closed first, then "go as recommended": all five as the kickoff recomm
 - The cut itself (step 6: the pull request into `dev`, the version, the tag) waits for
   the owner's word once steps 1–5 are done and green: it publishes a draft.
 
+### 2026-11-13, steps 1–3 (released rules, docs)
+
+- Step 1 (`release.yml`, `scripts/release-check.sh`): pre-release tags on `dev` or
+  `main`, `--prerelease --latest=false`, escaped dots, a `workflow_dispatch` dry run.
+  Tried locally (v0.3.0 passes; `-alpha.1`, `v0.4` refused; a beta on this feature
+  branch refused, on `origin/dev` accepted by the branch rule) and on GitHub: run
+  43402853985 failed as it should, on the version, the CHANGELOG and the branch, and
+  built nothing.
+- Steps 2–3: `docs/development.md` "Pre-releases"; `docs/testing-by-hand.md` (029–031's
+  hand tests, data first), linked from `docs/README.md`.
+
+### 2026-11-13, step 5 stopped: the terminal check after the first frame loses keys
+
+- Done and reverted the same day. The kickoff (critique 4) said keys typed during the
+  check "still wait, as today". **Wrong**: the check reads stdin itself
+  (`graphics::read_until`), so whatever arrives before the device-attributes reply is
+  taken and dropped; crossterm cannot be handed those bytes back. Before the first
+  frame nobody types; after it, on a terminal that does not answer, the first 1.7 s of
+  keys would be lost. Found by the kitty picture tests, which type as soon as the panes
+  show (three failed: "written 0 times, not 1").
+- Back to the owner (decision 4 again): keep the check before the first frame (as it
+  is), shorten its limit there, or move it after the first frame and parse the keys it
+  swallowed ourselves (more code, a second key parser).
+
 ## Check
 
 ## Act

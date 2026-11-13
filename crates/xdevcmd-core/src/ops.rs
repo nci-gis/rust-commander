@@ -23,6 +23,8 @@ const MOVE_BATCH_FILES: usize = 64;
 const MOVE_BATCH_BYTES: u64 = 64 << 20;
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
+/// And at least this often while anything moves.
+const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -497,8 +499,10 @@ pub enum Event {
     Begin {
         path: PathBuf,
     },
+    /// Bytes written so far, and files finished (done, skipped or failed).
     Progress {
         bytes_done: u64,
+        files_done: u64,
     },
     /// `path` failed with an error that may pass (`error`): tried again after `wait`,
     /// try `attempt` of `of` (Round 031). Cleared by the next `Progress` or `Begin`.
@@ -582,6 +586,7 @@ pub fn start(req: Request) -> Handle {
             abort: false,
             bytes_done: 0,
             last_report: 0,
+            last_tick: std::time::Instant::now(),
             sum: Summary::default(),
             moving: false,
             approved: None,
@@ -633,6 +638,8 @@ struct Worker {
     abort: bool,
     bytes_done: u64,
     last_report: u64,
+    /// When progress was last said.
+    last_tick: std::time::Instant,
     sum: Summary,
     /// Copying for a move across devices: each source is removed as soon as its copy
     /// is complete, so what was skipped or failed stays where it was.
@@ -953,12 +960,19 @@ impl Worker {
         }
     }
 
+    /// `n` more bytes done (0: a file finished). Said every [`PROGRESS_STEP`] bytes,
+    /// and at least every [`PROGRESS_EVERY`] while files are finishing, so a run of small
+    /// files moves the bar and the ETA too (Round 031).
     fn advance(&mut self, n: u64) {
         self.bytes_done += n;
-        if self.bytes_done - self.last_report >= PROGRESS_STEP {
+        if self.bytes_done - self.last_report >= PROGRESS_STEP
+            || self.last_tick.elapsed() >= PROGRESS_EVERY
+        {
             self.last_report = self.bytes_done;
+            self.last_tick = std::time::Instant::now();
             let _ = self.tx.send(Event::Progress {
                 bytes_done: self.bytes_done,
+                files_done: self.sum.done + self.sum.skipped + self.sum.failed,
             });
         }
     }
@@ -1343,6 +1357,7 @@ impl Worker {
             match self.copy_bytes(src, dst, free) {
                 Ok(true) => {
                     self.sum.done += 1;
+                    self.advance(0);
                     if free {
                         self.made(dst, None);
                     } else if let Some(t) = self.old_trashed.take() {

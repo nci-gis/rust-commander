@@ -14,6 +14,7 @@ mod config_view;
 mod crash;
 mod decor;
 mod docs;
+mod eta;
 mod find_dialog;
 mod git;
 mod graphics;

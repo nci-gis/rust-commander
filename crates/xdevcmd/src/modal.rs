@@ -474,6 +474,9 @@ pub struct Job {
     /// A file failed with an error that may pass and is tried again (Round 031): the
     /// error, the try and of how many, and when the next try is.
     pub retrying: Option<(String, u32, u32, std::time::Instant)>,
+    /// Files finished, and how fast the job goes, for its time left (Round 031).
+    pub files_done: u64,
+    pub rate: crate::eta::Rate,
     /// Cancel while running, Close once done.
     pub buttons: Vec<Rect>,
     /// The answers on the question box, when one is up.
@@ -493,6 +496,8 @@ impl Job {
             done: None,
             title: None,
             retrying: None,
+            files_done: 0,
+            rate: Default::default(),
             buttons: Vec::new(),
             answer_buttons: Vec::new(),
         }
@@ -510,9 +515,19 @@ impl Job {
                     self.current = Some(path);
                     self.retrying = None;
                 }
-                ops::Event::Progress { bytes_done } => {
+                ops::Event::Progress {
+                    bytes_done,
+                    files_done,
+                } => {
                     self.bytes_done = bytes_done;
+                    self.files_done = files_done;
                     self.retrying = None;
+                    self.rate.observe(
+                        std::time::Instant::now(),
+                        bytes_done,
+                        files_done,
+                        (self.total_bytes, self.total_files),
+                    );
                 }
                 ops::Event::Retrying {
                     path,
@@ -1098,12 +1113,21 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 frame,
                 inner,
                 1,
-                &format!(
-                    "{} files · {} of {}",
-                    j.total_files,
-                    human_size(j.bytes_done),
-                    human_size(j.total_bytes)
-                ),
+                &{
+                    let mut s = format!(
+                        "{} files · {} of {}",
+                        j.total_files,
+                        human_size(j.bytes_done),
+                        human_size(j.total_bytes)
+                    );
+                    if let Some(left) = j
+                        .rate
+                        .left(std::time::Instant::now(), (j.total_bytes, j.total_files))
+                    {
+                        s.push_str(&format!(" · {} left", crate::eta::say(left)));
+                    }
+                    s
+                },
                 Style::new().fg(th.fg_dim),
             );
             if let Some(line) = j.retrying_line(std::time::Instant::now()) {
@@ -1197,7 +1221,11 @@ mod tests {
             "network error \u{2014} trying again in 4 s (3 of 5): Connection timed out"
         );
         assert!(j.retrying_line(at).unwrap().contains("trying again now"));
-        tx.send(ops::Event::Progress { bytes_done: 1 }).unwrap();
+        tx.send(ops::Event::Progress {
+            bytes_done: 1,
+            files_done: 0,
+        })
+        .unwrap();
         j.pump();
         assert!(j.retrying_line(at).is_none());
     }

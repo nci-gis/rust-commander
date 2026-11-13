@@ -260,6 +260,21 @@ on other programs' unwritten data, not on how small our files are. `Dirty:` in
 `/proc/meminfo` says only how things were a moment ago (a download can start right
 after), so a check before `syncfs` is a guess, not a guarantee.
 
+### 2026-11-13, the owner on calibrating with CI, and Copy relative path
+
+- **"Fixed, and measured through CI?"** Yes, for the shape, not the exact number. A
+  `sync threads` case in `cargo xtask bench` (1, 4, 8, 16, 32, 64 threads, with
+  `File::sync_data` as xdevcmd calls it) and a `bench` workflow, run by hand only, on
+  Linux, macOS and Windows runners. Caveat: runners' disks are virtual (Azure), with
+  their own flush latency, and some may not honour a flush, so their absolute times are
+  not a laptop's. They show whether more threads help at all on NTFS and APFS, which
+  sets the fixed number. The owner's machines confirm it.
+- **Copy relative path** (owner, for beta.2): proposed as item 48. Copy path is in the
+  files' right-click menu only today (`Cmd::CopyPath`, `copy_path` in `app/input.rs`).
+  Relative to the repository's root when the file is inside one (found by looking for
+  `.git` upward, no process run), else to the pane's directory. The same control-
+  character guard and OSC 52 as Copy path. A row in F1 and the right-click menu.
+
 ## Check
 
 ## Act

@@ -244,6 +244,22 @@ threads, 326 ms here for 1,000): only our files, the same code on every system.
 `syncfs` is dropped, or kept only when the system's dirty data is small
 (`/proc/meminfo` `Dirty:`). That choice is the owner's.
 
+Measured again for the owner's question "16 threads, as on Windows and macOS?" (1,000
+files of 1 KiB, ext4, two runs each):
+
+| Threads | 1 | 4 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|---|
+| ms | 6,370–7,553 | 2,667 | 1,316–1,330 | 634–678 | 327 | 167–174 |
+
+The time falls with the threads almost exactly. ext4 makes concurrent syncs durable in
+one journal commit (about 6.5 ms here), so the cost is the number of commits, about
+files ÷ threads. 16 threads is about 10× today.
+
+On `syncfs`: it is always correct; the only question is how long it waits. That depends
+on other programs' unwritten data, not on how small our files are. `Dirty:` in
+`/proc/meminfo` says only how things were a moment ago (a download can start right
+after), so a check before `syncfs` is a guess, not a guarantee.
+
 ## Check
 
 ## Act

@@ -11,6 +11,22 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Ctrl+Z undoes a copy** (Round 031): it removes what the copy (F5, Alt+Y) made, only
+  while each file is still as the copy made it; a file changed since, or a folder holding
+  something else, is kept and listed. Up to 200,000 items, run as a job.
+- **A replaced file goes to the trash** where the trash is on the same drive (Linux: the
+  home trash or the drive's own; macOS: local drives; Windows: the system drive), so
+  undoing the copy brings it back. A kill between the two steps is finished at the next
+  start. Elsewhere a replace is for good, and the table marks it ⚠.
+- **Network errors are tried again before asking**: a timeout, a dropped connection or a
+  stale handle retries the file after 1, 2, 4, 8 and 15 s, counting down in the job box;
+  then Retry, Skip or Stop. Esc during a wait stops at once. New files on a network mount
+  (NFS, SMB, sshfs, rclone, UNC) are synced before their rename, so a late write error
+  is not lost.
+- **The job box says how long is left** ("about 4 min left"), from what it has done,
+  counting bytes and files, once the speed has settled.
+- **Kept lists follow a move or a rename**: rows moved elsewhere, renamed, or moved back
+  by Ctrl+Z keep their place in the list under their new path.
 - **F5 and F6 look before they start** (Round 030, the Smart Planner's first part). The
   dialog opens at once and checks the destination meanwhile: files already there (newer,
   older, another size, identical), a file where a folder is and the reverse, names

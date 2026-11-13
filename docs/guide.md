@@ -64,7 +64,16 @@ the mount like any directory:
 | NFS: `mount -t nfs` | NFS client (Windows features) |
 
 A mount is as fast as its network. When it is slow or the server is gone, the bar
-above shows it and Esc gets you out; copies and moves run as jobs with Cancel. Each
+above shows it and Esc gets you out; copies and moves run as jobs with Cancel. A copy
+or move that meets a network error that may pass (a timeout, a dropped connection, a
+stale handle) tries the file again by itself after 1, 2, 4, 8 and 15 seconds, the job
+box counting down ("network error — trying again in 4 s (3 of 5)"), and only then asks
+Retry, Skip or Stop; Esc during a wait stops at once. Onto a network mount (NFS, SMB,
+sshfs, rclone, a `\\server\share` path) each new file is synced before it gets its
+name, since such servers often report a failed write only then. A mount that caches
+writes (rclone's `--vfs-cache-mode`) may still be uploading after the job says done:
+"done" means written to the mount. A hard NFS mount whose server is gone blocks inside
+the system call rather than failing: Esc stops the job once that call returns. Each
 tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shift+F9,
 `[[menu]]` in the config) can hold those commands, typed into the terminal for you.
 
@@ -113,11 +122,28 @@ tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shi
 - Where nothing can be opened on a screen — over SSH or without a desktop, unless
   `[commands] opener` is set, and always in read-only mode — Enter views the file
   instead and says why. `enter = "view"` under `[files]` makes Enter always view.
-- **Ctrl+Z** undoes the last rename (one file or many), move, new directory, new file
-  or delete to the trash (F8 puts things back where they were), after showing what it
-  will do. It checks the disk first: a file renamed since, a name taken again, or a
-  new directory with something in it now, is left alone. Copies and Shift+F8 cannot be
-  undone, and Ctrl+Z says so.
+- **Ctrl+Z** undoes the last rename (one file or many), move, copy, Alt+Y
+  synchronisation, new directory, new file or delete to the trash (F8 puts things back
+  where they were), after showing what it will do. It checks the disk first: a file
+  renamed since, a name taken again, or a new directory with something in it now, is
+  left alone. **Undoing a copy** removes what the copy made, but only what is still as
+  it made it: a copied file you changed since is kept, and so is a copied folder you put
+  something into; the job lists what it kept. Files the copy replaced come back from
+  the trash (below). A copy of more than 200,000 items, and Shift+F8, cannot be undone,
+  and Ctrl+Z says so.
+- **A file replaced goes to the trash** where the trash is on the same drive, so Ctrl+Z
+  after the copy brings it back (and it can be restored from the trash by hand after a
+  move): on Linux the home trash or the drive's own; on macOS any local drive; on
+  Windows the system drive only (other drives may have no Recycle Bin). Elsewhere, and
+  on network shares, a replace is for good, and the table before the copy marks it ⚠.
+  The table says ℹ "a file replaced goes to the trash"; the job's summary says how many
+  went there.
+- **The job box says when it will end** ("about 4 min left"), from what it has really
+  done in the last seconds, counting both bytes and files. It says nothing for the
+  first three seconds, while the speed is still changing, or while nothing moves.
+- **A kept list follows what you move or rename**: a row moved to another folder (F6,
+  from a results tab or elsewhere), renamed (F2, Shift+F2) or moved back by Ctrl+Z
+  stays in the list, under its new path, instead of being reported gone.
 - xdevcmd always asks before it deletes or overwrites anything. **Shift+F8** deletes
   only on **Y** (or a click on its button), never on Enter.
 - **F5** / **F6** look before they start: the dialog opens at once and checks the

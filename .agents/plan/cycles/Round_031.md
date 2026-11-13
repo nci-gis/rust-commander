@@ -1,11 +1,10 @@
 # Round 031: Smart Planner v1, around the executor (v0.4.0-beta.1, part 3 of 4, item 42)
 
-**Status**: Planning — kickoff review written 2026-11-13 at the owner's request ("start
-031") while Round 030 is at Review; no code until the owner answers the decisions below
+**Status**: Do (started 2026-11-13; the owner: "Go as recommended")
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42; the owner's decisions of
 2026-11-13 (undo for a copy, replace to trash on by default, network pause and ETA
 pulled from v2, kept lists follow a move)
-**Date started**: YYYY-MM-DD
+**Date started**: 2026-11-13
 **Date completed**: YYYY-MM-DD
 
 ## Goal
@@ -252,6 +251,126 @@ About a week and a half.
 
 ## Do
 
+### 2026-11-13, the owner's decisions
+
+"Go as recommended": all five as the kickoff recommends.
+
+1. Windows: a replace goes to the Recycle Bin (ℹ️) only on the system drive; ⚠️ (skip by
+   default) on every other drive in beta.1.
+2. Backoff: 5 tries, 1 · 2 · 4 · 8 · 15 s, then the question.
+3. New files synced before their rename on a network target only.
+4. Undo of a copy: one step, until the next operation; capped at 200,000 items; a job.
+5. Alt+Y's replaces go to the trash too, and Alt+Y is undone the same way.
+
+### 2026-11-13, step 1–2: what a copy made, and its undo (f47bc76)
+
+- `ops::Made { path, ident, old }`, `Summary::{made, made_over, replaced_for_good}`,
+  `MADE_CAP` = `plan::CAP`; recorded only for `Kind::Copy` (F5 and Alt+Y), in the order
+  made, the `Ident` taken after the rename. Merged-into directories, skipped rows and a
+  move record nothing.
+- `Undo::Copy { made, what, for_good }` → `Plan::Unmake { made, kept }`; `undo::unmake`
+  is a job (`Handle::spawn`, no questions): last made first, a file only while its
+  `Ident` is the same, a directory only through `remove_dir`. Kept items are listed in
+  the summary with why.
+- App: `expect_copy_undo` / `note_copied` (the trash's pending pattern), `Job::title`
+  ("Undo the copy"); Alt+Y no longer says "a synchronisation cannot be undone".
+- Tests: core order/what-is-made, undo removes / keeps changed / nothing left; render:
+  F5 → Ctrl+Z → Enter removes the copy; "Undo the copy of x.txt?"; a permanent delete
+  still says it cannot be undone (replaces the old "a copy cannot be undone" check).
+
+### 2026-11-13, step 3: replace into the trash (3a1338a)
+
+- `plan::Target::trash` from `plan::trash_keeps(dir)`: Linux `ops::volume_trash_usable`
+  (reads only; the home trash on the same device, or the mount's `.Trash/$uid` /
+  `.Trash-$uid` usable or makeable); macOS by `f_fstypename` (apfs, hfs, msdos, exfat);
+  Windows `on_system_drive` (decision 1).
+- Executor: in `copy_bytes`' replace, inside `commit_replace`'s `ready`: journal `swap
+  <tmp> <dst>`, `durable`, `still_agreed`, then `faults::at(Point::Trash)` +
+  `send_to_trash`; a failed rename restores the old file. `Summary::replaced_to_trash`;
+  `Made::old` for the undo. New fault point `trash`.
+- Journal recovery: a `swap` whose `dst` is empty and whose temp file is ours and
+  there is renamed in (`rename_noreplace`) before the part files are tidied;
+  `Interrupted::swapped`, said at start ("N replacement(s) finished …").
+- Table: `Plan::level(g)` shows Newer/Older/Differs as ℹ when the trash keeps them; a
+  head line "ℹ a file replaced goes to the trash[: Ctrl+Z brings it back]". **Still
+  asked, skip first**: the outline's "ℹ in the summary only" would have replaced files
+  without a question for the first time since 0.1; kept as a question (deviation).
+- Test isolation: unit tests never trash without `trash_root`; the test binary
+  (`feature = "faults"`) trashes only on Linux, where XDG_DATA_HOME is the sandbox — on
+  macOS/Windows CI it would have filled the runner's real Trash.
+- `Cmd::Resume` boxed (clippy `large_enum_variant` after `Interrupted` grew).
+- Tests: order from the trace (sync-data < journal-sync < trash < rename); rename
+  failing after the trash puts the old file back; journal tidy finishes a swap and
+  leaves one whose old file is still there; Windows drive rule; render: replace → trash
+  → Ctrl+Z brings it back (Linux); pty: halt at the rename after the trash, kill -9,
+  restart says "1 replacement finished" and the new file is in place — **shown failing
+  with the journal's `swap` recovery taken out** (timed out waiting for the message).
+
+### 2026-11-13, step 4: network (2752e52)
+
+- `Fs::Network`: Linux `f_type` NFS/SMB2/CIFS/SMB1/Ceph/AFS, and for FUSE the mount
+  table's type (`mount_type_in`, octal escapes, longest mount point) — sshfs, rclone,
+  s3fs, gcsfuse …; macOS smbfs/nfs/afpfs/webdav/cifs/ftp; Windows UNC only.
+- `ops::transient(e, network)`: TIMEDOUT, NOTCONN, HOSTDOWN, HOSTUNREACH, CONNRESET,
+  CONNABORTED, NETDOWN, NETUNREACH, NETRESET, STALE; EIO only on a network target;
+  Windows 53, 59, 64, 67, 121, 1229, 1231, 1236.
+- `Request::backoff` (`BACKOFF_SECS` 1·2·4·8·15), `Event::Retrying`, `Worker::wait` in
+  50 ms steps on the cancel flag; after the last try the question says "(a network
+  error: tried 6 times)". The job box's third line counts down.
+- A new file on a network target is synced before its rename (decision 3).
+- Tests: retried then done without a question; asked after the tries; EIO on a local
+  disk asked at once; Esc during a 30 s wait ends in < 5 s; mount-table and UNC
+  parsing; the job box's line.
+
+### 2026-11-13, step 5: ETA (7bc9e24)
+
+- `Event::Progress { bytes_done, files_done }`, sent per MiB and at least every 250 ms
+  while files finish. `xdevcmd/src/eta.rs`: work = bytes + 64 KiB per file, an EWMA
+  (τ 5 s); shown after 3 s, when the last 2 s of estimates agree within 25 %, and not
+  after 3 s without progress; "about 45 s", "about 4 min", "about 1 h 20 min".
+- Tests with given instants: steady, slowdown (hidden while it falls, then longer), a
+  burst of small files, a stall, rounding.
+
+### 2026-11-13, step 6: kept lists follow a move (4923723)
+
+- `Summary::relocated` (each top-level source of a move that went, and where);
+  `lists::relink`; the app's `follow_moves` / `follow_renames` after a move job (F6,
+  undo of a move), F2, Shift+F2 and its undo. A results tab showing a moved row turns
+  into its kept list first, then is shown again relinked.
+- Found by the render test: `to.join("")` added a trailing slash ("main.rs/"), which
+  is no file, so the row was reported gone; the unit test had passed because `PathBuf`
+  equality ignores it.
+
+### 2026-11-13, step 7: docs and CHANGELOG
+
+- `docs/guide.md` (network retries and sync, undo of a copy, replace into the trash,
+  the ETA, lists that follow), `docs/security.md` (the trash step, its recovery, what
+  undo removes), CHANGELOG Unreleased → Added (five entries).
+
 ## Check
+
+- [x] Step 1–2: a copy reports what it made; Ctrl+Z removes what is still as made,
+  keeps and lists the rest; Alt+Y the same
+- [x] Step 3: replace into the trash per volume; journal `swap` and its recovery; the
+  table's ℹ; undo brings the old file back; the kill test fails without the recovery
+- [x] Step 4: network detection, retries with backoff, Esc during a wait, the
+  question after the tries, new files synced on a network target
+- [x] Step 5: the ETA (progress per file and per 250 ms; settled, never during a stall)
+- [x] Step 6: kept lists and results tabs follow moves and renames
+- [x] Step 7: guide, security, CHANGELOG
+- [x] fmt, clippy ×3 (Linux, `x86_64-pc-windows-gnu`, `x86_64-apple-darwin`),
+  `cargo test --workspace --no-fail-fast` locally (core 297, app 253, render 212, pty
+  112)
+- [ ] CI on the branch
+- [ ] **Not verified**: a real network mount (an SMB or NFS share pulled mid-copy, an
+  sshfs that drops; the retries are tested through the fault seam only, and the
+  mount-table parse on a sample); the replace into the trash on macOS and Windows (the
+  test binary does not trash there, by design); a Windows USB stick and F8 there (the
+  Recycle Bin question of the kickoff, critique 5); the ETA by eye on a real slow copy;
+  undo of a very large copy (only the cap's arithmetic, not 200,000 files)
+- [ ] **Deviations for the owner**: a replace into the trash is ℹ but still asked, skip
+  first (step 3); no setting to turn replace-into-trash off; the network sync covers
+  copies, not a move's files (synced with their batch already); errors while making a
+  directory or walking the source are not retried, only a file's copy
 
 ## Act

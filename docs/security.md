@@ -140,6 +140,16 @@ meanwhile, asks again ("It changed since you answered"). Alt+Y's plan, and F5/F6
 (the table before a copy or move starts), do the same for each file they said they
 would replace; a file the plan said to leave is left, whatever is there by then.
 
+**A file replaced goes to the trash first** (Round 031), where the trash is on the
+same drive (see the guide for which drives): the new file is complete and synced under
+a temporary name, the journal says which temporary file replaces which, the old file
+goes to the trash, and the new one is renamed in. A rename that fails then puts the old
+file back. A kill between the trash and the rename leaves nothing under the name for a
+moment; the next start renames the complete new file in and says so ("1 replacement
+finished … the old one is in the trash"). Undoing a copy removes only what is still the
+file it made (size, date and, on Unix, which file it is) and brings the replaced file
+back from the trash; a folder the copy made goes only once empty.
+
 **The plan's decisions survive a kill.** With safe operations on, a copy or move from
 the table writes its decisions to the journal before its first step (which files to
 leave, which to replace and what each one was), and marks each source as it finishes

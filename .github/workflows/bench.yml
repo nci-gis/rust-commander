@@ -1,8 +1,8 @@
 name: bench
 
 # Measurements that need another system than the one at hand, run by hand only: Actions
-# -> bench -> Run workflow, or `gh workflow run bench --ref <branch>`. Never on a push
-# or a pull request, and never a gate: shared runners' disks are virtual and vary by
+# -> bench -> Run workflow, or `gh workflow run bench --ref <branch>`, or a push to a
+# bench/ branch (below). Never on other pushes or a pull request, and never a gate: shared runners' disks are virtual and vary by
 # tens of per cent, so their numbers show a shape (does this help on NTFS, on APFS?),
 # not a laptop's times.
 #

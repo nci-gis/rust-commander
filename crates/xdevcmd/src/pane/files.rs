@@ -1161,6 +1161,12 @@ impl FilePane {
         }
     }
 
+    /// A directory read still under way on its thread, of any kind (`--screenshot`
+    /// waits for it before the next input).
+    pub fn is_reading(&self) -> bool {
+        self.reading.is_some()
+    }
+
     /// Stop waiting for a slow read. The directory it was for, if there was one.
     pub fn stop_reading(&mut self) -> Option<PathBuf> {
         self.reading.take().map(|r| r.target)

@@ -532,11 +532,11 @@ impl App {
             Action::Bottom => self.with_files(|f| f.go_end()),
             Action::Parent => self.with_files(|f| f.go_up()),
             Action::GoHome => {
-                let home = crate::bookmarks::expand_tilde("~");
-                if home.is_absolute() {
+                if let Some(home) = crate::bookmarks::home_dir() {
                     self.with_files(|f| f.set_cwd(&home));
                 } else {
-                    self.status = "no home directory: neither HOME nor USERPROFILE is set".into();
+                    self.status =
+                        "no home directory: neither HOME nor USERPROFILE is a full path".into();
                 }
             }
             Action::GoRoot => self.with_files(|f| {

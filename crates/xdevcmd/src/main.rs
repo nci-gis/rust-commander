@@ -505,7 +505,9 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     terminal.draw(|f| app.draw(f))?;
     let finish_jobs = |app: &mut App| {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while (app.job_working() || app.syntax_waiting()) && std::time::Instant::now() < deadline {
+        while (app.job_working() || app.syntax_waiting() || app.reading_dir())
+            && std::time::Instant::now() < deadline
+        {
             std::thread::sleep(Duration::from_millis(20));
             app.tick();
         }
@@ -521,7 +523,10 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
         std::thread::sleep(Duration::from_millis(30));
         app.tick();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while app.planning() && std::time::Instant::now() < deadline {
+        // A directory slower than SLOW to read (C:\ on a Windows runner, the Ctrl+\
+        // flake of runs 43221291571 and 43409507585): the next key acts on it, not on the
+        // directory the pane still showed.
+        while (app.planning() || app.reading_dir()) && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
             app.tick();
         }

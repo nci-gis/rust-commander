@@ -10,6 +10,14 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+- **F1's own row, chosen inside F1, switches between the small and the large window**
+  instead of closing and opening F1 again.
+
+### Fixed
+- **`~` on Windows when `HOME` is not a Windows path** (left by Cygwin or an old MSYS,
+  `/home/ann`): it goes to `USERPROFILE` instead of saying there is no home directory.
+
 ## [0.4.0-beta.1] - 2026-11-13
 
 ### Added

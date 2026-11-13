@@ -933,6 +933,21 @@ impl Commands {
             self.message = Some(why.clone());
             return Outcome::Stay;
         }
+        // F1's own row, chosen inside F1: the other size, not F1 closed and opened again
+        // (which would only start over at the small size).
+        if r.run == Run::Act(Action::Help) {
+            let to = match self.size {
+                Size::Small if self.can_grow() => Size::Large,
+                Size::Small => {
+                    self.message = Some("the screen is too small for the large size".into());
+                    return Outcome::Stay;
+                }
+                Size::Large => Size::Small,
+            };
+            self.size = to;
+            self.refresh(Some(row));
+            return Outcome::Stay;
+        }
         Outcome::Run(row)
     }
 
@@ -1810,6 +1825,39 @@ mod tests {
             Outcome::Run(row) => c.rows[*row].title.clone(),
             _ => "(not run)".into(),
         }
+    }
+
+    /// The owner's question (Round 033): F1 opened from inside F1 never loops. F1's own
+    /// row switches the size and stays; F1 the key grows, then closes; nothing opens a
+    /// second window.
+    #[test]
+    fn f1_inside_f1_switches_size_and_never_runs_itself() {
+        use ratatui::crossterm::event::KeyCode;
+        let help_item = |c: &Commands| {
+            c.items
+                .iter()
+                .position(|it| {
+                    matches!(it, Item::Row { row, .. } if c.rows[*row].run == Run::Act(Action::Help))
+                })
+                .expect("F1's row is listed")
+        };
+        let mut c = palette((118, 34));
+        assert!(matches!(press(&mut c, KeyCode::F(1)), Outcome::Stay));
+        assert_eq!(c.size, Size::Large);
+        let i = help_item(&c);
+        assert!(matches!(c.choose(i), Outcome::Stay));
+        assert_eq!(c.size, Size::Small);
+        let i = help_item(&c);
+        assert!(matches!(c.choose(i), Outcome::Stay));
+        assert_eq!(c.size, Size::Large);
+        assert!(matches!(press(&mut c, KeyCode::F(1)), Outcome::Close));
+
+        // Too small a screen for the large size: it says so and stays.
+        let mut c = palette((60, 16));
+        let i = help_item(&c);
+        assert!(matches!(c.choose(i), Outcome::Stay));
+        assert_eq!(c.size, Size::Small);
+        assert!(c.message.as_deref().unwrap_or("").contains("too small"));
     }
 
     #[test]

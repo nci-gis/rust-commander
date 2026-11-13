@@ -21,6 +21,19 @@ impl App {
 
     /// The viewer has lines on screen drawn plain until its scan reaches them
     /// (`--screenshot` waits for it, as for a job).
+    /// A file pane on show is still reading its directory: one slower than
+    /// [`crate::pane::files::SLOW`], such as `C:\` on a busy Windows runner after Ctrl+\.
+    /// `--screenshot` waits for it, so a frame never shows the old directory under a key
+    /// that left it.
+    pub fn reading_dir(&self) -> bool {
+        self.file_panes().iter().any(|id| {
+            self.panes
+                .get(id)
+                .and_then(Pane::as_files)
+                .is_some_and(|f| f.is_reading())
+        })
+    }
+
     pub fn syntax_waiting(&self) -> bool {
         matches!(&self.modal, Some(Modal::View(v)) if v.syntax_waiting())
     }

@@ -4064,6 +4064,27 @@ fn tilde_goes_home_and_ctrl_backslash_to_the_root() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A directory slower to read than the pane waits (150 ms) is waited for before the frame
+/// and before the next key: the Windows Ctrl+\\ flake (runs 43221291571, 43409507585) was
+/// `C:\\` read late, and the frame still showed the directory the key had left.
+#[test]
+fn a_slow_directory_is_waited_for_before_the_next_key_and_the_frame() {
+    let (a, b) = fixture();
+    fs::create_dir(a.join("slow-dir-x")).unwrap();
+    fs::write(a.join("slow-dir-x").join("inside.txt"), "").unwrap();
+    let out = isolated()
+        .env("XDEVCMD_TEST_SLOW_DIR", "slow-dir-x")
+        .arg("--screenshot=100x24")
+        .arg("--keys=Down,Enter")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("inside"), "the slow directory's file\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn bulk_rename_is_off_in_read_only_mode() {
     let (a, b) = fixture();

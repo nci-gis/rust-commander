@@ -449,7 +449,9 @@ fn copying_over_a_file_skips_it_unless_told_otherwise() {
     wait_file(&s.right().join("other.txt"), "copied", |c| {
         c.as_deref() == Some("x")
     });
-    xdevcmd.wait_gone("Already exists");
+    // The job is over once the marks clear; it asked nothing on the way.
+    xdevcmd.until("marks to clear", |scr| !scr.contains('\u{2022}'));
+    assert!(!xdevcmd.screen().contains("Already exists"));
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         "OLDER",

@@ -1386,4 +1386,75 @@ mod tests {
         let _g = faults::set(Point::Lookup, "cASEpROBE", faults::Action::Found);
         assert_eq!(target(&d).ignores_case, Some(true));
     }
+
+    /// Run `req` to its end, answering any question with Abort (a planned job asks
+    /// none here): the number of questions asked.
+    fn run_job(req: crate::ops::Request) -> u32 {
+        use crate::ops::{Answer, Event};
+        let h = crate::ops::start(req);
+        let mut asked = 0;
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                Event::Ask(_) => {
+                    asked += 1;
+                    h.answer(Answer::Abort);
+                }
+                Event::Done(_) => return asked,
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn the_choices_made_on_the_plan_are_what_the_job_does() {
+        for kind in [Kind::Copy, Kind::Move] {
+            let d = tmp(&format!("execute-{kind:?}"));
+            let (src, to) = (d.join("src"), d.join("to"));
+            fs::create_dir_all(&src).unwrap();
+            fs::create_dir_all(&to).unwrap();
+            fs::write(src.join("older"), "new").unwrap();
+            fs::write(to.join("older"), "old").unwrap();
+            age(&to.join("older"), 3600);
+            fs::write(src.join("newer"), "mine").unwrap();
+            age(&src.join("newer"), 3600);
+            fs::write(to.join("newer"), "theirs").unwrap();
+            fs::write(src.join("fresh"), "f").unwrap();
+            let sources = [src.join("older"), src.join("newer"), src.join("fresh")];
+            let p = plan(kind, &sources, &to);
+            let mut req = match kind {
+                Kind::Copy => crate::ops::Request::copy(sources.to_vec(), to.clone()),
+                _ => crate::ops::Request::mv(sources.to_vec(), to.clone()),
+            };
+            // Older replaced, newer left: no question while the job runs.
+            req.expect = p.expectations(|g| match g {
+                Group::Older => Choice::Replace,
+                _ => Choice::Skip,
+            });
+            assert_eq!(run_job(req), 0, "{kind:?}");
+            assert_eq!(fs::read_to_string(to.join("older")).unwrap(), "new");
+            assert_eq!(fs::read_to_string(to.join("newer")).unwrap(), "theirs");
+            assert_eq!(fs::read_to_string(to.join("fresh")).unwrap(), "f");
+            // A move leaves the source it skipped.
+            assert!(src.join("newer").exists(), "{kind:?}");
+            assert_eq!(src.join("older").exists(), kind == Kind::Copy, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_file_changed_after_the_plan_is_asked_about_not_replaced() {
+        let d = tmp("changed-after");
+        let (src, to) = (d.join("src"), d.join("to"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        fs::write(src.join("f"), "new").unwrap();
+        fs::write(to.join("f"), "old").unwrap();
+        age(&to.join("f"), 3600);
+        let p = plan(Kind::Copy, &[src.join("f")], &to);
+        let mut req = crate::ops::Request::copy(vec![src.join("f")], to.clone());
+        req.expect = p.expectations(|_| Choice::Replace);
+        // Someone else writes it between the plan and the job.
+        fs::write(to.join("f"), "someone else's").unwrap();
+        assert_eq!(run_job(req), 1, "asked, not replaced");
+        assert_eq!(fs::read_to_string(to.join("f")).unwrap(), "someone else's");
+    }
 }

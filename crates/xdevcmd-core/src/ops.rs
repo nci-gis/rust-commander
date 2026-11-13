@@ -95,6 +95,9 @@ pub struct Request {
     pub expect: std::collections::HashMap<PathBuf, Expect>,
     /// Copy and move: what to do with files already at the destination.
     pub existing: Existing,
+    /// Files and bytes the confirmed plan already counted (Round 030): the job's
+    /// progress bar uses them instead of walking the sources a second time.
+    pub planned: Option<(u64, u64)>,
     /// Safe operations for this job, taken from the setting when the request is made
     /// and kept to the end: turning the setting over mid-job must not split one job
     /// between two ways of writing, and tests set it here rather than in a global
@@ -152,6 +155,7 @@ impl Request {
             pairs: Vec::new(),
             expect: Default::default(),
             existing: Existing::Ask,
+            planned: None,
             safe: safe(),
         }
     }
@@ -169,6 +173,7 @@ impl Request {
             pairs: Vec::new(),
             expect: Default::default(),
             existing: Existing::Ask,
+            planned: None,
             safe: safe(),
         }
     }
@@ -186,6 +191,7 @@ impl Request {
             pairs: Vec::new(),
             expect: Default::default(),
             existing: Existing::Ask,
+            planned: None,
             safe: safe(),
         }
     }
@@ -537,7 +543,7 @@ impl Worker {
             self.finish();
             return;
         }
-        let (files, bytes) = scan(&req.sources);
+        let (files, bytes) = req.planned.unwrap_or_else(|| scan(&req.sources));
         let _ = self.tx.send(Event::Scanned { files, bytes });
 
         for src in &req.sources {
@@ -1882,6 +1888,27 @@ mod tests {
 
     fn run(req: Request) -> Summary {
         run_with(req, Answer::Yes).0
+    }
+
+    #[test]
+    fn a_planned_job_does_not_walk_its_sources_again() {
+        let d = tmp("planned");
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("f"), "x").unwrap();
+        let mut req = Request::copy(vec![d.join("f")], d.join("to"));
+        // Numbers no walk of this one file would give: they can only be the plan's.
+        req.planned = Some((7, 70));
+        let h = start(req);
+        let scanned = loop {
+            let e = h
+                .events
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            if let Event::Scanned { files, bytes } = e {
+                break (files, bytes);
+            }
+        };
+        assert_eq!(scanned, (7, 70));
     }
 
     #[test]

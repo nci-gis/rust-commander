@@ -313,6 +313,7 @@ impl Confirm {
         };
         self.table = None;
         self.request.expect.clear();
+        self.request.planned = None;
         if let Some(l) = self.body.get_mut(3) {
             *l = "counting\u{2026}".into();
         }
@@ -333,6 +334,7 @@ impl Confirm {
         let Some((_, line)) = self.planning.take() else {
             return;
         };
+        self.request.planned = Some((plan.totals.files, plan.totals.bytes));
         if !plan.has_questions() {
             let same: u64 = plan
                 .groups()

@@ -323,6 +323,32 @@ rows with a decision are kept.
 - Not yet: Shift+F5 (copy as, no confirm dialog today) and Alt+Y go to step 4; the
   "needs" figure is an upper bound (it counts every conflict as written).
 
+### 2026-11-13, step 4: the executor fed by the plan
+
+- `Request::planned`: the plan's files and bytes; `Worker::run` uses them for its
+  progress instead of walking the sources again (a copy or move walked its tree twice
+  before: the dialog's count and the worker's `scan`). Tab clears it with the plan.
+- The executor itself is unchanged (critique 1): the plan's choices arrive through
+  `Request::expect` (step 3), and Round 029's re-check stands: a file changed between
+  the plan and the job is asked about, not replaced.
+- Tests: core `a_planned_job_does_not_walk_its_sources_again` (numbers only the plan
+  can give); `the_choices_made_on_the_plan_are_what_the_job_does` (copy and move:
+  older replaced, newer and its move source left, new copied, no question);
+  `a_file_changed_after_the_plan_is_asked_about_not_replaced`.
+- Alt+Y and Shift+F5, looked at again: Alt+Y already is scan → plan → confirm →
+  execute (compare's rows, `Request::sync` with an `Expect` and `Ident` per row since
+  Round 029); moving it onto `plan::Plan` would change a settled dialog for no new
+  safety, so it stays. Shift+F5 copies one file under a new name with no confirm
+  dialog; its one possible conflict is asked about as before. Both written here as a
+  deviation from decision 4 for the owner to see.
+- A pty flake seen twice while writing step 3's test (`q` right after the job, under
+  the whole suite: "did not exit on q", the screen already left): the test now waits
+  for the job's end (marks cleared), as its neighbour does. A probe quitting right
+  after a planned job, 15 times alone and 15 under the suite, never hung: taken as load
+  on quit (Round 029's syncs) racing the pty test's patience, not a hang. Kept in mind
+  for pillar 4's flake list.
+- fmt; clippy ×3; `cargo test --workspace` green, the pty suite five times in a row.
+
 ## Check
 
 ## Act

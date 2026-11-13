@@ -402,6 +402,29 @@ fn start_up_times_are_said_when_asked_and_in_usage() {
     ] {
         assert!(screen.contains(step), "{step:?} missing:\n{screen}");
     }
+    // The start-up budget (pillar 4, Round 032): everything but the terminal check,
+    // which is the terminal's to answer (this harness never does), under 150 ms. A debug
+    // build on a shared runner: generous on purpose, it is there to catch a step that
+    // grew by an order of magnitude.
+    let line = screen
+        .lines()
+        .find(|l| l.contains("started in "))
+        .unwrap_or_else(|| panic!("no timings line:\n{screen}"));
+    let ms = |name: &str| -> f64 {
+        let at = line
+            .find(name)
+            .unwrap_or_else(|| panic!("{name} in {line}"));
+        line[at + name.len()..]
+            .split(|c: char| c != '.' && !c.is_ascii_digit())
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("a number after {name} in {line}"))
+    };
+    let ours = ms("started in ") - ms("terminal check ");
+    assert!(
+        ours < 150.0,
+        "start-up without the terminal check took {ours} ms: {line}"
+    );
     x.quit();
 
     let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);

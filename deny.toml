@@ -57,8 +57,9 @@ multiple-versions = "warn"
 wildcards = "deny"
 # xdevcmd depends on xdevcmd-core by path *and* an exact version (=x.y.z), which is what
 # crates.io needs. A path with no version would be a wildcard; refused, so it cannot
-# come back unnoticed.
-allow-wildcard-paths = false
+# come back unnoticed. `true` allows a bare path only in a crate that is never
+# published (`publish = false`: xtask, Round 032); xdevcmd's is still refused.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

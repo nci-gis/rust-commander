@@ -40,6 +40,37 @@ XDEVCMD_SOAK_SECS=600 cargo test --release --test pty -- --ignored soak --nocapt
 Uses xdevcmd heavily for ten minutes and fails if memory keeps growing. Linux only.
 Samples go to `target/tmp/soak-rss.csv`.
 
+## Benchmarks
+
+`cargo xtask bench` measures xdevcmd the same way every time and keeps the numbers, so a
+change can be compared with what came before instead of guessed at:
+
+```bash
+cargo xtask bench --quick --host my-laptop        # a minute or two
+cargo xtask bench --host my-laptop                # the full set, before a release
+cargo xtask bench --host my-laptop --save-baseline
+```
+
+It builds the release binary and runs each case five times (`--runs N`) after a warm-up,
+printing the median, p95, best and peak memory, and the change from this host's
+baseline, marked past ±15 %:
+
+- the package: the binary's size, the crates in `Cargo.lock`;
+- listing and sorting 10,000 and 100,000 entries;
+- the copy planner on 10,000, 100,000 and 200,000 files;
+- copying many small files and one large file; replacing small files (each synced
+  before its rename, the old one to a trash of the run's own); undoing a copy;
+- start-up to the first frame and the terminal check, in a terminal that answers and one
+  that does not (from `--timings`), and the CPU used while idle (Linux).
+
+Each case runs in a child process on trees made from a fixed recipe in a temporary
+directory, never your files. Results go to `bench/` (its README says which file is
+which); `--host` names the machine in them, and nothing is read from the system to name
+it. Two machines' numbers are not comparable, nor a busy machine's (the load is printed
+first). CI does not compare times, which vary too much on shared runners: it keeps hard
+budgets only (`tests/budgets.rs`; start-up without the terminal check under 150 ms, in
+`tests/pty.rs`).
+
 ## Docs that are generated
 
 - `docs/keys.md`: `xdevcmd --print-keys > docs/keys.md`. A test fails if it is out of date.

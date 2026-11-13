@@ -276,6 +276,25 @@ Round 030 closed first, then "go as recommended": all five as the kickoff recomm
   is), shorten its limit there, or move it after the first frame and parse the keys it
   swallowed ourselves (more code, a second key parser).
 
+### 2026-11-13, step 4: the benchmark harness
+
+- `xtask/` (`publish = false`, `release = false`, only crates already in the lock),
+  `.cargo/config.toml` alias, `default-members` so `cargo build`/`test` at the root still
+  mean xdevcmd. `deny.toml`: `allow-wildcard-paths = true`, which cargo-deny applies to
+  unpublished crates only (checked: xdevcmd's pin taken away is still refused).
+- Cases as the outline, each in a child process (peak RSS from VmHWM on Linux), start-up
+  in portable-pty answering and silent, idle CPU from `/proc/<pid>/stat`; results and
+  per-host baselines in `bench/`; `docs/development.md` "Benchmarks", `bench/README.md`.
+- The budget: start-up without the terminal check < 150 ms, asserted in the pty test.
+- First quick run (this sandbox, 3 runs; not saved as a baseline, not the owner's
+  machine): binary 5.39 MiB, 277 crates in the lock; list 10,000 8.9 ms; plan 10,000
+  8.3 ms; copy 2,000 × 1 KiB 47 ms; one 32 MiB file 9.9 ms; undo 2,000 8.3 ms; start-up
+  11 ms (answering) / 1,714 ms (silent: the check 1,702 ms); idle CPU 0.33 %.
+- **Found by it**: replacing 1,000 small files took 7.1 s, ~7 ms a file. `strace -w`:
+  the per-file `fdatasync` before the rename (Round 029's rule), 7.4 ms each on this
+  disk; the trash step itself is a rename. Input for beta.2's group commit (item 43),
+  which today is planned for moves only.
+
 ## Check
 
 ## Act

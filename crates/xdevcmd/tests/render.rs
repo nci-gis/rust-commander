@@ -3683,8 +3683,9 @@ fn ctrl_z_undoes_a_rename_a_new_directory_and_a_move_after_asking() {
     shot_keys("110x24", "F7,d,o,c,s,Enter,Ctrl+z,Enter", &a, &b);
     assert!(!a.join("docs").exists(), "the new directory went");
 
-    // A move, then its undo: back where it came from.
-    shot_keys("110x24", "Down,F6,Enter,Ctrl+z,Enter", &a, &b);
+    // A move, then its undo: back where it came from. `wait`: the move ends first, or
+    // Ctrl+Z comes while it runs (a Windows runner, CI run 43371746802).
+    shot_keys("110x24", "Down,F6,Enter,wait,Ctrl+z,Enter", &a, &b);
     assert!(a.join("victim.txt").exists() && !b.join("victim.txt").exists());
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

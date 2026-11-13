@@ -392,6 +392,19 @@ rows with a decision are kept.
   the content not read), `CHANGELOG.md` Unreleased → Added (two entries).
 - CI on the branch by `gh workflow run ci --ref feat/v0.4.0` (below, Check).
 
+### 2026-11-13, CI on the branch
+
+- Run 43370457813 (51fa452): Windows failed `plan::tests::a_fat_drive_…`: the test
+  wrote `bad:name` and `dir?` as sources, which NTFS refuses. Those rows are now tested
+  only where such names can exist (c6274c2); the 4 GiB file and case clashes run
+  everywhere.
+- Run 43371746802 (c6274c2): Windows `ctrl_z_undoes_a_rename_a_new_directory_and_a_move
+  _after_asking` (Ctrl+Z sent while the move still ran: the known race its neighbour
+  already waits out; now `wait` too). macOS `going_quickly_past_pictures_sends_only_the
+  _one_stopped_on` (5 pictures sent instead of 2: a test of 60 ms key gaps against a
+  120 ms rule on a slow runner; no picture code touched here, green on macOS in the run
+  before): a flake for pillar 4's list.
+
 ## Check
 
 ## Act

@@ -1,12 +1,12 @@
 # Round 031: Smart Planner v1, around the executor (v0.4.0-beta.1, part 3 of 4, item 42)
 
-**Status**: Review (steps 1–7 done, CI green 2026-11-13, run 43394099654; for the
-owner's hand tests)
+**Status**: Complete (closed by the owner, 2026-11-13: "okay, chờ rồi close r31, xong
+start r32"; after CI run 43401249982 green)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42; the owner's decisions of
 2026-11-13 (undo for a copy, replace to trash on by default, network pause and ETA
 pulled from v2, kept lists follow a move)
 **Date started**: 2026-11-13
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-13
 
 ## Goal
 
@@ -377,7 +377,10 @@ About a week and a half.
 - [x] Step 5: the ETA (progress per file and per 250 ms; settled, never during a stall)
 - [x] Step 6: kept lists and results tabs follow moves and renames
 - [x] Step 7: guide, security, CHANGELOG
-- [x] Start-up timings (added at the owner's request): Usage, `--timings`, JSON
+- [x] Start-up timings (added at the owner's request): Usage, `--timings`, JSON; the
+  Usage box as wide as its longest line (the owner saw "first fra…" at any width;
+  reproduced with the old fixed 84 columns, guarded by the pty test); CI run
+  43401249982 green on all six jobs
 - [x] fmt, clippy ×3 (Linux, `x86_64-pc-windows-gnu`, `x86_64-apple-darwin`),
   `cargo test --workspace --no-fail-fast` locally (core 297, app 253, render 212, pty
   112)
@@ -396,3 +399,13 @@ About a week and a half.
   directory or walking the source are not retried, only a file's copy
 
 ## Act
+
+- Closed with its hand tests not run: the "Not verified" list above (a real network
+  share, the trash on macOS and Windows, F8 on a Windows USB stick, the ETA by eye, a
+  very large undo) goes into Round 032's beta.1 checklist, with Round 030's.
+- Carried to Round 032: the benchmark harness (the owner, 2026-11-13) and the terminal
+  check at start-up (1.7 s when the terminal does not answer; its kickoff, decision 4).
+- Deviations left as they are unless the owner says otherwise: a replace into the trash
+  is ℹ but still asked, skip first; no setting to turn it off; only a file's copy is
+  retried on a network error.
+- Nothing promoted to `context/` or `reference/`.

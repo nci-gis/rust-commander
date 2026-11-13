@@ -1,6 +1,7 @@
 # Round 032: Pre-release plumbing and 0.4.0-beta.1 (v0.4.0-beta.1, part 4 of 4)
 
-**Status**: Planning — outline; the kickoff is written when Round 031 is Complete
+**Status**: Planning — kickoff review written 2026-11-13 (the owner: "close r31, xong
+start r32"); no code until the owner answers the decisions below
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`; Decisions "Release path" and "Where
 pre-releases go" (owner, 2026-11-13: GitHub only, marked pre-release, never "Latest";
 crates.io, Scoop, winget and binstall start at 0.4.0); the benchmark harness (owner,
@@ -16,6 +17,135 @@ marked pre-release; nothing goes to crates.io, Scoop or winget. Before the cut, 
 command measures xdevcmd the same way every time and keeps the numbers, so each later
 feature is compared with a baseline instead of a guess. Then beta.1 is cut, its baseline
 recorded, and the owner uses it for about a week.
+
+## Kickoff review (2026-11-13, after Round 031 closed)
+
+### 1. What changed since the outline
+
+- Round 031 is Complete; Round 030 is still at Review (its hand tests not run). Both
+  rounds' "Not verified" lists are the core of the beta.1 checklist (step 3).
+- Added to this round by the owner: **the benchmark harness** (step 4). Round 031 gave
+  it its first input: `--timings`' JSON and the Usage view's start-up line.
+- Measured in Round 031, for decision 4: every start-up step but one takes 0.2–1.6 ms
+  (about 4 ms); the terminal check takes up to **1.7 s** when the terminal does not
+  answer (its 1.5 s limit and 0.2 s of quiet).
+- `[Unreleased]` in CHANGELOG.md holds everything since 0.3.0 (rounds 018–031), about
+  210 lines.
+
+### 2. The code this round touches
+
+| Where | What is there today | What this round does |
+|---|---|---|
+| `.github/workflows/release.yml` `check` | the tag = Cargo.toml's version, a dated CHANGELOG section (grep with unescaped dots), the tag on `origin/main` | a pre-release tag (`-beta.N`, `-rc.N`) on `origin/dev` or main; a stable tag on main only; dots escaped; a `workflow_dispatch` that runs only `check` |
+| `release.yml` `release` | `gh release create … --draft` | `--prerelease --latest=false` for a pre-release tag |
+| `release.toml` | `allow-branch = ["dev", "main"]`, `publish = true`, tag `v{{version}}` | unchanged; every pre-release command says `--no-publish` |
+| `crates/xdevcmd/Cargo.toml` | the dev-dependency pins `xdevcmd-core = "=0.3.0"` | rewritten by cargo-release to `=0.4.0-beta.1` (it did so for 0.3.0) |
+| `crates/xdevcmd/src/docs.rs` | Help → Documentation links `tree/v{version}/docs`, tested for `0.4.0-rc.1` | nothing: the tag will exist |
+| `docs/development.md` "Releasing" | six steps for a stable release | a "Pre-releases" section |
+| `crates/xdevcmd/src/main.rs:422`, `graphics.rs` `probe` | asked before the first frame, up to 1.5 s + 0.2 s | decision 4 |
+| (new) `xtask/` | — | the harness (step 4) |
+| `core/ops.rs` `measure_a_move_across_devices…` | an ignored test, run in CI only to print | absorbed by the harness; CI keeps printing it |
+| `xdevcmd/tests/budgets.rs` | binary ≤ 7 MB (CI), 100,000 entries < 1 s (ignored) | a start-up budget without the terminal check, from `--timings` |
+| `xdevcmd/src/usage.rs` `read` | RSS from `/proc` (Linux), `ps` (macOS), none on Windows | the harness reads a child's peak RSS the same ways |
+
+### 3. Outside check
+
+- **Pre-releases on GitHub**: `gh release create --prerelease` marks one; `--latest=false`
+  keeps the "Latest" badge on 0.3.0 (to be confirmed on the runner's gh in the dry run). cargo-release takes an explicit
+  version (`cargo release 0.4.0-beta.1`) and semver orders `beta.1 < beta.2 < rc.1 <
+  0.4.0`, as the ROADMAP says.
+- **Benchmarks for a CLI/TUI**: hyperfine's practice (warm-up runs, several runs, median
+  and spread, the machine's state printed) is the model for timing a whole program;
+  ripgrep and fd keep their benchmark scripts in the repository and their numbers in
+  the README per machine, not as CI gates. That matches the outline's "not a CI gate".
+  No hyperfine dependency: it is not on every machine, and the cases that call
+  `xdevcmd-core` directly cannot use it anyway.
+- **Peak memory of a child**: Linux `/proc/<pid>/status` VmHWM (read before it exits)
+  or the children's `ru_maxrss` (`getrusage`, if rustix offers it; else `/proc` and
+  `ps` as `usage.rs` reads its own); macOS `ru_maxrss` is in bytes, Linux's in KiB.
+  Windows: unknown, as in Usage.
+
+### 4. Critique of the outline
+
+1. **`xtask` must stay out of the release machinery.** A workspace member is packaged
+   by CI's `cargo package --workspace` and versioned by cargo-release: the crate needs
+   `publish = false` and `[package.metadata.release] release = false`, and `cargo deny`
+   covers it. It should depend only on crates already in `Cargo.lock` (xdevcmd-core,
+   rustix, portable-pty for the pty start), so the shipped dependency tree and
+   `deny.toml` do not move.
+2. **Start-up is measured twice, on purpose**: through a pty that answers the
+   terminal's queries at once (what a local terminal costs: the budget), and through
+   one that answers nothing (what a silent terminal or a slow SSH link costs: the 1.7 s).
+   Both come from `--timings`' JSON; the harness never parses the screen.
+3. **The 150 ms start-up budget can be a CI test now**: everything but the terminal
+   check, from `--timings` in a pty, which the pty tests can already run. A generous
+   bound (150 ms on a runner) catches a real regression without flaking.
+4. **The terminal check can move after the first frame without the risk it was put
+   first for.** It runs first so that no reply reaches crossterm's input reader as keys;
+   but that reader is made lazily in the first turn of the loop, *after* the first
+   draw (`run.rs`: `self.input.get_or_insert_with(KeyReader::new)`). Probing between
+   the first draw and the reader's creation keeps the replies away from it, and the
+   screen is up in ~4 ms. Keys typed during the probe still wait, as today. This is
+   decision 4's recommendation; it needs a pty test with a silent terminal (the screen
+   is drawn before 100 ms) and the existing picture tests.
+5. **The harness's trees must be the same every run**: generated from a fixed recipe
+   (counts, sizes, names, depth) into a scratch directory, not from the user's files.
+   A `--quick` set (seconds) for each feature's before/after, the full set (minutes)
+   before a release.
+6. **What the owner's machine is called**: `--host <name>` given by the owner, never
+   the hostname or user name read from the system (private data in a committed file).
+7. **The beta.1 checklist is long**: 029's, 030's and 031's "by hand" lists together.
+   Ordered by risk (data first: kill and power-pull, USB FAT/exFAT, SMB pulled mid-copy,
+   trash and undo; then tables, ETA, timings), each with how to set it up and what to
+   see, so a week's use covers the top first.
+
+### 5. Steps (each a commit; behaviour first as a failing test where there is one)
+
+1. **`release.yml`**: pre-release tags on `dev`, `--prerelease --latest=false`, escaped
+   dots, a `workflow_dispatch` dry run of `check` (tried with `v0.4.0-beta.1` before any
+   tag exists: it must fail on the version and pass on the branch rule). **S.**
+2. **`docs/development.md`, "Pre-releases"** (outline). **S.**
+3. **The beta.1 hand-test checklist**, `docs/` or the round's Check (decision 5),
+   ordered by risk (critique 7). **S.**
+4. **The benchmark harness** (outline step 4, with critiques 1, 2, 5 and 6): `xtask`
+   with `bench [--quick] [--host NAME] [--save-baseline]`; the start-up budget test in
+   `budgets.rs` (critique 3). **M.**
+5. **The terminal check after the first frame** (decision 4), with its pty test. **S.**
+6. **The cut**: `feat/v0.4.0` into `dev` by pull request with CI green; `cargo release
+   0.4.0-beta.1 --no-publish --no-tag --no-push`; CHANGELOG dated; tag on `dev`; the
+   draft read; the harness run on the owner's machine and saved as beta.1's baseline;
+   Publish by the owner. **S.**
+
+About a week, then the week of use.
+
+### 6. Decisions for the owner
+
+1. **CHANGELOG for pre-releases**: `## [0.4.0-beta.1] - date` holds everything since
+   0.3.0 now; beta.2 and rc.1 get their own short sections; at 0.4.0 one section says
+   everything since 0.3.0 again, in full (recommended: each release page reads on its
+   own) — or one section that grows until 0.4.0.
+2. **Where the plumbing lands**: in this round, as above (recommended; it is small and
+   the cut is here).
+3. **The harness**: `cargo xtask bench` (recommended, critique 1) or a shell script;
+   results in `bench/` in the repository (recommended: reviewed with the change that
+   moved them) or outside it.
+4. **The terminal check**: after the first frame (recommended, critique 4), or a
+   shorter limit before it (e.g. 300 ms), or as it is.
+5. **The beta.1 checklist's home**: `docs/testing-by-hand.md` (recommended: kept for
+   beta.2 and rc.1, and for anyone else testing) or only this round's Check.
+
+### 7. Risks
+
+- **A pre-release tag on `dev` is new**: the check job's rules are tried by the
+  `workflow_dispatch` dry run first; a wrong tag can be deleted (development.md says how)
+  before anything is published.
+- **The harness measures the machine** (outline); per-host baselines and the machine's
+  load printed with each run.
+- **Moving the terminal check** changes the order of the first second for every user;
+  the picture tests (kitty, iTerm2, sixel, the cell size) and a silent-terminal test
+  guard it.
+- **Round 030 still at Review** when beta.1 is cut: the cut waits for the owner's close
+  of 030 or carries it in the checklist (owner's call).
 
 ## Plan (outline)
 

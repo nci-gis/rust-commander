@@ -48,6 +48,24 @@ panel; `windows_e2e.rs` covers the panes, a command run in `cmd.exe` in the pane
 F10. They compile on every system (clippy for `x86_64-pc-windows-gnu` checks them) and
 run only on Windows. Keys only: no mouse yet.
 
+**Faults: a data-safety fix is shown failing through the fault seam** (Round 029). A
+sync moved after its rename passes every content check, and a full disk or a swapped
+target cannot be had on demand. `xdevcmd-core/src/faults.rs` puts `faults::at(Point,
+path)` before each guarded call (`Write`, `SyncData`, `SyncDir`, `Rename`,
+`RemoveSource`, `JournalBegin`, `JournalLine`, `JournalSync`, `ReadDir`, `Stat`). Rules
+match a path fragment (`fail`, or `set` with `Swap`, `Halt`, `Delay`, `Skip`), live while
+their guard does, and `faults::trace`/`traced` record the order, for order tests. It
+exists only under `cfg(any(test, feature = "faults"))`: the pty and render tests' binary
+has it and reads `XDEVCMD_FAULTS` (`kind|point|fragment|arg`, `;` between rules; `|`
+because `:` is in Windows paths), and `tests/budgets.rs` checks the release build has
+none of it. Places: `faults::places::{other_device, small_fs}` (`XDEVCMD_TEST_OTHER_DEV`,
+`XDEVCMD_TEST_SMALL_FS`, mounted by CI; elsewhere skipped, saying so). A new write path
+that cannot be undone goes through `faults::at` (or `faults::sync_data`, `sync_dir`,
+`ops::commit_replace`) with an order test from the trace. No `#[cfg(test)]` statics per
+module for a new hook (the old pattern), and no seam in the release build. To show such a
+test fails on the old code: a `git worktree` of the previous commit with the one
+`faults::at` put in front of the call it guards, the test written to compile on both.
+
 **Every test runs xdevcmd isolated** from whoever runs it: `XDEVCMD_CONFIG` points at a file
 that does not exist, `XDG_DATA_HOME` at a scratch directory, and the pty tests use
 `/bin/sh` with a plain prompt. Without that, a developer who had rebound F5 would see

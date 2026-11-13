@@ -3,7 +3,7 @@
 **Date**: 2026-11-13
 **Agent**: Claude Code
 **Confidence**: High
-**Status**: New
+**Status**: Promoted (2026-11-13, `reference/testing.md`, "Faults")
 **Source**: Round 029 (pillar 1), steps 0–7
 **Review-by**: 2027-05-13
 

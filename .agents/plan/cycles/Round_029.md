@@ -951,6 +951,16 @@ root; CI is not).
   phases, 0 files lost or left partial; disk-full (ENOSPC) runs left every file
   intact.
 
+### 2026-11-13, the owner's two decisions after Review
+
+- **Decision 4, the sync cost** (owner: "Yes to both"): kept as it is for beta.1, past
+  the 2× line (~2.4× here, ~3× on CI for many small files moved across devices; large
+  files and new copies unaffected). Measured again on the owner's USB stick and Mac
+  during beta.1's week; whether group commit (`syncfs`) gets priority is decided for
+  beta.2 (item 43).
+- **The fault seam in canon**: authorised; the "Faults" paragraph is in
+  `reference/testing.md`, logged in `promotions.md`.
+
 ## Check
 
 ## Act

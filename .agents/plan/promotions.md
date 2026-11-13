@@ -105,3 +105,13 @@ No rule added or altered: `context/` is untouched, and the unsafe rule stands.
 
 **Promoted by**: XDevTeam ("Sửa các file canon", 2026-11-11). Written by Claude Code
 through the shell.
+
+## 2026-11-13: The fault seam → `reference/testing.md` ("Faults")
+
+**Source**: [Round 029](cycles/Round_029.md), steps 0–7;
+[memory/2026-11-13-fault-seam-for-tests.md](../memory/2026-11-13-fault-seam-for-tests.md)
+**Rationale**: Every data-safety test from Round 030 on is written through the seam
+(`faults::at`, the trace for order, the test places). One paragraph next to the test
+layers: what the seam is, where it exists (never in the release build), the rule for a
+new write path, and how to show a seam test fails on the old code.
+**Promoted by**: XDevTeam ("Yes to both", 2026-11-13). Written by Claude Code.

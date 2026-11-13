@@ -16,7 +16,8 @@ wins: `$XDEVCMD_CONFIG`,
 `~/.config/xdevcmd/config.toml`.
 
 **If the file has a mistake**, xdevcmd ignores the whole file, starts with the defaults,
-and the status line names the problem. **F1 → Settings** shows what is in use.
+and the status line names the problem. **Help → Config in use** shows what is in use,
+and why a file was ignored.
 
 **File → Settings…** inside xdevcmd changes the common settings and saves them here,
 writing only the lines that changed. Everything else, keys included, is set in this
@@ -63,6 +64,8 @@ follow = false            # the file pane used last goes where the shell's cd go
 [viewer]
 wrap = true
 tab_width = 4             # 1-16
+highlight = true          # colour source, config files, diffs and logs by language:
+                          # F3 up to 64 MiB, quick view up to 1 MiB; off under NO_COLOR
 images = "auto"           # quick view's pictures: auto, kitty, iterm2, sixel or blocks
                           # (sixel only where the terminal gives its cell size)
 
@@ -106,25 +109,33 @@ View and Edit.
 
 ```toml
 [theme]
-name = "dark"             # dark, light, ansi, blue, high-contrast, or a file of yours
+name = "xdevtheme"        # xdevtheme, dark, light, ansi, blue, high-contrast, or a file
 accent = "#ff8800"        # "#rrggbb", "reset" (the terminal's own), or "0"-"255"
 background = "reset"      # let the terminal's background show through
 colors = "auto"           # how many colours the terminal shows: auto, truecolor, 256, 16
 ```
 
-**Themes.** `dark` is the default; `light` is for a light terminal; `ansi` uses only
+**Themes.** `xdevtheme` is the default: xdevcmd's teal turned into a light that runs across
+the screen to violet, with rounded frames, the titles in a notch, a lit cursor row and
+slanted F keys (its `[style]`, below). `dark` is the plain look it replaced, one teal
+accent and nothing more; `light` is for a light terminal; `ansi` uses only
 your terminal's 16 colours, so it follows your terminal's palette; `blue` is the
 blue-panel look of the DOS-era commanders; `high-contrast` is black and white with
 bright colours. **View → Theme…** switches while xdevcmd runs; `name` keeps the choice.
 
 Your own theme is a file `themes/<name>.toml` beside `config.toml` (or beside the xdevcmd
-binary, for a portable copy). The release files come with seven examples in `themes/`
-(Dracula, Night Owl, Tokyo Night, Catppuccin Mocha, Nord, Gruvbox dark, Solarized light),
-which work as they are when kept beside `xdevcmd`. To start your own, print a built-in theme with every colour listed:
+binary, for a portable copy). The release files come with nine in `themes/`: three more
+looks of xdevcmd's own, **xdevtheme-neon** (the light runs teal, violet and pink, and the
+focused frame glows), **xdevtheme-glass** (no lines: panes are cards, the path and the
+cursor row are pills) and **xdevtheme-light** (xdevtheme for a light terminal, such as
+macOS Terminal's default profile), and six well-known palettes (Dracula, Tokyo Night, Catppuccin
+Mocha, Nord, Gruvbox dark, Solarized light),
+which work as they are when kept beside `xdevcmd`. To start your own, print a theme with
+every colour listed (a built-in one, or a file's: `--print-theme xdevtheme-light`):
 
 ```bash
 mkdir -p ~/.config/xdevcmd/themes
-xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml   # then [theme] name = "mine"
+xdevcmd --print-theme xdevtheme > ~/.config/xdevcmd/themes/mine.toml   # then [theme] name = "mine"
 ```
 
 A theme file starts from a built-in theme and changes what it lists, with the same
@@ -138,6 +149,44 @@ cursor_active = "#5a3000"
 ```
 
 Colours set in `[theme]` itself go on top of whichever theme is chosen.
+
+A `name` whose file is not there any more (deleted, renamed, or a typo), or whose file
+does not read, does not stop the rest of the config: xdevtheme stands in, and the status
+line says which theme was missing. `--check-config` still reports it and exits 1.
+
+`XDEVCMD_THEME` in the environment overrides `name` for that run, to try one without
+editing the config: `XDEVCMD_THEME=xdevtheme-neon xdevcmd`.
+
+A theme file may also say how it draws, beyond its colours, in a `[style]` table. Each
+line is optional, and leaving it out keeps today's look:
+
+```toml
+# themes/glow.toml — then [theme] name = "glow"
+base = "dark"
+
+[style]
+borders = "rounded"     # plain, rounded, thick, double, or none: each pane a card
+titles = "notch"        # line, notch (╭┤title├─), or pill: the focused title on the light
+gradient = "#a46bff"    # a light from the accent to this colour, on the frames, tabs, keys
+                        # and menus in the accent's colours; two colours make three stops,
+                        # gradient = ["#a46bff", "#ff5fb0"]; or "none"
+gradient_runs = "across"  # across (left to right) or down (top to bottom)
+cursor = "glow"         # block, glow (lit from its left edge) or pill
+marker = true           # a ▌ on the frame at the cursor's row
+keys = "slant"          # the F keys: plain, caps (the number on the accent), or slant (◢1◤),
+                        # which also draws the selected tab and the menu bar's number so
+shadow = "dim"          # none, dim, or glow: under dialogs and menus
+glow = false            # the focused frame lights the cells around it
+sky = false             # the backgrounds take a faint aurora, top to bottom
+stars = false           # a few fixed stars in the empty rows of the file panes
+```
+
+The style uses only box-drawing, block and geometric characters, no Nerd Font. On a
+16-colour terminal it is left off, since the glyphs may be missing (the old Windows
+console) and there are no colours to blend; at 256 colours the gradient is coarser.
+Programs in the terminal panel keep their own colours: the gradient never reaches them.
+On a light panel (xdevtheme-light) the lit cursor row is fainter and the `dim` shadow a
+soft grey, so the names on them stay readable.
 
 **`colors = "auto"`** sends 24-bit colour only where the terminal is known to take it:
 `COLORTERM=truecolor` (or `24bit`), iTerm2, WezTerm, kitty, Ghostty, Alacritty, VS Code,
@@ -168,7 +217,18 @@ copy = ["F5", "Ctrl+c"]   # F5 or Ctrl+C (naming an action replaces all its keys
 ```
 
 Naming an action replaces all of its default keys. The names are in
-`xdevcmd --print-config` and on the F1 screen.
+`xdevcmd --print-config`, and F1's large size (F1, F1) names the selected command's on
+its last line (`[keys] copy`); a key you changed has a `•` there.
+
+`help` always keeps **F1**: `help = ["F1", "Ctrl+F1"]` adds a key beside it, and a
+`help` without F1 is an error that says so, and so is F1 given to any other action. Keys
+added act in the file panes; inside the shell F1 is the program's, and **Alt+X F1** opens
+Commands there (and in the panes).
+
+`usage = ["Shift+F1", "Alt+x F1"]` gives Alt+X F1 back to Usage, as before 0.4: then
+Alt+X F1 is Usage in the file panes, and in the shell it goes to the program (Usage is
+not one of the shell's commands), so Commands is reached from the shell with F12, then
+F1.
 
 A binding can be two keys in a row, written with a space: `"Alt+r Left"` is Alt+R, then
 Left. Bindings that start with the same key form a group, and there is no time limit

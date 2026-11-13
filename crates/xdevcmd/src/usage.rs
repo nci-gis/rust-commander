@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Sparkline};
+use ratatui::widgets::Sparkline;
 use ratatui::Frame;
 
 use xdevcmd_core::format::human_size;
@@ -56,6 +56,9 @@ pub struct Usage {
     frames: u64,
     /// The terminal it runs in and how it draws pictures, for a bug report.
     pub terminal: String,
+    /// How long start-up took, and its steps ([`crate::startup`]); none in screenshots,
+    /// which never start for real.
+    pub startup: Option<(String, String)>,
 }
 
 impl Default for Usage {
@@ -68,6 +71,7 @@ impl Default for Usage {
             draws: VecDeque::new(),
             frames: 0,
             terminal: String::new(),
+            startup: None,
         }
     }
 }
@@ -245,27 +249,30 @@ fn uptime(d: Duration) -> String {
     }
 }
 
+/// `s` cut to `width` columns, ending in "…" where it was cut: a line too long for the
+/// box says so rather than stopping mid-word at the border.
+fn ellipsize(s: &str, width: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    let cols = |c: char| c.width().unwrap_or(0);
+    if s.chars().map(cols).sum::<usize>() <= width {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        if used + cols(c) + 1 > width {
+            break;
+        }
+        used += cols(c);
+        out.push(c);
+    }
+    out.truncate(out.trim_end().len());
+    out.push('\u{2026}');
+    out
+}
+
 pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     let th = theme::t();
-    let w = area.width.min(84);
-    let ht = area.height.min(22);
-    let r = Rect::new(
-        area.x + (area.width - w) / 2,
-        area.y + (area.height - ht) / 2,
-        w,
-        ht,
-    );
-    frame.render_widget(Clear, r);
-    let block = Block::bordered()
-        .border_style(Style::new().fg(th.accent))
-        .style(Style::new().bg(th.bg_panel).fg(th.fg))
-        .title(Line::from(Span::styled(
-            " Usage ",
-            Style::new().fg(th.accent).add_modifier(Modifier::BOLD),
-        )));
-    let inner = block.inner(r);
-    frame.render_widget(block, r);
-
     let mut lines: Vec<(String, Style)> = Vec::new();
     let dim = Style::new().fg(th.fg_dim);
     let plain = Style::new().fg(th.fg);
@@ -346,6 +353,10 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         ),
         plain,
     ));
+    if let Some((total, steps)) = &u.startup {
+        lines.push((format!("start-up   {total} to the first frame"), plain));
+        lines.push((format!("           {steps}"), dim));
+    }
     if !u.terminal.is_empty() {
         lines.push((format!("terminal   {}", u.terminal), plain));
     }
@@ -367,6 +378,33 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     ));
     lines.push((String::new(), plain));
     // What the graph shows: the newest samples, one per column.
+    // As wide as its longest line (the start-up steps are the longest), never past the
+    // screen: a line is cut, with "…", only where the screen itself is too narrow.
+    let longest = lines
+        .iter()
+        .map(|(t, _)| unicode_width::UnicodeWidthStr::width(t.as_str()))
+        .max()
+        .unwrap_or(0);
+    let w = ((longest + 4).max(84) as u16).min(area.width);
+    let ht = area.height.min(22);
+    let r = Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - ht) / 2,
+        w,
+        ht,
+    );
+    crate::modal::clear_overlay(frame, r);
+    let block = crate::decor::bordered()
+        .border_style(Style::new().fg(th.accent))
+        .style(Style::new().bg(th.bg_panel).fg(th.fg))
+        .title(Line::from(Span::styled(
+            " Usage ",
+            Style::new().fg(th.accent).add_modifier(Modifier::BOLD),
+        )));
+    let inner = block.inner(r);
+    frame.render_widget(block, r);
+    crate::decor::notch(frame.buffer_mut(), r);
+
     let width = inner.width.saturating_sub(2) as usize;
     let shown: Vec<u64> = u
         .samples
@@ -393,11 +431,12 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         if i as u16 >= inner.height {
             break;
         }
+        let w = inner.width.saturating_sub(2);
         frame.buffer_mut().set_line(
             inner.x + 1,
             inner.y + i as u16,
-            &Line::from(Span::styled(text.clone(), *style)),
-            inner.width.saturating_sub(2),
+            &Line::from(Span::styled(ellipsize(text, w as usize), *style)),
+            w,
         );
     }
     let top = inner.y + lines.len() as u16;
@@ -426,6 +465,18 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A line too long for the box ends in "…" where it is cut; one that fits is left.
+    #[test]
+    fn a_line_too_long_for_the_box_ends_in_an_ellipsis() {
+        assert_eq!(ellipsize("config 0.3", 20), "config 0.3");
+        assert_eq!(
+            ellipsize("config 0.3 · panes 0.9", 12),
+            "config 0.3\u{2026}"
+        );
+        assert_eq!(ellipsize("設計書です", 7), "設計書\u{2026}");
+        assert_eq!(ellipsize("abc", 0), "\u{2026}");
+    }
 
     /// Samples every 2 s for `mins` minutes, memory given by `f(seconds)`.
     fn run(mins: u64, f: impl Fn(f64) -> u64) -> Vec<(f64, u64)> {

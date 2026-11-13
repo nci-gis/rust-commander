@@ -1,5 +1,7 @@
 [workspace]
-members = ["crates/xdevcmd-core", "crates/xdevcmd"]
+members = ["crates/xdevcmd-core", "crates/xdevcmd", "xtask"]
+# `cargo build`/`cargo test` at the root keep meaning xdevcmd; xtask is run by name.
+default-members = ["crates/xdevcmd-core", "crates/xdevcmd"]
 resolver = "2"
 
 # The one place xdevcmd says what it is. Help > About, --help and --version read these at

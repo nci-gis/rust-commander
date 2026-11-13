@@ -5,12 +5,13 @@ use std::time::{Duration, Instant, SystemTime};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
 use ratatui::Frame;
 
 use xdevcmd_core::archive::{self, ItemKind, Listing};
 use xdevcmd_core::find::{self, Query};
-use xdevcmd_core::format::{elide_middle, format_time, human_size};
+use xdevcmd_core::format::{
+    elide_middle, elided, fit_end, fit_start, format_time, human_size, text_cells,
+};
 use xdevcmd_core::glob::{has_wildcards, Pattern};
 use xdevcmd_core::size::{Sizer, Total};
 use xdevcmd_core::{entry_at, read_dir, sort_entries, Entry, Kind, Sort, SortKey};
@@ -45,9 +46,10 @@ pub struct FilePane {
     all: Vec<Entry>,
     /// The quick filter in force, as typed. Cleared on leaving the directory.
     pub filter: Option<String>,
-    /// Directories this tab was in, for back and forward. Most recent last.
-    back: Vec<PathBuf>,
-    forward: Vec<PathBuf>,
+    /// Places this tab was in, for back and forward: directories, and lists (Alt+F7's
+    /// results, a shell's output). Most recent last.
+    back: Vec<Place>,
+    forward: Vec<Place>,
     /// Directory sizes worked out so far, and the walks still running.
     sizes: HashMap<PathBuf, Total>,
     sizing: HashSet<PathBuf>,
@@ -60,9 +62,104 @@ pub struct FilePane {
     pub archive: Option<ArchiveView>,
     /// A big archive being listed on another thread: Esc gives up on it.
     opening: Option<Opening>,
+    /// A directory being read on another thread, past [`SLOW`]: Esc gives up on it.
+    reading: Option<Reading>,
     /// `[files] git_status`: the letters for this directory, and the run in flight.
     git: Option<crate::git::Marks>,
     git_rx: Option<std::sync::mpsc::Receiver<crate::git::Marks>>,
+}
+
+/// How long a directory's read is waited for before the pane carries on without it and
+/// shows a bar. Under this a read looks instant, so a local directory never shows one.
+pub const SLOW: Duration = Duration::from_millis(150);
+
+/// A directory as a thread read it: where it really is, its time, and its entries
+/// (`None` when only the time was asked for).
+struct Read {
+    dir: PathBuf,
+    mtime: Option<SystemTime>,
+    entries: Option<std::io::Result<Vec<Entry>>>,
+}
+
+/// What a read in flight is for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ReadFor {
+    /// Moving there; `record` as for [`FilePane::navigate`].
+    Move { record: bool },
+    /// Reading this directory again.
+    Reload,
+    /// The periodic look for changes.
+    Check,
+}
+
+/// A read that took longer than [`SLOW`]. The thread cannot be stopped if the system
+/// call it is in hangs (a dead mount); dropping this only stops waiting for it, and its
+/// answer, whenever it comes, goes nowhere.
+struct Reading {
+    target: PathBuf,
+    why: ReadFor,
+    rx: std::sync::mpsc::Receiver<Read>,
+    started: Instant,
+    count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// Where the cursor goes once a move arrives (Enter on a search result, Go to).
+    select: Option<Select>,
+}
+
+/// Where the cursor is to land in a listing still on its way.
+#[derive(Debug, Clone)]
+enum Select {
+    /// This path, as the listing will name it.
+    Path(PathBuf),
+    /// The entry of this name, in whatever directory the move arrives in: the path the
+    /// move was asked for may not be the one the listing has (a link resolved, /var on
+    /// macOS being /private/var).
+    Name(std::ffi::OsString),
+}
+
+/// Read `path` on a thread: its real path when `resolve`, its time, and its entries
+/// unless `time_only`.
+fn read_on_thread(
+    path: &Path,
+    resolve: bool,
+    time_only: bool,
+    hidden: bool,
+) -> (
+    std::sync::mpsc::Receiver<Read>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (path, counter) = (path.to_path_buf(), count.clone());
+    std::thread::spawn(move || {
+        test_delay(&path);
+        let dir = if resolve {
+            xdevcmd_core::paths::canonical(&path).unwrap_or(path)
+        } else {
+            path
+        };
+        let mtime = dir_mtime(&dir);
+        let entries = (!time_only).then(|| xdevcmd_core::read_dir_counted(&dir, hidden, &counter));
+        let _ = tx.send(Read {
+            dir,
+            mtime,
+            entries,
+        });
+    });
+    (rx, count)
+}
+
+/// `XDEVCMD_TEST_SLOW_DIR=<text>`: a directory whose path holds `<text>` is read two
+/// seconds late, as from a slow mount. For the tests of the bar and of Esc; it only
+/// ever delays.
+fn test_delay(path: &Path) {
+    static SLOW_DIR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let slow = SLOW_DIR.get_or_init(|| std::env::var("XDEVCMD_TEST_SLOW_DIR").ok());
+    if slow
+        .as_deref()
+        .is_some_and(|s| !s.is_empty() && path.to_string_lossy().contains(s))
+    {
+        std::thread::sleep(Duration::from_secs(2));
+    }
 }
 
 struct Opening {
@@ -106,13 +203,32 @@ impl ArchiveView {
     }
 }
 
-/// A tab of Find results (Alt+F7): every operation works on them as on a listing,
-/// since each row carries its full path.
+/// Where a tab has been: a directory, or a kept list ([`crate::lists`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+    Dir(PathBuf),
+    List(crate::lists::Id),
+}
+
+/// A tab of Find results (Alt+F7), or of a kept list: every operation works on them as
+/// on a listing, since each row carries its full path.
 pub struct Results {
     pub what: String,
     search: Option<find::Search>,
     pub scanned: u64,
     pub unreadable: u64,
+    /// The kept list this tab shows: a list from the start, a search once it ends (or
+    /// is left).
+    pub list: Option<crate::lists::Id>,
+    /// Alt+F7's search, rather than a list being checked.
+    pub find: bool,
+    /// A list: its rows, while they are checked; those found gone; the row to put the
+    /// cursor on once it arrives; and what was left out when it was made.
+    pub total: usize,
+    gone: Vec<PathBuf>,
+    select: Option<PathBuf>,
+    pub capped: bool,
+    pub outside: usize,
 }
 
 impl Results {
@@ -186,6 +302,7 @@ impl FilePane {
             results: None,
             archive: None,
             opening: None,
+            reading: None,
             git: None,
             git_rx: None,
         };
@@ -202,9 +319,172 @@ impl FilePane {
             search: Some(find::start(q)),
             scanned: 0,
             unreadable: 0,
+            list: None,
+            find: true,
+            total: 0,
+            gone: Vec::new(),
+            select: None,
+            capped: false,
+            outside: 0,
         });
         p.refilter(None);
         p
+    }
+
+    /// Show kept list `id` here, its rows checked again on a thread; those gone since
+    /// are named and dropped. `record` puts the place being left on the back list.
+    /// False, with a notice, if the list is no longer kept or outside the root.
+    pub fn open_list(&mut self, id: crate::lists::Id, record: bool) -> bool {
+        let Some(l) = crate::lists::get(id) else {
+            self.notice = Some("that list is no longer kept".into());
+            return false;
+        };
+        let root = xdevcmd_core::paths::canonical(&l.root).unwrap_or_else(|_| l.root.clone());
+        if !xdevcmd_core::policy::get().allows(&root) {
+            self.notice = Some("that list is outside the root xdevcmd is confined to".into());
+            return false;
+        }
+        let left = self.place();
+        self.leave_results();
+        self.archive = None;
+        self.opening = None;
+        self.reading = None;
+        self.cwd = root;
+        if record && left != Place::List(id) {
+            self.remember(left);
+        }
+        self.cursor = 0;
+        self.offset = 0;
+        self.marked.clear();
+        self.filter = None;
+        self.sizer.cancel();
+        self.sizing.clear();
+        self.sizes.clear();
+        self.git = None;
+        self.git_rx = None;
+        self.error = None;
+        self.all = vec![parent_entry(&self.cwd)];
+        self.results = Some(Results {
+            what: l.source.clone(),
+            search: Some(find::list_grouped(l.rows.clone(), l.groups.clone())),
+            scanned: 0,
+            unreadable: 0,
+            list: Some(id),
+            find: false,
+            total: l.rows.len(),
+            gone: Vec::new(),
+            select: l.chosen.clone(),
+            capped: l.capped,
+            outside: l.outside,
+        });
+        crate::lists::touch(id);
+        self.checked = (Instant::now(), None);
+        self.refilter(None);
+        true
+    }
+
+    /// Where this tab is now. A search's results become a kept list here, if they are
+    /// not one yet, so that Back can come back to them.
+    pub fn place(&mut self) -> Place {
+        let cwd = self.cwd.clone();
+        if self.results.as_ref().is_some_and(|r| r.list.is_none()) {
+            let rows: Vec<PathBuf> = self
+                .all
+                .iter()
+                .filter(|e| !e.is_parent())
+                .map(|e| e.path.clone())
+                .collect();
+            let r = self.results.as_mut().expect("checked above");
+            if !rows.is_empty() {
+                let stopped = if r.running() { " (stopped)" } else { "" };
+                let (rows, capped, outside) = crate::lists::tidy_rows(rows);
+                let source = format!("find {}{stopped}", r.what);
+                r.list = Some(crate::lists::keep(
+                    source,
+                    cwd.clone(),
+                    rows,
+                    capped,
+                    outside,
+                    true,
+                    Vec::new(),
+                ));
+            }
+        }
+        match self.list_id() {
+            Some(id) => Place::List(id),
+            None => Place::Dir(cwd),
+        }
+    }
+
+    /// Files moved or renamed, each (from, to), are about to be followed in the kept
+    /// lists (Round 031): if this results tab shows any of them, it becomes its kept
+    /// list now, from the rows as they were, and that list is returned to be shown again
+    /// once relinked ([`FilePane::reopen_list`]). A search still running is left alone.
+    pub fn holds_moved(&mut self, moved: &[(PathBuf, PathBuf)]) -> Option<crate::lists::Id> {
+        let r = self.results.as_ref()?;
+        if r.running() {
+            return None;
+        }
+        let touched = self
+            .all
+            .iter()
+            .any(|e| !e.is_parent() && moved.iter().any(|(from, _)| e.path.starts_with(from)));
+        if !touched {
+            return None;
+        }
+        match self.place() {
+            Place::List(id) => Some(id),
+            Place::Dir(_) => None,
+        }
+    }
+
+    /// Show kept list `id` again, its rows as they now are, the cursor where it was.
+    pub fn reopen_list(&mut self, id: crate::lists::Id) {
+        let row = self
+            .current()
+            .filter(|e| !e.is_parent())
+            .map(|e| e.path.clone());
+        let back = std::mem::take(&mut self.back);
+        let forward = std::mem::take(&mut self.forward);
+        crate::lists::set_chosen(id, row);
+        self.open_list(id, false);
+        if let Some(r) = self.results.as_mut() {
+            r.select = crate::lists::get(id).and_then(|l| l.chosen);
+        }
+        self.back = back;
+        self.forward = forward;
+    }
+
+    /// The kept list this tab shows, if any.
+    pub fn list_id(&self) -> Option<crate::lists::Id> {
+        self.results.as_ref().and_then(|r| r.list)
+    }
+
+    /// Leaving a results tab: a search still running stops, and a list remembers the
+    /// row the cursor was on, for the way back.
+    fn leave_results(&mut self) {
+        let row = self
+            .current()
+            .filter(|e| !e.is_parent())
+            .map(|e| e.path.clone());
+        if let Some(mut r) = self.results.take() {
+            if let Some(s) = r.search.take() {
+                s.cancel();
+            }
+            if let Some(id) = r.list {
+                crate::lists::set_chosen(id, row);
+            }
+        }
+    }
+
+    /// Put `left` on the back list (once), and forget the way forward.
+    fn remember(&mut self, left: Place) {
+        self.back.retain(|p| *p != left);
+        self.back.push(left);
+        if self.back.len() > HISTORY {
+            self.back.remove(0);
+        }
+        self.forward.clear();
     }
 
     /// Take in what the search has found since the last call. True when anything
@@ -221,6 +501,7 @@ impl FilePane {
         for ev in search.rx.try_iter() {
             match ev {
                 find::Event::Found(p) => found.push(p),
+                find::Event::Gone(p) => r.gone.push(p),
                 find::Event::Progress { scanned } => r.scanned = scanned,
                 find::Event::Done {
                     scanned,
@@ -234,6 +515,25 @@ impl FilePane {
         }
         if finished {
             r.search = None;
+            if let (Some(id), false) = (r.list, r.find) {
+                // Not silent: a row that went is named, and the list forgets it. Names
+                // never checked before (taken from a shell's output) go quietly.
+                let went = crate::lists::checked(id, &r.gone);
+                let left = self.all.iter().any(|e| !e.is_parent()) || !found.is_empty();
+                if !went.is_empty() {
+                    self.notice = Some(format!(
+                        "{} gone since: {}",
+                        went.len(),
+                        crate::lists::some_names(&went)
+                    ));
+                } else if !left {
+                    self.notice = Some("none of those names is a file or directory here".into());
+                }
+            }
+        }
+        // A search that ended is kept as a list, for Back and Alt+L.
+        if finished && r.find && r.list.is_none() {
+            self.place();
         }
         if found.is_empty() {
             return finished;
@@ -246,7 +546,12 @@ impl FilePane {
                 .into_owned();
             self.all.push(entry_at(&p, name));
         }
-        let keep = self.current().map(|e| e.path.clone());
+        // Back to a list: the cursor on the row it was on when the list was left.
+        let want = self.results.as_mut().and_then(|r| {
+            let w = r.select.clone()?;
+            found_has(&self.all, &w).then(|| r.select.take()).flatten()
+        });
+        let keep = want.or_else(|| self.current().map(|e| e.path.clone()));
         sort_entries(&mut self.all, self.sort);
         self.refilter(keep);
         true
@@ -267,6 +572,7 @@ impl FilePane {
     /// Browse `file` as a directory: at once if it is small, else from a thread, with a
     /// notice meanwhile.
     pub fn enter_archive(&mut self, file: &Path) {
+        self.reading = None;
         // A link inside the root to an archive outside it: its contents are outside.
         if !xdevcmd_core::policy::get().allows(file) {
             self.notice = Some("that archive is outside the root xdevcmd is confined to".into());
@@ -390,16 +696,7 @@ impl FilePane {
         if self.results.is_some() {
             // Results are re-checked, not re-searched: what was deleted or moved away
             // goes, what is still there gets its size and time again.
-            let mut v = vec![Entry {
-                name: "..".into(),
-                path: self.cwd.clone(),
-                kind: Kind::Parent,
-                size: 0,
-                modified: None,
-                hidden: false,
-                symlink: false,
-                error: None,
-            }];
+            let mut v = vec![parent_entry(&self.cwd)];
             v.extend(
                 self.all
                     .iter()
@@ -428,8 +725,50 @@ impl FilePane {
     /// sorts — a refresh that left it on whatever slid into its row would make the
     /// next key act on the wrong file.
     pub fn reload(&mut self) {
+        if self.results.is_none() && self.archive.is_none() {
+            // A directory: on a thread, as a move is. One already on its way stays.
+            if self.reading.is_some() {
+                return;
+            }
+            let cwd = self.cwd.clone();
+            if let Some(read) = self.read_bounded(&cwd, false, false, ReadFor::Reload) {
+                self.apply(read);
+            }
+            return;
+        }
         let keep = self.current().map(|e| e.path.clone());
-        match self.read() {
+        let read = self.read();
+        self.show(read);
+        self.checked = (Instant::now(), dir_mtime(&self.cwd));
+        self.refilter(keep);
+        self.after_listing();
+    }
+
+    /// Show a directory's listing that a thread read.
+    fn apply(&mut self, read: Read) {
+        let keep = self.current().map(|e| e.path.clone());
+        let Some(entries) = read.entries else { return };
+        // At the root there is no way up, so no `..` to offer one; a size already
+        // worked out for a directory stays.
+        let entries = entries.map(|mut v| {
+            if xdevcmd_core::policy::get().is_root(&self.cwd) {
+                v.retain(|e| !e.is_parent());
+            }
+            for e in v.iter_mut().filter(|e| e.is_dir()) {
+                if let Some(t) = self.sizes.get(&e.path) {
+                    e.size = t.bytes;
+                }
+            }
+            v
+        });
+        self.show(entries);
+        self.checked = (Instant::now(), read.mtime);
+        self.refilter(keep);
+        self.after_listing();
+    }
+
+    fn show(&mut self, read: std::io::Result<Vec<Entry>>) {
+        match read {
             Ok(mut v) => {
                 sort_entries(&mut v, self.sort);
                 self.all = v;
@@ -437,8 +776,10 @@ impl FilePane {
             }
             Err(e) => self.error = Some(format!("{}: {e}", self.cwd.display())),
         }
-        self.checked = (Instant::now(), dir_mtime(&self.cwd));
-        self.refilter(keep);
+    }
+
+    /// What follows a new listing: git's letters for it.
+    fn after_listing(&mut self) {
         if crate::look::get().git && self.archive.is_none() && self.results.is_none() {
             self.git_rx = Some(crate::git::start(&self.cwd));
         } else {
@@ -519,32 +860,56 @@ impl FilePane {
 
     /// Look now whether the directory changed, and re-read it if so. True when it did.
     pub fn check_now(&mut self) -> bool {
-        if self.results.is_some() || self.archive.is_some() {
+        if self.results.is_some() || self.archive.is_some() || self.reading.is_some() {
             return false;
         }
-        let mtime = dir_mtime(&self.cwd);
-        let changed = mtime != self.checked.1
-            || (self.all.len() <= FULL_CHECK_LIMIT && self.listing_changed());
-        if changed {
-            self.reload();
+        // One read on a thread: the time, and (for a directory small enough) the
+        // entries to compare, which are then the new listing if anything changed.
+        let full = self.all.len() <= FULL_CHECK_LIMIT;
+        let cwd = self.cwd.clone();
+        match self.read_bounded(&cwd, false, !full, ReadFor::Check) {
+            Some(read) => self.compare(read),
+            None => false,
+        }
+    }
+
+    /// A check's read against what is shown; shown instead if anything changed.
+    fn compare(&mut self, read: Read) -> bool {
+        let changed = read.mtime != self.checked.1
+            || read
+                .entries
+                .as_ref()
+                .is_some_and(|now| self.listing_changed(now));
+        if !changed {
+            self.checked = (Instant::now(), read.mtime);
+        } else if read.entries.is_some() {
+            self.apply(read);
         } else {
-            self.checked = (Instant::now(), mtime);
+            self.reload();
         }
         changed
     }
 
-    fn listing_changed(&self) -> bool {
-        let Ok(mut now) = self.read() else {
+    fn listing_changed(&self, now: &std::io::Result<Vec<Entry>>) -> bool {
+        let Ok(now) = now else {
             return self.error.is_none();
         };
+        let mut now: Vec<&Entry> = now
+            .iter()
+            .filter(|e| !(e.is_parent() && xdevcmd_core::policy::get().is_root(&self.cwd)))
+            .collect();
         if now.len() != self.all.len() {
             return true;
         }
-        let key = |e: &Entry| (e.path.clone(), e.size, e.modified, e.kind);
+        // A directory's size is not the listing's (it is worked out, or not): left out.
+        let key = |e: &Entry| {
+            let size = if e.is_dir() { 0 } else { e.size };
+            (e.path.clone(), size, e.modified, e.kind)
+        };
         now.sort_by(|a, b| a.path.cmp(&b.path));
         let mut was: Vec<_> = self.all.iter().map(key).collect();
         was.sort_by(|a, b| a.0.cmp(&b.0));
-        now.iter().map(key).ne(was)
+        now.iter().map(|e| key(e)).ne(was)
     }
 
     // ── directory sizes ────────────────────────────────────────────────────────────
@@ -659,12 +1024,7 @@ impl FilePane {
         if self.results.is_some() && !e.is_dir() {
             let file = e.path.clone();
             if let (Some(dir), Some(name)) = (file.parent(), file.file_name()) {
-                self.set_cwd(dir);
-                // By name in the directory as it now reads: set_cwd resolves links, so
-                // the path the search found (/var/… on macOS) may not be the path the
-                // listing has (/private/var/…).
-                let here = self.cwd.join(name);
-                self.select_path(&here);
+                self.go_to_file(dir, name);
             }
             return None;
         }
@@ -690,10 +1050,151 @@ impl FilePane {
         self.navigate(path, true);
     }
 
+    /// Go to `dir` with the cursor on the entry `name`: the one way to land on a file
+    /// (Enter on a search result, a typed path, a link's Go, both panes on one place).
+    /// The name is resolved against the listing that arrives, however late: before,
+    /// a slow directory was still the old one when the cursor was placed, and it landed
+    /// on `..`. A move that replaces this one, or Esc, drops the intent with it.
+    pub fn go_to_file(&mut self, dir: &Path, name: &std::ffi::OsStr) {
+        if !self.navigate(dir, true) {
+            return;
+        }
+        match self
+            .reading
+            .as_mut()
+            .filter(|r| matches!(r.why, ReadFor::Move { .. }))
+        {
+            Some(r) => r.select = Some(Select::Name(name.to_os_string())),
+            None => self.select_name(name),
+        }
+    }
+
+    /// The cursor on the entry `name` of the listing as it is; at the top, and said,
+    /// when it is not shown (hidden, filtered out, gone).
+    fn select_name(&mut self, name: &std::ffi::OsStr) {
+        match self
+            .entries
+            .iter()
+            .position(|e| e.path.file_name() == Some(name))
+        {
+            Some(i) => self.cursor = i,
+            None => {
+                self.cursor = 0;
+                self.notice = Some(format!(
+                    "{} is not shown here (hidden or filtered out?)",
+                    name.to_string_lossy()
+                ));
+            }
+        }
+    }
+
     /// Go to `path`. `record` puts the directory being left on the back list, which
     /// every move does except stepping through that list itself.
     fn navigate(&mut self, path: &Path, record: bool) -> bool {
-        let canonical = xdevcmd_core::paths::canonical(path).unwrap_or_else(|_| path.to_path_buf());
+        // A move replaces one still on its way.
+        self.reading = None;
+        match self.read_bounded(path, true, false, ReadFor::Move { record }) {
+            Some(read) => self.arrive(read, record),
+            // Slow: the old listing stays up, and the bar names where it is going.
+            None => true,
+        }
+    }
+
+    /// Read `path`, waiting up to [`SLOW`]. `None` when it is slower: the read goes on,
+    /// [`Self::poll_reading`] takes it in, and the bar shows meanwhile.
+    fn read_bounded(
+        &mut self,
+        path: &Path,
+        resolve: bool,
+        time_only: bool,
+        why: ReadFor,
+    ) -> Option<Read> {
+        let (rx, count) = read_on_thread(path, resolve, time_only, self.show_hidden);
+        match rx.recv_timeout(SLOW) {
+            Ok(read) => Some(read),
+            Err(_) => {
+                self.reading = Some(Reading {
+                    target: path.to_path_buf(),
+                    why,
+                    rx,
+                    started: Instant::now(),
+                    count,
+                    select: None,
+                });
+                None
+            }
+        }
+    }
+
+    /// A read that was slow has come, or not. True when the pane changed (or the bar
+    /// should move on).
+    pub fn poll_reading(&mut self) -> bool {
+        let Some(r) = &self.reading else { return false };
+        match r.rx.try_recv() {
+            Ok(read) => {
+                let Some(r) = self.reading.take() else {
+                    return false;
+                };
+                match r.why {
+                    ReadFor::Move { record } => {
+                        if self.arrive(read, record) {
+                            match r.select {
+                                Some(Select::Path(p)) => self.select_path(&p),
+                                Some(Select::Name(n)) => self.select_name(&n),
+                                None => {}
+                            }
+                        }
+                    }
+                    ReadFor::Reload if read.dir == self.cwd => self.apply(read),
+                    ReadFor::Check if read.dir == self.cwd => {
+                        self.compare(read);
+                    }
+                    _ => {}
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.reading = None;
+                true
+            }
+        }
+    }
+
+    /// Stop waiting for a slow read. The directory it was for, if there was one.
+    pub fn stop_reading(&mut self) -> Option<PathBuf> {
+        self.reading.take().map(|r| r.target)
+    }
+
+    /// A slow read the user is waiting for, for the bar: what it is ("opening" a
+    /// directory moved to, "reading" this one again), the directory, the entries read
+    /// so far, and how long it has taken. The periodic check is not one: on a slow
+    /// mount it would put the bar up every few seconds for nothing anyone asked.
+    pub fn reading(&self) -> Option<(&'static str, &Path, usize, Duration)> {
+        let r = self.reading.as_ref()?;
+        let what = match r.why {
+            ReadFor::Move { .. } => "opening",
+            ReadFor::Reload => "reading",
+            ReadFor::Check => return None,
+        };
+        Some((
+            what,
+            r.target.as_path(),
+            r.count.load(std::sync::atomic::Ordering::Relaxed),
+            r.started.elapsed(),
+        ))
+    }
+
+    /// The move to `read.dir`, now that it has been read: the policy, the back list,
+    /// the new listing. False if refused, or if a directory stepped back to is gone.
+    fn arrive(&mut self, read: Read, record: bool) -> bool {
+        let canonical = read.dir.clone();
+        // Back and Forward skip a directory that has gone since.
+        if !record
+            && matches!(&read.entries, Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        {
+            return false;
+        }
         let policy = xdevcmd_core::policy::get();
         if !policy.allows(&canonical) {
             if let Some(root) = &policy.root {
@@ -704,22 +1205,16 @@ impl FilePane {
             }
             return false;
         }
+        // Leaving a results tab for a directory, the search is over; its results, and
+        // a list, are kept for Back.
+        let left = self.place();
+        let was_list = self.results.is_some();
+        self.leave_results();
         self.archive = None;
         self.opening = None;
-        // Leaving a results tab for a directory, the search is over.
-        if let Some(mut r) = self.results.take() {
-            if let Some(s) = r.search.take() {
-                s.cancel();
-            }
-        }
         let old = std::mem::replace(&mut self.cwd, canonical);
-        if record && old != self.cwd {
-            self.back.retain(|p| *p != old);
-            self.back.push(old.clone());
-            if self.back.len() > HISTORY {
-                self.back.remove(0);
-            }
-            self.forward.clear();
+        if record && (was_list || old != self.cwd) {
+            self.remember(left);
         }
         self.cursor = 0;
         self.offset = 0;
@@ -728,7 +1223,7 @@ impl FilePane {
         self.sizer.cancel();
         self.sizing.clear();
         self.sizes.clear();
-        self.reload();
+        self.apply(read);
         // Coming up out of a directory lands on the directory you came from, however
         // you came up: `..`, Backspace, Back, or a bookmark.
         if old.parent() == Some(self.cwd.as_path()) {
@@ -740,8 +1235,8 @@ impl FilePane {
     /// Back to the directory before this one. False when there is none.
     pub fn go_back(&mut self) -> bool {
         while let Some(p) = self.back.pop() {
-            let here = self.cwd.clone();
-            if p.is_dir() && self.navigate(&p, false) {
+            let here = self.place();
+            if self.go(&p) {
                 self.forward.push(here);
                 return true;
             }
@@ -751,8 +1246,8 @@ impl FilePane {
 
     pub fn go_forward(&mut self) -> bool {
         while let Some(p) = self.forward.pop() {
-            let here = self.cwd.clone();
-            if p.is_dir() && self.navigate(&p, false) {
+            let here = self.place();
+            if self.go(&p) {
                 self.back.push(here);
                 return true;
             }
@@ -760,12 +1255,25 @@ impl FilePane {
         false
     }
 
+    /// Step to a place on the back or forward list, without recording it.
+    fn go(&mut self, p: &Place) -> bool {
+        match p {
+            // Not `is_dir()` first: that is a stat on this thread, and a dead mount
+            // answers it no sooner than the read. The read says if it has gone.
+            Place::Dir(d) => self.navigate(d, false),
+            Place::List(id) => crate::lists::get(*id).is_some() && self.open_list(*id, false),
+        }
+    }
+
     /// Directories visited, most recent first, without repeats or the current one.
     pub fn history(&self) -> Vec<PathBuf> {
+        let here = self.results.is_none().then_some(&self.cwd);
         let mut out: Vec<PathBuf> = Vec::new();
         for p in self.back.iter().rev().chain(self.forward.iter().rev()) {
-            if *p != self.cwd && !out.contains(p) {
-                out.push(p.clone());
+            if let Place::Dir(d) = p {
+                if Some(d) != here && !out.contains(d) {
+                    out.push(d.clone());
+                }
             }
         }
         out
@@ -828,6 +1336,15 @@ impl FilePane {
     /// just renamed is still the one under the cursor rather than whatever sorted into
     /// its old position.
     pub fn select_path(&mut self, path: &Path) {
+        // A move still on its way: the cursor goes there once it arrives.
+        if let Some(r) = self
+            .reading
+            .as_mut()
+            .filter(|r| matches!(r.why, ReadFor::Move { .. }))
+        {
+            r.select = Some(Select::Path(path.to_path_buf()));
+            return;
+        }
         if let Some(i) = self.entries.iter().position(|e| e.path == path) {
             self.cursor = i;
         }
@@ -960,6 +1477,84 @@ impl FilePane {
             .find_map(|(k, r)| (x >= r.x && x < r.x + r.width && y == r.y).then_some(*k))
     }
 
+    /// What this tab is waiting for, for the bar under it: a label, and how far along
+    /// it is when the total is known. `None` when it waits for nothing.
+    pub fn progress(&self) -> Option<(String, Option<f64>)> {
+        if let Some((what, dir, n, took)) = self.reading() {
+            let name = dir.file_name().map_or_else(
+                || dir.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let mut label = format!("{what} {name}\u{2026}");
+            if n > 0 {
+                label.push_str(&format!(" {}", digits(n as u64)));
+            }
+            if took.as_secs() > 0 {
+                label.push_str(&format!(" \u{b7} {} s", took.as_secs()));
+            }
+            label.push_str(" \u{b7} Esc stops");
+            return Some((label, None));
+        }
+        let r = self.results.as_ref().filter(|r| r.running())?;
+        if r.find {
+            Some((
+                format!(
+                    "searching\u{2026} {} looked at \u{b7} Esc stops",
+                    digits(r.scanned)
+                ),
+                None,
+            ))
+        } else {
+            let done = r.scanned.min(r.total as u64);
+            Some((
+                format!("checking {} of {}", digits(done), digits(r.total as u64)),
+                Some(done as f64 / r.total.max(1) as f64),
+            ))
+        }
+    }
+
+    /// The bar on the pane's bottom edge: a block that runs back and forth while the
+    /// total is not known, one that fills when it is, and what it is waiting for.
+    fn draw_progress(&self, frame: &mut Frame, area: Rect) {
+        let Some((label, done)) = self.progress() else {
+            return;
+        };
+        if area.width < 12 || area.height < 3 {
+            return;
+        }
+        const BAR: usize = 10;
+        let cells: String = match done {
+            Some(f) => {
+                let full = ((f.clamp(0.0, 1.0) * BAR as f64).round() as usize).min(BAR);
+                "\u{25b0}".repeat(full) + &"\u{25b1}".repeat(BAR - full)
+            }
+            None => {
+                // Three lit cells that run to the end and back.
+                let t = (crate::pane::files::ticks() / 90) as usize % (2 * (BAR - 3));
+                let at = if t < BAR - 3 { t } else { 2 * (BAR - 3) - t };
+                (0..BAR)
+                    .map(|i| {
+                        if (at..at + 3).contains(&i) {
+                            '\u{25b0}'
+                        } else {
+                            '\u{25b1}'
+                        }
+                    })
+                    .collect()
+            }
+        };
+        let th = theme::t();
+        let line = Line::from(vec![
+            Span::styled(" ", Style::new().fg(th.fg_dim)),
+            Span::styled(cells, Style::new().fg(th.accent)),
+            Span::styled(format!(" {label} "), Style::new().fg(th.fg_dim)),
+        ]);
+        let y = area.y + area.height - 1;
+        frame
+            .buffer_mut()
+            .set_line(area.x + 1, y, &line, area.width.saturating_sub(2));
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, active: bool, drop_target: bool) {
         // While files are dragged over this pane it changes colour, so a release is
         // never a guess about where they will land.
@@ -982,12 +1577,34 @@ impl FilePane {
         }
         if let Some(r) = &self.results {
             let n = self.all.iter().filter(|e| !e.is_parent()).count();
-            let state = if r.running() {
-                format!("searching\u{2026} {} looked at", r.scanned)
+            if r.find {
+                let state = if r.running() {
+                    format!("searching\u{2026} {} looked at", r.scanned)
+                } else {
+                    format!("{n} found")
+                };
+                filter = format!(" find {} \u{b7} {state} {filter}", r.what);
             } else {
-                format!("{n} found")
-            };
-            filter = format!(" find {} \u{b7} {state} {filter}", r.what);
+                let state = if r.running() {
+                    format!(
+                        "checking\u{2026} {} of {}",
+                        r.scanned.max(n as u64),
+                        r.total
+                    )
+                } else {
+                    n.to_string()
+                };
+                // What was left out goes last: a narrow pane cuts the middle of a title,
+                // so the count (first) and this (last) are what stay.
+                let mut left_out = String::new();
+                if r.capped {
+                    left_out.push_str(&format!(" \u{b7} capped at {}", crate::lists::ROWS));
+                }
+                if r.outside > 0 {
+                    left_out.push_str(&format!(" \u{b7} {} outside the root", r.outside));
+                }
+                filter = format!(" list {state} \u{b7} {}{left_out} {filter}", r.what);
+            }
         }
         let fw = filter
             .chars()
@@ -1012,12 +1629,14 @@ impl FilePane {
             ));
         }
         let title = Line::from(title);
-        let block = Block::bordered()
+        let block = crate::decor::bordered()
             .border_style(border)
             .style(Style::new().bg(theme::t().bg_panel))
             .title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        self.draw_progress(frame, area);
+        crate::decor::notch(frame.buffer_mut(), area);
 
         if inner.width < 8 || inner.height < 2 {
             return;
@@ -1214,33 +1833,16 @@ impl FilePane {
                 ),
                 (false, None) => Span::raw(" "),
             }];
-            spans.push(Span::styled(
-                format!(
-                    "{:<w$}",
-                    elide_middle(&name_text, w_name as usize),
-                    w = w_name as usize
-                ),
-                base,
-            ));
+            // Fitted in columns, not characters: a CJK name is wider than it is long.
+            spans.push(Span::styled(fit_start(&name_text, w_name as usize), base));
             if w_ext > 0 {
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(
-                    format!(
-                        "{:<w$}",
-                        elide_middle(&ext_text, w_ext as usize),
-                        w = w_ext as usize
-                    ),
-                    base,
-                ));
+                spans.push(Span::styled(fit_start(&ext_text, w_ext as usize), base));
             }
             if w_size > 0 {
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(
-                    format!(
-                        "{:>w$}",
-                        elide_middle(&size_text, w_size as usize),
-                        w = w_size as usize
-                    ),
+                    fit_end(&size_text, w_size as usize),
                     if e.is_dir() {
                         Style::new().fg(theme::t().fg_dim)
                     } else {
@@ -1256,6 +1858,22 @@ impl FilePane {
                 ));
             }
 
+            // The cursor's row shows its whole name when the column cuts it: the name
+            // takes the row, over Ext, Size and Modified, which the status line still
+            // gives for that file. Every other row keeps the columns.
+            if is_cursor && text_cells(&name_text) > w_name as usize {
+                let whole = if look.icons {
+                    format!("{} {}", crate::look::icon(e), e.name)
+                } else {
+                    e.name.clone()
+                };
+                spans.truncate(1);
+                spans.push(Span::styled(
+                    fit_start(&whole, rows.width.saturating_sub(gutter) as usize),
+                    base,
+                ));
+            }
+
             let buf = frame.buffer_mut();
             if is_cursor {
                 let bg = if active {
@@ -1266,6 +1884,18 @@ impl FilePane {
                 buf.set_style(Rect::new(rows.x, y, rows.width, 1), Style::new().bg(bg));
             }
             buf.set_line(rows.x, y, &Line::from(spans), rows.width);
+        }
+        // The rows below the last entry, for a theme with stars.
+        let listed = self
+            .entries
+            .len()
+            .saturating_sub(self.offset)
+            .min(usize::from(rows.height)) as u16;
+        if listed < rows.height {
+            crate::decor::stars(
+                frame.buffer_mut(),
+                Rect::new(rows.x, rows.y + listed, rows.width, rows.height - listed),
+            );
         }
         // Over the right border, beside the rows: how long the list is, and where.
         self.bar = crate::scrollbar::draw(
@@ -1288,13 +1918,11 @@ fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, Pa
     let n = full.chars().count();
     // Which character of the drawn text character `i` of `full` became, as
     // elide_middle lays it out.
+    let cut = elided(full, room);
     let at = |i: usize| -> Option<usize> {
-        if n <= room {
+        let Some((head, tail)) = cut else {
             return Some(i);
-        }
-        let keep = room.saturating_sub(1);
-        let head = keep.div_ceil(2);
-        let tail = keep - head;
+        };
         if i < head {
             Some(i)
         } else if i >= n - tail {
@@ -1347,6 +1975,44 @@ fn crumbs(cwd: &Path, full: &str, room: usize, x0: u16, y: u16) -> Vec<(Rect, Pa
     }
     out
 }
+
+/// The `..` row a results tab starts with: up to its root.
+fn parent_entry(dir: &Path) -> Entry {
+    Entry {
+        name: "..".into(),
+        path: dir.to_path_buf(),
+        kind: Kind::Parent,
+        size: 0,
+        modified: None,
+        hidden: false,
+        symlink: false,
+        error: None,
+    }
+}
+
+fn found_has(all: &[Entry], p: &Path) -> bool {
+    all.iter().any(|e| e.path == p)
+}
+
+/// Milliseconds since the program started, for things that move.
+pub fn ticks() -> u128 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis()
+}
+
+/// `12400` as `12,400`.
+fn digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1376,6 +2042,83 @@ mod tests {
         let got: Vec<(u16, u16)> = c.iter().map(|(r, _)| (r.x, r.width)).collect();
         assert_eq!(got, [(0, 1), (1, 4), (6, 3)]);
     }
+    /// A move whose read is slow, as `navigate` leaves it: the read is sent by the test.
+    fn slow_move(f: &mut FilePane, to: &Path, select: Select) -> std::sync::mpsc::Sender<Read> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        f.reading = Some(Reading {
+            target: to.to_path_buf(),
+            why: ReadFor::Move { record: true },
+            rx,
+            started: Instant::now(),
+            count: Default::default(),
+            select: Some(select),
+        });
+        tx
+    }
+
+    fn read_of(dir: &Path) -> Read {
+        Read {
+            dir: dir.to_path_buf(),
+            mtime: dir_mtime(dir),
+            entries: Some(xdevcmd_core::read_dir_counted(
+                dir,
+                false,
+                &Default::default(),
+            )),
+        }
+    }
+
+    /// B02: the name is found in the listing that arrives, whatever its path; a move
+    /// made meanwhile drops the intent with the read; so does Esc; a name that is not
+    /// listed leaves the cursor at the top and says so.
+    #[test]
+    fn a_file_to_land_on_is_found_in_the_listing_that_arrives() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-land-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for (dir, names) in [
+            ("a", &["x"][..]),
+            ("b", &["aa", "target"]),
+            ("c", &["target", "zz"]),
+        ] {
+            std::fs::create_dir_all(d.join(dir)).unwrap();
+            for n in names {
+                std::fs::write(d.join(dir).join(n), "").unwrap();
+            }
+        }
+        let mut f = FilePane::new(&d.join("a"), Sort::default(), false);
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name("target".into()));
+        tx.send(read_of(&d.join("b"))).unwrap();
+        assert!(f.poll_reading());
+        assert_eq!(f.current().map(|e| e.name.as_str()), Some("target"));
+
+        // A second move before the first arrives: its intent goes with it.
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name("aa".into()));
+        f.set_cwd(&d.join("c"));
+        let _ = tx.send(read_of(&d.join("b")));
+        f.poll_reading();
+        assert_eq!(f.cwd, xdevcmd_core::paths::canonical(d.join("c")).unwrap());
+        assert_eq!(f.cursor, 0, "not on c's own `target`: nobody chose it");
+
+        // Esc: the same.
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name("aa".into()));
+        assert!(f.stop_reading().is_some());
+        let _ = tx.send(read_of(&d.join("b")));
+        assert!(!f.poll_reading());
+        assert_eq!(f.cwd, xdevcmd_core::paths::canonical(d.join("c")).unwrap());
+
+        // Not listed (hidden): the top, and a word why.
+        let tx = slow_move(&mut f, &d.join("b"), Select::Name(".hidden".into()));
+        tx.send(read_of(&d.join("b"))).unwrap();
+        f.poll_reading();
+        assert_eq!(f.cursor, 0);
+        assert!(
+            f.notice.as_deref().is_some_and(|n| n.contains(".hidden")),
+            "{:?}",
+            f.notice
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     use std::io::Read as _;
 
     fn big_tar(dir: &Path) -> PathBuf {

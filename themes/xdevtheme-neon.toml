@@ -1,0 +1,31 @@
+# xdevtheme-neon: xdevtheme lit like neon on glass. The light runs teal, violet, pink;
+# the focused frame glows into the cells around it, and dialogs cast a faint light.
+# Pick "xdevtheme-neon" in View > Theme... or with [theme] name = "xdevtheme-neon".
+# On a 16-colour terminal the [style] part is left off.
+base = "dark"
+background = "#04050b"
+panel = "#070912"
+bar = "#0b0e1c"
+border = "#1c2240"
+border_active = "#2ee6d0"
+accent = "#2ee6d0"
+text = "#dde3f5"
+text_dim = "#646f94"
+directory = "#7da2ff"
+executable = "#5ef0a0"
+symlink = "#d08bff"
+archive = "#ffb35c"
+error = "#ff5f87"
+marked = "#ffe066"
+cursor = "#11152a"
+cursor_active = "#1a2246"
+
+[style]
+borders = "rounded"
+titles = "notch"
+gradient = ["#a46bff", "#ff5fb0"]   # teal (the accent), then violet, then pink
+cursor = "glow"
+marker = true
+keys = "slant"
+shadow = "glow"
+glow = true                         # the focused frame lights the cells around it

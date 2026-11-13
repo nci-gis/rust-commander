@@ -19,6 +19,11 @@ pub const OPTIONS: &[(&str, Arg, &str)] = &[
         "start fresh instead of reopening the last session",
     ),
     (
+        "--timings",
+        Arg::None,
+        "say how long start-up took (status line, and stderr at the end)",
+    ),
+    (
         "--read-only",
         Arg::None,
         "write nothing: no copy, move, delete, rename, edit",
@@ -47,7 +52,7 @@ pub const OPTIONS: &[(&str, Arg, &str)] = &[
     (
         "--print-theme",
         Arg::Theme,
-        "print a built-in theme as a file, to start your own",
+        "print a theme (built in, or a file in themes/) as a file",
     ),
     ("--print-keys", Arg::None, "print every key as Markdown"),
     (
@@ -70,7 +75,7 @@ pub const OPTIONS: &[(&str, Arg, &str)] = &[
     ("--help", Arg::None, "print the help and exit"),
 ];
 
-const THEMES: &str = "dark light ansi blue high-contrast";
+const THEMES: &str = "xdevtheme dark light ansi blue high-contrast";
 const SHELLS: &str = "bash zsh fish powershell";
 
 /// Completions for `shell`, or why not.
@@ -179,7 +184,8 @@ pub fn man() -> String {
     s.push_str(".SH SYNOPSIS\n.B xdevcmd\n[\\fIOPTIONS\\fR] [\\fILEFT\\fR] [\\fIRIGHT\\fR]\n");
     s.push_str(".SH DESCRIPTION\nA two-pane file manager for the terminal, in the tradition of Total Commander: \
 copy, move, rename and compare between two panes, with archives, a terminal panel and \
-undo. Press F1 inside it for every key and setting as configured.\n");
+undo. Press F1 inside it for every command and its key, as configured; Help, Config \
+in use shows the settings in effect.\n");
     s.push_str(".SH OPTIONS\n");
     for (o, a, help) in OPTIONS {
         let arg = match a {

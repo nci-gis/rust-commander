@@ -70,6 +70,7 @@ pub enum Action {
     Back,
     Forward,
     History,
+    ShowList,
     Hotlist,
     OpenWith,
     OpenWithMenu,
@@ -104,6 +105,9 @@ pub enum Action {
 pub struct Binding {
     pub action: Action,
     pub name: &'static str,
+    /// What F1 calls it ("Copy as…"). Free to change: the compatibility promise is
+    /// `name`, which `[keys]` uses; this is only for people to read.
+    pub title: &'static str,
     pub group: &'static str,
     pub about: &'static str,
     pub keys: &'static [&'static str],
@@ -123,6 +127,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Quit,
         name: "quit",
+        title: "Quit",
         group: "General",
         about: "Quit xdevcmd",
         keys: &["F10", "q", "Ctrl+q"],
@@ -130,13 +135,17 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Help,
         name: "help",
+        title: "Commands",
         group: "General",
-        about: "This screen: every key and setting",
-        keys: &["F1"],
+        about: "Every command, found by typing, with its key; Enter runs it",
+        // F1 is always kept (`apply` refuses a [keys] help without it). Alt+X F1 opens it
+        // from the shell, where F1 alone is the program's (owner, decision 1).
+        keys: &["F1", "Alt+x F1"],
     },
     Binding {
         action: Action::Refresh,
         name: "refresh",
+        title: "Refresh",
         group: "General",
         about: "Re-read the active pane",
         keys: &["Ctrl+r"],
@@ -144,6 +153,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ToggleHidden,
         name: "toggle_hidden",
+        title: "Show or hide hidden files",
         group: "General",
         about: "Show or hide hidden files",
         keys: &["Ctrl+h"],
@@ -151,6 +161,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CursorUp,
         name: "cursor_up",
+        title: "Move up",
         group: "Navigate",
         about: "Move up",
         keys: &["Up"],
@@ -158,6 +169,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CursorDown,
         name: "cursor_down",
+        title: "Move down",
         group: "Navigate",
         about: "Move down",
         keys: &["Down"],
@@ -165,6 +177,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::PageUp,
         name: "page_up",
+        title: "Page up",
         group: "Navigate",
         about: "Page up",
         keys: &["PageUp"],
@@ -172,6 +185,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::PageDown,
         name: "page_down",
+        title: "Page down",
         group: "Navigate",
         about: "Page down",
         keys: &["PageDown"],
@@ -179,6 +193,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Top,
         name: "top",
+        title: "First entry",
         group: "Navigate",
         about: "First entry",
         keys: &["Home"],
@@ -186,6 +201,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Bottom,
         name: "bottom",
+        title: "Last entry",
         group: "Navigate",
         about: "Last entry",
         keys: &["End"],
@@ -193,6 +209,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Open,
         name: "open",
+        title: "Open",
         group: "Navigate",
         about: "Enter a directory, or open a file with its program",
         keys: &["Enter"],
@@ -200,6 +217,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::EnterDir,
         name: "enter_dir",
+        title: "Enter directory",
         group: "Navigate",
         about: "Enter the directory under the cursor",
         // Alt+F too: macOS Terminal.app sends Option+Right as ESC f (word right),
@@ -209,6 +227,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Parent,
         name: "parent",
+        title: "Parent directory",
         group: "Navigate",
         about: "Go up one directory",
         // Alt+B: Terminal.app's Option+Left, as Alt+F above.
@@ -217,6 +236,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::GoHome,
         name: "go_home",
+        title: "Home directory",
         group: "Navigate",
         about: "Go to your home directory",
         keys: &["~"],
@@ -224,6 +244,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::GoRoot,
         name: "go_root",
+        title: "Root directory",
         group: "Navigate",
         about: "Go to the root of this drive or filesystem",
         keys: &["Ctrl+\\"],
@@ -231,6 +252,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Mark,
         name: "mark",
+        title: "Mark",
         group: "Select",
         about: "Mark or unmark the entry",
         keys: &["Space"],
@@ -238,6 +260,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MarkAndNext,
         name: "mark_and_next",
+        title: "Mark and move down",
         group: "Select",
         about: "Mark, then move down",
         keys: &["Insert"],
@@ -245,6 +268,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::InvertMarks,
         name: "invert_marks",
+        title: "Invert marks",
         group: "Select",
         about: "Invert all marks",
         keys: &["*"],
@@ -252,6 +276,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MarkAll,
         name: "mark_all",
+        title: "Mark all",
         group: "Select",
         about: "Mark everything",
         keys: &["Ctrl+a"],
@@ -259,6 +284,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::UnmarkAll,
         name: "unmark_all",
+        title: "Clear marks",
         group: "Select",
         about: "Clear all marks",
         keys: &["Alt+u"],
@@ -266,6 +292,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::View,
         name: "view",
+        title: "View",
         group: "Files",
         about: "View the file",
         keys: &["F3"],
@@ -273,6 +300,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Edit,
         name: "edit",
+        title: "Edit",
         group: "Files",
         about: "Edit the file in your editor",
         keys: &["F4"],
@@ -280,6 +308,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Copy,
         name: "copy",
+        title: "Copy",
         group: "Files",
         about: "Copy to the other pane",
         keys: &["F5"],
@@ -287,6 +316,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Move,
         name: "move",
+        title: "Move",
         group: "Files",
         about: "Move to the other pane",
         keys: &["F6"],
@@ -294,6 +324,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Rename,
         name: "rename",
+        title: "Rename",
         group: "Files",
         about: "Rename the entry under the cursor",
         keys: &["Shift+F6", "F2", "Alt+x F6"],
@@ -301,6 +332,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MkDir,
         name: "mkdir",
+        title: "New directory\u{2026}",
         group: "Files",
         about: "Create a directory",
         keys: &["F7"],
@@ -308,6 +340,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Delete,
         name: "delete",
+        title: "Delete",
         group: "Files",
         about: "Delete (to the trash, by default)",
         keys: &["F8"],
@@ -315,6 +348,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::DeletePermanent,
         name: "delete_permanent",
+        title: "Delete permanently",
         group: "Files",
         about: "Delete permanently",
         keys: &["Shift+F8", "Alt+x F8"],
@@ -322,6 +356,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SortName,
         name: "sort_name",
+        title: "Sort by name",
         group: "Sort",
         about: "Sort by name (again to reverse)",
         keys: &["Ctrl+F3"],
@@ -329,6 +364,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SortExt,
         name: "sort_ext",
+        title: "Sort by extension",
         group: "Sort",
         about: "Sort by extension",
         keys: &["Ctrl+F4"],
@@ -336,6 +372,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SortSize,
         name: "sort_size",
+        title: "Sort by size",
         group: "Sort",
         about: "Sort by size",
         keys: &["Ctrl+F5"],
@@ -343,6 +380,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SortModified,
         name: "sort_modified",
+        title: "Sort by date",
         group: "Sort",
         about: "Sort by date",
         keys: &["Ctrl+F6"],
@@ -350,6 +388,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::FocusNextPane,
         name: "focus_next_pane",
+        title: "Next file pane",
         group: "Panes",
         about: "Next file pane",
         keys: &["Tab"],
@@ -357,6 +396,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SplitRight,
         name: "split_right",
+        title: "Split right",
         group: "Panes",
         about: "Split the pane, or the shell, side by side",
         keys: &["Alt+s"],
@@ -364,6 +404,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SplitDown,
         name: "split_down",
+        title: "Split down",
         group: "Panes",
         about: "Split the pane, or the shell, top and bottom",
         keys: &["Alt+d"],
@@ -371,6 +412,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ClosePane,
         name: "close_pane",
+        title: "Close pane",
         group: "Panes",
         about: "Close the pane, or the focused shell",
         keys: &["Alt+w"],
@@ -378,6 +420,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ResizeLeft,
         name: "resize_left",
+        title: "Move border left",
         group: "Panes",
         about: "Move the pane's border left",
         keys: &["Alt+Shift+Left", "Alt+r Left"],
@@ -385,6 +428,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ResizeRight,
         name: "resize_right",
+        title: "Move border right",
         group: "Panes",
         about: "Move the pane's border right",
         keys: &["Alt+Shift+Right", "Alt+r Right"],
@@ -392,6 +436,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ResizeUp,
         name: "resize_up",
+        title: "Move border up",
         group: "Panes",
         about: "Move the pane's border up",
         keys: &["Alt+Shift+Up", "Alt+r Up"],
@@ -399,6 +444,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ResizeDown,
         name: "resize_down",
+        title: "Move border down",
         group: "Panes",
         about: "Move the pane's border down",
         keys: &["Alt+Shift+Down", "Alt+r Down"],
@@ -406,6 +452,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Zoom,
         name: "zoom",
+        title: "Zoom",
         group: "Panes",
         about: "Fill the screen with this pane, or put it back",
         keys: &["Alt+z"],
@@ -413,6 +460,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::FocusTerminal,
         name: "focus_terminal",
+        title: "Terminal",
         group: "Terminal",
         about: "Jump into or out of the shell",
         keys: &["F12"],
@@ -420,6 +468,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::TerminalHistory,
         name: "terminal_history",
+        title: "Terminal history",
         group: "Terminal",
         about: "The shell's history in the viewer: read, search, copy, save",
         // F12's family, the only keys xdevcmd takes inside the shell. Alt+X F12 for
@@ -429,6 +478,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ToggleTerminal,
         name: "toggle_terminal",
+        title: "Show or hide terminal",
         group: "Terminal",
         about: "Show or hide the shell",
         keys: &["Alt+t"],
@@ -436,6 +486,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CdTerminalHere,
         name: "cd_terminal_here",
+        title: "cd the shell here",
         group: "Terminal",
         about: "cd the shell to this pane's directory",
         keys: &["Alt+c"],
@@ -443,6 +494,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::GoShellDir,
         name: "go_shell_dir",
+        title: "Go to the shell's directory",
         group: "Terminal",
         about: "Go to the shell's directory (the reverse of cd here)",
         // A pane key, like Alt+C: inside the shell Alt+G is the program's.
@@ -451,6 +503,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::TypeNames,
         name: "type_names",
+        title: "Type names into the shell",
         group: "Terminal",
         about: "Type the marked names into the shell's command line, without Enter",
         // Midnight Commander's and Total Commander's keys. A legacy terminal sends
@@ -460,6 +513,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::NewTerminal,
         name: "new_terminal",
+        title: "New terminal",
         group: "Terminal",
         about: "Open a new terminal tab",
         keys: &["Alt+n"],
@@ -467,6 +521,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::NewTab,
         name: "new_tab",
+        title: "New tab",
         group: "Tabs",
         about: "New tab on the same directory",
         keys: &["Ctrl+t"],
@@ -474,6 +529,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CloseTab,
         name: "close_tab",
+        title: "Close tab",
         group: "Tabs",
         about: "Close the tab",
         keys: &["Ctrl+w"],
@@ -481,6 +537,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::NextTab,
         name: "next_tab",
+        title: "Next tab",
         group: "Tabs",
         about: "Next tab, of the file pane or the terminal",
         keys: &["Ctrl+PageDown"],
@@ -488,6 +545,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::PrevTab,
         name: "prev_tab",
+        title: "Previous tab",
         group: "Tabs",
         about: "Previous tab, of the file pane or the terminal",
         keys: &["Ctrl+PageUp"],
@@ -495,6 +553,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::GoTab,
         name: "go_tab",
+        title: "Go to tab N",
         group: "Tabs",
         about: "Go to tab N, the digit in the key",
         // Ctrl+PageUp / PageDown cannot be typed on a laptop, where PageUp is Fn+Up and
@@ -507,6 +566,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::NextSplit,
         name: "next_split",
+        title: "Next split",
         group: "Panes",
         about: "Next split, of the file panes or the terminal",
         keys: &["Alt+o"],
@@ -514,6 +574,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::QuitNoCd,
         name: "quit_no_cd",
+        title: "Quit without cd",
         group: "General",
         about: "Quit, leaving the shell where it was (with --cwd-file)",
         keys: &["Q"],
@@ -521,6 +582,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::QuickSearch,
         name: "quick_search",
+        title: "Quick search",
         group: "Navigate",
         about: "Jump to a name as you type it; Up/Down for the next match",
         keys: &["/", "Ctrl+s"],
@@ -528,6 +590,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Filter,
         name: "filter",
+        title: "Filter\u{2026}",
         group: "Navigate",
         about: "Show only names matching what you type (*.rs works too)",
         keys: &["Ctrl+f"],
@@ -535,6 +598,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::GoToPath,
         name: "go_to_path",
+        title: "Go to path\u{2026}",
         group: "Navigate",
         about: "Type a path to go to",
         keys: &["Ctrl+l", "Ctrl+g"],
@@ -542,6 +606,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Back,
         name: "back",
+        title: "Back",
         group: "Navigate",
         about: "Back to the previous directory",
         keys: &["Alt+,"],
@@ -549,6 +614,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Forward,
         name: "forward",
+        title: "Forward",
         group: "Navigate",
         about: "Forward again",
         keys: &["Alt+."],
@@ -556,14 +622,24 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::History,
         name: "history",
+        title: "History and lists\u{2026}",
         group: "Navigate",
-        about: "Directories visited in this tab",
+        about: "Directories visited in this tab, and the lists kept",
         // Alt+J too: macOS Terminal.app sends Option+Down as three separate keys.
         keys: &["Alt+Down", "Alt+j"],
     },
     Binding {
+        action: Action::ShowList,
+        name: "show_list",
+        title: "Last list",
+        group: "Navigate",
+        about: "The list used last (Alt+F7's results, paths from a shell's output), here",
+        keys: &["Alt+l"],
+    },
+    Binding {
         action: Action::Hotlist,
         name: "hotlist",
+        title: "Hotlist",
         group: "Navigate",
         about: "Bookmarks: go to one, or bookmark this directory",
         keys: &["Ctrl+d"],
@@ -571,6 +647,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::OpenWith,
         name: "open_with",
+        title: "Open with system app",
         group: "Files",
         about: "Open with the system's default application",
         keys: &["o"],
@@ -578,6 +655,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::OpenWithMenu,
         name: "open_with_menu",
+        title: "Open with\u{2026}",
         group: "Files",
         about: "Open with…: your [[open]] rules, the system's program, view, edit",
         keys: &["O"],
@@ -585,6 +663,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Undo,
         name: "undo",
+        title: "Undo",
         group: "Files",
         about: "Undo the last rename, move, new directory or new file (asks first)",
         keys: &["Ctrl+z"],
@@ -592,6 +671,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CalcSizes,
         name: "calc_sizes",
+        title: "Directory sizes",
         group: "Files",
         about: "Work out the size of every directory shown",
         keys: &["Ctrl+Space"],
@@ -599,6 +679,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MarkPattern,
         name: "mark_pattern",
+        title: "Mark by pattern\u{2026}",
         group: "Select",
         about: "Mark by pattern, e.g. *.jpg *.png",
         keys: &["+"],
@@ -606,6 +687,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::UnmarkPattern,
         name: "unmark_pattern",
+        title: "Unmark by pattern\u{2026}",
         group: "Select",
         about: "Unmark by pattern",
         keys: &["-"],
@@ -613,6 +695,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SwapPanes,
         name: "swap_panes",
+        title: "Swap panes",
         group: "Panes",
         about: "Swap this pane with the other one",
         keys: &["Ctrl+u"],
@@ -620,6 +703,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MirrorPane,
         name: "mirror_pane",
+        title: "Same directory there",
         group: "Panes",
         about: "Show this directory in the other pane too",
         keys: &["Alt+="],
@@ -627,6 +711,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::FindFiles,
         name: "find_files",
+        title: "Find files\u{2026}",
         group: "Files",
         about: "Find files by name and content; results open in a new tab",
         keys: &["Alt+F7"],
@@ -634,6 +719,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::BulkRename,
         name: "bulk_rename",
+        title: "Rename many\u{2026}",
         group: "Files",
         about: "Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR",
         keys: &["Shift+F2", "Alt+x F2"],
@@ -641,6 +727,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::QuickView,
         name: "quick_view",
+        title: "Quick view",
         group: "Panes",
         about: "The other pane previews the file under the cursor",
         keys: &["Alt+q"],
@@ -648,6 +735,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::NewFile,
         name: "new_file",
+        title: "New file\u{2026}",
         group: "Files",
         about: "Create a file and open it in the editor",
         keys: &["Shift+F4", "Alt+x F4"],
@@ -655,6 +743,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CopyAs,
         name: "copy_as",
+        title: "Copy as\u{2026}",
         group: "Files",
         about: "Copy beside itself under another name",
         keys: &["Shift+F5", "Alt+x F5"],
@@ -662,6 +751,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Symlink,
         name: "symlink",
+        title: "Link in other pane",
         group: "Files",
         about: "Link to this in the other pane's directory",
         keys: &["Ctrl+Shift+F5"],
@@ -669,6 +759,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Permissions,
         name: "permissions",
+        title: "Permissions\u{2026}",
         group: "Files",
         about: "Permissions: an octal mode, or read-only on Windows",
         keys: &["Alt+p"],
@@ -676,6 +767,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Checksum,
         name: "checksum",
+        title: "Checksum",
         group: "Files",
         about: "SHA-256 of the file, checked against a .sha256 beside it",
         keys: &["Alt+h"],
@@ -683,6 +775,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::UserMenu,
         name: "user_menu",
+        title: "Your commands\u{2026}",
         group: "General",
         about: "Your commands from [[menu]], run in the terminal",
         keys: &["Shift+F9", "Alt+x F9"],
@@ -690,6 +783,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Pack,
         name: "pack",
+        title: "Pack\u{2026}",
         group: "Files",
         about: "Pack the selection into a .zip, .tar or .tar.gz",
         keys: &["Alt+F5"],
@@ -697,6 +791,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Unpack,
         name: "unpack",
+        title: "Unpack",
         group: "Files",
         about: "Unpack the archive under the cursor into the other pane",
         keys: &["Alt+F9"],
@@ -704,6 +799,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::CompareDirs,
         name: "compare_dirs",
+        title: "Compare with other pane",
         group: "Panes",
         about: "Compare with the other pane: mark what is newer or missing there",
         keys: &["Alt+k"],
@@ -711,6 +807,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::SyncDirs,
         name: "sync_dirs",
+        title: "Synchronise\u{2026}",
         group: "Panes",
         about: "Synchronise both panes' trees: newer wins, shown before it runs",
         keys: &["Alt+y"],
@@ -718,6 +815,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MenuBar,
         name: "menu_bar",
+        title: "Menu bar",
         group: "General",
         about: "The menu bar: File, View, Help",
         keys: &["F9"],
@@ -725,6 +823,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::ContextMenu,
         name: "context_menu",
+        title: "Context menu",
         group: "General",
         about: "The right-click menu, for the row under the cursor",
         keys: &["Shift+F10", "Menu", "Alt+x F10"],
@@ -732,9 +831,12 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Usage,
         name: "usage",
+        title: "Usage",
         group: "General",
         about: "What xdevcmd is using: memory and its trend, CPU, threads, draw time",
-        keys: &["Shift+F1", "Alt+x F1"],
+        // Alt+X F1 was Usage's, for terminals with no Shift+F1; it opens F1 now (owner,
+        // 2026-11-12), and Usage is a row in F1 and in the Help menu.
+        keys: &["Shift+F1"],
     },
 ];
 
@@ -783,6 +885,16 @@ pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
         out.push(format!(
             "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p}, Enter too, goes to the program with it; Esc cancels."
         ));
+        // F1 from the shell, where F1 alone is the program's.
+        let f1 = keymap
+            .keys_for(Action::Help)
+            .into_iter()
+            .find(|k| k.starts_with(&format!("{p} ")));
+        if let Some(k) = f1 {
+            out.push(format!(
+                "{k} opens Commands (F1) from the shell, where F1 is the program's."
+            ));
+        }
     }
     out
 }
@@ -853,7 +965,123 @@ impl Action {
                 | Action::ResizeUp
                 | Action::ResizeDown
                 | Action::Zoom
+                | Action::ShowList
         )
+    }
+}
+
+/// Where a command does its work, for F1's "commands for where you are" (Round 024).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Place {
+    /// A file pane: a directory, a list or results tab, an archive.
+    Files,
+    /// The terminal panel.
+    Terminal,
+    /// The viewer: its own keys, which only it reads.
+    Viewer,
+    /// Wherever focus is: quitting, menus, panes and shells alike.
+    Everywhere,
+}
+
+impl Action {
+    /// Where this action acts. An exhaustive match, so a new action has to say.
+    pub fn place(self) -> Place {
+        use Action as A;
+        match self {
+            A::Quit
+            | A::QuitNoCd
+            | A::Help
+            | A::MenuBar
+            | A::Usage
+            | A::UserMenu
+            | A::SplitRight
+            | A::SplitDown
+            | A::ClosePane
+            | A::ResizeLeft
+            | A::ResizeRight
+            | A::ResizeUp
+            | A::ResizeDown
+            | A::Zoom
+            | A::NextSplit
+            | A::NextTab
+            | A::PrevTab
+            | A::GoTab => Place::Everywhere,
+            A::FocusTerminal | A::TerminalHistory | A::ToggleTerminal | A::NewTerminal => {
+                Place::Terminal
+            }
+            A::Refresh
+            | A::ToggleHidden
+            | A::FocusNextPane
+            | A::CdTerminalHere
+            | A::GoShellDir
+            | A::TypeNames
+            | A::NewTab
+            | A::CloseTab
+            | A::CursorUp
+            | A::CursorDown
+            | A::PageUp
+            | A::PageDown
+            | A::Top
+            | A::Bottom
+            | A::Open
+            | A::EnterDir
+            | A::Parent
+            | A::GoHome
+            | A::GoRoot
+            | A::Mark
+            | A::MarkAndNext
+            | A::InvertMarks
+            | A::MarkAll
+            | A::UnmarkAll
+            | A::View
+            | A::Edit
+            | A::Copy
+            | A::Move
+            | A::Rename
+            | A::MkDir
+            | A::Delete
+            | A::DeletePermanent
+            | A::SortName
+            | A::SortExt
+            | A::SortSize
+            | A::SortModified
+            | A::QuickSearch
+            | A::Filter
+            | A::GoToPath
+            | A::Back
+            | A::Forward
+            | A::History
+            | A::ShowList
+            | A::Hotlist
+            | A::OpenWith
+            | A::OpenWithMenu
+            | A::Undo
+            | A::SwapPanes
+            | A::MirrorPane
+            | A::MarkPattern
+            | A::UnmarkPattern
+            | A::CalcSizes
+            | A::FindFiles
+            | A::BulkRename
+            | A::QuickView
+            | A::NewFile
+            | A::CopyAs
+            | A::Symlink
+            | A::Permissions
+            | A::Checksum
+            | A::Pack
+            | A::Unpack
+            | A::CompareDirs
+            | A::SyncDirs
+            | A::ContextMenu => Place::Files,
+        }
+    }
+
+    /// Opens from the shell after the prefix (Alt+X F1), without being one of the keys
+    /// xdevcmd takes inside the shell (`is_global`, F12's family): F1 typed there stays
+    /// the program's. Kept apart so keymap A's rule and its tests do not move.
+    pub fn opens_from_shell(self) -> bool {
+        matches!(self, Action::Help)
     }
 }
 
@@ -1014,10 +1242,31 @@ impl Keymap {
                     "[keys] has no action called \"{name}\"; see `xdevcmd --print-config`"
                 ));
             };
+            // F1 is the one key every page of the docs and every newcomer starts from: it
+            // cannot be taken away, only added to.
+            if action == Action::Help
+                && !keys.iter().any(|k| parse_binding(k) == parse_binding("F1"))
+            {
+                return Err(format!(
+                    "[keys] {name}: F1 is always kept; add keys beside it ({name} = [\"F1\", …])"
+                ));
+            }
             self.map.retain(|_, a| *a != action);
             self.seqs.retain(|_, a| *a != action);
             for k in keys {
                 let parsed = parse_binding(k).map_err(|e| format!("[keys] {name}: {e}"))?;
+                // F1 is Help's and nobody else's: given to another action, or made the
+                // start of a two-key binding, it would no longer open Commands.
+                let f1 = parse_key("F1").ok();
+                let takes_f1 = match parsed {
+                    Keys::One(c) => Some(c) == f1,
+                    Keys::Two(p, _) => Some(p) == f1,
+                };
+                if takes_f1 && action != Action::Help {
+                    return Err(format!(
+                        "[keys] {name} = \"{k}\": F1 is always kept for help (Commands); use another key"
+                    ));
+                }
                 // Keymap A: the actions xdevcmd takes inside the shell keep to F12's
                 // family, or a rebinding would take a key from the program there.
                 if action.is_global() && !F12_FAMILY.iter().any(|f| parse_binding(f) == Ok(parsed))
@@ -1323,6 +1572,7 @@ mod tests {
             Action::Back,
             Action::Forward,
             Action::History,
+            Action::ShowList,
             Action::Hotlist,
             Action::OpenWith,
             Action::OpenWithMenu,
@@ -1547,6 +1797,53 @@ mod tests {
         }
         assert_eq!(km.shell_prefix(), Some(parse_key("Alt+x").unwrap()));
         assert!(Action::SplitRight.acts_on_shell() && !Action::SplitRight.is_global());
+    }
+
+    #[test]
+    fn no_other_action_can_take_f1() {
+        for (name, key) in [("copy", "F1"), ("usage", "F1"), ("view", "F1 v")] {
+            let mut km = Keymap::default();
+            let e = km.apply(&table(&[(name, &[key])])).unwrap_err();
+            assert!(e.contains(name) && e.contains("F1 is always kept"), "{e}");
+        }
+        // Alt+X F1 is a different key: a user may give it to Usage again.
+        let mut km = Keymap::default();
+        km.apply(&table(&[("usage", &["Alt+x F1"])])).unwrap();
+        assert_eq!(km.action_for(ev("F1")), Some(Action::Help));
+    }
+
+    #[test]
+    fn help_always_keeps_f1() {
+        let mut km = Keymap::default();
+        let e = km.apply(&table(&[("help", &["Alt+g k"])])).unwrap_err();
+        assert!(
+            e.contains("[keys] help") && e.contains("F1 is always kept"),
+            "{e}"
+        );
+        let mut km = Keymap::default();
+        let e = km.apply(&table(&[("help", &[])])).unwrap_err();
+        assert!(e.contains("F1 is always kept"), "{e}");
+        // Keys beside it are fine, and F1 is still there.
+        let mut km = Keymap::default();
+        km.apply(&table(&[("help", &["F1", "Alt+g k"])])).unwrap();
+        assert_eq!(km.action_for(ev("F1")), Some(Action::Help));
+        assert_eq!(
+            km.in_group(Keymap::chord(ev("Alt+g")), ev("k")),
+            Some(Action::Help)
+        );
+    }
+
+    #[test]
+    fn alt_x_f1_is_commands_and_a_users_own_alt_x_f1_still_wins() {
+        let km = Keymap::default();
+        let x = Keymap::chord(ev("Alt+x"));
+        assert_eq!(km.in_group(x, ev("F1")), Some(Action::Help));
+        assert_eq!(km.keys_for(Action::Usage), vec!["Shift+F1"]);
+        let mut km = Keymap::default();
+        km.apply(&table(&[("usage", &["Shift+F1", "Alt+x F1"])]))
+            .unwrap();
+        assert_eq!(km.in_group(x, ev("F1")), Some(Action::Usage));
+        assert_eq!(km.action_for(ev("F1")), Some(Action::Help));
     }
 
     #[test]

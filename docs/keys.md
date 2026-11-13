@@ -3,21 +3,21 @@
 These are the defaults. Press **F1** in xdevcmd to see your own, after any changes in
 `[keys]` in the config. This file is generated: `xdevcmd --print-keys > docs/keys.md`.
 
-In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x, Enter too, goes to the program with it; Esc cancels.
+In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x, Enter too, goes to the program with it; Esc cancels. Alt+x F1 opens Commands (F1) from the shell, where F1 is the program's.
 
 ## General
 
 | Keys | Does |
 |---|---|
 | `Ctrl+q` `F10` `q` | Quit xdevcmd |
-| `F1` | This screen: every key and setting |
+| `F1` `Alt+x F1` | Every command, found by typing, with its key; Enter runs it |
 | `Ctrl+r` | Re-read the active pane |
 | `Ctrl+h` | Show or hide hidden files |
 | `Q` | Quit, leaving the shell where it was (with --cwd-file) |
 | `Shift+F9` `Alt+x F9` | Your commands from [[menu]], run in the terminal |
 | `F9` | The menu bar: File, View, Help |
 | `Menu` `Shift+F10` `Alt+x F10` | The right-click menu, for the row under the cursor |
-| `Shift+F1` `Alt+x F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
+| `Shift+F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
 
 ## Navigate
 
@@ -39,7 +39,8 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Ctrl+g` `Ctrl+l` | Type a path to go to |
 | `Alt+,` | Back to the previous directory |
 | `Alt+.` | Forward again |
-| `Alt+Down` `Alt+j` | Directories visited in this tab |
+| `Alt+Down` `Alt+j` | Directories visited in this tab, and the lists kept |
+| `Alt+l` | The list used last (Alt+F7's results, paths from a shell's output), here |
 | `Ctrl+d` | Bookmarks: go to one, or bookmark this directory |
 
 ## Select

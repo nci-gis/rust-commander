@@ -31,6 +31,8 @@ pub struct Query {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Found(PathBuf),
+    /// A path in a list ([`list`]) that is not there any more.
+    Gone(PathBuf),
     /// How far it has got: files looked at so far.
     Progress {
         scanned: u64,
@@ -70,6 +72,156 @@ pub fn start(q: Query) -> Search {
         });
     });
     Search { rx, stop }
+}
+
+/// Check a list of paths on a thread of its own: [`Event::Found`] for each that is
+/// there, [`Event::Gone`] for each that is not, in the list's order, each path once.
+///
+/// A list is made of what a shell printed, so it can be long (a `find /`) and can name
+/// anything. Nothing is looked up on another machine (`\\server\…`, `//host/…`): a
+/// lookup there can hang, and the user would see a frozen screen. Those count as gone.
+pub fn list(paths: Vec<PathBuf>) -> Search {
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    thread::spawn(move || {
+        let scanned = check(&paths, &flag, &mut |e| tx.send(e).is_ok());
+        let _ = tx.send(Event::Done {
+            scanned,
+            unreadable: 0,
+        });
+    });
+    Search { rx, stop }
+}
+
+/// One line's candidates, taken from a shell's output: the whole line (as shown, then
+/// without trailing spaces) and the paths found in it by the `path:line` rules
+/// (`found::paths_in`). The whole line, when it names something, is that thing: the
+/// paths found in it are then not rows (`report:2026.txt` is one file, not `report`).
+pub type Group = (Vec<PathBuf>, Vec<PathBuf>);
+
+/// [`list`], where some rows are a line's candidates ([`Group`]): decided on the
+/// check's own thread, never on the screen's, since a list can hold 10,000 lines.
+pub fn list_grouped(paths: Vec<PathBuf>, groups: Vec<Group>) -> Search {
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    thread::spawn(move || {
+        let scanned = check_grouped(&paths, &groups, &flag, &mut |e| tx.send(e).is_ok());
+        let _ = tx.send(Event::Done {
+            scanned,
+            unreadable: 0,
+        });
+    });
+    Search { rx, stop }
+}
+
+/// [`list_grouped`]'s work. Each line's whole is looked at first, in order; the first
+/// that is there is the line's row and the rest of its candidates go (as `Gone`, which
+/// a list drops quietly for rows never checked before). A path found in lines whose
+/// wholes were all there goes too; anything else is checked as [`check`] does.
+pub fn check_grouped(
+    paths: &[PathBuf],
+    groups: &[Group],
+    stop: &AtomicBool,
+    emit: &mut dyn FnMut(Event) -> bool,
+) -> u64 {
+    let rows: std::collections::HashSet<&PathBuf> = paths.iter().collect();
+    let mut decided: std::collections::HashMap<&PathBuf, bool> = Default::default();
+    let mut won = vec![false; groups.len()];
+    let mut scanned = 0u64;
+    for (g, (wholes, _)) in groups.iter().enumerate() {
+        for w in wholes.iter().filter(|w| rows.contains(w)) {
+            if stop.load(Ordering::Relaxed) {
+                return scanned;
+            }
+            if let Some(&there) = decided.get(w) {
+                won[g] |= there;
+                continue;
+            }
+            // This line is already taken whole: its later wholes are left unlooked, not
+            // decided, since another line may name the same thing whole.
+            if won[g] {
+                continue;
+            }
+            scanned += 1;
+            let there = !remote_name(w) && fs::symlink_metadata(w).is_ok();
+            won[g] |= there;
+            decided.insert(w, there);
+            let e = if there {
+                Event::Found(w.clone())
+            } else {
+                Event::Gone(w.clone())
+            };
+            if !emit(e) {
+                return scanned;
+            }
+        }
+    }
+    // Wholes no line needed looked at: not rows (dropped quietly, never checked).
+    for (wholes, _) in groups {
+        for w in wholes.iter().filter(|w| rows.contains(w)) {
+            if !decided.contains_key(w) {
+                decided.insert(w, false);
+                if !emit(Event::Gone(w.clone())) {
+                    return scanned;
+                }
+            }
+        }
+    }
+    // A path found in a line stands unless every line it was found in was taken whole.
+    let mut beaten: std::collections::HashMap<&PathBuf, bool> = Default::default();
+    for (g, (_, parts)) in groups.iter().enumerate() {
+        for p in parts {
+            let b = beaten.entry(p).or_insert(true);
+            *b &= won[g];
+        }
+    }
+    let rest: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| !decided.contains_key(p))
+        .filter(|p| {
+            if beaten.get(p).copied().unwrap_or(false) {
+                let _ = emit(Event::Gone((*p).clone()));
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+    scanned + check(&rest, stop, emit)
+}
+
+/// Whether `p` names a place on another machine.
+pub fn remote_name(p: &Path) -> bool {
+    let s = p.to_string_lossy();
+    s.starts_with("\\\\") || s.starts_with("//")
+}
+
+/// [`list`]'s work, synchronous, for tests. Returns the paths looked at.
+pub fn check(paths: &[PathBuf], stop: &AtomicBool, emit: &mut dyn FnMut(Event) -> bool) -> u64 {
+    let mut seen = std::collections::HashSet::new();
+    let mut scanned = 0u64;
+    for p in paths {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        if !seen.insert(p) {
+            continue;
+        }
+        scanned += 1;
+        let there = !remote_name(p) && fs::symlink_metadata(p).is_ok();
+        let e = if there {
+            Event::Found(p.clone())
+        } else {
+            Event::Gone(p.clone())
+        };
+        if !emit(e) || (scanned.is_multiple_of(512) && !emit(Event::Progress { scanned })) {
+            break;
+        }
+    }
+    scanned
 }
 
 fn is_hidden(name: &str) -> bool {
@@ -272,6 +424,130 @@ mod tests {
             true
         });
         assert_eq!(n, 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_list_is_checked_once_each_in_its_order() {
+        let d = tree("list");
+        let paths = vec![
+            d.join("src/main.rs"),
+            d.join("gone.rs"),
+            d.join("src/main.rs"),
+            d.join("src"),
+            PathBuf::from("//host/share/a"),
+            PathBuf::from("\\\\server\\share\\a"),
+        ];
+        let mut got = Vec::new();
+        let n = check(&paths, &AtomicBool::new(false), &mut |e| {
+            got.push(e);
+            true
+        });
+        assert_eq!(n, 5, "the duplicate is looked at once");
+        assert_eq!(
+            got,
+            vec![
+                Event::Found(d.join("src/main.rs")),
+                Event::Gone(d.join("gone.rs")),
+                Event::Found(d.join("src")),
+                Event::Gone(PathBuf::from("//host/share/a")),
+                Event::Gone(PathBuf::from("\\\\server\\share\\a")),
+            ]
+        );
+        // Stopped: nothing more.
+        let mut got = 0;
+        check(&paths, &AtomicBool::new(true), &mut |_| {
+            got += 1;
+            true
+        });
+        assert_eq!(got, 0);
+        // Through the thread, as the pane uses it.
+        let s = list(paths);
+        let events: Vec<Event> = s.rx.iter().collect();
+        assert!(matches!(
+            events.last(),
+            Some(Event::Done { scanned: 5, .. })
+        ));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A line's whole decides only when it is there: then its parts go (quietly, as
+    /// `Gone`); otherwise the whole goes and its parts are checked as before. A part
+    /// that another line, not taken whole, also named stays.
+    #[test]
+    fn a_whole_line_that_exists_wins_over_the_paths_found_in_it() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-find-whole-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        for n in ["a b.txt", "b.txt", "c.txt"] {
+            fs::write(d.join(n), "x").unwrap();
+        }
+        let p = |n: &str| d.join(n);
+        // "a b.txt": there whole. "x c.txt": not, so c.txt is checked as today. "b.txt"
+        // is found in both lines' parts... and in a third, not taken whole.
+        let groups: Vec<Group> = vec![
+            (vec![p("a b.txt")], vec![p("a"), p("b.txt")]),
+            (vec![p("x c.txt")], vec![p("x"), p("c.txt")]),
+        ];
+        let rows = vec![
+            p("a b.txt"),
+            p("a"),
+            p("b.txt"),
+            p("x c.txt"),
+            p("x"),
+            p("c.txt"),
+        ];
+        let mut found = Vec::new();
+        check_grouped(&rows, &groups, &AtomicBool::new(false), &mut |e| {
+            if let Event::Found(f) = e {
+                found.push(f);
+            }
+            true
+        });
+        found.sort();
+        assert_eq!(found, [p("a b.txt"), p("c.txt")]);
+        // b.txt also named by a line not taken whole: it stays.
+        let mut groups = groups;
+        groups.push((vec![p("nope")], vec![p("b.txt")]));
+        let mut found = Vec::new();
+        check_grouped(&rows, &groups, &AtomicBool::new(false), &mut |e| {
+            if let Event::Found(f) = e {
+                found.push(f);
+            }
+            true
+        });
+        assert!(found.contains(&p("b.txt")), "{found:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A line taken whole on its first whole does not decide its second for another
+    /// line that names the same thing whole: that one is still looked at.
+    #[test]
+    fn a_whole_left_unlooked_by_one_line_is_still_found_for_another() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-find-whole2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("x y"), "x").unwrap();
+        fs::write(d.join("x"), "x").unwrap();
+        // Line 1 as shown "x y" (there) then trimmed... a second whole, "x"; line 2 is "x".
+        let groups: Vec<Group> = vec![
+            (vec![d.join("x y"), d.join("x")], vec![]),
+            (vec![d.join("x")], vec![]),
+        ];
+        let rows = vec![d.join("x y"), d.join("x")];
+        let mut found = Vec::new();
+        let mut gone = Vec::new();
+        check_grouped(&rows, &groups, &AtomicBool::new(false), &mut |e| {
+            match e {
+                Event::Found(f) => found.push(f),
+                Event::Gone(g) => gone.push(g),
+                _ => {}
+            }
+            true
+        });
+        found.sort();
+        assert_eq!(found, [d.join("x"), d.join("x y")], "gone: {gone:?}");
+        assert!(gone.is_empty(), "{gone:?}");
         let _ = fs::remove_dir_all(&d);
     }
 }

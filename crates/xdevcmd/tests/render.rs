@@ -44,7 +44,13 @@ fn isolated() -> Command {
     c.env("XDEVCMD_CONFIG", sandbox.join("no-such-config.toml"));
     c.env("XDG_DATA_HOME", sandbox.join("data"));
     // And from their session: a test must neither reopen their panes nor overwrite them.
-    c.env("XDEVCMD_STATE", sandbox.join("session.toml"));
+    // One state directory per run of xdevcmd: what one test leaves there (F1's recent
+    // commands) must not change what another sees.
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    c.env(
+        "XDEVCMD_STATE",
+        sandbox.join(format!("state-{n}")).join("session.toml"),
+    );
     // And from how they are connected: whether a file can be opened depends on SSH and
     // a display, so every test starts as a local desktop session; a test about SSH
     // sets the variable itself.
@@ -52,7 +58,16 @@ fn isolated() -> Command {
     c.env_remove("SSH_TTY");
     // Run from xdevcmd's own terminal panel, the suite would be refused.
     c.env_remove("XDEVCMD_PANEL");
+    // The plain look these tests read (┌, │, " 1 Help"); a test about themes removes it.
+    c.env("XDEVCMD_THEME", "dark");
     c.env("DISPLAY", ":0");
+    c
+}
+
+/// [`isolated`] with the theme left to the config, for the tests about themes.
+fn themed() -> Command {
+    let mut c = isolated();
+    c.env_remove("XDEVCMD_THEME");
     c
 }
 
@@ -286,11 +301,11 @@ fn f5_can_replace_only_older_files() {
         .unwrap()
         .set_times(fs::FileTimes::new().set_modified(later))
         .unwrap();
+    // The plan finds it before the start (Round 030): a newer file there is a group of
+    // its own, left by default; Enter asks nothing.
     let s = shot_keys("110x24", "Down,Insert,F5", &a, &b);
-    assert!(s.contains("if a file is there: ask"), "{s}");
-    let s = shot_keys("110x24", "Down,Insert,F5,u", &a, &b);
-    assert!(s.contains("replace it only if older"), "{s}");
-    let s = shot_keys("110x24", "Down,Insert,F5,u,Enter", &a, &b);
+    assert!(s.contains("would replace a newer file  [skip]"), "{s}");
+    let s = shot_keys("110x24", "Down,Insert,F5,Enter", &a, &b);
     assert!(!s.contains("Already exists"), "no question\n{s}");
     assert_eq!(fs::read(b.join("victim.txt")).unwrap(), b"newer there");
     let _ = fs::remove_dir_all(a.parent().unwrap());
@@ -1108,7 +1123,7 @@ fn an_unknown_option_is_refused() {
 // ── help ───────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn f1_lists_keys_and_tab_switches_to_settings() {
+fn f1_lists_keys_and_config_in_use_shows_the_settings() {
     let (a, b) = fixture();
     let cfg = write_config(
         a.parent().unwrap(),
@@ -1116,18 +1131,22 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
     );
 
     let keys = shot_with(&cfg, "F1", &a, &b);
-    assert!(keys.contains("Keys") && keys.contains("Settings"), "{keys}");
-    assert!(keys.contains("Quit xdevcmd"), "{keys}");
+    assert!(keys.contains("\u{250c} Commands"), "{keys}");
+    assert!(keys.contains("type to find a command"), "{keys}");
 
-    // Wherever its group lands as the table grows: the next two pages.
-    let rebound =
-        shot_with(&cfg, "F1,PageDown", &a, &b) + &shot_with(&cfg, "F1,PageDown,PageDown", &a, &b);
+    // A rebound key is listed with its new key, and marked as changed.
+    let rebound = shot_with(&cfg, "F1,c,o,p,y", &a, &b);
+    let row = rebound
+        .lines()
+        .find(|l| l.contains("Files: Copy "))
+        .unwrap_or_else(|| panic!("{rebound}"));
     assert!(
-        rebound.contains("\u{2022} F2"),
-        "a rebound key should be listed, and marked as changed\n{rebound}"
+        row.contains("\u{2022} Files: Copy") && row.contains("F2"),
+        "{row}"
     );
 
-    let settings = shot_with(&cfg, "F1,Tab", &a, &b);
+    // The settings moved to Help → Config in use (F9, Help is left of File).
+    let settings = shot_with(&cfg, "F9,Left,Down,Enter", &a, &b);
     assert!(
         settings.contains("loaded"),
         "the file's status should be shown\n{settings}"
@@ -1135,13 +1154,580 @@ fn f1_lists_keys_and_tab_switches_to_settings() {
 
     // [viewer] sits below the fold at 24 rows; scroll to it the way a user would. Two
     // pages, since the list grows as settings are added.
-    let viewer = shot_with(&cfg, "F1,Tab,PageDown", &a, &b)
-        + &shot_with(&cfg, "F1,Tab,PageDown,PageDown", &a, &b);
+    let viewer = shot_with(&cfg, "F9,Left,Down,Enter,PageDown", &a, &b)
+        + &shot_with(&cfg, "F9,Left,Down,Enter,PageDown,PageDown", &a, &b);
     assert!(
         viewer.contains("\u{2022} tab_width = 8"),
         "a changed value should be marked\n{viewer}"
     );
     let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// The box F1 is drawn in: its top line, and how wide it is.
+fn commands_box(s: &str) -> Option<(usize, usize)> {
+    s.lines().enumerate().find_map(|(y, l)| {
+        let x = l.find("\u{250c} Commands")?;
+        let x = l[..x].chars().count();
+        let w = l.chars().skip(x).take_while(|c| *c != '\u{2510}').count() + 1;
+        Some((y, w))
+    })
+}
+
+/// The line under F1's last row: its message, a description, or its keys.
+fn commands_last_line(s: &str) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    let (top, _) = commands_box(s).expect("F1 on screen");
+    let x = lines[top].find("\u{250c} Commands").unwrap();
+    let col = lines[top][..x].chars().count();
+    let bottom = (top + 1..lines.len())
+        .find(|y| lines[*y].chars().nth(col) == Some('\u{2514}'))
+        .expect("the box's bottom");
+    lines[bottom - 1].to_string()
+}
+
+/// F1 opens small, at the top, no wider than 72; F1 again makes it the whole window,
+/// with the groups to browse and keymap A's rule above them.
+#[test]
+fn f1_opens_small_and_f1_again_makes_it_large() {
+    let (a, b) = fixture();
+    let small = shot_keys("118x34", "F1", &a, &b);
+    let (top, w) = commands_box(&small).unwrap_or_else(|| panic!("{small}"));
+    assert_eq!(top, 1, "at the top, under the menu bar\n{small}");
+    assert_eq!(w, 72, "{small}");
+    assert!(small.contains("type to find a command"), "{small}");
+    assert!(commands_last_line(&small).contains("F1 larger"), "{small}");
+    // In a file pane, the files' commands come first.
+    let first = small.lines().nth(3).unwrap_or_default();
+    assert!(first.contains("1   Files: View"), "{small}");
+
+    // Larger, the selected row still selected (View, in a file pane).
+    let large = shot_keys("118x34", "F1,F1", &a, &b);
+    assert_eq!(commands_box(&large), Some((0, 118)), "{large}");
+    assert!(
+        commands_last_line(&large).contains("[keys] view"),
+        "{large}"
+    );
+    // At its top, the rule for the shell and the groups to browse.
+    let large = shot_keys("118x34", "F1,F1,Home", &a, &b);
+    assert!(large.contains(" General "), "{large}");
+    assert!(
+        large.contains("In the shell, xdevcmd takes only"),
+        "{large}"
+    );
+    // F1 a third time closes it.
+    let closed = shot_keys("118x34", "F1,F1,F1", &a, &b);
+    assert!(commands_box(&closed).is_none(), "{closed}");
+}
+
+/// On a screen where the large size would be no larger (owner's decision 2), F1 stays
+/// small, says nothing of growing, and F1 again closes it.
+#[test]
+fn on_a_small_screen_f1_stays_small() {
+    let (a, b) = fixture();
+    for size in ["80x24", "60x20"] {
+        let s = shot_keys(size, "F1", &a, &b);
+        let (_, w) = commands_box(&s).unwrap_or_else(|| panic!("{s}"));
+        let width: usize = size.split('x').next().unwrap().parse().unwrap();
+        assert_eq!(w, 72.min(width - 4), "{s}");
+        assert!(!commands_last_line(&s).contains("F1 larger"), "{s}");
+        let s = shot_keys(size, "F1,F1", &a, &b);
+        assert!(commands_box(&s).is_none(), "closed\n{s}");
+    }
+}
+
+/// Narrow: Name and Key, the selected row's description on the last line; under 30
+/// columns, the name alone.
+#[test]
+fn f1_at_narrow_widths_keeps_name_and_key_on_the_row() {
+    let (a, b) = fixture();
+    let s = shot_keys("50x20", "F1,c,o,p,y", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Files: Copy "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains("F5"), "{row}");
+    assert!(
+        !row.contains("other pane"),
+        "no description on the row\n{s}"
+    );
+    assert!(
+        commands_last_line(&s).contains("Copy to the other pane"),
+        "{s}"
+    );
+    let s = shot_keys("28x20", "F1,c,o,p,y", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Files: Copy"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(!row.contains("F5"), "the name alone\n{s}");
+}
+
+/// What is typed stays when F1 grows, and so does the selection; Esc clears it, then
+/// closes.
+#[test]
+fn f1_growing_keeps_the_text_and_esc_clears_then_closes() {
+    let (a, b) = fixture();
+    let s = shot_keys("118x34", "F1,s,o,r,t,Down,F1", &a, &b);
+    assert_eq!(commands_box(&s), Some((0, 118)), "large\n{s}");
+    assert!(s.contains("\u{203a} sort"), "{s}");
+    assert!(!s.contains(" General "), "a flat list, not the groups\n{s}");
+    assert!(commands_last_line(&s).contains("[keys] sort_ext"), "{s}");
+    let s = shot_keys("118x34", "F1,s,o,r,t,Esc", &a, &b);
+    assert!(s.contains("type to find a command"), "cleared\n{s}");
+    let s = shot_keys("118x34", "F1,s,o,r,t,Esc,Esc", &a, &b);
+    assert!(commands_box(&s).is_none(), "closed\n{s}");
+    // Tab is not a tab switch any more, nor text.
+    let s = shot_keys("118x34", "F1,s,Tab", &a, &b);
+    assert!(s.contains("\u{203a} s "), "{s}");
+}
+
+/// A command the mode turns off is listed with the reason, and Enter says it on the
+/// last line instead of closing. A read-only row says why it cannot run.
+#[test]
+fn f1_says_why_a_row_cannot_run() {
+    let (a, b) = fixture();
+    let s = shot_flags(&["--read-only"], "F1,c,o,p,y", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Files: Copy "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains("read-only mode"), "{row}");
+    let s = shot_flags(&["--read-only"], "F1,c,o,p,y,Enter", &a, &b);
+    assert!(commands_box(&s).is_some(), "stays open\n{s}");
+    assert!(
+        commands_last_line(&s).contains("copying and moving is turned off"),
+        "{s}"
+    );
+    let s = shot_keys("110x24", "F1,d,o,u,b,l,e,-,c,l,i,c,k,Enter", &a, &b);
+    assert!(commands_box(&s).is_some(), "stays open\n{s}");
+    assert!(commands_last_line(&s).contains("a mouse gesture"), "{s}");
+    // Go to tab N needs its digit: shown with its keys, not run from here.
+    let s = shot_keys("110x24", "F1,g,o,Space,t,o,Space,t,a,b,Enter", &a, &b);
+    assert!(s.contains("Alt+1 \u{2026} Alt+9"), "{s}");
+    assert!(commands_last_line(&s).contains("digit"), "{s}");
+}
+
+/// Enter runs the row on the pane F1 was opened from, and the status line says the
+/// key for next time; a command's own message says more, and wins.
+#[test]
+fn f1_runs_a_row_and_says_its_key_for_next_time() {
+    let (a, b) = fixture();
+    fs::write(a.join(".hidden.txt"), "x").unwrap();
+    let s = shot_keys("110x24", "F1,r,e,f,r,e,s,h,Enter", &a, &b);
+    assert!(commands_box(&s).is_none(), "closed\n{s}");
+    assert!(s.contains("Next time: Ctrl+r"), "{s}");
+    let s = shot_keys("110x24", "F1,h,i,d,d,e,n,Enter", &a, &b);
+    assert!(s.contains(".hidden"), "ran\n{s}");
+    assert!(s.contains("hidden files shown"), "{s}");
+    assert!(!s.contains("Next time"), "its own message instead\n{s}");
+    // Opened from the Help menu, whose item already shows F1: nothing to add.
+    let s = shot_keys("110x24", "F9,Left,Enter,r,e,f,r,e,s,h,Enter", &a, &b);
+    assert!(commands_box(&s).is_none(), "{s}");
+    assert!(!s.contains("Next time"), "{s}");
+}
+
+/// F1 over the viewer: the viewer's own keys first, read-only; Esc gives the viewer
+/// back; any other command closes the viewer first, as its Esc would, then runs.
+#[test]
+fn f1_over_the_viewer_lists_its_keys_and_gives_it_back() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,F3,F1", &a, &b);
+    assert!(s.contains("\u{250c} view "), "the viewer under it\n{s}");
+    let first = s
+        .lines()
+        .find(|l| l.contains("1   "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(first.contains("Viewer: Switch between"), "{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,Enter", &a, &b);
+    assert!(commands_last_line(&s).contains("press it there"), "{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,Esc", &a, &b);
+    assert!(commands_box(&s).is_none(), "{s}");
+    assert!(s.contains("\u{250c} view "), "the viewer is back\n{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,r,e,f,r,e,s,h,Enter", &a, &b);
+    assert!(
+        !s.contains("\u{250c} view "),
+        "the viewer closed first\n{s}"
+    );
+    assert!(s.contains("Next time: Ctrl+r"), "{s}");
+}
+
+/// Keys added to `help` act in the panes; in the viewer its own keys win: with
+/// `help = ["F1", "q"]`, q still closes the viewer, and F1 still opens Commands.
+#[test]
+fn a_key_added_to_help_is_the_viewers_own_in_the_viewer() {
+    let (a, b) = fixture();
+    let body = "[keys]\nhelp = [\"F1\", \"q\"]\n";
+    let s = shot_cfg_env(body, &[], "Down,F3,q", &a, &b);
+    assert!(!s.contains("\u{250c} view "), "q closed the viewer\n{s}");
+    assert!(commands_box(&s).is_none(), "{s}");
+    let s = shot_cfg_env(body, &[], "Down,F3,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+}
+
+/// A file-group command that acts on the shell (cd the shell here), run from F1 in the
+/// shell, leaves focus in the shell, as Alt+X then its key does; before, it moved
+/// focus to the file pane.
+#[test]
+fn a_shell_acting_command_from_f1_in_the_shell_keeps_the_shell_focused() {
+    let (a, b) = fixture();
+    let keys = "F12,A-x,F1,c,d,Space,t,h,e,Space,s,h,e,l,l,Enter";
+    let s = shot_keys("200x24", keys, &a, &b);
+    assert!(commands_box(&s).is_none(), "{s}");
+    assert!(
+        status(&s).contains("terminal 1/1"),
+        "the shell kept focus\n{s}"
+    );
+    let s = shot_keys("200x24", "F12,A-x,A-c", &a, &b);
+    assert!(status(&s).contains("terminal 1/1"), "as Alt+X Alt+C\n{s}");
+}
+
+/// `--help` and the man page say what F1 is now, and where the settings went.
+#[test]
+fn help_and_the_man_page_say_f1_is_commands() {
+    for flag in ["--help", "--print-man"] {
+        let out = xdevcmd(&[OsStr::new(flag)]);
+        let text = String::from_utf8_lossy(&out.stdout).replace('\n', " ");
+        assert!(!text.contains("every key and setting"), "{flag}: {text}");
+        assert!(text.contains("every command and its key"), "{flag}");
+        assert!(text.contains("Config in use"), "{flag}");
+    }
+}
+
+/// In the viewer, "close" and Enter is the viewer's own Close, which says its key and
+/// does nothing: never Close pane, which closed the viewer and then the pane.
+#[test]
+fn close_typed_in_the_viewers_f1_closes_no_pane() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,F3,F1,c,l,o,s,e,Enter", &a, &b);
+    assert!(commands_box(&s).is_some(), "stays open\n{s}");
+    let last = commands_last_line(&s);
+    assert!(last.contains("Esc \u{b7} q: the viewer's own key"), "{s}");
+    let s = shot_keys("110x24", "Down,F3,F1,c,l,o,s,e,Enter,Esc,Esc,Esc", &a, &b);
+    assert!(!s.contains("\u{250c} view "), "{s}");
+    assert!(
+        s.contains(&sep("a")) && s.contains(&sep("b")),
+        "both panes\n{s}"
+    );
+}
+
+/// A wide (CJK) name is cut by columns: its row ends at F1's border, as every row does.
+#[test]
+fn f1_cuts_wide_names_by_columns() {
+    let (a, b) = fixture();
+    let cfg = write_config(
+        a.parent().unwrap(),
+        "[[menu]]\nkey = \"j\"\nlabel = \"日本語のとても長いコマンドの名前です\"\ncommand = \"echo x\"\n",
+    );
+    // 60 columns: Name and Key; the name, 51 columns wide, has room for 39.
+    let out = isolated()
+        .arg("--config")
+        .arg(&cfg)
+        .arg("--screenshot=60x20")
+        .arg("--keys=F1,日,本")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .expect("xdevcmd should run");
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
+    let row = s
+        .lines()
+        .find(|l| l.contains("Your commands"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains('\u{2026}'), "cut\n{s}");
+    assert!(
+        row.contains("Shift+F9 j"),
+        "the key not pushed off the row\n{s}"
+    );
+}
+
+/// The commands run from F1 are kept beside the session, the last first, and come
+/// first in the small list next time (the owner's decision 4). Read-only modes write
+/// nothing.
+#[test]
+fn f1_remembers_recent_commands_across_restarts() {
+    let (a, b) = fixture();
+    let state = a.parent().unwrap().join("recent-state");
+    let run = |flags: &[&str], keys: &str| {
+        let out = isolated()
+            .env("XDEVCMD_STATE", state.join("session.toml"))
+            .args(flags)
+            .arg("--screenshot=110x24")
+            .arg(format!("--keys={keys}"))
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .expect("xdevcmd should run");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    run(&[], "F1,s,o,r,t,Space,b,y,Space,s,i,z,e,Enter");
+    let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
+    assert!(kept.contains("sort_size"), "{kept}");
+    let s = run(&[], "F1");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(first.contains("Sort by size"), "{s}");
+    // An unknown name in the file is dropped, not an error.
+    fs::write(
+        state.join("commands.toml"),
+        "recent = [\"no_such_command\", \"sort_ext\"]\n",
+    )
+    .unwrap();
+    let s = run(&[], "F1");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(first.contains("Sort by extension"), "{s}");
+    // Read-only: run, but nothing written.
+    run(&["--read-only"], "F1,s,o,r,t,Space,b,y,Space,n,a,m,e,Enter");
+    let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
+    assert!(!kept.contains("sort_name"), "{kept}");
+    // `restore_session = false` keeps nothing between runs: not written, not read.
+    let cfg = write_config(a.parent().unwrap(), "[general]\nrestore_session = false\n");
+    let flags = ["--config", cfg.to_str().unwrap()];
+    run(&flags, "F1,s,o,r,t,Space,b,y,Space,n,a,m,e,Enter");
+    let kept = fs::read_to_string(state.join("commands.toml")).unwrap();
+    assert!(!kept.contains("sort_name"), "not written\n{kept}");
+    let s = run(&flags, "F1");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(!first.contains("Sort by"), "not read\n{s}");
+}
+
+/// `help` keeps F1: a `[keys] help` without it is refused, and `--check-config` says
+/// why; keys beside it are fine.
+#[test]
+fn a_config_that_takes_f1_from_help_is_refused() {
+    let (a, b) = fixture();
+    let cfg = write_config(a.parent().unwrap(), "[keys]\nhelp = [\"Alt+g k\"]\n");
+    let out = xdevcmd(&[
+        "--check-config".as_ref(),
+        "--config".as_ref(),
+        cfg.as_os_str(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("[keys] help: F1 is always kept"), "{err}");
+    // Nor can another action take F1 (`copy = ["F1"]` used to pass, and F1 copied).
+    let cfg = write_config(a.parent().unwrap(), "[keys]\ncopy = [\"F1\"]\n");
+    let out = xdevcmd(&[
+        "--check-config".as_ref(),
+        "--config".as_ref(),
+        cfg.as_os_str(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("[keys] copy") && err.contains("F1 is always kept"),
+        "{err}"
+    );
+    let s = shot_with(&cfg, "F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "F1 still opens Commands\n{s}");
+    let cfg = write_config(
+        a.parent().unwrap(),
+        "[keys]\nhelp = [\"F1\", \"Alt+g k\"]\n",
+    );
+    let out = xdevcmd(&[
+        "--check-config".as_ref(),
+        "--config".as_ref(),
+        cfg.as_os_str(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// From the shell F1 is Alt+X F1 (owner's decision 1): the prefix's hint offers it,
+/// and F1 opens on the shell's commands. In a pane Alt+X F1 is F1 too; Usage keeps
+/// Shift+F1.
+#[test]
+fn alt_x_f1_opens_commands_from_the_shell_and_the_panes() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys(SIZE, "F12,A-x", &a, &b);
+    assert!(status(&s).contains("then: F1 F12"), "{s}");
+    let s = shot_keys(SIZE, "F12,A-x,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+    let first = s.lines().find(|l| l.contains("1   ")).unwrap_or_default();
+    assert!(first.contains("Terminal: "), "the shell's rows first\n{s}");
+    let s = shot_keys(SIZE, "A-x,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+    let s = shot_keys(SIZE, "S-F1", &a, &b);
+    assert!(commands_box(&s).is_none() && s.contains("Usage"), "{s}");
+    // `usage` given Alt+X F1 back (docs/config.md): Usage in the panes; in the shell it
+    // is the program's, and Commands is F12, then F1.
+    let body = "[keys]\nusage = [\"Shift+F1\", \"Alt+x F1\"]\n";
+    let s = shot_cfg_env(body, &[], "A-x,F1", &a, &b);
+    assert!(
+        s.contains("\u{250c} Usage") && commands_box(&s).is_none(),
+        "{s}"
+    );
+    let s = shot_cfg_env(body, &[], "F12,A-x,F1", &a, &b);
+    assert!(
+        commands_box(&s).is_none() && !s.contains("\u{250c} Usage"),
+        "{s}"
+    );
+    let s = shot_cfg_env(body, &[], "F12,A-x,F1,F12,F1", &a, &b);
+    assert!(commands_box(&s).is_some(), "{s}");
+}
+
+/// The Help menu: Commands… (F1) · Config in use · Usage (Shift+F1) · Documentation ·
+/// ─ · About.
+#[test]
+fn the_help_menu_is_commands_config_in_use_usage_documentation_and_about() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "F9,Left", &a, &b);
+    let row = |label: &str| {
+        s.lines()
+            .find(|l| l.contains(label))
+            .unwrap_or_else(|| panic!("{label}\n{s}"))
+            .to_string()
+    };
+    assert!(row("Commands\u{2026}").contains("F1"), "{s}");
+    assert!(row("Usage").contains("Shift+F1"), "{s}");
+    let at = |label: &str| s.lines().position(|l| l.contains(label)).unwrap();
+    assert!(at("Commands\u{2026}") < at("Config in use"));
+    assert!(at("Config in use") < at("Usage"));
+    assert!(at("Usage") < at("Documentation"));
+    assert!(at("Documentation") < at("About xdevcmd"));
+    assert!(!s.contains("Keys and settings"), "{s}");
+    // Commands… opens F1 at its large size.
+    let s = shot_keys("118x34", "F9,Left,Enter", &a, &b);
+    assert_eq!(commands_box(&s), Some((0, 118)), "{s}");
+}
+
+/// Help → Documentation without a copy beside the binary (a build, as cargo install
+/// makes): it says where a copy comes from and gives the link at this version's tag,
+/// never `main`; Enter copies it, nothing is opened.
+#[test]
+fn documentation_gives_the_link_at_this_versions_tag() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x30", "F9,Left,Up,Up,Enter", &a, &b);
+    assert!(s.contains("\u{250c} Documentation"), "{s}");
+    let url = format!(
+        "{}/tree/v{}/docs",
+        env!("CARGO_PKG_REPOSITORY"),
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(s.contains(&url), "{url}\n{s}");
+    assert!(!s.contains("/main/"), "{s}");
+    assert!(s.contains("No copy on this computer"), "{s}");
+    assert!(s.contains("[Enter] copy link"), "{s}");
+    let s = shot_keys("110x30", "F9,Left,Up,Up,Enter,Enter", &a, &b);
+    assert!(!s.contains("\u{250c} Documentation"), "closed\n{s}");
+    assert!(s.contains("copied 1 line to the clipboard"), "{s}");
+}
+
+/// Documentation is a row in F1, found by typing.
+#[test]
+fn documentation_is_a_row_in_f1() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x30", "F1,d,o,c,u,m,e,n,t,a,t,i,o,n,Enter", &a, &b);
+    assert!(s.contains("\u{250c} Documentation"), "{s}");
+}
+
+/// A release archive's layout: `docs/` beside the binary. The window names that copy
+/// first, and Enter reads its index in the viewer.
+#[test]
+fn documentation_names_the_copy_beside_the_binary_first() {
+    let dir =
+        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("archive-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("docs")).unwrap();
+    let exe = dir.join(
+        std::path::Path::new(env!("CARGO_BIN_EXE_xdevcmd"))
+            .file_name()
+            .unwrap(),
+    );
+    // A link, not a copy, where the file system allows: the debug binary is large.
+    if fs::hard_link(env!("CARGO_BIN_EXE_xdevcmd"), &exe).is_err() {
+        fs::copy(env!("CARGO_BIN_EXE_xdevcmd"), &exe).unwrap();
+    }
+    fs::write(
+        dir.join("docs").join("README.md"),
+        "# xdevcmd documentation\n\nRead in this order.\n",
+    )
+    .unwrap();
+    let (a, b) = fixture();
+    let run = |keys: &str| {
+        // The same isolation, another program: the one in the archive's layout.
+        let c = isolated();
+        let mut c2 = Command::new(&exe);
+        for (k, v) in c.get_envs() {
+            match v {
+                Some(v) => c2.env(k, v),
+                None => c2.env_remove(k),
+            };
+        }
+        let out = c2
+            .arg("--screenshot=110x30")
+            .arg(format!("--keys={keys}"))
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .expect("xdevcmd should run");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let s = run("F9,Left,Up,Up,Enter");
+    let local = s
+        .lines()
+        .position(|l| l.contains("On this computer"))
+        .unwrap_or_else(|| panic!("{s}"));
+    let online = s.lines().position(|l| l.contains("Online, for")).unwrap();
+    assert!(local < online, "the local copy first\n{s}");
+    assert!(s.contains("[Enter] read README.md"), "{s}");
+    assert!(s.contains("[C] copy link"), "{s}");
+    let s = run("F9,Left,Up,Up,Enter,Enter");
+    assert!(
+        s.contains("Read in this order."),
+        "the index, in the viewer\n{s}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Config in use: the loaded file, a changed value marked, a filter that keeps the
+/// lines it matches under their section's name; Esc clears it, then closes.
+#[test]
+fn config_in_use_marks_changes_and_filters_to_a_section() {
+    let (a, b) = fixture();
+    let cfg = write_config(
+        a.parent().unwrap(),
+        "[viewer]\ntab_width = 8\n[keys]\ncopy = [\"F2\"]\n",
+    );
+    let open = "F9,Left,Down,Enter";
+    let s = shot_with(&cfg, &format!("{open},t,a,b,_,w"), &a, &b);
+    assert!(s.contains("\u{250c} Config in use"), "{s}");
+    assert!(s.contains("[viewer]"), "its section\n{s}");
+    assert!(s.contains("\u{2022} tab_width = 8"), "marked\n{s}");
+    assert!(!s.contains("[general]"), "other sections gone\n{s}");
+    // A section's name keeps the whole section: [keys], as written.
+    let s = shot_with(&cfg, &format!("{open},[,k,e,y,s,]"), &a, &b);
+    assert!(s.contains("copy = [\"F2\"]"), "{s}");
+    let s = shot_with(&cfg, &format!("{open},t,a,b,Esc"), &a, &b);
+    assert!(s.contains("[general]"), "cleared\n{s}");
+    let s = shot_with(&cfg, &format!("{open},t,a,b,Esc,Esc"), &a, &b);
+    assert!(!s.contains("\u{250c} Config in use"), "closed\n{s}");
+}
+
+/// Config in use is a row in F1 too: every command by typing.
+#[test]
+fn config_in_use_is_a_row_in_f1() {
+    let (a, b) = fixture();
+    let s = shot_keys(
+        "110x24",
+        "F1,c,o,n,f,i,g,Space,i,n,Space,u,s,e,Enter",
+        &a,
+        &b,
+    );
+    assert!(s.contains("\u{250c} Config in use"), "{s}");
+}
+
+/// A config with an error is IGNORED, and Config in use says so and why.
+#[test]
+fn config_in_use_says_a_rejected_file_was_ignored() {
+    let (a, b) = fixture();
+    let cfg = write_config(a.parent().unwrap(), "[files]\nsort = \"colour\"\n");
+    let s = shot_with(&cfg, "F9,Left,Down,Enter", &a, &b);
+    assert!(s.contains("IGNORED"), "{s}");
+    assert!(s.contains("sort"), "says why\n{s}");
 }
 
 // ── mouse ──────────────────────────────────────────────────────────────────────────
@@ -1278,13 +1864,52 @@ fn the_key_bar_and_dialog_buttons_are_clickable() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// F1's rows: a click selects one, a double-click runs it, Enter runs what was
+/// clicked, a click outside closes F1, the wheel scrolls. Located, never hard-coded.
 #[test]
-fn help_tabs_are_clickable() {
+fn f1_rows_are_clickable() {
+    let (a, b) = files(&["alpha.txt", ".hidden.txt"]);
+    // "hidden" finds two rows; Down selects the second, so what runs after a click
+    // on the first is what the click chose.
+    let typed = "F1,h,i,d,d,e,n,Down";
+    let open = shot_keys(SIZE, typed, &a, &b);
+    let (x, y) = locate(&open, "Show or hide hidden files");
+    assert!(open.contains("2   "), "{open}");
+    // One click selects: F1 stays open, nothing run.
+    let s = shot_keys(SIZE, &format!("{typed},click:{x}:{y}"), &a, &b);
+    assert!(s.contains("\u{250c} Commands"), "{s}");
+    assert!(!s.contains(".hidden"), "{s}");
+    // Enter runs what the click selected.
+    let s = shot_keys(SIZE, &format!("{typed},click:{x}:{y},Enter"), &a, &b);
+    assert!(!s.contains("\u{250c} Commands"), "{s}");
+    assert!(s.contains(".hidden"), "{s}");
+    // A double-click runs it.
+    let s = shot_keys(
+        SIZE,
+        &format!("{typed},click:{x}:{y},click:{x}:{y}"),
+        &a,
+        &b,
+    );
+    assert!(status(&s).contains("hidden files shown"), "{s}");
+    // A click outside closes F1.
+    let plain = shot_keys(SIZE, "", &a, &b);
+    let (px, py) = locate(&plain, "alpha");
+    let s = shot_keys(SIZE, &format!("F1,click:{px}:{py}"), &a, &b);
+    assert!(!s.contains("\u{250c} Commands"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn the_wheel_scrolls_f1() {
     let (a, b) = files(&["alpha.txt"]);
-    let open = shot_keys(SIZE, "F1", &a, &b);
-    let (x, y) = locate(&open, "Settings");
-    let s = shot_keys(SIZE, &format!("F1,click:{}:{y}", x + 1), &a, &b);
-    assert!(s.contains("Config file"), "{s}");
+    let open = shot_keys("118x40", "F1,F1,Home", &a, &b);
+    assert!(open.contains(" General "), "{open}");
+    let (x, y) = locate(&open, "General");
+    let s = shot_keys("118x40", &format!("F1,F1,Home,wheel:{x}:{y}:4"), &a, &b);
+    assert!(!s.contains(" General "), "scrolled past it\n{s}");
+    let back = format!("F1,F1,Home,wheel:{x}:{y}:4,wheel:{x}:{y}:-4");
+    let s = shot_keys("118x40", &back, &a, &b);
+    assert!(s.contains(" General "), "and back\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -1346,7 +1971,7 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
     let s = shot_keys(SIZE, "F12,A-n,A-s,A-w,A-t", &a, &b);
     assert!(status(&s).contains("terminal 1/1"), "{s}");
     assert!(!status(&s).contains("split"), "{s}");
-    let help = shot_keys("150x150", "F1", &a, &b);
+    let help = shot_keys("150x150", "F1,F1", &a, &b);
     assert!(
         help.contains("In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x"),
         "{help}"
@@ -1355,7 +1980,7 @@ fn terminal_keys_typed_into_the_shell_are_the_shells() {
     // Resizing's Alt+R group cannot be opened after Alt+X: F1 names the key that works.
     let resize = help
         .lines()
-        .find(|l| l.contains("resize_left"))
+        .find(|l| l.contains("Move border left"))
         .unwrap_or_default();
     assert!(
         resize.contains("in the shell: Alt+x Alt+Shift+Left"),
@@ -1391,10 +2016,10 @@ fn alt_c_asks_with_three_buttons_when_sending_without_asking_is_off() {
 #[test]
 fn f1_lists_alt_g_as_a_pane_key() {
     let (a, b) = files(&["alpha.txt"]);
-    let help = shot_keys("150x150", "F1", &a, &b);
+    let help = shot_keys("150x150", "F1,F1", &a, &b);
     let row = help
         .lines()
-        .find(|l| l.contains("go_shell_dir"))
+        .find(|l| l.contains("Go to the shell's directory "))
         .unwrap_or_default();
     assert!(row.contains("Alt+g"), "{help}");
     assert!(row.contains("Go to the shell's directory"), "{row}");
@@ -1491,6 +2116,32 @@ fn right_click_on_a_terminal_tab_opens_its_menu() {
     // Inside a shell, a right-click opens nothing of xdevcmd's.
     let body = shot_keys(SIZE, &format!("F12,rclick:10:{}", y + 3), &a, &b);
     assert!(!body.contains("View history"), "{body}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Round 027: the tab menu's Log to file… asks where, Save as…-style: the tab's number,
+/// an `xdevcmd-<shell>-<date>-<time>.log` name, text by default and Tab for raw.
+#[test]
+fn log_to_file_from_the_tab_menu_asks_where_and_tab_switches_to_raw() {
+    let (a, b) = files(&["alpha.txt"]);
+    let one = shot_keys(SIZE, "F12", &a, &b);
+    let (bar, y) = tab_bar(&one);
+    let first = col(&bar, "\u{2302} 1");
+    let menu = format!("F12,rclick:{first}:{y}");
+    let s = shot_keys(SIZE, &menu, &a, &b);
+    let (ly, line) = s
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("Log to file"))
+        .unwrap_or_else(|| panic!("no Log to file in the tab menu:\n{s}"));
+    assert!(!s.contains("Stop logging"), "one or the other\n{s}");
+    let lx = col(line, "Log to file");
+    let ask = shot_keys(SIZE, &format!("{menu},click:{lx}:{ly}"), &a, &b);
+    assert!(ask.contains("Log terminal 1 to file"), "{ask}");
+    assert!(ask.contains("text, escapes removed (Tab: raw)"), "{ask}");
+    assert!(ask.contains("xdevcmd-") && ask.contains(".log"), "{ask}");
+    let raw = shot_keys(SIZE, &format!("{menu},click:{lx}:{ly},Tab"), &a, &b);
+    assert!(raw.contains("raw bytes, as received (Tab: text)"), "{raw}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -1604,10 +2255,10 @@ fn the_context_menu_types_into_the_shell() {
         .find(|l| l.contains("Type into the shell"))
         .unwrap_or_else(|| panic!("{s}"));
     assert!(line.contains("Alt+Enter"), "{line}");
-    let help = shot_keys("150x150", "F1", &a, &b);
+    let help = shot_keys("150x150", "F1,F1", &a, &b);
     let row = help
         .lines()
-        .find(|l| l.contains("type_names"))
+        .find(|l| l.contains("Type names into the shell"))
         .unwrap_or_default();
     assert!(
         row.contains("Alt+Enter") && row.contains("Ctrl+Enter"),
@@ -1724,11 +2375,139 @@ fn dropping_onto_a_pane_showing_the_same_directory_says_so() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A CJK character takes two columns. Names with them were fitted by counting
+/// characters, so their rows ran past the others and pushed Ext, Size and Modified to
+/// the right, cutting the date off. Every row's columns start where the header's do.
+#[test]
+fn wide_characters_in_names_keep_the_columns_in_line() {
+    let (a, b) = files(&[
+        "README.md",
+        "\u{3010} LIFE\u{3011}AI-SDLC_proposal_v0.2.html",
+        "\u{3010} LIFE\u{3011}AI\u{6d3b}\u{7528}_\u{54c1}\u{8cea}\u{5411}\u{4e0a}_\u{6bb5}\u{968e}POC\u{63d0}\u{6848}_v1.4.html",
+    ]);
+    for size in ["110x14", "90x14", "140x14"] {
+        let s = shot(size, &a, &b);
+        // In a screenshot a wide character is followed by the cell it covers, so a
+        // character's place in the line is its column.
+        let col = |line: &str, word: &str| {
+            line.find(word)
+                .map(|at| line.chars().count() - line[at..].chars().count())
+        };
+        let lines: Vec<&str> = s.lines().collect();
+        let header = lines.iter().find(|l| l.contains("Name ")).unwrap();
+        // At 90 columns there is no room for Modified; the rest still lines up.
+        let date = col(header, "Modified");
+        let rows: Vec<&&str> = lines
+            .iter()
+            .filter(|l| l.contains(" md ") || l.contains(" html "))
+            .collect();
+        assert_eq!(rows.len(), 3, "{s}");
+        for row in rows {
+            let left = &row[..row.find("\u{2502}\u{2502}").unwrap_or(row.len())];
+            let ext = if left.contains(" md ") {
+                " md "
+            } else {
+                " html "
+            };
+            assert_eq!(
+                col(left, ext).map(|c| c + 1),
+                col(header, "Ext"),
+                "{size}: Ext\n{s}"
+            );
+            if let Some(date) = date {
+                assert_eq!(
+                    left.chars().nth(date + 4),
+                    Some('-'),
+                    "{size}: Modified\n{s}"
+                );
+                assert!(
+                    left.chars().count() > date + 15,
+                    "{size}: the date is cut\n{s}"
+                );
+            }
+        }
+    }
+    // The status line has the cursor's whole name, which the column cuts. Each wide
+    // character is followed by the cell it covers, a space: the screenshot once showed
+    // a letter left there by an earlier frame ("\u{3010}E LIFE\u{3011}d…").
+    let s = shot_keys("110x14", "Down,Down,Down", &a, &b);
+    assert!(
+        status(&s).contains("AI\u{6d3b} \u{7528} _\u{54c1} ")
+            && status(&s).contains("POC\u{63d0} \u{6848} _v1.4.html"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A name the column cuts is shown whole on the cursor's row, over Ext, Size and
+/// Modified; the other rows keep their columns, and a short name's row is unchanged.
+#[test]
+fn the_cursor_row_shows_a_long_name_whole() {
+    let long = "LIFE_AI-SDLC_improvement_proposal_v0.1.md";
+    let wide =
+        "\u{3010} LIFE\u{3011}AI\u{6d3b}\u{7528}_\u{54c1}\u{8cea}\u{5411}\u{4e0a}_POC_v1.4.html";
+    let (a, b) = files(&[long, "README.md", wide]);
+    let left = |s: &str, has: &str| -> String {
+        let line = s.lines().find(|l| l.contains(has)).unwrap();
+        line[..line.find("\u{2502}\u{2502}").unwrap_or(line.len())].to_string()
+    };
+    // The cursor on the long name (.., then the long one): whole, with its extension.
+    let s = shot_keys("110x14", "Down", &a, &b);
+    assert!(s.contains(long), "{s}");
+    assert!(
+        !left(&s, "LIFE_AI-S").contains("2026-"),
+        "its row is the name\n{s}"
+    );
+    assert!(
+        left(&s, "README").contains(" md "),
+        "README keeps its columns\n{s}"
+    );
+    // A wide name: each wide character is followed by the cell it covers.
+    let s = shot_keys("110x14", "Down,Down,Down", &a, &b);
+    assert!(
+        s.contains("_POC_v1.4.html") && s.contains("\u{3010}  LIFE\u{3011} AI\u{6d3b} \u{7528} "),
+        "{s}"
+    );
+    assert!(
+        left(&s, "LIFE_AI-S").contains('\u{2026}'),
+        "the long name is cut again\n{s}"
+    );
+    // On a short name, the row is as it was.
+    let s = shot_keys("110x14", "Down,Down", &a, &b);
+    assert!(
+        left(&s, "README").contains(" md ") && left(&s, "README").contains("2026-"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// The menu bar names this xdevcmd at its right, by the number a shell started from its
+/// panel is told; the menus win where there is no room for both.
+#[test]
+fn the_menu_bar_shows_which_xdevcmd_this_is() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys("120x10", "", &a, &b);
+    let top = s.lines().next().unwrap().trim_end();
+    let pid = top.rsplit(' ').next().unwrap();
+    assert!(
+        top.ends_with(&format!("xdevcmd {pid}")) && pid.parse::<u32>().is_ok(),
+        "{s}"
+    );
+    assert!(top.starts_with("  File   View   Help"), "{s}");
+    let s = shot_keys("30x10", "", &a, &b);
+    let top = s.lines().next().unwrap();
+    assert!(top.contains("Help") && !top.contains("xdevcmd"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn a_terminal_split_too_small_to_use_is_refused() {
     let (a, b) = files(&["alpha.txt"]);
     let s = shot_keys("80x24", "F12,A-x,A-d", &a, &b);
     assert!(s.contains("too small to split"), "{s}");
+    // The message keeps its gap from the terminal's keys; it was drawn right after
+    // them, "…Shift+F12 historytoo small".
+    assert!(status(&s).contains("  too small to split"), "{s}");
     assert!(!status(&s).contains("split 2/2"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
@@ -1762,7 +2541,8 @@ fn no_layout_at_any_size_panics_or_overflows() {
             shrink.replace("Alt+Shift", "A-x,Alt+Shift")
         ),
         "A-s,A-s,Tab,A-w,A-w,F12,A-x,A-s,A-x,A-w,A-x,A-w".into(),
-        "F1,Tab".into(),
+        "F1,F1".into(),
+        "F1,c,o,p,y".into(),
         "Down,Down,F3,h".into(),
         "Down,Down,F8".into(),
         "Down,Down,S-F6".into(),
@@ -1996,9 +2776,12 @@ fn starting_without_directories_reopens_the_last_session() {
         status(&s).contains("tab 2/2"),
         "the second was the active one\n{s}"
     );
-    // The left pane's tab bar puts its border a row lower, so measure the right pane
-    // by its own top-left corner on the first row.
-    let right_pane = first.find('\u{250c}').map(|b| first[..b].chars().count());
+    // Both panes have a tab bar (the right one shows it to stay in line), so measure
+    // the right pane by the second top-left corner on the border row.
+    let border = s.lines().nth(2).unwrap();
+    let right_pane = border
+        .rfind('\u{250c}')
+        .map(|b| border[..b].chars().count());
     assert!(
         right_pane.is_some_and(|x| x < 50),
         "the 30% split is kept, not reset to half\n{s}"
@@ -2550,7 +3333,7 @@ fn a_theme_file_beside_the_config_is_a_theme() {
     .unwrap();
     let cfg = write_config(&dir, "[theme]\nname = \"mine\"\n");
     let check = |cfg: &std::path::Path| {
-        isolated()
+        themed()
             .env("XDEVCMD_CONFIG", cfg)
             .arg("--check-config")
             .output()
@@ -2563,7 +3346,7 @@ fn a_theme_file_beside_the_config_is_a_theme() {
         String::from_utf8_lossy(&out.stdout)
     );
     // View → Theme… lists it after the built-in ones.
-    let out = isolated()
+    let out = themed()
         .env("XDEVCMD_CONFIG", &cfg)
         .args(["--screenshot=100x40", "--keys=F9,Right,Up,Enter"])
         .arg(&a)
@@ -2571,7 +3354,15 @@ fn a_theme_file_beside_the_config_is_a_theme() {
         .output()
         .unwrap();
     let s = String::from_utf8_lossy(&out.stdout);
-    for name in ["dark", "light", "ansi", "blue", "high-contrast", "mine"] {
+    for name in [
+        "xdevtheme",
+        "dark",
+        "light",
+        "ansi",
+        "blue",
+        "high-contrast",
+        "mine",
+    ] {
         assert!(s.contains(name), "{name}\n{s}");
     }
     // A bad colour in the file names the file.
@@ -2599,7 +3390,8 @@ fn a_theme_file_beside_the_config_is_a_theme() {
 #[test]
 fn view_theme_switches_while_running() {
     let (a, b) = fixture();
-    let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Enter", &a, &b);
+    // The list starts at the default, xdevtheme; then dark, then light.
+    let s = shot_keys("100x40", "F9,Right,Up,Enter,Down,Down,Enter", &a, &b);
     assert!(s.contains("theme: light"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
@@ -2686,7 +3478,7 @@ fn settings_saves_only_what_changed_and_keeps_the_rest_of_the_file() {
         "{after}"
     );
     assert!(after.contains("delete_to_trash = false"), "{after}");
-    assert!(after.contains("[theme]\nname = \"light\""), "{after}");
+    assert!(after.contains("[theme]\nname = \"dark\""), "{after}");
     assert!(after.contains("[[menu]]\nkey = \"t\""), "{after}");
     // What was saved is what the next start reads.
     let out = isolated()
@@ -2783,20 +3575,20 @@ fn settings_works_with_the_mouse() {
     let s0 = shot_with(&cfg, open, &a, &b);
     let theme = format!("{open},{}", click(locate(&s0, "Theme ")));
     let s = shot_with(&cfg, &theme, &a, &b);
-    let (vx, vy) = locate(&s, "\u{2039} dark \u{203a}");
+    let (vx, vy) = locate(&s, "\u{2039} xdevtheme \u{203a}");
     let more = format!(
         "{theme},{}",
-        click((vx + "\u{2039} dark ".chars().count(), vy))
+        click((vx + "\u{2039} xdevtheme ".chars().count(), vy))
     );
     let s = shot_with(&cfg, &more, &a, &b);
     assert!(
-        s.contains("\u{2039} light \u{203a}"),
+        s.contains("\u{2039} dark \u{203a}"),
         "\u{203a} steps forward\n{s}"
     );
     let back = format!("{more},{}", click((vx, vy)));
     let s = shot_with(&cfg, &back, &a, &b);
     assert!(
-        s.contains("\u{2039} dark \u{203a}"),
+        s.contains("\u{2039} xdevtheme \u{203a}"),
         "\u{2039} steps back\n{s}"
     );
     // The wheel moves the selected row: the help line follows it.
@@ -2891,9 +3683,18 @@ fn ctrl_z_undoes_a_rename_a_new_directory_and_a_move_after_asking() {
     shot_keys("110x24", "F7,d,o,c,s,Enter,Ctrl+z,Enter", &a, &b);
     assert!(!a.join("docs").exists(), "the new directory went");
 
-    // A move, then its undo: back where it came from.
-    shot_keys("110x24", "Down,F6,Enter,Ctrl+z,Enter", &a, &b);
+    // A move, then its undo: back where it came from. `wait`: the move ends first, or
+    // Ctrl+Z comes while it runs (a Windows runner, CI run 43371746802).
+    shot_keys("110x24", "Down,F6,Enter,wait,Ctrl+z,Enter", &a, &b);
     assert!(a.join("victim.txt").exists() && !b.join("victim.txt").exists());
+
+    // A copy, then its undo: the copy goes, the source stays (Round 031).
+    let s = shot_keys("110x24", "Down,F5,Enter,wait,Ctrl+z,Enter,wait", &a, &b);
+    assert!(
+        a.join("victim.txt").exists() && !b.join("victim.txt").exists(),
+        "{s}"
+    );
+    assert!(s.contains("Undo the copy: 1 removed"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -2902,10 +3703,21 @@ fn ctrl_z_says_what_cannot_be_undone_and_refuses_what_changed() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Ctrl+z", &a, &b);
     assert!(s.contains("nothing to undo"), "{s}");
-    // A copy is not undone, and an older rename is not undone behind it.
-    let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,Ctrl+z", &a, &b);
+    // A copy is undone (Round 031), not the older rename behind it.
+    // `wait`: the copy ends first, or its "1 copied" replaces the answer to Ctrl+Z
+    // (seen on a Windows runner).
+    let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,wait,Ctrl+z", &a, &b);
     assert!(
-        s.contains("the last operation, a copy, cannot be undone"),
+        s.contains("Undo the copy of x.txt?") && s.contains("remove the 1 item it made"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    // A permanent delete is not undone, and says so.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,S-F8,y,wait,Ctrl+z", &a, &b);
+    assert!(
+        s.contains("the last operation, a permanent delete, cannot be undone"),
         "{s}"
     );
     let _ = fs::remove_dir_all(a.parent().unwrap());
@@ -3103,6 +3915,68 @@ fn alt_f7_finds_by_name_and_content_into_a_new_tab() {
         !s.lines().nth(2).unwrap().contains("find "),
         "back in a directory\n{s}"
     );
+}
+
+/// Round 021: a search's results are kept. Enter on one goes to its directory, and
+/// Back comes back to them, now a list; Alt+J offers it above the directories.
+#[test]
+fn alt_f7_results_are_kept_and_back_returns_to_them() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src/deep")).unwrap();
+    fs::write(a.join("src/main.rs"), "fn main() {}").unwrap();
+    fs::write(a.join("src/deep/lib.rs"), "").unwrap();
+    let find = "Alt+F7,*,.,r,s,Enter,End,Enter";
+    let s = shot_keys("110x24", &format!("{find},Alt+comma"), &a, &b);
+    assert!(
+        s.contains("list 2 \u{b7} find *.rs"),
+        "back in the results\n{s}"
+    );
+    assert!(s.contains("deep/lib") || s.contains("deep\\lib"), "{s}");
+    let s = shot_keys("110x24", &format!("{find},Alt+j"), &a, &b);
+    assert!(s.contains("list \u{b7} find *.rs \u{b7} 2"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Round 031: a row moved elsewhere from a results tab stays in the list, naming the
+/// file where it went, instead of being dropped as gone.
+#[test]
+fn a_row_moved_from_a_results_tab_follows_it() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src/deep")).unwrap();
+    fs::write(a.join("src/main.rs"), "fn main() {}").unwrap();
+    fs::write(a.join("src/deep/lib.rs"), "").unwrap();
+    // End: src/main.rs, the last row; F6 moves it to the other pane.
+    let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,F6,Enter,wait", &a, &b);
+    assert!(b.join("main.rs").exists(), "moved\n{s}");
+    assert!(!s.contains("gone"), "{s}");
+    let left = |s: &str| -> String {
+        s.lines()
+            .map(|l| l.chars().take(55).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(
+        left(&s).contains("main"),
+        "the row is kept, where it went\n{s}"
+    );
+    assert!(
+        left(&s).contains("deep/lib") || left(&s).contains("deep\\lib"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A row in a results tab lives in another directory: renaming it in place renames it
+/// there, and the row follows.
+#[test]
+fn a_result_in_a_subdirectory_is_renamed_where_it_is() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src/deep")).unwrap();
+    fs::write(a.join("src/deep/lib.rs"), "").unwrap();
+    let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,F2,x,Enter", &a, &b);
+    assert!(a.join("src/deep/x.rs").exists(), "renamed where it is\n{s}");
+    assert!(!a.join("x.rs").exists());
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
 #[test]
@@ -3530,13 +4404,38 @@ fn alt_k_marks_what_the_other_side_lacks_and_f5_copies_it() {
         s.contains("2 items"),
         "F5 takes exactly the marked two\n{s}"
     );
-    // newer.txt sorts first and exists there: the job stops to ask, as F5 always does.
+    // newer.txt exists there, older: the plan says so before the start, and leaves it
+    // unless told otherwise (Round 030); the job asks nothing.
+    let s = shot_keys("110x24", "Alt+k,F5", &a, &b);
+    assert!(s.contains("would replace an older file  [skip]"), "{s}");
     let s = shot_keys("110x24", "Alt+k,F5,Enter", &a, &b);
-    assert!(s.contains("overwrite"), "{s}");
+    assert!(!s.contains("overwrite"), "{s}");
     assert_eq!(
         fs::read_to_string(b.join("newer.txt")).unwrap(),
         "old",
-        "not before the answer"
+        "left, as the plan said"
+    );
+}
+
+/// A directory on the other side that cannot be read (the fault seam, so it runs as
+/// root and on every system): a row with a warning and a count in the title, never
+/// "nothing to do", and Alt+K names it on the status line and marks nothing under it.
+#[test]
+fn a_directory_that_cannot_be_read_is_shown_in_the_plan_not_taken_for_empty() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("sub")).unwrap();
+    fs::write(a.join("sub/inner.txt"), "x").unwrap();
+    fs::create_dir_all(b.join("sub")).unwrap();
+    let fault = format!("fail|read-dir|{}|1", b.join("sub").display());
+    let s = shot_cfg_env("", &[("XDEVCMD_FAULTS", fault.as_str())], "Alt+y", &a, &b);
+    assert!(s.contains("cannot be read in the other"), "{s}");
+    assert!(s.contains("1 not read"), "{s}");
+    assert!(!s.contains("inner.txt"), "nothing under it is planned\n{s}");
+    let fault = format!("fail|read-dir|{}|1", b.display());
+    let s = shot_cfg_env("", &[("XDEVCMD_FAULTS", fault.as_str())], "Alt+y", &a, &b);
+    assert!(
+        s.contains("cannot compare"),
+        "a root that cannot be read\n{s}"
     );
 }
 
@@ -3741,32 +4640,26 @@ fn about_wraps_its_description_instead_of_cutting_it() {
     assert!(!line.contains('\u{2026}'), "not cut in the middle\n{s}");
 }
 
-/// F1 at 80 columns: a key's description too long for its row goes on below, under the
-/// description column, instead of running off the edge.
+/// F1 at 80 columns: a description too long for its row is cut with `…` on the row,
+/// never run off the edge or into the next row, and the selected row's is said whole
+/// on the last line.
 #[test]
-fn f1_wraps_long_descriptions_under_their_column() {
+fn f1_cuts_a_long_description_and_says_it_whole_below() {
     let (a, b) = fixture();
-    let s = shot_keys("80x40", "F1", &a, &b);
+    let s = shot_keys("80x40", "F1,q,u,i,t,Space,w,i,t,h,o,u,t", &a, &b);
     let lines: Vec<&str> = s.lines().collect();
     let at = lines
         .iter()
-        .position(|l| l.contains("quit_no_cd"))
-        .expect("the quit_no_cd row");
-    let desc = lines[at].find("Quit, leaving").expect("its description");
-    let next = lines[at + 1];
-    let col = |l: &str, i: usize| l.chars().skip(i).collect::<String>();
-    // Columns by characters: the borders are one character each, like the spaces.
-    let desc_chars = lines[at][..desc].chars().count();
-    assert!(
-        col(next, desc_chars).starts_with("where it was"),
-        "continued under the description\n{s}"
-    );
-    assert!(
-        next.chars().take(desc_chars).skip(1).all(|c| c == ' '),
-        "nothing left of it\n{s}"
-    );
-    // The intro sentence ends on the page too.
-    assert!(s.contains("is the program's."), "{s}");
+        .position(|l| l.contains("Quit without cd"))
+        .unwrap_or_else(|| panic!("the row\n{s}"));
+    assert!(lines[at].contains("Quit, leaving"), "{s}");
+    assert!(lines[at].contains('\u{2026}'), "cut on its row\n{s}");
+    // Not wrapped: the line under it is the last line, with the whole of it.
+    assert!(lines[at + 1].contains("(with --cwd-file)"), "{s}");
+    let whole = lines
+        .iter()
+        .find(|l| l.contains("Quit, leaving the shell where it was (with --cwd-file)"));
+    assert!(whole.is_some(), "whole on the last line\n{s}");
 }
 
 #[test]
@@ -4014,4 +4907,533 @@ fn y_and_cap_y_copy_from_the_viewer_and_control_characters_are_refused() {
     assert!(s.contains("not copied"), "a Ctrl+U in the text\n{s}");
     let s = shot_flags(&["--restricted"], "/,n,o,t,Enter,F3,y", &a, &b);
     assert!(s.contains("restricted mode: no clipboard"), "{s}");
+}
+
+/// A second tab on one pane gives it a tab bar. The pane beside it shows its own bar
+/// too, with its one tab, so the two lists start on the same row.
+#[test]
+fn a_tab_bar_on_one_pane_keeps_both_lists_in_line() {
+    let (a, b) = files(&["alpha.txt"]);
+    let s = shot_keys("100x14", "Ctrl+t", &a, &b);
+    let bars = s.lines().nth(1).unwrap();
+    assert!(
+        bars.contains(" 2 a ") && bars.contains(" 1 b ") && bars.matches('+').count() == 2,
+        "a bar on each pane\n{s}"
+    );
+    let header = s.lines().nth(3).unwrap();
+    assert_eq!(header.matches("Name ").count(), 2, "{s}");
+    // Alone, a pane has no bar.
+    let s = shot("100x14", &a, &b);
+    assert!(s.lines().nth(1).unwrap().starts_with('\u{250c}'), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// xdevtheme, the default, and its style: rounded frames with the title in a notch, the
+/// F keys and the selected tab as slanted segments, a bar on the frame at the cursor's
+/// row. On a 16-colour terminal, none of it: plain frames and keys.
+#[test]
+fn xdevtheme_draws_its_style_and_leaves_it_off_at_16_colours() {
+    let (a, b) = fixture();
+    // No config: the default theme.
+    let at = |colors: &str| {
+        let out = themed()
+            .env("XDEVCMD_COLORS", colors)
+            .args(["--screenshot=110x24", "--keys=Ctrl+t,Down"])
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let s = at("truecolor");
+    assert!(
+        s.contains("\u{256d}\u{2524}"),
+        "a notch in a rounded frame\n{s}"
+    );
+    assert!(s.contains("\u{25e2}1\u{25e4}Help"), "slanted keys\n{s}");
+    assert!(s.contains("\u{25e2}2 "), "the selected tab, slanted\n{s}");
+    assert!(
+        s.lines().any(|l| l.starts_with('\u{258c}')),
+        "the cursor row's bar on the frame\n{s}"
+    );
+    let s = at("16");
+    assert!(
+        !s.contains('\u{256d}') && !s.contains('\u{25e2}') && s.contains(" 1 Help"),
+        "{s}"
+    );
+}
+
+/// The two other looks. Neon: the notch. Glass: no lines (the rows start with a space,
+/// not a frame), the cursor row as a pill, and a box that a program in the terminal
+/// panel draws is left as it drew it.
+#[cfg(unix)]
+#[test]
+fn neon_and_glass_draw_their_styles_and_leave_the_terminal_alone() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("looks-cfg");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+    // A shell that draws a box, then waits.
+    let shell = dir.join("boxer.sh");
+    fs::write(
+        &shell,
+        "#!/bin/sh\nprintf '\\342\\224\\214\\342\\224\\200\\342\\224\\220 boxed\\r\\n'\nsleep 5\n",
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&shell, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let shot = |name: &str| {
+        fs::copy(
+            repo.join(format!("{name}.toml")),
+            dir.join(format!("themes/{name}.toml")),
+        )
+        .unwrap();
+        let cfg = write_config(
+            &dir,
+            &format!(
+                "[theme]\nname = \"{name}\"\n[terminal]\nshell = \"{}\"\n",
+                shell.display()
+            ),
+        );
+        let out = themed()
+            .env("XDEVCMD_CONFIG", &cfg)
+            .env("XDEVCMD_COLORS", "truecolor")
+            .env("XDEVCMD_SCREENSHOT_WAIT_MS", "600")
+            .args(["--screenshot=110x30", "--keys=Down"])
+            .arg(&a)
+            .arg(&b)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let s = shot("xdevtheme-neon");
+    assert!(s.contains("\u{256d}\u{2524}"), "{s}");
+    let s = shot("xdevtheme-glass");
+    let header = s.lines().find(|l| l.contains("Name ")).unwrap();
+    assert!(header.starts_with("  Name"), "no frame on the left\n{s}");
+    assert!(
+        s.lines()
+            .any(|l| l.starts_with('\u{2590}') && l.contains('\u{258c}')),
+        "the cursor row as a pill\n{s}"
+    );
+    assert!(
+        s.contains("\u{250c}\u{2500}\u{2510} boxed"),
+        "the program's box is its own\n{s}"
+    );
+}
+
+/// xdevtheme-light, the light member of the family, as a file in `themes/`: listed in
+/// View → Theme…, it draws the panes and F1 (small and large) on its own white panel,
+/// and `--print-theme` writes it out as a file that draws the same frame.
+#[test]
+fn xdevtheme_light_is_a_theme_that_draws_on_its_white_panel() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("light-cfg");
+    fs::create_dir_all(dir.join("themes")).unwrap();
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+    fs::copy(
+        repo.join("xdevtheme-light.toml"),
+        dir.join("themes/xdevtheme-light.toml"),
+    )
+    .unwrap();
+    let cfg = write_config(&dir, "[theme]\nname = \"xdevtheme-light\"\n");
+    let run = |keys: &str, colour: bool| {
+        let mut c = themed();
+        c.env("XDEVCMD_CONFIG", &cfg)
+            .env("XDEVCMD_COLORS", "truecolor")
+            .args(["--screenshot=110x30", &format!("--keys={keys}")])
+            .arg(&a)
+            .arg(&b);
+        if colour {
+            c.env("XDEVCMD_SCREENSHOT_COLOR", "1");
+        }
+        let out = c.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{keys}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // The panel, #fbfcff, and the background, #eef1f8, as backgrounds.
+    let (panel, background) = ("48;2;251;252;255", "48;2;238;241;248");
+    let s = run("Down,Insert", true);
+    assert!(s.contains(panel) && s.contains(background), "{s}");
+    assert!(
+        !s.contains("48;2;7;9;15"),
+        "not xdevtheme's dark background"
+    );
+    let s = run("Down,Insert", false);
+    assert!(s.contains("\u{256d}\u{2524}"), "xdevtheme's notch\n{s}");
+    for keys in ["F1", "F1,F1"] {
+        let s = run(keys, true);
+        assert!(s.contains(panel), "{keys}\n{s}");
+        assert!(run(keys, false).contains("Commands"), "{keys}");
+    }
+    // View → Theme… lists it.
+    assert!(run("F9,Right,Up,Enter", false).contains("xdevtheme-light"));
+    // Printed, saved under another name and chosen, it draws the same frame.
+    let out = themed()
+        .env("XDEVCMD_CONFIG", &cfg)
+        .args(["--print-theme", "xdevtheme-light"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let printed = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(printed.contains("base = \"light\""), "{printed}");
+    fs::write(dir.join("themes/copy.toml"), &printed).unwrap();
+    // The menu bar's first row carries the process id; the rest must match.
+    let below_menu = |s: String| s.lines().skip(1).collect::<Vec<_>>().join("\n");
+    let before = below_menu(run("Down,Insert,F1", true));
+    write_config(&dir, "[theme]\nname = \"copy\"\n");
+    assert!(
+        below_menu(run("Down,Insert,F1", true)) == before,
+        "the printed copy draws differently\n{printed}"
+    );
+}
+
+/// A config naming a theme whose file was deleted keeps the rest of its settings: the
+/// default theme stands in and the status line says so. `--check-config` still fails.
+#[test]
+fn a_deleted_theme_file_gives_the_default_theme_and_keeps_the_config() {
+    let (a, b) = fixture();
+    let dir = a.parent().unwrap().join("gone-cfg");
+    fs::create_dir_all(&dir).unwrap();
+    // A setting that shows: the menu bar off.
+    let cfg = write_config(
+        &dir,
+        "[general]\nmenu_bar = false\n[theme]\nname = \"was-here\"\n",
+    );
+    let out = themed()
+        .env("XDEVCMD_CONFIG", &cfg)
+        .env("XDEVCMD_COLORS", "truecolor")
+        .args(["--screenshot=110x24", "--keys=Down"])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !s.contains("File   View"),
+        "the config's menu_bar = false holds\n{s}"
+    );
+    assert!(
+        status(&s).contains("\"was-here\" is not there") && status(&s).contains("xdevtheme in use"),
+        "{s}"
+    );
+    assert!(s.contains('\u{256d}'), "the default theme's frames\n{s}");
+    let out = themed()
+        .env("XDEVCMD_CONFIG", &cfg)
+        .arg("--check-config")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no such theme"));
+}
+
+// ── syntax colours in the viewer (Round 028) ─────────────────────────────────────────
+
+/// A colour screenshot at true colour, in the plain look (`dark`), `NO_COLOR` cleared
+/// unless the test sets it.
+fn coloured_shot(
+    keys: &str,
+    a: &std::path::Path,
+    b: &std::path::Path,
+    env: &[(&str, &str)],
+    config: Option<&std::path::Path>,
+) -> String {
+    let mut c = isolated();
+    c.env_remove("NO_COLOR")
+        .env("XDEVCMD_SCREENSHOT_COLOR", "1")
+        .env("XDEVCMD_COLORS", "truecolor");
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    if let Some(cfg) = config {
+        c.arg("--config").arg(cfg);
+    }
+    let out = c
+        .args(["--screenshot=110x20", &format!("--keys={keys}")])
+        .arg(a)
+        .arg(b)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// The colours (foreground, background) in force where `text` first appears in a
+/// colour screenshot.
+fn colours_at(s: &str, text: &str) -> (String, String) {
+    let at = s
+        .find(text)
+        .unwrap_or_else(|| panic!("{text:?} not on screen\n{s}"));
+    let sgr_at = s[..at].rfind("\x1b[").expect("an SGR before it");
+    let sgr = &s[sgr_at + 2..at];
+    let sgr = &sgr[..sgr.find('m').expect("the SGR's end")];
+    let parts: Vec<&str> = sgr.split(';').collect();
+    let mut fg = String::new();
+    let mut bg = String::new();
+    let mut k = 0;
+    while k < parts.len() {
+        match parts[k] {
+            "38" | "48" if parts.get(k + 1) == Some(&"2") => {
+                let rgb = parts[k + 2..k + 5].join(",");
+                if parts[k] == "38" {
+                    fg = rgb;
+                } else {
+                    bg = rgb;
+                }
+                k += 5;
+            }
+            _ => k += 1,
+        }
+    }
+    (fg, bg)
+}
+
+// The dark theme's slots (theme.rs, `Theme::dark`).
+const DARK_TEXT: &str = "199,212,227";
+const DARK_DIM: &str = "101,119,139";
+const DARK_KEYWORD: &str = "197,164,255";
+const DARK_STRING: &str = "126,231,135";
+const DARK_MARK: &str = "255,214,102";
+const DARK_ACCENT: &str = "0,214,190";
+
+const RUST_SAMPLE: &[u8] =
+    b"fn main() {\n    let s = \"hi there\"; // a note\n    /* two\n       lines */ go();\n}\n";
+const PYTHON_SAMPLE: &[u8] =
+    b"@cached\ndef area(r=None):\n    \"\"\"Doc string\n    more of it\"\"\"\n    return 3.14  # pi\n";
+
+#[test]
+fn f3_colours_rust_and_python_by_their_language() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot("Down,F3", &a, &b, &[], None);
+    assert!(s.contains("Rust"), "the title names the language\n{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_KEYWORD);
+    assert_eq!(colours_at(&s, "\"hi there\"").0, DARK_STRING);
+    assert_eq!(colours_at(&s, "// a note").0, DARK_DIM);
+    assert_eq!(
+        colours_at(&s, "lines */").0,
+        DARK_DIM,
+        "a comment over two lines"
+    );
+    assert_eq!(colours_at(&s, "go").0, DARK_ACCENT, "a call");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    let (a, b) = with_file("area.py", PYTHON_SAMPLE);
+    let s = coloured_shot("Down,F3", &a, &b, &[], None);
+    assert!(s.contains("Python"), "{s}");
+    assert_eq!(colours_at(&s, "@cached").0, DARK_MARK);
+    assert_eq!(colours_at(&s, "def").0, DARK_KEYWORD);
+    assert_eq!(
+        colours_at(&s, "more of it").0,
+        DARK_STRING,
+        "a string over two lines"
+    );
+    assert_eq!(colours_at(&s, "# pi").0, DARK_DIM);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn colours_are_off_by_setting_and_under_no_color() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let cfg = write_config(a.parent().unwrap(), "[viewer]\nhighlight = false\n");
+    let s = coloured_shot("Down,F3", &a, &b, &[], Some(&cfg));
+    assert!(!s.contains("Rust"), "{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_TEXT);
+    assert_eq!(colours_at(&s, "// a note").0, DARK_TEXT);
+    // NO_COLOR: nothing lexed. (The screenshot itself keeps the theme's colours: it is
+    // crossterm that leaves colour out on a real terminal.)
+    let s = coloured_shot("Down,F3", &a, &b, &[("NO_COLOR", "1")], None);
+    assert!(!s.contains("Rust"), "{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_TEXT);
+    // Hex view is never coloured, and back to text it is again.
+    let s = coloured_shot("Down,F3,h,h", &a, &b, &[], None);
+    assert_eq!(colours_at(&s, "fn").0, DARK_KEYWORD);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn the_search_term_is_lit_over_the_colours() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot("Down,F3,/,t,h,e,r,e,Enter", &a, &b, &[], None);
+    assert_eq!(colours_at(&s, "there").1, DARK_MARK, "the hit's background");
+    assert_eq!(
+        colours_at(&s, "\"hi ").0,
+        DARK_STRING,
+        "the rest of the string keeps its colour"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A comment opened on the first line and never closed: at the end of a file of 30,000
+/// lines, reached by `G`, the lines are the comment's colour: the scan's checkpoints
+/// carried the state there.
+#[test]
+fn a_jump_to_the_end_is_coloured_from_the_scan() {
+    let mut body = String::from("/* opened here\n");
+    for i in 0..30_000 {
+        body.push_str(&format!("let x{i} = \"not a string, a comment\";\n"));
+    }
+    let (a, b) = with_file("big.rs", body.as_bytes());
+    let s = coloured_shot("Down,F3,G", &a, &b, &[], None);
+    assert!(s.contains("x29999"), "{s}");
+    assert_eq!(colours_at(&s, "let x29999").0, DARK_DIM);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn quick_view_colours_too() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot("Down,Alt+q", &a, &b, &[], None);
+    assert!(s.contains("Rust"), "{s}");
+    assert_eq!(colours_at(&s, "fn").0, DARK_KEYWORD);
+    assert_eq!(colours_at(&s, "\"hi there\"").0, DARK_STRING);
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+#[test]
+fn settings_offers_colouring_source_on_by_default() {
+    let (a, b) = fixture();
+    let s = shot_keys("122x34", "F9,Up,Up,Enter,Tab", &a, &b);
+    let row = s
+        .lines()
+        .find(|l| l.contains("Viewer colours source"))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(row.contains("[x]"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A selected line keeps the search term lit: the selection's background goes round it.
+#[test]
+fn the_search_term_stays_lit_inside_a_selection() {
+    let (a, b) = with_file("main.rs", RUST_SAMPLE);
+    let s = coloured_shot(
+        "Down,F3,drag:10:2:10:2,/,t,h,e,r,e,Enter",
+        &a,
+        &b,
+        &[],
+        None,
+    );
+    assert!(s.contains("1 line selected") || s.contains("/there"), "{s}");
+    assert_eq!(
+        colours_at(&s, "there").1,
+        DARK_MARK,
+        "the hit, not the selection\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+// ── the Smart Planner's confirm table (Round 030) ─────────────────────────────────────
+
+/// A copy onto files that are there: one older, one newer, one identical, one new.
+fn planned_trees() -> (PathBuf, PathBuf) {
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let root = scratch(&format!("plan-{n}"));
+    let _ = fs::remove_dir_all(&root);
+    let (a, b) = (root.join("a"), root.join("b"));
+    aged(&a.join("older.txt"), "new body", 10);
+    aged(&b.join("older.txt"), "old", 3600);
+    aged(&a.join("newer.txt"), "x", 3600);
+    aged(&b.join("newer.txt"), "y", 10);
+    aged(&a.join("same.txt"), "same", 600);
+    aged(&b.join("same.txt"), "same", 600);
+    aged(&a.join("fresh.txt"), "fresh", 10);
+    (a, b)
+}
+
+#[test]
+fn a_copy_onto_files_that_are_there_shows_the_plan_once_per_group() {
+    for size in ["118x34", "80x24", "60x20"] {
+        let (a, b) = planned_trees();
+        let s = shot_keys(size, "*,F5", &a, &b);
+        for line in [
+            "would replace a newer file  [skip]",
+            "would replace an older file  [skip]",
+            "1 already there, identical: left as it is",
+            "Space changes what is done",
+        ] {
+            assert!(s.contains(line), "{size}: {line}\n{s}");
+        }
+        assert!(s.contains("create 1"), "{size}: the summary\n{s}");
+        // The U line of the plain dialog is gone: the table decides per group.
+        assert!(!s.contains("(U changes)"), "{size}\n{s}");
+        // Nothing has been touched while the dialog is open.
+        assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "old");
+    }
+}
+
+/// Round 031: where the trash is on the same volume, a replaced file goes there, the
+/// table says so, and Ctrl+Z puts it back. Linux only: there the trash is the
+/// sandbox's own (XDG_DATA_HOME).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_replaced_file_goes_to_the_trash_and_ctrl_z_brings_it_back() {
+    let (a, b) = planned_trees();
+    let s = shot_keys("118x34", "*,F5,Down,Space", &a, &b);
+    assert!(
+        s.contains("a file replaced goes to the trash: Ctrl+Z brings it back"),
+        "{s}"
+    );
+    let s = shot_keys("118x34", "*,F5,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert!(s.contains("1 replaced (the old one in the trash)"), "{s}");
+    // A new run has no undo of the last one: the copy again on fresh trees, then its
+    // undo, in one run.
+    let (a, b) = planned_trees();
+    let s = shot_keys("118x34", "*,F5,Down,Space,Enter,wait,Ctrl+z", &a, &b);
+    assert!(s.contains("remove the 2 items it made"), "{s}");
+    assert!(
+        s.contains("put back from the trash the 1 it replaced"),
+        "{s}"
+    );
+    let (a, b) = planned_trees();
+    let _ = shot_keys(
+        "118x34",
+        "*,F5,Down,Space,Enter,wait,Ctrl+z,Enter,wait",
+        &a,
+        &b,
+    );
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "old");
+    assert!(!b.join("fresh.txt").exists(), "what the copy made went");
+}
+
+#[test]
+fn the_table_changes_a_group_and_the_copy_does_what_it_says() {
+    let (a, b) = planned_trees();
+    // Down from the first group (newer) to older; Space: replace. Enter, then wait.
+    let s = shot_keys("118x34", "*,F5,Down,Space", &a, &b);
+    assert!(s.contains("would replace an older file  [replace]"), "{s}");
+    assert!(s.contains("would replace a newer file  [skip]"), "{s}");
+    assert!(s.contains("replace 1"), "{s}");
+    let _ = shot_keys("118x34", "*,F5,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert_eq!(
+        fs::read_to_string(b.join("newer.txt")).unwrap(),
+        "y",
+        "kept"
+    );
+    assert_eq!(fs::read_to_string(b.join("fresh.txt")).unwrap(), "fresh");
+}
+
+#[test]
+fn a_copy_with_nothing_to_decide_is_the_dialog_it_always_was() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,Insert,F5", &a, &b);
+    assert!(s.contains("1 file \u{2022} 7 bytes"), "{s}");
+    assert!(s.contains("if a file is there: ask  (U changes)"), "{s}");
+    for not in ["create ", "Space changes", "\u{26a0}", "identical"] {
+        assert!(!s.contains(not), "{not}\n{s}");
+    }
 }

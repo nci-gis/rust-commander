@@ -1,0 +1,29 @@
+# xdevtheme-glass: no lines. Each pane is a card on a dark background, with a header
+# strip lit on the focused one, its path as a pill, and the cursor row as a pill.
+# Pick "xdevtheme-glass" in View > Theme... or with [theme] name = "xdevtheme-glass".
+# On a 16-colour terminal the [style] part is left off.
+base = "dark"
+background = "#04060c"
+panel = "#0d1120"
+bar = "#04060c"
+border = "#1e2540"
+border_active = "#2ee6d0"
+accent = "#2ee6d0"
+text = "#dce3f4"
+text_dim = "#6a7597"
+directory = "#80a8ff"
+executable = "#62f0a6"
+symlink = "#c39bff"
+archive = "#ffb760"
+error = "#ff6390"
+marked = "#ffe27a"
+cursor = "#151a2e"
+cursor_active = "#1b2748"
+
+[style]
+borders = "none"        # cards
+titles = "pill"
+gradient = "#a46bff"
+cursor = "pill"
+keys = "caps"
+shadow = "dim"

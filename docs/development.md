@@ -40,6 +40,38 @@ XDEVCMD_SOAK_SECS=600 cargo test --release --test pty -- --ignored soak --nocapt
 Uses xdevcmd heavily for ten minutes and fails if memory keeps growing. Linux only.
 Samples go to `target/tmp/soak-rss.csv`.
 
+## Benchmarks
+
+`cargo xtask bench` measures xdevcmd the same way every time and keeps the numbers, so a
+change can be compared with what came before instead of guessed at:
+
+```bash
+cargo xtask bench --quick --host my-laptop        # a minute or two
+cargo xtask bench --host my-laptop                # the full set, before a release
+cargo xtask bench --host my-laptop --save-baseline
+```
+
+It builds the release binary and runs each case five times (`--runs N`) after a warm-up,
+printing the median, p95, best and peak memory, and the change from this host's
+baseline, marked past ±15 %:
+
+- the package: the binary's size, the crates in `Cargo.lock`;
+- listing and sorting 10,000 and 100,000 entries;
+- the copy planner on 10,000, 100,000 and 200,000 files;
+- copying many small files and one large file; replacing small files (each synced
+  before its rename, the old one to a trash of the run's own); undoing a copy;
+- start-up to the first frame and the terminal check, in a terminal that answers and one
+  that does not (from `--timings`), and the CPU used while idle (Linux).
+
+Each case runs in a child process on trees made from a fixed recipe in a temporary
+directory, never your files. Results go to `bench/` (its README says which file is
+which); `--host` names the machine in them, and nothing is read from the system to name
+it. Two machines' numbers are not comparable, nor a busy machine's (the load is printed
+first). CI does not compare times, which vary too much on shared runners: it keeps hard
+budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
+(everything but the terminal check under 1 s, a debug build: an order of magnitude over
+the 150 ms budget, which is for `cargo xtask bench` on a release build).
+
 ## Docs that are generated
 
 - `docs/keys.md`: `xdevcmd --print-keys > docs/keys.md`. A test fails if it is out of date.
@@ -118,15 +150,16 @@ so **every `cargo release` before step 5 says `--no-publish`**.
    ```
 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
-   dated CHANGELOG section agree and that the tag is on `main`, then builds Linux (x86_64
+   dated CHANGELOG section agree and that the tag is on `main`
+   (`scripts/release-check.sh`), then builds Linux (x86_64
    glibc and static musl, ARM64 static musl), macOS (ARM and Intel) and Windows, and opens
    a **draft** release with the archives (each holding `LICENSE`, `README.md`,
-   `THIRD-PARTY.md` and the example `themes/`),
+   `THIRD-PARTY.md`, the example `themes/` and this version's `docs/`),
    `SHA256SUMS`, and that CHANGELOG section as its notes.
    Read it, then Publish.
 5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a
    crates.io token kept on the owner's machine, never in a workflow). Check first that
-   `cargo package --workspace` passes (CI does it on Linux):
+   `cargo package --workspace --exclude xtask` passes (CI does it on Linux):
 
    ```bash
    cargo release publish                 # look: xdevcmd-core, then xdevcmd
@@ -138,8 +171,51 @@ so **every `cargo release` before step 5 says `--no-publish`**.
 6. **Scoop and winget**, from the published release's `SHA256SUMS`: see
    [packaging/README.md](../packaging/README.md).
 
+## Pre-releases
+
+A beta or release candidate (`0.4.0-beta.1`, `0.4.0-rc.1`) goes to **GitHub only**,
+marked pre-release, never "Latest"; crates.io, Scoop, winget and binstall wait for the
+release itself (a version on crates.io can never be deleted, and package managers have
+no beta channel worth keeping). It is cut from `dev`, without a pull request into
+`main`. Semver orders them `0.4.0-beta.1 < 0.4.0-beta.2 < 0.4.0-rc.1 < 0.4.0`.
+
+1. **Try the rules first** (nothing is built): Actions → release → Run workflow, with
+   the tag to be (or `gh workflow run release --ref dev -f tag=v0.4.0-beta.1`). Before
+   step 2 it fails on the version and the CHANGELOG, as it should; the branch rule is
+   what this tries. Locally: `scripts/release-check.sh v0.4.0-beta.1 origin/dev`.
+2. **On `dev`**, the version and the dated notes, never published:
+
+   ```bash
+   cargo release 0.4.0-beta.1 --no-tag --no-push --no-publish            # look
+   cargo release 0.4.0-beta.1 --no-tag --no-push --no-publish --execute
+   git push origin dev
+   ```
+
+   The CHANGELOG heading becomes `## [0.4.0-beta.1] - <date>`, holding everything
+   since the last release; the next pre-release gets its own short section. At the
+   release (0.4.0), its section says everything since the last release again, in full,
+   so each release page reads on its own.
+3. **Tag `dev`** and push the tag:
+
+   ```bash
+   cargo release tag --execute
+   git push origin v0.4.0-beta.1
+   ```
+
+4. **The `release` workflow** checks the tag (`scripts/release-check.sh`: a pre-release
+   on `dev` or `main`), builds the six archives and opens a **draft marked
+   pre-release**. Read it, then Publish. Help → Documentation in that build links the
+   tag's `docs/`.
+5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop and winget
+   (step 6). Every `cargo release` here says `--no-publish`.
+
+A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1`,
+`git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.
+A published pre-release is not deleted: the next one supersedes it.
+
 CI runs on pushes to `dev` and `main` and on pull requests into them; the `release`
-workflow runs only for a `v*` tag on `main`. A change to the packaging
+workflow runs only for a `v*` tag (a release on `main`, a pre-release on `dev` or
+`main`), or by hand to check a tag's rules. A change to the packaging
 (`release.yml`, `about.toml`, `about.hbs`) is therefore first exercised by the next
 tag. If that run fails, nothing is released: fix it on `dev`, merge, delete the tag
 (`git push origin :v0.2.0` and `git tag -d v0.2.0`) and tag `main` again.

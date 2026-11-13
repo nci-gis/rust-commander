@@ -7,17 +7,23 @@
 mod app;
 mod bookmarks;
 mod cli_docs;
+mod commands;
 mod config;
 mod config_edit;
+mod config_view;
 mod crash;
+mod decor;
+mod docs;
+mod eta;
 mod find_dialog;
 mod git;
 mod graphics;
-mod help;
 mod keyfix;
 mod keys;
 mod layout;
 mod line_edit;
+mod links;
+mod lists;
 mod look;
 mod menu;
 mod modal;
@@ -30,6 +36,7 @@ mod scrollbar;
 mod search;
 mod session;
 mod settings_dialog;
+mod startup;
 mod tempfiles;
 mod theme;
 mod usage;
@@ -64,6 +71,7 @@ pub(crate) const USAGE: &str = "\
 Usage:
   xdevcmd [LEFT] [RIGHT]       start with these directories in the two panes
   xdevcmd --no-restore         start fresh instead of reopening the last session
+  xdevcmd --timings            say how long start-up took (status line, and stderr at the end)
   xdevcmd --read-only          xdevcmd writes nothing: no copy, move, delete, rename, edit
   xdevcmd --restricted         read-only, and no shell, no editor, no clipboard
   xdevcmd --root DIR           never navigate above DIR
@@ -72,7 +80,7 @@ Usage:
                                shell function can cd there (Q quits without it)
   xdevcmd --config PATH        use this config file instead of the default one
   xdevcmd --print-config       print every setting at its default, ready to save
-  xdevcmd --print-theme NAME   print a built-in theme as a file, to start your own
+  xdevcmd --print-theme NAME   print a theme as a file, to start your own
   xdevcmd --print-keys         print every key as Markdown (as configured)
   xdevcmd --print-completions SHELL   completions for bash, zsh, fish or powershell
   xdevcmd --print-man          print the manual page (roff): xdevcmd --print-man | man -l -
@@ -82,11 +90,12 @@ Usage:
   xdevcmd --screenshot[=WxH]   render one frame as plain text and exit
           --keys=F8,Enter      with --screenshot: type these keys first; mouse too:
                                click:X:Y rclick:X:Y ctrl-click:X:Y drag:X1:Y1:X2:Y2
-                               wheel:X:Y:N move:X:Y
+                               wheel:X:Y:N move:X:Y; wait (for running jobs to end)
   xdevcmd --version            print the version and exit
   xdevcmd --help               print this and exit
 
-Press F1 inside xdevcmd for every key and setting as currently configured.
+Press F1 inside xdevcmd for every command and its key, as currently configured;
+Help > Config in use shows the settings in effect.
 
 Config file, first match wins:
   $XDEVCMD_CONFIG
@@ -96,7 +105,7 @@ Config file, first match wins:
 
   mkdir -p ~/.config/xdevcmd && xdevcmd --print-config > ~/.config/xdevcmd/config.toml
 
-Your own theme starts from a built-in one (dark, light, ansi, blue, high-contrast):
+Your own theme starts from a built-in one (xdevtheme, dark, light, ansi, blue, high-contrast):
   mkdir -p ~/.config/xdevcmd/themes
   xdevcmd --print-theme dark > ~/.config/xdevcmd/themes/mine.toml
 ";
@@ -115,6 +124,7 @@ struct Cli {
     show_keys: bool,
     check_config: bool,
     no_restore: bool,
+    timings: bool,
     read_only: bool,
     restricted: bool,
     root: Option<PathBuf>,
@@ -151,6 +161,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "--show-keys" => cli.show_keys = true,
             "--check-config" => cli.check_config = true,
             "--no-restore" => cli.no_restore = true,
+            "--timings" => cli.timings = true,
             "--read-only" => cli.read_only = true,
             "--restricted" => cli.restricted = true,
             "--root" => {
@@ -186,6 +197,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
 }
 
 fn main() -> Result<()> {
+    let mut clock = startup::Clock::start();
     crash::mark_main();
     let cli = match parse_cli() {
         Ok(c) => c,
@@ -244,8 +256,19 @@ fn main() -> Result<()> {
     tempfiles::sweep();
 
     let (mut settings, outcome) = config::load(cli.config.as_deref());
+    clock.mark("config");
     if cli.check_config {
         match &outcome {
+            // The app starts with the default theme in its place, but a check says so.
+            Outcome::Loaded(_) if settings.theme_note.is_some() => {
+                // The whole reason, with the themes there are.
+                let why = config::named_theme(&settings.config.theme.name)
+                    .err()
+                    .or_else(|| settings.theme_note.clone())
+                    .unwrap_or_default();
+                eprintln!("{why}");
+                std::process::exit(1);
+            }
             Outcome::Loaded(p) => emit(&format!("ok: {}\n", p.display())),
             Outcome::NoFile => match config::default_path() {
                 Some(p) => emit(&format!("no config at {} — defaults in use\n", p.display())),
@@ -277,6 +300,7 @@ fn main() -> Result<()> {
     }
     .unwrap_or_else(|| xdevcmd_core::color::detect(|k| std::env::var(k).ok(), cfg!(windows)));
     settings.depth = depth;
+    decor::set_depth(depth);
     theme::init(if depth == xdevcmd_core::color::Depth::Ansi16 {
         settings.theme16
     } else {
@@ -370,6 +394,8 @@ fn main() -> Result<()> {
         None => App::new(&left, &right, settings, outcome),
     };
     app.cwd_file = cli.cwd_file.clone();
+    clock.mark("panes");
+    app.timings = startup::wanted(cli.timings, std::env::var("XDEVCMD_TIMINGS").ok());
 
     if let Some((w, h)) = cli.screenshot {
         return screenshot(app, w, h, &cli.keys);
@@ -383,10 +409,11 @@ fn main() -> Result<()> {
             );
             std::process::exit(1);
         }
-        Nested::Note(pid) => app.say(format!(
-            "started from the terminal panel of xdevcmd {pid}: if this is that panel, \
-             F12 there goes back to it"
-        )),
+        Nested::Ask(pid) => {
+            if !start_anyway(pid) {
+                std::process::exit(1);
+            }
+        }
         Nested::No => {}
     }
 
@@ -402,6 +429,9 @@ fn main() -> Result<()> {
         // as keys.
         app.probe = graphics::probe(Duration::from_millis(1500));
     }
+    clock.mark("terminal check");
+    app.startup = clock;
+    let timings = app.timings;
     let mut terminal = ratatui::Terminal::new(
         quiet::Quiet::new(ratatui::backend::CrosstermBackend::new(stdout())).with_depth(depth),
     )?;
@@ -443,6 +473,11 @@ fn main() -> Result<()> {
 
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
+    if timings {
+        if let Some(json) = startup::last_json() {
+            eprintln!("xdevcmd startup {json}");
+        }
+    }
     result
 }
 
@@ -468,38 +503,112 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     app.tick();
     // Draw once before any input: clicks hit-test against where things were drawn.
     terminal.draw(|f| app.draw(f))?;
+    let finish_jobs = |app: &mut App| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while (app.job_working() || app.syntax_waiting()) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            app.tick();
+        }
+    };
     for input in parse_inputs(keys) {
         match input {
             Input::Key(k) => app.feed_key(k),
             Input::Mouse(m) => app.feed_mouse(m),
+            Input::Wait => finish_jobs(&mut app),
         }
         // Let a job that an input started make progress, then redraw so the next
         // click lands on what is now on screen.
         std::thread::sleep(Duration::from_millis(30));
         app.tick();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while app.planning() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+            app.tick();
+        }
         terminal.draw(|f| app.draw(f))?;
     }
     // A job the last key started finishes before the frame is taken (a slow machine
     // took longer than the pause above), unless it waits on a question to show.
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while app.job_working() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-        app.tick();
-    }
-    terminal.draw(|f| app.draw(f))?;
+    finish_jobs(&mut app);
+    // The frame as drawn, not the backend's copy: the backend gets only what changed,
+    // and the cell a wide character covers is never sent, so it kept a letter from an
+    // earlier frame ("【E LIFE】d…" on the status line).
+    let frame = terminal.draw(|f| app.draw(f))?;
 
-    let buf = terminal.backend().buffer();
+    let buf = frame.buffer;
+    // XDEVCMD_SCREENSHOT_COLOR=1 keeps the colours, as SGR sequences: for looking at a
+    // theme without a terminal (`less -R`, or converted to a page).
+    let colour = std::env::var_os("XDEVCMD_SCREENSHOT_COLOR").is_some_and(|v| v == "1");
     let mut out = String::new();
     for y in 0..h {
         let mut line = String::new();
+        let mut last = None;
+        // The cells a wide character covers: the buffer keeps a blank in each. The plain
+        // frame keeps it, so a character's place in the line is its column (the tests
+        // count on it); the colour one is for looking at, so it drops it as a terminal
+        // would.
+        let mut covered = 0;
         for x in 0..w {
-            line.push_str(buf.cell(Position::new(x, y)).map_or(" ", |c| c.symbol()));
+            if covered > 0 {
+                covered -= 1;
+                continue;
+            }
+            let Some(cell) = buf.cell(Position::new(x, y)) else {
+                line.push(' ');
+                continue;
+            };
+            if colour {
+                covered = unicode_width::UnicodeWidthStr::width(cell.symbol()).saturating_sub(1);
+            }
+            if colour {
+                let sgr = sgr_of(cell);
+                if last.as_ref() != Some(&sgr) {
+                    line.push_str(&sgr);
+                    last = Some(sgr);
+                }
+            }
+            line.push_str(cell.symbol());
         }
-        out.push_str(line.trim_end());
+        if colour {
+            line.push_str("\x1b[0m");
+        } else {
+            line.truncate(line.trim_end().len());
+        }
+        out.push_str(&line);
         out.push('\n');
     }
     emit(&out);
     Ok(())
+}
+
+/// One cell's colours and weight as an SGR sequence, for a colour screenshot.
+fn sgr_of(cell: &ratatui::buffer::Cell) -> String {
+    use ratatui::style::{Color, Modifier};
+    fn colour(c: Color, base: u8) -> String {
+        match c {
+            Color::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", base + 8),
+            Color::Indexed(i) => format!("{};5;{i}", base + 8),
+            Color::Reset => format!("{}", base + 9),
+            named => {
+                let i = (0..16u8).find(|&i| theme::ansi(i) == named).unwrap_or(7);
+                format!("{};5;{i}", base + 8)
+            }
+        }
+    }
+    let mut s = format!("\x1b[0;{};{}", colour(cell.fg, 30), colour(cell.bg, 40));
+    for (m, code) in [
+        (Modifier::BOLD, ";1"),
+        (Modifier::DIM, ";2"),
+        (Modifier::ITALIC, ";3"),
+        (Modifier::UNDERLINED, ";4"),
+        (Modifier::REVERSED, ";7"),
+    ] {
+        if cell.modifier.contains(m) {
+            s.push_str(code);
+        }
+    }
+    s.push('m');
+    s
 }
 
 /// Whether xdevcmd is starting inside its own terminal panel.
@@ -508,9 +617,9 @@ enum Nested {
     No,
     /// This is that panel's terminal: it would run inside itself.
     Refuse(u32),
-    /// Started from a panel, but which terminal this is cannot be told (Windows): start,
-    /// and say so.
-    Note(u32),
+    /// Started from a panel, but which terminal this is cannot be told (Windows): ask
+    /// before starting.
+    Ask(u32),
 }
 
 /// [`own_panel`] with what this process has: its variables, its terminal's name and,
@@ -548,8 +657,8 @@ fn own_panel_here() -> Nested {
 /// (`code .`, `kitty &`, `wt`) and a tmux started there included; only the same terminal
 /// is the panel. Unix compares the names; a panel's xdevcmd that has ended, or a value
 /// that is not a pid, does not count. Without names (Windows, or a shell from a build
-/// that did not set the tty) a live pid is all there is: Unix refuses as before, Windows,
-/// which cannot ask, starts and says so.
+/// that did not set the tty) a live pid is all there is: Unix refuses as before; Windows,
+/// which cannot ask the system, asks the user ([`start_anyway`]).
 fn own_panel(
     pid: Option<&str>,
     tty: Option<&str>,
@@ -568,8 +677,38 @@ fn own_panel(
         (_, Some(t), Some(m)) if t == m => Nested::Refuse(pid),
         (_, Some(_), _) => Nested::No,
         (Some(true), None, _) => Nested::Refuse(pid),
-        (None, None, _) => Nested::Note(pid),
+        (None, None, _) => Nested::Ask(pid),
     }
+}
+
+/// Windows, started from the terminal panel of xdevcmd `pid`: that panel, or a new window
+/// opened from it (`start cmd`), which Windows does not tell apart. Asks on the terminal
+/// before anything is drawn; Enter is no. With no one to ask (input not a terminal),
+/// starts.
+fn start_anyway(pid: u32) -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return true;
+    }
+    let mut err = std::io::stderr().lock();
+    let _ = write!(
+        err,
+        "This shell runs inside xdevcmd {pid}: in its terminal panel, or in a window \
+         opened from that panel.\nF12 in that panel goes back to its files.\n\
+         Start another xdevcmd here? [y/N] "
+    );
+    let _ = err.flush();
+    let mut answer = String::new();
+    if stdin.lock().read_line(&mut answer).is_err() {
+        return false;
+    }
+    said_yes(&answer)
+}
+
+/// `y` or `yes`, in any case, around spaces; anything else, Enter included, is no.
+fn said_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 /// Write to stdout. A reader that stops early (`xdevcmd --screenshot | head`) ends xdevcmd
@@ -590,14 +729,22 @@ fn emit(text: &str) {
 enum Input {
     Key(KeyEvent),
     Mouse(MouseEvent),
+    /// Until the running jobs end (or ask something), as before the frame is taken.
+    Wait,
 }
 
 /// `F5`, `S-F8`, `A-s`, `PageDown`, `Enter`, `x` — the same names the config accepts,
 /// plus `S-` / `C-` / `A-` shorthands — and mouse tokens: `click:X:Y`, `rclick:X:Y`,
-/// `ctrl-click:X:Y`, `shift-click:X:Y`, `drag:X1:Y1:X2:Y2`, `wheel:X:Y:N`, `move:X:Y`.
+/// `ctrl-click:X:Y`, `shift-click:X:Y`, `drag:X1:Y1:X2:Y2`, `wheel:X:Y:N`, `move:X:Y`; and
+/// `wait`, for the jobs started so far to end before the next input (a copy's own
+/// "1 copied" otherwise lands on whatever the next key says, on a slow machine).
 fn parse_inputs(spec: &str) -> Vec<Input> {
     let mut out = Vec::new();
     for tok in spec.split(',').filter(|s| !s.is_empty()) {
+        if tok == "wait" {
+            out.push(Input::Wait);
+            continue;
+        }
         if let Some(events) = parse_mouse(tok) {
             out.extend(events.into_iter().map(Input::Mouse));
             continue;
@@ -803,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn without_terminal_names_unix_refuses_and_windows_says_so() {
+    fn without_terminal_names_unix_refuses_and_windows_asks() {
         // A shell from a build that set only the pid: as before.
         assert_eq!(
             own_panel(Some("41"), None, Some(PTS), 99, |_| Some(true)),
@@ -813,10 +960,20 @@ mod tests {
             own_panel(Some("41"), Some(""), Some(PTS), 99, |_| Some(true)),
             Nested::Refuse(41)
         );
-        // Windows: no names, no asking.
+        // Windows: no names, and the system cannot be asked: the user is.
         assert_eq!(
             own_panel(Some("41"), None, None, 99, |_| None),
-            Nested::Note(41)
+            Nested::Ask(41)
         );
+    }
+
+    #[test]
+    fn only_yes_starts_another() {
+        for yes in ["y\r\n", "Y\n", "yes", " YES \r\n"] {
+            assert!(said_yes(yes), "{yes:?}");
+        }
+        for no in ["", "\r\n", "n\r\n", "no", "yy", "ye", "sure"] {
+            assert!(!said_yes(no), "{no:?}");
+        }
     }
 }

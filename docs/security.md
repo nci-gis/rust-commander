@@ -77,9 +77,10 @@ Alt+Y sync, extracting (F5 inside an archive, Alt+F9), Alt+F5 pack, and Shift+F2
 many, whose files spend a moment under temporary names. Not covered, because nothing
 can be: Shift+F8 (there is nothing to keep), and F4 (your editor writes the file).
 
-**What it guarantees.** However xdevcmd ends — a crash, `kill -9`, a power cut — no file
-is ever left cut short under its real name: the real name holds either the old file
-or the complete new one. The next start finds the journal of the run that ended, removes
+**What it guarantees.** However xdevcmd itself ends — a crash, `kill -9` — no file is
+ever left cut short under its real name: the real name holds either the old file or
+the complete new one. A power cut is different, and is below ("What survives a power
+cut"). The next start finds the journal of the run that ended, removes
 its temporary files, puts rename many's files back under their names, and offers to
 continue the job. Continuing skips what is already there and identical (same size and
 date: what the first run finished), starts again the file that was cut short, and asks
@@ -88,6 +89,90 @@ the first time is asked about again, not replaced because its source is newer. A
 continues with the sources still there; a source whose identical copy is already at the
 destination (a move across drives stopped between the copy and the removal) is left
 where it is, and the summary says so. A delete continues with what is left.
+
+**When the journal cannot be written.** A journal that cannot be made (its directory
+read-only, the disk full) is asked about before the job does anything: **Stop** (the
+default, and Esc) leaves everything as it is; **Continue without the journal** runs the
+job as with safe operations off, and its summary says so. A journal that fails part-way
+is asked about the same way before the next step that cannot be undone (a file
+replaced, a source removed), once per job; a journal that failed once is never trusted
+again, even if a later line would go through. Rename many without its journal renames
+nothing and says why, with **rename anyway** to go on without it.
+
+**What is synced, and when** (Round 029). Writing a file and renaming it is not enough
+for a power cut: the system may put the rename on disk before the data. So, with safe
+operations on or off:
+- **A file replaced** (a copy over an older one, Alt+Y, extract over a file, pack over
+  an archive, Save as… over a file) has its new data synced to the disk, the file still
+  open, before it is renamed over the old one; with safe operations on, the journal's
+  line for it is synced in between. A sync that fails removes the new file and keeps
+  the old one; Retry copies it again from its source rather than trusting a second sync
+  of the same file (on Linux a failed sync can drop the data and clear the error).
+- **A move across drives** removes a source only once its copy is on disk: the copy's
+  data synced, then its folder (so its name survives too), then the journal's line
+  saying both exist, and only then the source. This is done 64 files (or 64 MiB) at a
+  time: one sync per file cost a move of 10,000 small files eight times its time onto a
+  disk, batched it is about two and a half (measured on Linux; about three on GitHub's
+  macOS machine). A copy that cannot be synced is removed and its source kept.
+- **The journal** is synced, with its folder, when a job starts, and before each step
+  that cannot be undone.
+- **Not synced, on purpose:** a new file copied onto the same drive, and the end of a
+  job. Syncing every new file would make a copy of many small files several times
+  slower, for a protection only a power cut needs.
+
+**What survives a kill, and what survives a power cut.**
+- A **kill** (`kill -9`, a crash, the terminal closed): with safe operations on, never a
+  short file under a real name; the next start tidies up and offers to continue. A move
+  across drives killed after a copy was synced and before its source was removed says
+  so at the next start ("copied completely … both are kept"), and removes neither.
+- A **power cut**: a file replaced is the old one or the complete new one; a source moved
+  across drives is never gone before its copy is on disk. But a **new** file copied
+  just before the cut (not synced, by the rule above) can be short or empty under its
+  real name, and continuing the job takes a file of the right size and date for done
+  without reading it. If the power went during a big copy of new files, check them (or
+  copy again with "replace all"). A later version will copy again what a run that died
+  in a power cut had made itself.
+
+**Replaced only if it is still the file you agreed to.** The answer to "Already exists"
+is about the file it showed: right before replacing it, xdevcmd looks again (size,
+date, and on Unix which file it is), and if another program changed or replaced it
+meanwhile, asks again ("It changed since you answered"). Alt+Y's plan, and F5/F6's
+(the table before a copy or move starts), do the same for each file they said they
+would replace; a file the plan said to leave is left, whatever is there by then.
+
+**A file replaced goes to the trash first** (Round 031), where the trash is on the
+same drive (see the guide for which drives): the new file is complete and synced under
+a temporary name, the journal says which temporary file replaces which, the old file
+goes to the trash, and the new one is renamed in. A rename that fails then puts the old
+file back. A kill between the trash and the rename leaves nothing under the name for a
+moment; the next start renames the complete new file in and says so ("1 replacement
+finished … the old one is in the trash"). Undoing a copy removes only what is still the
+file it made (size, date and, on Unix, which file it is) and brings the replaced file
+back from the trash; a folder the copy made goes only once empty.
+
+**The plan's decisions survive a kill.** With safe operations on, a copy or move from
+the table writes its decisions to the journal before its first step (which files to
+leave, which to replace and what each one was), and marks each source as it finishes
+it. Continuing it after a kill leaves the finished sources and carries out the same
+decisions without asking again; a file to be replaced that has changed since is asked
+about, as above. Files are "identical" when size and date agree (within a FAT drive's
+two seconds), as rsync's and robocopy's quick check: the content is not read. "Overwrite all" and "Update" are rules, applied to whatever is there. What no
+program can close without a rename that compares first: another program replacing the
+file in the microseconds between that last look and the rename.
+
+**Windows.** A folder cannot be synced on Windows without code xdevcmd does not use
+(no `unsafe`, no extra library), so the folder steps above are skipped there. NTFS
+journals its names, so a rename is either there or not after a crash, but the newest
+renames may be lost: a move across drives on Windows relies on that. On FAT drives and
+some network shares a rename that must not replace anything is a check followed by a
+rename, with the same kind of small window.
+Also on Windows, the look at a file before replacing it compares size, modification
+time and creation time only (there is no file number to compare without that same
+code): another file put there with all three the same is not told apart.
+
+**Network drives.** Some network file systems cannot sync a folder at all; xdevcmd then
+takes the folder as having nothing to sync, so on such a drive a copy's name rests on
+the server, as a moved file's name did before.
 
 **What happens whatever the setting.** A file being *replaced* is always written under
 a temporary name first, so cancelling never loses the old one. Closing the terminal or
@@ -111,13 +196,18 @@ cleaned up; if one is stuck after five seconds (a hung network drive) it asks ag
   can leave it short.
 - Measured on Linux (2026-11-08): copying 10,000 files of 1 KiB took about 9 µs more
   per file (the rename); one large file, no difference.
+- macOS: a sync there is a full flush of the drive's own cache (`F_FULLFSYNC`, which is
+  what Rust's file sync does on Apple systems); about 0.7 ms per small file on GitHub's
+  macOS machines, more on a slow USB stick.
+- Compare (Alt+K, Alt+Y) never takes a folder it could not read for an empty one: such
+  a folder is a row with ⚠, and nothing under it is copied either way.
 
 ## Safe modes
 
 | | normal | read-only | restricted |
 |---|---|---|---|
 | copy, move, delete, rename, edit | yes | no | no |
-| saves anything (session, bookmarks, File → Settings…) | yes | no | no |
+| saves anything (session, bookmarks, File → Settings…, a terminal tab's log) | yes | no | no |
 | open files in other programs, run a file as a program | yes | no | no |
 | view and browse | yes | yes | yes |
 | terminal, clipboard | yes | yes | no |
@@ -160,6 +250,26 @@ What xdevcmd learns about the shell, and how far it trusts each source
     wins. On Windows, then, a program that prints a prompt mark can make itself look
     idle. If that matters to you there, set `[terminal] send_when_idle = false`, and
     every send asks.
+- **Paths printed in the shell's output** (the history's Tab, Enter, F3, F4) are found
+  in text any program can print. They are only offered: nothing opens until a key is
+  pressed on one, its full path is shown first, it must exist on this machine (paths
+  on another, `\\server\…` or `//host/…`, are never looked up, so a lookup cannot
+  hang), and it is checked as from a file pane: inside the root, and F4 off in the
+  read-only modes. A directory taken from the prompt marks only ever resolves a
+  relative path; it is read from the system where it can be (Linux), at the prompt.
+- **A list from the output** (`p` in the history) holds only names found in that
+  text, which any program can print. Each row must exist on this machine and lie inside
+  the root; the list stays in memory; and deleting from a list says, in the
+  confirmation, which list the names came from. No list is made while ssh runs in the
+  shell, whose output names another machine's files.
+- **The shell's output stays in memory** (Shift+F12, lists), never written to disk,
+  unless you turn on a log for that tab (its menu's Log to file…). A log keeps
+  **everything the shell prints**: a password typed at a prompt that does not echo it
+  is not in it, but a token, a key or customer data that a command prints is. New log
+  files are created readable by you only (`0600`; Windows: the folder's permissions);
+  appending to an existing file keeps its permissions, and xdevcmd says so when others
+  can read it. A link, FIFO or device at the chosen name is refused, and so is a file
+  another user owns (Unix). Off in the read-only modes. Nothing is logged unless you ask, per tab.
 - **What is typed** is always quoted for the shell by `safety.rs`; a name with a control
   character, or one that shell cannot be given safely, is refused whole. Names are
   wrapped in bracketed paste when the shell asked for it, so its line editor takes them

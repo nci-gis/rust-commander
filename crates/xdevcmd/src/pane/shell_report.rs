@@ -153,7 +153,32 @@ pub(crate) fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
     String::from_utf8(b).ok().map(PathBuf::from)
 }
 
-/// The vt100 callbacks of one shell: the last directory and prompt mark it reported.
+/// A command the shell ran, from its `133;C` mark: the line its output starts on, and
+/// the directory it ran in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Command {
+    /// The line's number since the shell started, counting the lines the history has
+    /// dropped: it never drifts as old lines go.
+    pub line: u64,
+    pub dir: Option<PathBuf>,
+}
+
+/// The commands kept, the newest last; older ones are forgotten.
+const COMMANDS_KEPT: usize = 200;
+
+/// Counts the line breaks written to it, and keeps nothing.
+#[derive(Default)]
+struct Breaks(u64);
+
+impl std::fmt::Write for Breaks {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0 += s.bytes().filter(|&b| b == b'\n').count() as u64;
+        Ok(())
+    }
+}
+
+/// The vt100 callbacks of one shell: the last directory and prompt mark it reported,
+/// and where each command it ran began.
 #[derive(Debug, Default)]
 pub struct ShellReports {
     /// This machine's name, for OSC 7's host.
@@ -169,6 +194,21 @@ pub struct ShellReports {
     /// ignored — printed by `cat` of a file in a shell that sends none, it would make
     /// the shell look busy until it ended.
     pub prompted: bool,
+    /// The shell's process, once started: on Linux its directory is read from `/proc`
+    /// at each prompt, rather than taken from what the output claims.
+    pid: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
+    /// The lines the history has dropped off its top so far (or `clear` erased), as
+    /// line breaks: the rows vt100 hands [`vt100::Callbacks::on_scroll`], written out
+    /// as a capture would write them, so a long line wrapped over rows counts once.
+    dropped: u64,
+    /// That capture's state: whether the last dropped row ended its line.
+    stream: vt100::capture::BasicFormattedCaptureState,
+    /// The commands run, oldest first.
+    pub commands: std::collections::VecDeque<Command>,
+    /// The shell's directory at its last prompt (`133;A`). Read then, while the shell
+    /// waits for a line, not when the command starts: the output is parsed behind the
+    /// shell, which may have run `cd` by the time its `133;C` is read.
+    prompt_dir: Option<PathBuf>,
 }
 
 impl ShellReports {
@@ -178,6 +218,66 @@ impl ShellReports {
             windows,
             ..Self::default()
         }
+    }
+
+    /// Read the shell's directory from the system when a command starts (Linux).
+    pub fn with_pid(mut self, pid: std::sync::Arc<std::sync::atomic::AtomicU32>) -> Self {
+        self.pid = Some(pid);
+        self
+    }
+
+    /// The directory a command starting now runs in: on Linux the shell's, from
+    /// `/proc`; elsewhere the last one the shell reported.
+    fn dir_now(&self) -> Option<PathBuf> {
+        #[cfg(target_os = "linux")]
+        if let Some(pid) = self
+            .pid
+            .as_ref()
+            .map(|p| p.load(std::sync::atomic::Ordering::Relaxed))
+            .filter(|&p| p != 0)
+        {
+            return std::fs::read_link(format!("/proc/{pid}/cwd")).ok();
+        }
+        self.dir.clone()
+    }
+
+    /// The history's text as a capture gives it, and the number of its first line in
+    /// the count [`Command::line`] uses.
+    pub fn history(&self, screen: &vt100::Screen) -> (String, u64) {
+        let mut basic = String::new();
+        let mut state = self.stream.clone();
+        let _ = screen.write_contents_formatted_basic(
+            &mut basic,
+            vt100::capture::BasicFormattedCaptureRange::Full(&mut state),
+        );
+        // The last dropped row did not end its line: the capture starts by ending it.
+        let pending = basic.starts_with('\n');
+        let mut text: String = vt100::capture::basic_formatted_to_plain(&basic).collect();
+        if pending {
+            text.remove(0);
+        }
+        (text, self.dropped + u64::from(pending))
+    }
+
+    /// A `133;C`: the command's output starts on the cursor's row.
+    fn command_starts(&mut self, screen: &vt100::Screen) {
+        let mut breaks = Breaks::default();
+        let mut state = self.stream.clone();
+        let _ = screen.write_contents_formatted_basic(
+            &mut breaks,
+            vt100::capture::BasicFormattedCaptureRange::Full(&mut state),
+        );
+        // The last row's line is the `breaks`-th after those dropped; the rows below the
+        // cursor are blank, a line each.
+        let (rows, _) = screen.size();
+        let (row, _) = screen.cursor_position();
+        let below = u64::from(rows.get().saturating_sub(1).saturating_sub(row));
+        let line = (self.dropped + breaks.0).saturating_sub(below);
+        let dir = self.prompt_dir.clone().or_else(|| self.dir_now());
+        if self.commands.len() == COMMANDS_KEPT {
+            self.commands.pop_front();
+        }
+        self.commands.push_back(Command { line, dir });
     }
 
     /// One OSC, as vt100 split it.
@@ -199,8 +299,25 @@ impl ShellReports {
 }
 
 impl vt100::Callbacks for ShellReports {
-    fn unhandled_osc(&mut self, _: &mut vt100::Screen, params: &[&[u8]]) {
+    fn unhandled_osc(&mut self, screen: &mut vt100::Screen, params: &[&[u8]]) {
         self.osc(params);
+        match osc133(params) {
+            Some(Mark::Prompt) => self.prompt_dir = self.dir_now(),
+            Some(Mark::Running) if self.prompted && !screen.alternate_screen() => {
+                self.command_starts(screen);
+            }
+            _ => {}
+        }
+    }
+
+    fn on_scroll(&mut self, row: vt100::capture::RowContents<'_>, alternate_screen: bool) {
+        // The other screen (a full-screen program's) has no history.
+        if alternate_screen {
+            return;
+        }
+        let mut breaks = Breaks::default();
+        let _ = row.write_formatted_basic(&mut breaks, &mut self.stream);
+        self.dropped += breaks.0;
     }
 }
 
@@ -397,5 +514,86 @@ mod tests {
         assert_eq!(p.callbacks().dir, Some("/tmp/sn/\u{e9}".into()));
         assert_eq!(p.callbacks().mark, Some(Mark::Prompt));
         assert_eq!(p.callbacks().dir_seq, 2);
+    }
+
+    /// Each command's first line of output, as the history view finds it.
+    fn starts(p: &vt100::Parser<ShellReports>) -> Vec<String> {
+        let (text, first) = p.callbacks().history(p.screen());
+        let lines: Vec<&str> = text.lines().collect();
+        p.callbacks()
+            .commands
+            .iter()
+            .filter(|c| c.line >= first)
+            .map(|c| {
+                lines
+                    .get((c.line - first) as usize)
+                    .unwrap_or(&"?")
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// A prompt, the command, its output: as a shell with the docs' snippet sends it.
+    fn run(p: &mut vt100::Parser<ShellReports>, cmd: &str, out: &[&str]) {
+        p.process(format!("\x1b]133;A\x07$ {cmd}\r\n\x1b]133;C\x07").as_bytes());
+        for l in out {
+            p.process(format!("{l}\r\n").as_bytes());
+        }
+        p.process(b"\x1b]133;D;0\x07");
+    }
+
+    #[test]
+    fn a_command_is_found_again_at_its_first_line_of_output() {
+        let mut p = vt100::Parser::new_with_callbacks(
+            nz(6),
+            nz(20),
+            100,
+            ShellReports::new("b".into(), false),
+        );
+        run(&mut p, "ls", &["Cargo.toml", "src"]);
+        run(&mut p, "grep", &["src/a.rs:3:x"]);
+        assert_eq!(starts(&p), ["Cargo.toml", "src/a.rs:3:x"]);
+        // A line longer than the screen is wide wraps over rows: still one line.
+        run(&mut p, "echo", &[&"w".repeat(45)]);
+        run(&mut p, "pwd", &["/tmp"]);
+        assert_eq!(starts(&p)[3], "/tmp");
+    }
+
+    #[test]
+    fn commands_keep_their_lines_as_the_history_drops_old_ones() {
+        // Room for 6 rows on screen and 4 in the history.
+        let mut p = vt100::Parser::new_with_callbacks(
+            nz(6),
+            nz(20),
+            4,
+            ShellReports::new("b".into(), false),
+        );
+        run(&mut p, "first", &["one"]);
+        for i in 0..6 {
+            run(&mut p, "n", &[&format!("out{i}"), &"z".repeat(30)]);
+        }
+        let s = starts(&p);
+        assert_eq!(s.last().map(String::as_str), Some("out5"), "{s:?}");
+        assert!(
+            !s.contains(&"one".to_string()),
+            "dropped with its lines: {s:?}"
+        );
+        // `clear` erases the history; the commands before it go with it.
+        p.process(b"\x1b[H\x1b[2J\x1b[3J");
+        run(&mut p, "after", &["fresh"]);
+        assert_eq!(starts(&p).last().map(String::as_str), Some("fresh"));
+    }
+
+    #[test]
+    fn a_running_mark_from_a_shell_without_prompt_marks_records_nothing() {
+        let mut p = vt100::Parser::new_with_callbacks(
+            nz(6),
+            nz(20),
+            10,
+            ShellReports::new("b".into(), false),
+        );
+        p.process(b"\x1b]133;C\x07text\r\n");
+        assert!(p.callbacks().commands.is_empty());
     }
 }

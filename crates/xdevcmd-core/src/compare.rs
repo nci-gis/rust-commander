@@ -6,10 +6,19 @@
 //! must take seconds, not hours. Same time but a different size is reported as a
 //! conflict and never synchronised automatically: there is no telling which is right.
 
+use std::ffi::OsString;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
+
+/// One side of a compare.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -20,14 +29,44 @@ pub enum State {
     /// Same time, different size.
     Conflict,
     Same,
+    /// A directory on this side could not be read ([`Diff::error`] says why): the whole
+    /// subtree is this one row, and nothing under it is planned on either side, since
+    /// "only on the other side" means nothing where one side is unknown.
+    Unreadable(Side),
+    /// A directory on this side went away while it was compared.
+    Missing(Side),
+    /// Some entries of a directory on this side could not be read or looked at: a name
+    /// only on the other side, there, may have its twin among them, so it is not planned.
+    /// The directory's own row carries the first error; each such name is a row too.
+    Incomplete(Side),
+    /// A name on one side whose twin on the other differs only in case, on a volume
+    /// that ignores case (macOS, Windows): to that volume they are one file, so copying
+    /// either way would replace the other. Left to a person, never planned.
+    CaseClash,
+}
+
+impl State {
+    /// Something could not be decided: shown, never planned.
+    pub fn unknown(self) -> bool {
+        matches!(
+            self,
+            State::Unreadable(_) | State::Missing(_) | State::Incomplete(_)
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diff {
-    /// Below both roots, `/`-separated.
-    pub rel: String,
+    /// Below both roots, as the file system names it (any bytes, not only UTF-8): the
+    /// text shown is made where it is drawn.
+    pub rel: PathBuf,
     pub is_dir: bool,
     pub state: State,
+    /// Why, for [`State::Unreadable`], [`State::Missing`] and an incomplete directory.
+    pub error: Option<String>,
+    /// What each side held when compared: what a plan expects to find there.
+    pub left: Option<crate::ops::Ident>,
+    pub right: Option<crate::ops::Ident>,
 }
 
 const SLACK_SECS: u64 = 2;
@@ -60,37 +99,63 @@ fn newer(a: Option<SystemTime>, b: Option<SystemTime>) -> std::cmp::Ordering {
     }
 }
 
-fn entries(dir: &Path, hidden: bool) -> Vec<(String, fs::Metadata)> {
-    let mut v: Vec<(String, fs::Metadata)> = fs::read_dir(dir)
-        .map(|it| {
-            it.flatten()
-                .filter_map(|e| {
-                    let name = e.file_name().to_string_lossy().into_owned();
-                    if !hidden && name.starts_with('.') {
-                        return None;
-                    }
-                    // Links are compared as what they are, never followed.
-                    fs::symlink_metadata(e.path()).ok().map(|m| (name, m))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort_by(|a, b| a.0.cmp(&b.0));
-    v
+/// One directory's entries, sorted by their names' bytes, links not followed.
+struct Listing {
+    entries: Vec<(OsString, fs::Metadata)>,
+    /// The first entry that could not be read or looked at, if any did.
+    incomplete: Option<String>,
+}
+
+/// List `dir`; an error when it cannot be read at all.
+fn entries(dir: &Path, hidden: bool) -> io::Result<Listing> {
+    crate::faults::at(crate::faults::Point::ReadDir, dir)?;
+    let mut out = Listing {
+        entries: Vec::new(),
+        incomplete: None,
+    };
+    for e in fs::read_dir(dir)? {
+        let e = match e {
+            Ok(e) => e,
+            Err(err) => {
+                out.incomplete.get_or_insert_with(|| err.to_string());
+                continue;
+            }
+        };
+        let name = e.file_name();
+        if !hidden && name.as_encoded_bytes().first() == Some(&b'.') {
+            continue;
+        }
+        // Links are compared as what they are, never followed.
+        let path = e.path();
+        match crate::faults::at(crate::faults::Point::Stat, &path)
+            .and_then(|()| fs::symlink_metadata(&path))
+        {
+            Ok(m) => out.entries.push((name, m)),
+            // Gone since it was listed: not there, which is no doubt about it.
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => {
+                out.incomplete
+                    .get_or_insert_with(|| format!("{}: {err}", path.display()));
+            }
+        }
+    }
+    out.entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
 }
 
 /// Compare `left` and `right`. With `deep`, directories present on both sides are
 /// compared inside too; a directory on one side only is one entry, not its contents.
-pub fn compare(left: &Path, right: &Path, deep: bool, hidden: bool) -> Vec<Diff> {
-    let w = Walk {
+/// An error when either root cannot be read: that is no plan at all.
+pub fn compare(left: &Path, right: &Path, deep: bool, hidden: bool) -> io::Result<Vec<Diff>> {
+    compare_until(
+        left,
+        right,
         deep,
         hidden,
-        stop: &AtomicBool::new(false),
-        seen: &AtomicU64::new(0),
-    };
-    let mut out = Vec::new();
-    w.walk(left, right, "", &mut out);
-    out
+        &AtomicBool::new(false),
+        &AtomicU64::new(0),
+    )
+    .unwrap_or_else(|| Ok(Vec::new()))
 }
 
 /// [`compare`] that can be stopped, counting the entries looked at into `seen` as it
@@ -103,16 +168,23 @@ pub fn compare_until(
     hidden: bool,
     stop: &AtomicBool,
     seen: &AtomicU64,
-) -> Option<Vec<Diff>> {
+) -> Option<io::Result<Vec<Diff>>> {
     let w = Walk {
         deep,
         hidden,
         stop,
         seen,
     };
+    let root = |p: &Path| {
+        entries(p, hidden).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", p.display())))
+    };
+    let (le, re) = match (root(left), root(right)) {
+        (Ok(l), Ok(r)) => (l, r),
+        (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
+    };
     let mut out = Vec::new();
-    w.walk(left, right, "", &mut out);
-    (!stop.load(Ordering::Relaxed)).then_some(out)
+    w.merge(left, right, Path::new(""), le, re, &mut out);
+    (!stop.load(Ordering::Relaxed)).then_some(Ok(out))
 }
 
 struct Walk<'a> {
@@ -123,21 +195,83 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    fn walk(&self, l: &Path, r: &Path, prefix: &str, out: &mut Vec<Diff>) {
+    /// Compare the directories `l` and `r`, both at `rel` below the roots.
+    fn walk(&self, l: &Path, r: &Path, rel: &Path, out: &mut Vec<Diff>) {
         if self.stop.load(Ordering::Relaxed) {
             return;
         }
-        let (deep, hidden) = (self.deep, self.hidden);
-        let le = entries(l, hidden);
-        let re = entries(r, hidden);
-        self.seen
-            .fetch_add((le.len() + re.len()) as u64, Ordering::Relaxed);
-        let rel = |n: &str| {
-            if prefix.is_empty() {
-                n.to_string()
-            } else {
-                format!("{prefix}/{n}")
+        let side = |p: &Path, s: Side| {
+            entries(p, self.hidden).map_err(|e| {
+                let state = if e.kind() == io::ErrorKind::NotFound {
+                    State::Missing(s)
+                } else {
+                    State::Unreadable(s)
+                };
+                Box::new(Diff {
+                    rel: rel.to_path_buf(),
+                    is_dir: true,
+                    state,
+                    error: Some(e.to_string()),
+                    left: None,
+                    right: None,
+                })
+            })
+        };
+        match (side(l, Side::Left), side(r, Side::Right)) {
+            (Ok(le), Ok(re)) => self.merge(l, r, rel, le, re, out),
+            // One row for the whole subtree: neither side's entries under it are planned.
+            (Err(d), _) | (_, Err(d)) => out.push(*d),
+        }
+    }
+
+    fn merge(
+        &self,
+        l: &Path,
+        r: &Path,
+        prefix: &Path,
+        le: Listing,
+        re: Listing,
+        out: &mut Vec<Diff>,
+    ) {
+        let deep = self.deep;
+        self.seen.fetch_add(
+            (le.entries.len() + re.entries.len()) as u64,
+            Ordering::Relaxed,
+        );
+        for (s, why) in [(Side::Left, &le.incomplete), (Side::Right, &re.incomplete)] {
+            if let Some(why) = why {
+                out.push(Diff {
+                    rel: prefix.to_path_buf(),
+                    is_dir: true,
+                    state: State::Incomplete(s),
+                    error: Some(why.clone()),
+                    left: None,
+                    right: None,
+                });
             }
+        }
+        // A name only on one side, where the other could not be read in full: unknown.
+        let (left_whole, right_whole) = (le.incomplete.is_none(), re.incomplete.is_none());
+        let (le, re) = (le.entries, re.entries);
+        let rel = |n: &OsString| prefix.join(n);
+        let id = |m: &fs::Metadata| Some(crate::ops::Ident::of(m));
+        let row = |rel: PathBuf,
+                   is_dir: bool,
+                   state: State,
+                   left: Option<crate::ops::Ident>,
+                   right: Option<crate::ops::Ident>| Diff {
+            rel,
+            is_dir,
+            state,
+            error: None,
+            left,
+            right,
+        };
+        // A name only on one side that the other side still finds: the other volume
+        // ignores case, and holds it under another case. One lookup per such name.
+        let clash = |other: &Path, n: &OsString| {
+            let p = other.join(n);
+            crate::faults::found(crate::faults::Point::Lookup, &p) || p.symlink_metadata().is_ok()
         };
         let (mut i, mut j) = (0, 0);
         while i < le.len() || j < re.len() {
@@ -149,20 +283,26 @@ impl Walk<'_> {
             match order {
                 std::cmp::Ordering::Less => {
                     let (n, m) = &le[i];
-                    out.push(Diff {
-                        rel: rel(n),
-                        is_dir: m.is_dir(),
-                        state: State::LeftOnly,
-                    });
+                    let state = if !right_whole {
+                        State::Incomplete(Side::Right)
+                    } else if clash(r, n) {
+                        State::CaseClash
+                    } else {
+                        State::LeftOnly
+                    };
+                    out.push(row(rel(n), m.is_dir(), state, id(m), None));
                     i += 1;
                 }
                 std::cmp::Ordering::Greater => {
                     let (n, m) = &re[j];
-                    out.push(Diff {
-                        rel: rel(n),
-                        is_dir: m.is_dir(),
-                        state: State::RightOnly,
-                    });
+                    let state = if !left_whole {
+                        State::Incomplete(Side::Left)
+                    } else if clash(l, n) {
+                        State::CaseClash
+                    } else {
+                        State::RightOnly
+                    };
+                    out.push(row(rel(n), m.is_dir(), state, None, id(m)));
                     j += 1;
                 }
                 std::cmp::Ordering::Equal => {
@@ -172,18 +312,10 @@ impl Walk<'_> {
                         if deep {
                             self.walk(&l.join(n), &r.join(n), &rel(n), out);
                         } else {
-                            out.push(Diff {
-                                rel: rel(n),
-                                is_dir: true,
-                                state: State::Same,
-                            });
+                            out.push(row(rel(n), true, State::Same, id(a), id(b)));
                         }
                     } else if a.is_dir() != b.is_dir() {
-                        out.push(Diff {
-                            rel: rel(n),
-                            is_dir: false,
-                            state: State::Conflict,
-                        });
+                        out.push(row(rel(n), false, State::Conflict, id(a), id(b)));
                     } else {
                         let state = match newer(stamp(a), stamp(b)) {
                             std::cmp::Ordering::Greater => State::LeftNewer,
@@ -191,11 +323,7 @@ impl Walk<'_> {
                             std::cmp::Ordering::Equal if a.len() != b.len() => State::Conflict,
                             std::cmp::Ordering::Equal => State::Same,
                         };
-                        out.push(Diff {
-                            rel: rel(n),
-                            is_dir: false,
-                            state,
-                        });
+                        out.push(row(rel(n), false, state, id(a), id(b)));
                     }
                     i += 1;
                     j += 1;
@@ -205,18 +333,31 @@ impl Walk<'_> {
     }
 }
 
-/// What synchronising both ways copies: (source, directory to copy it into).
-pub fn plan(left: &Path, right: &Path, diffs: &[Diff]) -> Vec<(PathBuf, PathBuf)> {
-    let parent = |root: &Path, rel: &str| match rel.rsplit_once('/') {
-        Some((p, _)) => root.join(p),
+/// What synchronising both ways copies: (source, directory to copy it into, what the
+/// compare found where it goes). Nothing that could not be decided ([`State::unknown`])
+/// or needs a person (a conflict, a case clash) is ever in it.
+pub fn plan(
+    left: &Path,
+    right: &Path,
+    diffs: &[Diff],
+) -> Vec<(PathBuf, PathBuf, crate::ops::Expect)> {
+    use crate::ops::Expect;
+    let parent = |root: &Path, rel: &Path| match rel.parent() {
+        Some(p) => root.join(p),
         None => root.to_path_buf(),
+    };
+    let expect = |there: Option<crate::ops::Ident>| match there {
+        Some(id) => Expect::Replace(id),
+        None => Expect::Absent,
     };
     diffs
         .iter()
         .filter_map(|d| match d.state {
-            State::LeftOnly | State::LeftNewer => Some((left.join(&d.rel), parent(right, &d.rel))),
+            State::LeftOnly | State::LeftNewer => {
+                Some((left.join(&d.rel), parent(right, &d.rel), expect(d.right)))
+            }
             State::RightOnly | State::RightNewer => {
-                Some((right.join(&d.rel), parent(left, &d.rel)))
+                Some((right.join(&d.rel), parent(left, &d.rel), expect(d.left)))
             }
             _ => None,
         })
@@ -255,8 +396,8 @@ mod tests {
         touch(&r.join("sub/deep"), "d", 900);
         fs::create_dir_all(r.join("rdir/inner")).unwrap();
 
-        let got = compare(&l, &r, true, false);
-        let state = |n: &str| got.iter().find(|d| d.rel == n).map(|d| d.state);
+        let got = compare(&l, &r, true, false).unwrap();
+        let state = |n: &str| got.iter().find(|d| d.rel == Path::new(n)).map(|d| d.state);
         assert_eq!(state("only-left"), Some(State::LeftOnly));
         assert_eq!(state("only-right"), Some(State::RightOnly));
         assert_eq!(state("newer"), Some(State::LeftNewer));
@@ -278,7 +419,10 @@ mod tests {
         );
         assert_eq!(state("rdir/inner"), None);
 
-        let p = plan(&l, &r, &got);
+        let p: Vec<_> = plan(&l, &r, &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
         assert!(p.contains(&(l.join("newer"), r.clone())));
         assert!(p.contains(&(l.join("sub/deep"), r.join("sub"))));
         assert!(p.contains(&(r.join("rdir"), l.clone())));
@@ -306,7 +450,7 @@ mod tests {
             &AtomicBool::new(false),
             &seen,
         );
-        assert!(out.is_some());
+        assert!(matches!(out, Some(Ok(_))));
         assert!(
             seen.load(Ordering::Relaxed) >= 4,
             "both levels of both sides counted"
@@ -319,7 +463,207 @@ mod tests {
             &AtomicBool::new(true),
             &seen,
         );
-        assert_eq!(stopped, None);
+        assert!(stopped.is_none());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("xdevcmd-cmp-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("l")).unwrap();
+        fs::create_dir_all(d.join("r")).unwrap();
+        d
+    }
+
+    /// A deep compare of `d/l` and `d/r`.
+    fn diffs(d: &Path) -> Vec<Diff> {
+        compare(&d.join("l"), &d.join("r"), true, false).unwrap()
+    }
+
+    /// A directory on the right that cannot be read: today's plan copied everything
+    /// on the left into it, as if it were empty. Now the subtree is one row, and
+    /// nothing under it is planned on either side. The seam's ReadDir runs everywhere;
+    /// the real `chmod 000` below needs a user other than root.
+    #[test]
+    fn a_directory_that_cannot_be_read_is_never_planned_into() {
+        let d = scratch("unreadable");
+        touch(&d.join("l/sub/a"), "a", 100);
+        touch(&d.join("l/sub/b"), "b", 100);
+        touch(&d.join("r/sub/b"), "b", 100);
+        touch(&d.join("l/ok"), "x", 100);
+        let _f = crate::faults::fail(
+            crate::faults::Point::ReadDir,
+            &d.join("r").join("sub").to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(13),
+        );
+        let got = diffs(&d);
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
+        assert!(
+            !p.iter().any(|(s, _)| s.starts_with(d.join("l/sub"))),
+            "nothing under it is planned: {p:?}"
+        );
+        assert!(
+            p.contains(&(d.join("l/ok"), d.join("r"))),
+            "the rest still is: {p:?}"
+        );
+        assert!(
+            got.iter().any(|x| Path::new(&x.rel) == Path::new("sub")
+                && format!("{:?}", x.state).contains("Unreadable")),
+            "{got:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_without_read_permission_is_never_planned_into() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            eprintln!("skipped: root reads a directory whatever its mode");
+            return;
+        }
+        let d = scratch("chmod");
+        touch(&d.join("l/sub/a"), "a", 100);
+        fs::create_dir_all(d.join("r/sub")).unwrap();
+        fs::set_permissions(d.join("r/sub"), fs::Permissions::from_mode(0o000)).unwrap();
+        let got = diffs(&d);
+        fs::set_permissions(d.join("r/sub"), fs::Permissions::from_mode(0o755)).unwrap();
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
+        assert!(p.is_empty(), "{p:?}");
+        assert!(
+            got.iter()
+                .any(|x| x.state == State::Unreadable(Side::Right)),
+            "{got:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Two names that are not UTF-8 and read the same once made lossy: two rows, and
+    /// each planned source is a file that exists. Before, both became "a\u{fffd}" and
+    /// the plan named a source that was not there.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn names_that_are_not_utf8_are_compared_and_planned_as_they_are() {
+        use std::os::unix::ffi::OsStrExt;
+        let d = scratch("bytes");
+        let (a, b) = (
+            std::ffi::OsStr::from_bytes(b"a\xff"),
+            std::ffi::OsStr::from_bytes(b"a\xfe"),
+        );
+        fs::write(d.join("l").join(a), "ff").unwrap();
+        fs::write(d.join("l").join(b), "fe").unwrap();
+        let got = diffs(&d);
+        assert_eq!(got.len(), 2, "{got:?}");
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
+        assert_eq!(p.len(), 2);
+        for (src, _) in &p {
+            assert!(
+                src.exists(),
+                "{} is planned and does not exist",
+                src.display()
+            );
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// An entry on the left that cannot be looked at (a stat fails) while its twin on
+    /// the right can: the right one is not "only on the right", and is not planned to
+    /// be copied over it. Before, the left entry was dropped without a word and the
+    /// right one copied onto it.
+    #[test]
+    fn an_entry_that_cannot_be_looked_at_leaves_its_directory_unplanned() {
+        let d = scratch("stat");
+        touch(&d.join("l/x"), "left's", 100);
+        touch(&d.join("r/x"), "right's", 100);
+        touch(&d.join("r/y"), "y", 100);
+        let _f = crate::faults::fail(
+            crate::faults::Point::Stat,
+            &d.join("l").join("x").to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let got = diffs(&d);
+        let p: Vec<_> = plan(&d.join("l"), &d.join("r"), &got)
+            .into_iter()
+            .map(|(s, i, _)| (s, i))
+            .collect();
+        assert!(
+            p.is_empty(),
+            "nothing one-sided is planned where the left is unknown: {p:?}"
+        );
+        assert!(
+            got.iter()
+                .any(|x| format!("{:?}", x.state).contains("Incomplete")),
+            "{got:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_root_that_cannot_be_read_is_an_error_not_a_plan() {
+        let d = scratch("root");
+        let e = compare(&d.join("l"), &d.join("gone"), true, false).unwrap_err();
+        assert!(e.to_string().contains("gone"), "{e}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// `A.txt` on the left and `a.txt` on the right, on a volume that ignores case
+    /// (macOS, Windows): one file to it. Not "only left" and "only right", which a sync
+    /// would copy each over the other, losing one; a clash left to a person. On a
+    /// volume that keeps case apart there is nothing to find and this test says so.
+    #[test]
+    fn names_that_differ_only_in_case_are_a_clash_where_case_is_ignored() {
+        let d = scratch("case");
+        fs::write(d.join("l/A.txt"), "upper").unwrap();
+        fs::write(d.join("r/a.txt"), "lower").unwrap();
+        if !d.join("r/A.TXT").exists() {
+            eprintln!("skipped: {} keeps case apart", d.display());
+            let got = diffs(&d);
+            assert_eq!(plan(&d.join("l"), &d.join("r"), &got).len(), 2);
+            let _ = fs::remove_dir_all(&d);
+            return;
+        }
+        let got = diffs(&d);
+        assert!(plan(&d.join("l"), &d.join("r"), &got).is_empty(), "{got:?}");
+        assert!(
+            got.iter().all(|x| format!("{:?}", x.state) == "CaseClash"),
+            "{got:?}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The same clash where the volume keeps case apart (Linux): the seam makes the
+    /// lookup of each name on the other side answer as a volume that ignores case
+    /// would, so every system's CI covers the rule, not only macOS's and Windows'.
+    #[test]
+    fn a_case_clash_is_left_alone_wherever_the_lookup_finds_the_twin() {
+        let d = scratch("case-seam");
+        fs::write(d.join("l/A.txt"), "upper").unwrap();
+        fs::write(d.join("r/a.txt"), "lower").unwrap();
+        let _r = crate::faults::set(
+            crate::faults::Point::Lookup,
+            &d.join("r").join("A.txt").to_string_lossy(),
+            crate::faults::Action::Found,
+        );
+        let _l = crate::faults::set(
+            crate::faults::Point::Lookup,
+            &d.join("l").join("a.txt").to_string_lossy(),
+            crate::faults::Action::Found,
+        );
+        let got = diffs(&d);
+        assert!(plan(&d.join("l"), &d.join("r"), &got).is_empty(), "{got:?}");
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got.iter().all(|x| x.state == State::CaseClash), "{got:?}");
         let _ = fs::remove_dir_all(&d);
     }
 }

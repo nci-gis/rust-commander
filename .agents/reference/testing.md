@@ -40,6 +40,32 @@ Unix only because on Windows the same bytes pass through ConPTY's translation in
 console events, and whether SGR mouse input survives that is unverified. `render.rs`
 covers the same behaviour on all three platforms.
 
+**Windows has its own, smaller layer under a real ConPTY** (Rounds 018–019):
+`tests/winpty/mod.rs` runs `xdevcmd.exe` under portable-pty, answers ConPTY's `ESC[6n`,
+and reads the output both as text (for what is printed before the screen) and through
+vt100 as a screen. `windows_panel.rs` covers the question asked when started from a
+panel; `windows_e2e.rs` covers the panes, a command run in `cmd.exe` in the panel, and
+F10. They compile on every system (clippy for `x86_64-pc-windows-gnu` checks them) and
+run only on Windows. Keys only: no mouse yet.
+
+**Faults: a data-safety fix is shown failing through the fault seam** (Round 029). A
+sync moved after its rename passes every content check, and a full disk or a swapped
+target cannot be had on demand. `xdevcmd-core/src/faults.rs` puts `faults::at(Point,
+path)` before each guarded call (`Write`, `SyncData`, `SyncDir`, `Rename`,
+`RemoveSource`, `JournalBegin`, `JournalLine`, `JournalSync`, `ReadDir`, `Stat`). Rules
+match a path fragment (`fail`, or `set` with `Swap`, `Halt`, `Delay`, `Skip`), live while
+their guard does, and `faults::trace`/`traced` record the order, for order tests. It
+exists only under `cfg(any(test, feature = "faults"))`: the pty and render tests' binary
+has it and reads `XDEVCMD_FAULTS` (`kind|point|fragment|arg`, `;` between rules; `|`
+because `:` is in Windows paths), and `tests/budgets.rs` checks the release build has
+none of it. Places: `faults::places::{other_device, small_fs}` (`XDEVCMD_TEST_OTHER_DEV`,
+`XDEVCMD_TEST_SMALL_FS`, mounted by CI; elsewhere skipped, saying so). A new write path
+that cannot be undone goes through `faults::at` (or `faults::sync_data`, `sync_dir`,
+`ops::commit_replace`) with an order test from the trace. No `#[cfg(test)]` statics per
+module for a new hook (the old pattern), and no seam in the release build. To show such a
+test fails on the old code: a `git worktree` of the previous commit with the one
+`faults::at` put in front of the call it guards, the test written to compile on both.
+
 **Every test runs xdevcmd isolated** from whoever runs it: `XDEVCMD_CONFIG` points at a file
 that does not exist, `XDG_DATA_HOME` at a scratch directory, and the pty tests use
 `/bin/sh` with a plain prompt. Without that, a developer who had rebound F5 would see
@@ -49,7 +75,15 @@ every copy test fail, and a stray F8 in a test would land in their real trash.
 and checked without a terminal: `--screenshot=110x24 --keys=Down,Insert,S-F8` renders the
 permanent-delete warning. It takes mouse input too — `click:X:Y`, `rclick:X:Y`,
 `ctrl-click:X:Y`, `drag:X1:Y1:X2:Y2`, `wheel:X:Y:N` — and redraws after each event, so
-every click lands on what is actually on screen at that moment.
+every click lands on what is actually on screen at that moment. **`wait`** waits for the
+jobs started so far to end before the next input: there are only 30 ms between inputs, so
+on a slow machine a copy still running when the next key came replaced that key's message
+with its own "1 copied" (a Windows runner, 0.3.0's `ctrl_z_…` test).
+
+**A wait in a pty test must look for something only the output can contain.** `seq 1
+500` followed by `wait_for("500")` matched the typed command line and read the screen
+before the output arrived. Echo a mark the command line cannot show:
+`echo seq-done-$((6*7))` and wait for `seq-done-42` (cmd: `%OS:~0,0%`).
 
 Mouse tests find their coordinates by locating text in a first screenshot (`locate` in
 `tests/render.rs`), never by hardcoding them, so a layout change moves the clicks with

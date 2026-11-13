@@ -68,3 +68,50 @@ mentions changed, mechanically: `project.md` (the layout line and `cargo run -p 
 added or altered. Rounds, memory and this log keep the old name, as history.
 **Promoted by**: XDevTeam (authorised editing those mentions for this round, 2026-11-10).
 Written by Claude Code through the shell.
+
+## 2026-11-11: Canon housekeeping after 0.3.0 (`plan/ROADMAP.md`, `reference/ui.md`, `reference/gotchas.md`, `reference/testing.md`)
+
+**Source**: [Round 019](cycles/Round_019.md) step 4; the stale list in
+`.agents/memory/2026-11-10-final-review-before-publishing.md` ("After publishing —
+housekeeping"); what Rounds 018–019 found.
+**Rationale**: Canon that says what is no longer true misleads every later session.
+
+- `ROADMAP.md`:
+  - header and Direction brought to 0.3.0;
+  - "Next" replaced by "Where things stand" (releases, rounds) and "Next: v0.4.0"
+    (entries A–G from the v0.4 plan, the kickoff rule, packages, waiting on the owner);
+  - statuses of items 4b, 4c, 5b, 5c, 7b, 8, 8b, 10, 12, 13, 15–20 and 24–30 corrected;
+  - items 31–34 added;
+  - the crates.io question removed (done);
+  - "pending promotions" pointed at this file;
+  - Not planned notes that entry F asks about remote once more.
+- `reference/ui.md`:
+  - keymap A (only F12, Shift+F12 and Alt+X inside the shell; `acts_on_shell` through
+    Alt+X) replaces "global" layout keys in three places;
+  - Shift+F12, Alt+X with an F key, Shift+F10, and the pane ↔ shell keys of Round 016;
+  - the pid at the right of the menu bar.
+- `reference/gotchas.md`:
+  - vt100 0.18 (NonZero sizes, `Parser::set_size`, 0.18.1 for the `CSI 65535 @` freeze);
+    vt100 direct since tui-term was dropped;
+  - unicode-width direct at `"0.2"`;
+  - new entries: CJK columns, `--screenshot` reading the drawn frame, `app/` file names
+    clashing with imports, ConPTY's `ESC[6n`.
+- `reference/testing.md`:
+  - the Windows ConPTY layer (`tests/winpty`, `windows_panel.rs`, `windows_e2e.rs`);
+  - the `--keys` `wait` token;
+  - pty waits on marks only the output can contain.
+
+No rule added or altered: `context/` is untouched, and the unsafe rule stands.
+
+**Promoted by**: XDevTeam ("Sửa các file canon", 2026-11-11). Written by Claude Code
+through the shell.
+
+## 2026-11-13: The fault seam → `reference/testing.md` ("Faults")
+
+**Source**: [Round 029](cycles/Round_029.md), steps 0–7;
+[memory/2026-11-13-fault-seam-for-tests.md](../memory/2026-11-13-fault-seam-for-tests.md)
+**Rationale**: Every data-safety test from Round 030 on is written through the seam
+(`faults::at`, the trace for order, the test places). One paragraph next to the test
+layers: what the seam is, where it exists (never in the release build), the rule for a
+new write path, and how to show a seam test fails on the old code.
+**Promoted by**: XDevTeam ("Yes to both", 2026-11-13). Written by Claude Code.

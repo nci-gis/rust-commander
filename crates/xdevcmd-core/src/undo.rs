@@ -3,9 +3,10 @@
 //! The app records what the last operation was; when undo is asked for, [`Undo::plan`]
 //! looks at the disk *now* and says what undoing would do, or why it cannot. Nothing is
 //! taken on trust: a renamed file must still be where the rename put it, its old name
-//! still free; a new directory must still hold nothing but directories. What undoing
-//! would cost data — a copy (deleting the copies), a delete — is not undone, and says
-//! so, rather than undoing something older behind the user's back.
+//! still free; a new directory must still hold nothing but directories. A copy is undone
+//! by removing what it made, but only what is still as it made it (Round 031). What
+//! undoing would cost data — a permanent delete — is not undone, and says so, rather than
+//! undoing something older behind the user's back.
 
 use std::ffi::OsString;
 use std::fs;
@@ -28,6 +29,14 @@ pub enum Undo {
     MadeFile(PathBuf),
     /// F8: what went to the trash, and where each item went there.
     Trashed(Vec<crate::trashed::Trashed>),
+    /// A copy (F5, Alt+Y): what it made, in the order made; `what` for the question
+    /// ("copy of a.txt");
+    /// `for_good`: files it replaced with no trash, which undo cannot give back.
+    Copy {
+        made: Vec<crate::ops::Made>,
+        what: String,
+        for_good: u64,
+    },
     /// The last operation was one that is not undone: "a copy", "a delete".
     Cannot(String),
 }
@@ -43,6 +52,12 @@ pub enum Plan {
     Remove(PathBuf),
     /// Put these back from the trash where they were.
     Restore(Vec<crate::trashed::Trashed>),
+    /// Remove what a copy made and is still as it made it, putting back from the trash
+    /// what it replaced (a job: [`unmake`]). `kept`: how many of them changed since.
+    Unmake {
+        made: Vec<crate::ops::Made>,
+        kept: usize,
+    },
 }
 
 fn there(p: &Path) -> bool {
@@ -89,6 +104,7 @@ impl Undo {
                 format!("delete of {} to the trash", name(&t[0].original))
             }
             Undo::Trashed(t) => format!("delete of {} items to the trash", t.len()),
+            Undo::Copy { what, .. } => what.clone(),
             Undo::Cannot(what) => what.clone(),
         }
     }
@@ -97,6 +113,20 @@ impl Undo {
     pub fn plan(&self) -> Result<Plan, String> {
         match self {
             Undo::Cannot(what) => Err(format!("the last operation, {what}, cannot be undone")),
+            Undo::Copy { made, .. } => {
+                let kept = made.iter().filter(|m| !as_made(m)).count();
+                if kept == made.len() {
+                    return Err(if made.is_empty() {
+                        "that copy made nothing new: nothing to undo".into()
+                    } else {
+                        "nothing that copy made is as it made it any more".into()
+                    });
+                }
+                Ok(Plan::Unmake {
+                    made: made.clone(),
+                    kept,
+                })
+            }
             Undo::Rename(moves) => {
                 for (from, to) in moves {
                     if !there(to) {
@@ -182,6 +212,107 @@ impl Undo {
             }
         }
     }
+}
+
+/// Whether what a copy made is still as it made it: the same file (kind, size, time and,
+/// on Unix, inode), or for a directory, still a directory (adding to it changes its
+/// time; whether it holds anything else is found when removing it).
+fn as_made(m: &crate::ops::Made) -> bool {
+    match crate::ops::Ident::at(&m.path) {
+        Some(now) if m.ident.is_dir() => now.is_dir(),
+        Some(now) => now == m.ident,
+        None => false,
+    }
+}
+
+/// Carry out a `Plan::Unmake` as a job: last made first, so a directory's files go
+/// before it. Each is looked at again right before it goes: a file that changed stays;
+/// a directory stays while it holds anything (`remove_dir` refuses it). A file that
+/// replaced one in the trash goes first, then the old one comes back. What stayed is
+/// counted as skipped and listed, with why.
+pub fn unmake(made: Vec<crate::ops::Made>) -> crate::ops::Handle {
+    use crate::ops::{Event, Summary};
+    use std::sync::atomic::Ordering;
+    crate::ops::Handle::spawn(move |tx, cancel| {
+        let mut sum = Summary::default();
+        let _ = tx.send(Event::Scanned {
+            files: made.len() as u64,
+            bytes: 0,
+        });
+        let note = |sum: &mut Summary, p: &Path, why: &str| {
+            sum.skipped += 1;
+            if sum.errors.len() < 20 {
+                sum.errors.push(format!("{}: {why}", p.display()));
+            }
+        };
+        let allowed = crate::policy::guard_write();
+        for m in made.iter().rev() {
+            if cancel.load(Ordering::Relaxed) {
+                sum.cancelled = true;
+                break;
+            }
+            if let Err(e) = &allowed {
+                sum.failed = made.len() as u64;
+                sum.errors.push(e.to_string());
+                break;
+            }
+            if !crate::policy::get().allows(&m.path) {
+                note(&mut sum, &m.path, "outside the root xdevcmd is confined to");
+                continue;
+            }
+            let removed = match crate::ops::Ident::at(&m.path) {
+                None => {
+                    note(&mut sum, &m.path, "not there any more");
+                    false
+                }
+                Some(now) if m.ident.is_dir() && now.is_dir() => match fs::remove_dir(&m.path) {
+                    Ok(()) => true,
+                    Err(_) => {
+                        note(
+                            &mut sum,
+                            &m.path,
+                            "kept: it holds what the copy did not make",
+                        );
+                        false
+                    }
+                },
+                Some(now) if now == m.ident => match fs::remove_file(&m.path) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        sum.failed += 1;
+                        if sum.errors.len() < 20 {
+                            sum.errors.push(format!("{}: {e}", m.path.display()));
+                        }
+                        false
+                    }
+                },
+                Some(_) => {
+                    note(&mut sum, &m.path, "kept: changed since the copy");
+                    false
+                }
+            };
+            if removed {
+                sum.done += 1;
+                if let Some(old) = &m.old {
+                    if let Err(e) = crate::trashed::restore(old) {
+                        sum.failed += 1;
+                        if sum.errors.len() < 20 {
+                            sum.errors.push(format!(
+                                "{}: the file it replaced is still in the trash: {e}",
+                                m.path.display()
+                            ));
+                        }
+                    }
+                }
+            } else if m.old.is_some() && sum.errors.len() < 20 {
+                sum.errors.push(format!(
+                    "{}: the file it replaced stays in the trash",
+                    m.path.display()
+                ));
+            }
+        }
+        let _ = tx.send(Event::Done(sum));
+    })
 }
 
 /// Carry out a `Plan::Remove`: an empty directory tree, or an empty file. Checked again
@@ -367,6 +498,117 @@ mod tests {
         assert_eq!(
             u.plan().unwrap_err(),
             "the last operation, a copy, cannot be undone"
+        );
+    }
+
+    /// Run a copy, then undo it as the app does: the plan, then the job.
+    fn copy_then(
+        d: &Path,
+        sources: Vec<PathBuf>,
+        between: impl FnOnce(),
+    ) -> (Result<Plan, String>, Option<crate::ops::Summary>) {
+        let sum = run_job(crate::ops::start(crate::ops::Request::copy(
+            sources,
+            d.join("to"),
+        )));
+        let u = Undo::Copy {
+            made: sum.made.clone(),
+            what: "x".into(),
+            for_good: sum.replaced_for_good,
+        };
+        between();
+        let plan = u.plan();
+        let done = match &plan {
+            Ok(Plan::Unmake { made, .. }) => Some(run_job(unmake(made.clone()))),
+            _ => None,
+        };
+        (plan, done)
+    }
+
+    fn run_job(h: crate::ops::Handle) -> crate::ops::Summary {
+        loop {
+            match h
+                .events
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+            {
+                crate::ops::Event::Done(s) => return s,
+                crate::ops::Event::Ask(_) => h.answer(crate::ops::Answer::Yes),
+                _ => {}
+            }
+        }
+    }
+
+    /// Round 031: undoing a copy removes what it made, files then their directories.
+    #[test]
+    fn undoing_a_copy_removes_what_it_made() {
+        let d = dir("copy");
+        fs::create_dir_all(d.join("a/b")).unwrap();
+        fs::write(d.join("a/b/f"), "f").unwrap();
+        fs::write(d.join("g"), "g").unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        let (plan, done) = copy_then(&d, vec![d.join("a"), d.join("g")], || {});
+        assert!(matches!(plan, Ok(Plan::Unmake { kept: 0, .. })), "{plan:?}");
+        let done = done.unwrap();
+        assert_eq!(
+            (done.done, done.skipped, done.failed),
+            (4, 0, 0),
+            "{done:?}"
+        );
+        assert_eq!(fs::read_dir(d.join("to")).unwrap().count(), 0);
+        assert!(
+            d.join("a/b/f").exists() && d.join("g").exists(),
+            "the sources stay"
+        );
+    }
+
+    /// What changed since the copy stays, and so does the directory holding it; and a
+    /// file dropped into a copied directory keeps that directory.
+    #[test]
+    fn undoing_a_copy_keeps_what_changed_since() {
+        let d = dir("copy-changed");
+        fs::create_dir_all(d.join("a/b")).unwrap();
+        fs::write(d.join("a/b/f"), "f").unwrap();
+        fs::write(d.join("a/e"), "e").unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        let to = d.join("to");
+        let (plan, done) = copy_then(&d, vec![d.join("a")], || {
+            fs::write(to.join("a/e"), "edited, longer").unwrap();
+            fs::write(to.join("a/b/mine"), "m").unwrap();
+        });
+        assert!(matches!(plan, Ok(Plan::Unmake { kept: 1, .. })), "{plan:?}");
+        let done = done.unwrap();
+        assert_eq!(done.done, 1, "only b/f goes: {done:?}");
+        assert_eq!(
+            fs::read_to_string(to.join("a/e")).unwrap(),
+            "edited, longer"
+        );
+        assert!(to.join("a/b/mine").exists());
+        assert!(!to.join("a/b/f").exists());
+        assert!(
+            done.errors
+                .iter()
+                .any(|e| e.contains("changed since the copy")),
+            "{done:?}"
+        );
+        assert!(done
+            .errors
+            .iter()
+            .any(|e| e.contains("holds what the copy did not make")));
+    }
+
+    #[test]
+    fn a_copy_with_nothing_left_as_made_says_so() {
+        let d = dir("copy-gone");
+        fs::write(d.join("g"), "g").unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        let to = d.join("to");
+        let (plan, _) = copy_then(&d, vec![d.join("g")], || {
+            fs::remove_file(to.join("g")).unwrap();
+        });
+        assert_eq!(
+            plan.unwrap_err(),
+            "nothing that copy made is as it made it any more"
         );
     }
 }

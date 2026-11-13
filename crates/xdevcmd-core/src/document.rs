@@ -15,10 +15,10 @@ use std::path::{Path, PathBuf};
 
 /// Stop indexing here. A file with more lines than this is still viewable; the viewer
 /// says it is showing the first part rather than pretending otherwise.
-const MAX_LINES: usize = 4_000_000;
+pub(crate) const MAX_LINES: usize = 4_000_000;
 /// A single "line" longer than this is truncated for display. Minified JavaScript is one
 /// line of several megabytes, and nothing good comes of trying to lay that out.
-const MAX_LINE: u64 = 64 * 1024;
+pub(crate) const MAX_LINE: u64 = 64 * 1024;
 /// Bytes sniffed to decide text or binary.
 const SNIFF: usize = 8192;
 /// Give up a search after this much reading rather than freezing the UI.
@@ -186,6 +186,16 @@ impl Document {
         Ok(())
     }
 
+    /// Where line `i` starts in the file; for `i == line_count()`, where the text shown
+    /// ends. `None` past that.
+    pub fn line_start(&self, i: usize) -> Option<u64> {
+        match self.lines.get(i) {
+            Some(&s) => Some(s),
+            None if i == self.lines.len() => Some(self.indexed_len),
+            None => None,
+        }
+    }
+
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }
@@ -204,10 +214,7 @@ impl Document {
         let mut buf = vec![0u8; want];
         let got = self.source.read_at(start, &mut buf)?;
         buf.truncate(got);
-        while matches!(buf.last(), Some(b'\n') | Some(b'\r')) {
-            buf.pop();
-        }
-        Ok(String::from_utf8_lossy(&buf).into_owned())
+        Ok(line_text(buf))
     }
 
     pub fn lines_from(&mut self, from: usize, count: usize) -> Vec<String> {
@@ -299,6 +306,17 @@ impl Document {
     }
 }
 
+/// A line as the viewer shows it, from its first bytes (at most [`MAX_LINE`], the
+/// terminator counted): the terminator removed, invalid UTF-8 replaced. The one rule,
+/// shared with the highlighter's scan ([`crate::syntax::Scan`]), so a line coloured from
+/// the scan's checkpoints is the line drawn.
+pub(crate) fn line_text(mut buf: Vec<u8>) -> String {
+    while matches!(buf.last(), Some(b'\n') | Some(b'\r')) {
+        buf.pop();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 /// The name Save as offers for a shell's history: `xdevcmd-history-2026-11-10-142233.txt`,
 /// local time, so two saves a second apart never offer the same name.
 pub fn history_file_name() -> String {
@@ -323,18 +341,33 @@ pub fn save_bytes(path: &Path, bytes: &[u8], replace: bool, private: bool) -> io
         return write_new(path, bytes, private);
     }
     let part = crate::ops::part_name(path);
-    if let Err(e) = write_new(&part, bytes, private) {
-        let _ = std::fs::remove_file(&part);
-        return Err(e);
-    }
-    std::fs::rename(&part, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&part);
-    })
+    let f = match create(&part, bytes, private) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = std::fs::remove_file(&part);
+            return Err(e);
+        }
+    };
+    // Synced while open, then renamed over: the one way a file is replaced.
+    crate::ops::commit_replace(f, &part, path, || Ok(true)).map(|_| ())
 }
 
 /// A new file at `path` holding `bytes`; removed again if the write fails, so a full
 /// disk does not leave half of it under a name that looks finished.
 fn write_new(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
+    // `create` removes what it made if the write fails, and never touches a file that
+    // was already there (`AlreadyExists`).
+    let f = create(path, bytes, private)?;
+    let synced = crate::faults::sync_data(&f, path);
+    if synced.is_err() {
+        drop(f);
+        let _ = std::fs::remove_file(path);
+    }
+    synced
+}
+
+/// `path`, made new, holding `bytes`, still open; not synced.
+fn create(path: &Path, bytes: &[u8], private: bool) -> io::Result<std::fs::File> {
     use std::io::Write as _;
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
@@ -346,12 +379,12 @@ fn write_new(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
     #[cfg(not(unix))]
     let _ = private;
     let mut f = opts.open(path)?;
-    let written = f.write_all(bytes).and_then(|()| f.sync_all());
-    if written.is_err() {
+    if let Err(e) = f.write_all(bytes) {
         drop(f);
         let _ = std::fs::remove_file(path);
+        return Err(e);
     }
-    written
+    Ok(f)
 }
 
 /// First occurrence of `pat` in `hay`. Short needles over megabyte chunks, so the
@@ -396,6 +429,26 @@ fn read_up_to(f: &mut File, buf: &mut [u8]) -> io::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Save as over a file: synced before it is renamed over the old one.
+    #[test]
+    fn saving_over_a_file_syncs_before_renaming() {
+        let d = std::env::temp_dir().join(format!("xdevcmd-doc-sync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("s.txt"), b"old").unwrap();
+        let frag = d.to_string_lossy().into_owned();
+        crate::faults::trace(&frag);
+        save_bytes(&d.join("s.txt"), b"new", true, false).unwrap();
+        let seen: Vec<&str> = crate::faults::traced(&frag)
+            .into_iter()
+            .map(|(p, _)| p.name())
+            .collect();
+        assert_eq!(seen, ["sync-data", "rename"]);
+        assert_eq!(std::fs::read(d.join("s.txt")).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
     use std::fs;
     use std::sync::atomic::{AtomicU32, Ordering};
 

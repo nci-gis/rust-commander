@@ -241,6 +241,9 @@ impl Default for Terminal {
 pub struct Viewer {
     pub wrap: bool,
     pub tab_width: usize,
+    /// Colour source code, config files, diffs and logs by their language (F3 up to
+    /// 64 MiB, quick view up to 1 MiB). Off under `NO_COLOR`.
+    pub highlight: bool,
     /// How quick view draws pictures: "auto" (the terminal's own pictures where it can
     /// draw them, kitty, Ghostty, iTerm2, WezTerm, Windows Terminal, foot; half blocks
     /// elsewhere), "kitty", "iterm2", "sixel", or "blocks" (half blocks always).
@@ -252,6 +255,7 @@ impl Default for Viewer {
         Self {
             wrap: true,
             tab_width: 4,
+            highlight: true,
             images: "auto".into(),
         }
     }
@@ -319,7 +323,7 @@ impl Mode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ThemeSpec {
-    /// The theme: a built-in one (dark, light, ansi, blue, high-contrast) or a file
+    /// The theme: a built-in one (xdevtheme, dark, light, ansi, blue, high-contrast) or a file
     /// `themes/<name>.toml` beside this config. The colours below change it further.
     pub name: String,
     /// How many colours the terminal shows: "auto", "truecolor", "256" or "16".
@@ -348,7 +352,7 @@ impl Default for ThemeSpec {
         let t = Theme::default();
         let s = |c: Color| color_name(c);
         Self {
-            name: "dark".into(),
+            name: crate::theme::DEFAULT.into(),
             colors: "auto".into(),
             background: s(t.bg),
             panel: s(t.bg_panel),
@@ -389,6 +393,11 @@ pub struct Settings {
     pub mode: Mode,
     /// The canonical root directory, if navigation is confined.
     pub root: Option<PathBuf>,
+    /// The theme in use: `XDEVCMD_THEME`, else `[theme] name`, else the default when
+    /// that is not there.
+    pub theme_name: String,
+    /// `[theme] name` named a theme that is not there; the default is in use.
+    pub theme_note: Option<String>,
 }
 
 impl Default for Settings {
@@ -459,11 +468,37 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
 
     let colors = Depth::parse(&config.theme.colors)
         .map_err(|e| format!("[theme] colors = \"{}\": {e}", config.theme.colors))?;
-    let base = named_theme(&config.theme.name)?;
+    // XDEVCMD_THEME, for this run, then [theme] name. A theme that is not there (its
+    // file deleted, or a name mistyped) or that does not read is not a reason to drop
+    // the rest of the config: the default theme stands in, and says so. A name that is
+    // a path is an error, as always.
+    let theme_name = std::env::var("XDEVCMD_THEME")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| config.theme.name.clone());
+    if !is_theme_name(&theme_name) {
+        return Err(format!("[theme] name = \"{theme_name}\": not a theme name"));
+    }
+    let (base, theme_note) = match named_theme(&theme_name) {
+        Ok(t) => (t, None),
+        // Short, for the status line: --check-config gives the whole story.
+        Err(e) if e.contains("no such theme") => (
+            Theme::default(),
+            Some(format!(
+                "theme \"{theme_name}\" is not there \u{2014} {} in use; View \u{203a} Theme\u{2026} picks another",
+                crate::theme::DEFAULT
+            )),
+        ),
+        Err(e) => (
+            Theme::default(),
+            Some(format!("{e} \u{2014} {} in use", crate::theme::DEFAULT)),
+        ),
+    };
     let theme = build_theme(&config.theme, &base)?;
     // On a 16-colour terminal the default theme gives way to the one made of the 16
     // colours; a theme someone chose is kept, its colours fitted to the 16.
-    let theme16 = if config.theme.name == "dark" {
+    let theme16 = if theme_note.is_some() || plain_by_default(&theme_name) {
         build_theme(&config.theme, &Theme::ansi())?
     } else {
         theme
@@ -591,7 +626,19 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         sort,
         mode,
         root,
+        theme_name: if theme_note.is_some() {
+            crate::theme::DEFAULT.to_string()
+        } else {
+            theme_name
+        },
+        theme_note,
     })
+}
+
+/// The themes that give way to the 16-colour one on a terminal with 16 colours: the
+/// default and dark, which nobody chose for their own colours.
+fn plain_by_default(name: &str) -> bool {
+    name == crate::theme::DEFAULT || name == "dark"
 }
 
 /// A theme file, `themes/<name>.toml`: a built-in to start from and the colours that
@@ -616,6 +663,7 @@ struct ThemeFile {
     marked: Option<String>,
     cursor: Option<String>,
     cursor_active: Option<String>,
+    style: Option<crate::decor::StyleFile>,
 }
 
 /// The directory of the config file in use, once `load` has chosen it: with
@@ -680,11 +728,8 @@ pub fn available_themes() -> Vec<String> {
     names
 }
 
-/// The theme called `name`: built in, or read from a file in `theme_dirs`.
-pub fn named_theme(name: &str) -> Result<Theme, String> {
-    if let Some(t) = crate::theme::built_in(name) {
-        return Ok(t);
-    }
+/// Whether `name` can name a theme file: one name, never a path out of `themes/`.
+fn is_theme_name(name: &str) -> bool {
     // `:` too: on Windows `C:name` would make the join leave the theme directory.
     // Windows' device names: CON.toml is the console, and reading it waits forever.
     let device = {
@@ -694,7 +739,15 @@ pub fn named_theme(name: &str) -> Result<Theme, String> {
                 && n.len() == 4
                 && n.as_bytes()[3].is_ascii_digit())
     };
-    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') || device {
+    !(name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') || device)
+}
+
+/// The theme called `name`: built in, or read from a file in `theme_dirs`.
+pub fn named_theme(name: &str) -> Result<Theme, String> {
+    if let Some(t) = crate::theme::built_in(name) {
+        return Ok(t);
+    }
+    if !is_theme_name(name) {
         return Err(format!("[theme] name = \"{name}\": not a theme name"));
     }
     let Some(path) = theme_dirs()
@@ -742,6 +795,9 @@ pub fn theme_from_text(text: &str, shown: &str) -> Result<Theme, String> {
     for (slot, field, v) in theme_slots(&mut t, &f) {
         set(slot, field, v)?;
     }
+    if let Some(st) = &f.style {
+        t.decor = crate::decor::Decor::from_file(st, shown)?;
+    }
     Ok(t)
 }
 
@@ -771,34 +827,51 @@ fn theme_slots<'a>(
     ]
 }
 
-/// A built-in theme written out as a theme file, every colour listed: a start for
-/// one's own (`xdevcmd --print-theme dark > themes/mine.toml`).
+/// A theme written out as a theme file, every colour listed: a start for one's own
+/// (`xdevcmd --print-theme dark > themes/mine.toml`). A built-in theme, or a file in
+/// `themes/`, which is printed whole, so the copy no longer needs it.
 pub fn render_theme(name: &str) -> Result<String, String> {
-    let mut t = crate::theme::built_in(name).ok_or_else(|| {
-        format!(
-            "--print-theme {name}: not a built-in theme; there are {}",
-            crate::theme::BUILT_IN.join(", ")
-        )
-    })?;
+    let (t, kind, base) = match crate::theme::built_in(name) {
+        Some(t) => (t, "built-in theme", name.to_string()),
+        None => {
+            let t = named_theme(name).map_err(|e| format!("--print-theme {name}: {e}"))?;
+            // Every colour is listed and the style is written out, so the base only
+            // has to add nothing: a plain one of the same lightness.
+            let base = if crate::decor::is_light(t.bg) {
+                "light"
+            } else {
+                "dark"
+            };
+            (t, "theme", base.to_string())
+        }
+    };
+    Ok(theme_text(t, name, kind, &base))
+}
+
+/// `t` as a theme file, every colour and the style written out, starting from `base`
+/// (a theme with no style of its own); `kind` and `name` are for the comment on top.
+pub(crate) fn theme_text(mut t: Theme, name: &str, kind: &str, base: &str) -> String {
     let f = ThemeFile::default();
     let mut out = format!(
-        "# The built-in theme \"{name}\", from `xdevcmd --print-theme {name}`.\n\
+        "# The {kind} \"{name}\", from `xdevcmd --print-theme {name}`.\n\
          # Save it as themes/<your-name>.toml beside config.toml, change the colours you\n\
          # want, and pick it in View > Theme... or with [theme] name = \"<your-name>\".\n\
          # A line you delete keeps the base theme's colour.\n\
          # Colours: \"#rrggbb\", \"reset\" (the terminal's own), or \"0\"-\"255\".\n\
-         base = \"{name}\"\n"
+         base = \"{base}\"\n"
     );
+    let style = t.decor.to_toml();
     for (slot, field, _) in theme_slots(&mut t, &f) {
         out.push_str(&format!("{field} = \"{}\"\n", color_name(*slot)));
     }
-    Ok(out)
+    out.push_str(&style);
+    out
 }
 
 /// The theme the user sees for `name`: the named theme with `[theme]`'s own colours on
 /// top, as start-up builds it; for View → Theme….
 pub fn theme_for(name: &str, spec: &ThemeSpec, depth: Depth) -> Result<Theme, String> {
-    let base = if depth == Depth::Ansi16 && name == "dark" {
+    let base = if depth == Depth::Ansi16 && plain_by_default(name) {
         Theme::ansi()
     } else {
         named_theme(name)?
@@ -844,6 +917,7 @@ fn build_theme(spec: &ThemeSpec, base: &Theme) -> Result<Theme, String> {
             &d.cursor_active,
             base.row_cursor_active,
         )?,
+        decor: base.decor,
     })
 }
 
@@ -865,7 +939,7 @@ pub fn parse_color(s: &str) -> Result<Color, String> {
     Err("expected \"#rrggbb\", \"reset\", or a palette index 0-255".into())
 }
 
-fn color_name(c: Color) -> String {
+pub(crate) fn color_name(c: Color) -> String {
     match c {
         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
         Color::Indexed(n) => n.to_string(),

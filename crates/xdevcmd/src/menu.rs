@@ -10,7 +10,6 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, Mous
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear};
 use ratatui::Frame;
 
 use xdevcmd_core::ops;
@@ -30,6 +29,10 @@ pub enum Cmd {
     },
     /// Show this directory in the focused pane (history, hotlist).
     GoTo(PathBuf),
+    /// Show this kept list in a file pane (the history and lists menu).
+    ShowList(crate::lists::Id),
+    /// `P` in a shell's history: add its paths to this list, or to a new one.
+    AddToList(Option<crate::lists::Id>),
     AddBookmark(PathBuf),
     RemoveBookmark(PathBuf),
     /// Open with the system's application, already confirmed.
@@ -43,6 +46,12 @@ pub enum Cmd {
     ApplyRule(usize, PathBuf),
     /// A checked plan from Shift+F2: each file and its new path.
     BatchRename(Vec<(PathBuf, PathBuf)>),
+    /// The same without safe operations' journal, which could not be written: the user
+    /// said rename anyway. `undoing`: the plan is an undo of the last rename.
+    BatchRenameAnyway {
+        moves: Vec<(PathBuf, PathBuf)>,
+        undoing: bool,
+    },
     /// Entry `n` of `[[menu]]`.
     UserCommand(usize),
     /// Put this text on the clipboard (OSC 52).
@@ -54,18 +63,33 @@ pub enum Cmd {
     TabHistory(crate::pane::terms::TabId),
     /// The menu on a terminal tab: Save as… for its history, without the viewer.
     TabSaveHistory(crate::pane::terms::TabId),
+    /// The menu on a terminal tab: log its output to a file (asks where).
+    TabLog(crate::pane::terms::TabId),
+    /// The menu on a terminal tab: stop logging it.
+    TabStopLog(crate::pane::terms::TabId),
+    /// The menu on a terminal tab: a list of the paths in its last command's output.
+    TabList(crate::pane::terms::TabId),
     /// The menu on a terminal tab: close it, every shell in it.
     TabClose(crate::pane::terms::TabId),
-    /// A confirmed synchronisation plan: each source and the directory it goes into.
-    Sync(Vec<(PathBuf, PathBuf)>),
+    /// A confirmed synchronisation plan: each source, the directory it goes into, and
+    /// what the compare found where it goes (replaced only while it is still that).
+    Sync(Vec<(PathBuf, PathBuf, xdevcmd_core::ops::Expect)>),
     /// Quit even though jobs are still running: they are cancelled first.
     QuitAnyway,
     /// Quit now, though cancelled jobs have not finished stopping (a hung drive).
     QuitNow,
     /// Run an interrupted job again (safe operations' journal), "replace only if older".
-    Resume(xdevcmd_core::journal::Interrupted),
+    Resume(Box<xdevcmd_core::journal::Interrupted>),
     /// Help → About.
     About,
+    /// Help → Commands…: F1, opened at its large size.
+    Commands,
+    /// Help → Config in use: the loaded config file, read-only.
+    ConfigInUse,
+    /// Help → Documentation: the local copy of `docs/` and the link at this version.
+    Documentation,
+    /// Read this file in the viewer (the local docs' index), as F3 would.
+    ViewFile(PathBuf),
     /// View → Theme…: the list of themes.
     ThemeMenu,
     /// File → Settings….
@@ -299,8 +323,8 @@ impl Menu {
         let r = Rect::new(x, y, w, h);
         self.frame = r;
 
-        frame.render_widget(Clear, r);
-        let mut block = Block::bordered()
+        crate::modal::clear_overlay(frame, r);
+        let mut block = crate::decor::bordered()
             .border_style(Style::new().fg(th.accent))
             .style(Style::new().bg(th.bg_panel).fg(th.fg));
         if let Some(t) = &self.title {
@@ -311,6 +335,7 @@ impl Menu {
         }
         let inner = block.inner(r);
         frame.render_widget(block, r);
+        crate::decor::notch(frame.buffer_mut(), r);
 
         // Taller than the screen: scroll so the selected item is always on it.
         let visible = inner.height as usize;

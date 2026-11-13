@@ -11,6 +11,16 @@ use crate::entry::{Entry, Kind};
 /// behaviour that makes a file manager feel broken on `/proc`, on network mounts, and on
 /// anything being written to while you look at it.
 pub fn read_dir(dir: &Path, show_hidden: bool) -> io::Result<Vec<Entry>> {
+    read_dir_counted(dir, show_hidden, &std::sync::atomic::AtomicUsize::new(0))
+}
+
+/// [`read_dir`], adding one to `count` for each entry looked at: a slow directory's
+/// progress, read from another thread.
+pub fn read_dir_counted(
+    dir: &Path,
+    show_hidden: bool,
+    count: &std::sync::atomic::AtomicUsize,
+) -> io::Result<Vec<Entry>> {
     let mut out = Vec::new();
 
     if let Some(parent) = dir.parent() {
@@ -28,6 +38,7 @@ pub fn read_dir(dir: &Path, show_hidden: bool) -> io::Result<Vec<Entry>> {
 
     for dent in fs::read_dir(dir)? {
         let Ok(dent) = dent else { continue };
+        count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let name = dent.file_name().to_string_lossy().into_owned();
         let path = dent.path();

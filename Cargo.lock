@@ -2546,8 +2546,18 @@ dependencies = [
  "rustix",
  "tar",
  "trash",
+ "unicode-width",
  "zip",
  "zune-jpeg",
+]
+
+[[package]]
+name = "xtask"
+version = "0.0.0"
+dependencies = [
+ "portable-pty",
+ "serde_json",
+ "xdevcmd-core",
 ]
 
 [[package]]

@@ -23,8 +23,24 @@
 //! rename many's temporary names, so a later process given the same pid never matches a
 //! dead run's files, nor a dead run's journal a live process's files.
 //!
-//! Lines are written and flushed, not synced: losing the last lines in a power cut
-//! leaves a part file unknown to the journal, never a wrong action on the user's files.
+//! **Durable where it matters** (Round 029, after SQLite's rollback journal). At the
+//! start the journal is synced, and on Unix its directory too, before the job's first
+//! step. Later lines are written and flushed as they come, and synced by
+//! [`Journal::commit`] right before a step that cannot be undone (a rename that replaces
+//! a file, a source removed after its copy, rename many's first step): what that step
+//! needs to be recovered is on disk before it is taken. A new file's temporary name is
+//! not synced on its own: lost in a power cut, it leaves a part file unknown to the
+//! journal, never a wrong action on the user's files.
+//!
+//! **A journal that fails is broken for good.** A line or a sync that fails marks it
+//! broken and every later call fails too: a later line that went through would make a
+//! journal with a hole in it look whole. The job is told (the error comes back) and asks
+//! the user before its next step that cannot be undone.
+//!
+//! `v 3` names this layout. `moved` lines came with `v 2` (Round 029); `skip`, `replace`
+//! (the confirmed plan's decisions) and `done` (a source finished) with `v 3` (Round
+//! 030), for Resume to carry out exactly what is left. All are unknown tags to 0.3.0's
+//! tidy-up, which skips them, and this version reads older journals as before.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -77,6 +93,10 @@ pub struct Journal {
     file: File,
     /// Directories already written down.
     dirs: std::collections::HashSet<PathBuf>,
+    /// Why a line or a sync failed: once it has, the journal is not to be trusted.
+    broken: Option<String>,
+    /// Lines written since the last sync.
+    dirty: bool,
 }
 
 /// What trying a journal's lock found.
@@ -167,7 +187,8 @@ fn probe_lock(file: &File) -> Lock {
 impl Journal {
     /// Start a journal for a job of `kind` ("copy", "move", "delete", "extract", "pack",
     /// "sync", "rename"). `None` when journals are off; an error when the file cannot be
-    /// made, for the job to say it runs without one.
+    /// made or synced, for the job to ask whether to go on without one. Returned synced,
+    /// with its directory (Unix): on disk before the job's first step.
     pub fn begin(
         kind: &str,
         sources: &[PathBuf],
@@ -177,7 +198,7 @@ impl Journal {
         Some(Self::begin_in(DIR.get()?, kind, sources, dest, to_trash))
     }
 
-    fn begin_in(
+    pub(crate) fn begin_in(
         dir: &Path,
         kind: &str,
         sources: &[PathBuf],
@@ -185,6 +206,13 @@ impl Journal {
         to_trash: bool,
     ) -> std::io::Result<Self> {
         static N: AtomicU64 = AtomicU64::new(0);
+        // What the seam knows the job by: its first source, else its destination.
+        let about = sources
+            .first()
+            .map(PathBuf::as_path)
+            .or(dest)
+            .unwrap_or(dir);
+        crate::faults::at(crate::faults::Point::JournalBegin, about)?;
         fs::create_dir_all(dir)?;
         // A journal names the user's files by their full paths: the user's to read only,
         // also when an older xdevcmd made the directory open to others.
@@ -216,47 +244,137 @@ impl Journal {
             let _ = fs::remove_file(&new);
             return Err(e);
         }
+        // From here a failure drops `j`, which removes the file.
         let mut j = Self {
             path,
             file,
             dirs: std::collections::HashSet::new(),
+            broken: None,
+            dirty: false,
         };
-        j.line(&format!("host {}", enc(Path::new(&hostname()))));
-        j.line(&format!("kind {kind}"));
+        j.line(&format!("host {}", enc(Path::new(&hostname()))), about)?;
+        j.line("v 3", about)?;
+        j.line(&format!("kind {kind}"), about)?;
         for s in sources {
-            j.line(&format!("src {}", enc(s)));
+            j.line(&format!("src {}", enc(s)), about)?;
         }
         if let Some(d) = dest {
-            j.line(&format!("dest {}", enc(d)));
+            j.line(&format!("dest {}", enc(d)), about)?;
         }
         if to_trash {
-            j.line("trash");
+            j.line("trash", about)?;
         }
+        // The file, then the name it has in its directory: without the second, a power
+        // cut can lose the journal itself (SQLite syncs the directory for this).
+        j.commit(about)?;
+        crate::faults::sync_dir(dir)?;
         Ok(j)
     }
 
-    fn line(&mut self, s: &str) {
-        let _ = writeln!(self.file, "{s}");
-        let _ = self.file.flush();
-    }
-
-    /// About to make `p`, a temporary name: its directory is written down, once.
-    pub fn part(&mut self, p: &Path) {
-        if let Some(dir) = p.parent() {
-            if self.dirs.insert(dir.to_path_buf()) {
-                self.line(&format!("dir {}", enc(dir)));
+    /// Write one line about `about` (a path, for the fault seam). A journal that has
+    /// failed once fails every line after.
+    fn line(&mut self, s: &str, about: &Path) -> std::io::Result<()> {
+        if let Some(why) = &self.broken {
+            return Err(std::io::Error::other(why.clone()));
+        }
+        let r = crate::faults::at(crate::faults::Point::JournalLine, about)
+            .and_then(|()| writeln!(self.file, "{s}"))
+            .and_then(|()| self.file.flush());
+        match r {
+            Ok(()) => {
+                self.dirty = true;
+                Ok(())
+            }
+            Err(e) => {
+                self.broken = Some(e.to_string());
+                Err(e)
             }
         }
     }
 
+    /// Sync the lines written since the last time, before the step about `about` that
+    /// cannot be undone. Nothing to do when none were. A failed sync breaks the journal:
+    /// its lines may be gone from the disk with the error cleared (Linux), so it is never
+    /// synced again and taken for whole.
+    pub fn commit(&mut self, about: &Path) -> std::io::Result<()> {
+        if let Some(why) = &self.broken {
+            return Err(std::io::Error::other(why.clone()));
+        }
+        // Passed whether or not there is anything to sync: a test can then count on it
+        // before every step that cannot be undone.
+        let r = crate::faults::at(crate::faults::Point::JournalSync, about).and_then(|()| {
+            if !self.dirty || crate::faults::skipped(crate::faults::Point::JournalSync, about) {
+                return Ok(());
+            }
+            self.file.sync_data()
+        });
+        match r {
+            Ok(()) => {
+                self.dirty = false;
+                Ok(())
+            }
+            Err(e) => {
+                self.broken = Some(e.to_string());
+                Err(e)
+            }
+        }
+    }
+
+    /// Why this journal can no longer be trusted, if it cannot.
+    pub fn broken(&self) -> Option<&str> {
+        self.broken.as_deref()
+    }
+
+    /// About to make `p`, a temporary name: its directory is written down, once.
+    pub fn part(&mut self, p: &Path) -> std::io::Result<()> {
+        if let Some(dir) = p.parent() {
+            if !self.dirs.contains(dir) {
+                self.line(&format!("dir {}", enc(dir)), p)?;
+                self.dirs.insert(dir.to_path_buf());
+            }
+        }
+        Ok(())
+    }
+
     /// About to rename `orig` to the temporary name `tmp` (rename many).
-    pub fn renamed(&mut self, tmp: &Path, orig: &Path) {
-        self.line(&format!("ren {} {}", enc(tmp), enc(orig)));
+    pub fn renamed(&mut self, tmp: &Path, orig: &Path) -> std::io::Result<()> {
+        self.line(&format!("ren {} {}", enc(tmp), enc(orig)), orig)
     }
 
     /// `tmp` has been renamed on: nothing to put back.
-    pub fn unrenamed(&mut self, tmp: &Path) {
-        self.line(&format!("unren {}", enc(tmp)));
+    pub fn unrenamed(&mut self, tmp: &Path) -> std::io::Result<()> {
+        self.line(&format!("unren {}", enc(tmp)), tmp)
+    }
+
+    /// A move across devices: `dst`, a complete copy of `src`, is on disk, and `src` is
+    /// about to be removed. Synced by the [`Journal::commit`] before the removal.
+    pub fn moved(&mut self, src: &Path, dst: &Path) -> std::io::Result<()> {
+        self.line(&format!("moved {} {}", enc(src), enc(dst)), src)
+    }
+
+    /// The confirmed plan's word on `dst` (Round 030): left, or replaced while it is the
+    /// file the plan saw. A resume keeps it instead of asking again. Nothing for a row
+    /// the job will ask about.
+    pub fn decided(&mut self, dst: &Path, e: &crate::ops::Expect) -> std::io::Result<()> {
+        use crate::ops::Expect;
+        match e {
+            Expect::Skip => self.line(&format!("skip {}", enc(dst)), dst),
+            Expect::Replace(id) => self.line(&format!("replace {} {}", enc(dst), id.encode()), dst),
+            Expect::Absent => Ok(()),
+        }
+    }
+
+    /// About to put `dst` in the trash and rename `tmp`, its replacement, complete and
+    /// synced, over it (Round 031). Killed in between, the next start finishes the
+    /// rename: the new file is the one that was confirmed, and the old one is in the
+    /// trash. Synced by the commit before the trash step.
+    pub fn swap(&mut self, tmp: &Path, dst: &Path) -> std::io::Result<()> {
+        self.line(&format!("swap {} {}", enc(tmp), enc(dst)), dst)
+    }
+
+    /// The job has finished with `src`, one of its sources: a resume leaves it.
+    pub fn done(&mut self, src: &Path) -> std::io::Result<()> {
+        self.line(&format!("done {}", enc(src)), src)
     }
 }
 
@@ -284,6 +402,17 @@ pub struct Interrupted {
     /// Rename many's files that could not be put back (their name is taken): each
     /// (temporary name, name it had).
     pub stranded: Vec<(PathBuf, PathBuf)>,
+    /// A move across devices killed between a file's complete copy and the removal of
+    /// its source: (source, copy), both still there. Nothing is removed: Resume leaves
+    /// such a source where it is and says so.
+    pub moved: Vec<(PathBuf, PathBuf)>,
+    /// The confirmed plan's decisions (Round 030): each destination left or replaced.
+    pub decided: Vec<(PathBuf, crate::ops::Expect)>,
+    /// Replacements finished at the start: killed after the old file went to the trash
+    /// and before the new one was renamed in (Round 031). Each destination.
+    pub swapped: Vec<PathBuf>,
+    /// Sources the job finished with.
+    pub done: Vec<PathBuf>,
 }
 
 /// Tidy up after runs that ended without warning, and say what they were doing.
@@ -456,7 +585,7 @@ fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
     text.lines().all(|line| {
         let mut w = line.split(' ');
         match w.next() {
-            Some("dir" | "part" | "ren") => w.filter_map(dec).all(|p| inside(&p)),
+            Some("dir" | "part" | "ren" | "swap") => w.filter_map(dec).all(|p| inside(&p)),
             _ => true,
         }
     })
@@ -471,7 +600,12 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         cleaned: 0,
         restored: 0,
         stranded: Vec::new(),
+        moved: Vec::new(),
+        decided: Vec::new(),
+        done: Vec::new(),
+        swapped: Vec::new(),
     };
+    let mut swaps: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut parts: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut renames: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -491,7 +625,31 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("gone", Some(p), _) => parts.retain(|x| *x != p),
             ("ren", Some(t), Some(o)) => renames.push((t, o)),
             ("unren", Some(t), _) => renames.retain(|(x, _)| *x != t),
+            ("moved", Some(s), Some(d)) => it.moved.push((s, d)),
+            ("skip", Some(p), _) => it.decided.push((p, crate::ops::Expect::Skip)),
+            ("replace", Some(p), _) => {
+                // The third word is the file's identity, not a path.
+                if let Some(id) = line.split(' ').nth(2).and_then(crate::ops::Ident::decode) {
+                    it.decided.push((p, crate::ops::Expect::Replace(id)));
+                }
+            }
+            ("done", Some(p), _) => it.done.push(p),
+            ("swap", Some(t), Some(d)) => swaps.push((t, d)),
             _ => {}
+        }
+    }
+    // Before the temporary files go: one whose destination is empty is the complete,
+    // synced replacement of a file now in the trash. Renamed in, never over anything.
+    for (tmp, dst) in swaps {
+        let ours = tmp
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().contains(".xdevcmd-part-"));
+        if ours
+            && fs::symlink_metadata(&dst).is_err()
+            && fs::symlink_metadata(&tmp).is_ok_and(|m| m.is_file())
+            && crate::noreplace::rename_noreplace(&tmp, &dst).is_ok()
+        {
+            it.swapped.push(dst);
         }
     }
     // The temporary files that run made: `.name.xdevcmd-part-<run>-<n>`. The whole
@@ -519,6 +677,9 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             it.cleaned += 1;
         }
     }
+    // What was copied and not yet removed: told, never acted on.
+    it.moved
+        .retain(|(s, d)| fs::symlink_metadata(s).is_ok() && fs::symlink_metadata(d).is_ok());
     for (tmp, orig) in renames {
         if fs::symlink_metadata(&tmp).is_err() {
             continue;
@@ -929,6 +1090,183 @@ mod tests {
             0,
             "the journal is gone"
         );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A journal written by 0.3.0 (no `v` line, no `moved`) is tidied up as before; one
+    /// of this version, with lines 0.3.0 does not know, is read by the same rules.
+    #[test]
+    fn a_journal_of_0_3_0_is_still_tidied_and_new_tags_are_skipped() {
+        let d = dir("v030");
+        let jdir = d.join("journal");
+        fs::create_dir_all(&jdir).unwrap();
+        let part = d.join(".a.xdevcmd-part-2147483646-0");
+        fs::write(&part, "half").unwrap();
+        let old = format!(
+            "host {}\nkind copy\nsrc {}\ndest {}\ndir {}\n",
+            enc(Path::new(&hostname())),
+            enc(&d.join("a")),
+            enc(&d),
+            enc(&d),
+        );
+        orphan(&jdir, &old);
+        let got = recover_in(&jdir);
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].kind.as_str(), got[0].cleaned), ("copy", 1));
+        assert!(!part.exists());
+        let new = format!(
+            "{old}v 2\nmoved {} {}\nzzz unknown\n",
+            enc(&d.join("a")),
+            enc(&d.join("b"))
+        );
+        let it = tidy(&new, "2147483646");
+        assert_eq!(it.kind, "copy");
+        assert!(
+            it.moved.is_empty(),
+            "neither file is there: nothing to tell"
+        );
+        assert_eq!(it.sources, vec![d.join("a")]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A journal begun is on disk with its header; a line or a sync that fails breaks it
+    /// for good, so a later line that would go through is refused too.
+    #[test]
+    fn a_journal_that_failed_once_stays_broken() {
+        let d = dir("broken");
+        let mut j =
+            Journal::begin_in(&d, "copy", &[d.join("broken-src")], Some(&d), false).unwrap();
+        let text = fs::read_to_string(&j.path).unwrap();
+        assert!(text.contains("\nv 3\n"), "{text}");
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalSync,
+            "broken-part",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        j.part(&d.join("sub/.x.broken-part")).unwrap();
+        assert!(j.commit(&d.join("broken-part")).is_err());
+        assert!(j.broken().is_some());
+        assert!(
+            j.part(&d.join("other/.y")).is_err(),
+            "a later line is refused"
+        );
+        assert!(
+            j.commit(&d.join("anything")).is_err(),
+            "and never synced again"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A move killed between a file's synced copy and its source's removal: the next
+    /// start says both are there, and removes neither.
+    #[test]
+    fn a_move_killed_before_removing_a_source_says_both_are_there() {
+        let d = dir("moved");
+        let (src, dst, gone) = (d.join("a"), d.join("b"), d.join("c"));
+        fs::write(&src, "x").unwrap();
+        fs::write(&dst, "x").unwrap();
+        let text = format!(
+            "host {}\nv 2\nkind move\nsrc {}\nmoved {} {}\nmoved {} {}\n",
+            enc(Path::new(&hostname())),
+            enc(&src),
+            enc(&src),
+            enc(&dst),
+            enc(&gone),
+            enc(&dst),
+        );
+        let it = tidy(&text, "2147483646");
+        assert_eq!(
+            it.moved,
+            vec![(src.clone(), dst.clone())],
+            "the source of c is gone"
+        );
+        assert!(src.exists() && dst.exists(), "neither removed");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Killed after the old file went to the trash and before the new one was renamed
+    /// in: the next start renames the complete new file in. If the old one is still
+    /// there (killed before the trash step), the temporary file just goes.
+    #[test]
+    fn a_replacement_killed_after_the_trash_is_finished_at_the_next_start() {
+        let d = dir("swap");
+        let run = "2147483645";
+        let tmp1 = d.join(format!(".a.xdevcmd-part-{run}-1"));
+        let tmp2 = d.join(format!(".b.xdevcmd-part-{run}-2"));
+        fs::write(&tmp1, "new a").unwrap();
+        fs::write(&tmp2, "new b").unwrap();
+        fs::write(d.join("b"), "old b").unwrap();
+        let text = format!(
+            "host {}\nv 3\nkind copy\ndir {}\nswap {} {}\nswap {} {}\n",
+            enc(Path::new(&hostname())),
+            enc(&d),
+            enc(&tmp1),
+            enc(&d.join("a")),
+            enc(&tmp2),
+            enc(&d.join("b")),
+        );
+        let it = tidy(&text, run);
+        assert_eq!(it.swapped, vec![d.join("a")]);
+        assert_eq!(fs::read_to_string(d.join("a")).unwrap(), "new a");
+        assert_eq!(fs::read_to_string(d.join("b")).unwrap(), "old b");
+        assert!(!tmp1.exists() && !tmp2.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The plan's decisions and the sources finished come back from a dead run's
+    /// journal, for Resume; a damaged identity is dropped, not guessed.
+    #[test]
+    fn decisions_and_finished_sources_come_back_from_a_dead_run() {
+        use crate::ops::{Expect, Ident};
+        let d = dir("decided");
+        fs::write(d.join("there"), "x").unwrap();
+        let id = Ident::at(&d.join("there")).unwrap();
+        let mut j =
+            Journal::begin_in(&d, "copy", &[d.join("a"), d.join("b")], Some(&d), false).unwrap();
+        j.decided(&d.join("left"), &Expect::Skip).unwrap();
+        j.decided(&d.join("there"), &Expect::Replace(id)).unwrap();
+        j.decided(&d.join("new"), &Expect::Absent).unwrap();
+        j.done(&d.join("a")).unwrap();
+        let text = fs::read_to_string(&j.path).unwrap();
+        let it = tidy(
+            &format!("{text}replace {} i1:junk\n", enc(&d.join("bad"))),
+            "x",
+        );
+        assert_eq!(it.kind, "copy");
+        assert_eq!(
+            it.decided,
+            vec![
+                (d.join("left"), Expect::Skip),
+                (d.join("there"), Expect::Replace(id)),
+            ]
+        );
+        assert_eq!(it.done, vec![d.join("a")]);
+        drop(j);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_identity_reads_back_as_itself() {
+        use crate::ops::Ident;
+        let d = dir("ident");
+        fs::write(d.join("f"), "x").unwrap();
+        fs::create_dir(d.join("sub")).unwrap();
+        for p in [d.join("f"), d.join("sub")] {
+            let id = Ident::at(&p).unwrap();
+            assert_eq!(Ident::decode(&id.encode()), Some(id), "{}", id.encode());
+            assert!(!id.encode().contains(' '));
+        }
+        for junk in [
+            "",
+            "i1",
+            "i2:0:1:-:1:2",
+            "i1:x:1:-:1:2",
+            "i1:0:1:5:1:2",
+            "i1:0:1:-",
+        ] {
+            assert_eq!(Ident::decode(junk), None, "{junk}");
+        }
         let _ = fs::remove_dir_all(&d);
     }
 }

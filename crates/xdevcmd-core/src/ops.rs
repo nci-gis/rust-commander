@@ -17,8 +17,14 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 const BUF: usize = 256 * 1024;
+/// A move across devices removes sources a batch at a time: this many files, or
+/// [`MOVE_BATCH_BYTES`] of them, whichever comes first.
+const MOVE_BATCH_FILES: usize = 64;
+const MOVE_BATCH_BYTES: u64 = 64 << 20;
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
+/// And at least this often while anything moves.
+const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -84,16 +90,75 @@ pub struct Request {
     /// Copy each source into its own directory (synchronising): `(source, into)`.
     /// Directories are created as needed. When set, `sources` and `dest` are unused.
     pub pairs: Vec<(PathBuf, PathBuf)>,
-    /// Overwrites were listed in a plan the user confirmed, so they are not asked
-    /// about one by one. Only a plan that names every overwrite may set this.
-    pub overwrite_confirmed: bool,
+    /// Synchronising: what the confirmed plan expected at each destination (the path a
+    /// pair's source is copied to). A destination is replaced without a question only
+    /// when it is still the file the plan saw ([`Expect::Replace`]); anything else there
+    /// (a file where the plan saw none, one changed since) is asked about.
+    pub expect: std::collections::HashMap<PathBuf, Expect>,
     /// Copy and move: what to do with files already at the destination.
     pub existing: Existing,
+    /// Files and bytes the confirmed plan already counted (Round 030): the job's
+    /// progress bar uses them instead of walking the sources a second time.
+    pub planned: Option<(u64, u64)>,
     /// Safe operations for this job, taken from the setting when the request is made
     /// and kept to the end: turning the setting over mid-job must not split one job
     /// between two ways of writing, and tests set it here rather than in a global
     /// other tests read.
     pub safe: bool,
+    /// The waits between tries of a file that failed with an error that passes (a
+    /// network one): [`BACKOFF_SECS`]; then the user is asked. Tests shorten them.
+    pub backoff: Vec<std::time::Duration>,
+}
+
+/// The owner's decision 2, Round 031: five tries more, about 30 s in all, then the
+/// question.
+pub const BACKOFF_SECS: [u64; 5] = [1, 2, 4, 8, 15];
+
+fn backoff() -> Vec<std::time::Duration> {
+    BACKOFF_SECS
+        .iter()
+        .map(|s| std::time::Duration::from_secs(*s))
+        .collect()
+}
+
+/// Whether `e` is an error that may pass if tried again: the network's (a timeout, a
+/// lost connection, a stale handle). An I/O error only on a network target: on a local
+/// disk it is the disk failing, and trying again is wrong.
+pub fn transient(e: &io::Error, network: bool) -> bool {
+    let Some(code) = e.raw_os_error() else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        let n = Errno::from_raw_os_error(code);
+        [
+            Errno::TIMEDOUT,
+            Errno::NOTCONN,
+            Errno::HOSTDOWN,
+            Errno::HOSTUNREACH,
+            Errno::CONNRESET,
+            Errno::CONNABORTED,
+            Errno::NETDOWN,
+            Errno::NETUNREACH,
+            Errno::NETRESET,
+            Errno::STALE,
+        ]
+        .contains(&n)
+            || network && n == Errno::IO
+    }
+    #[cfg(windows)]
+    {
+        // BAD_NETPATH, UNEXP_NET_ERR, NETNAME_DELETED, BAD_NET_NAME, SEM_TIMEOUT,
+        // NETWORK_UNREACHABLE, CONNECTION_ABORTED, CONNECTION_INVALID.
+        let _ = network;
+        matches!(code, 53 | 59 | 64 | 67 | 121 | 1231 | 1236 | 1229)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (code, network);
+        false
+    }
 }
 
 impl Request {
@@ -108,12 +173,17 @@ impl Request {
             ..Self::delete(Vec::new(), false)
         }
     }
-    /// Copy each `(source, into)`, overwriting what the confirmed plan said it would.
-    pub fn sync(pairs: Vec<(PathBuf, PathBuf)>) -> Self {
+    /// Copy each `(source, into, expected)`, replacing what the confirmed plan said it
+    /// would, and only while it is what the plan saw.
+    pub fn sync(pairs: Vec<(PathBuf, PathBuf, Expect)>) -> Self {
+        let expect = pairs
+            .iter()
+            .filter_map(|(src, into, e)| Some((into.join(src.file_name()?), *e)))
+            .collect();
         Self {
             kind: Kind::Copy,
-            pairs,
-            overwrite_confirmed: true,
+            pairs: pairs.into_iter().map(|(s, i, _)| (s, i)).collect(),
+            expect,
             ..Self::delete(Vec::new(), false)
         }
     }
@@ -139,9 +209,11 @@ impl Request {
             inner: Vec::new(),
             base: String::new(),
             pairs: Vec::new(),
-            overwrite_confirmed: false,
+            expect: Default::default(),
             existing: Existing::Ask,
+            planned: None,
             safe: safe(),
+            backoff: backoff(),
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -156,9 +228,11 @@ impl Request {
             inner: Vec::new(),
             base: String::new(),
             pairs: Vec::new(),
-            overwrite_confirmed: false,
+            expect: Default::default(),
             existing: Existing::Ask,
+            planned: None,
             safe: safe(),
+            backoff: backoff(),
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -173,20 +247,149 @@ impl Request {
             inner: Vec::new(),
             base: String::new(),
             pairs: Vec::new(),
-            overwrite_confirmed: false,
+            expect: Default::default(),
             existing: Existing::Ask,
+            planned: None,
             safe: safe(),
+            backoff: backoff(),
         }
     }
 }
 
+/// Which file a decision was about: enough to tell, right before the step it allowed,
+/// that the file there is still that one. Kind, size and modification time; on Unix the
+/// device and inode too, on Windows the creation time (std has no stable file index).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ident {
+    kind: u8,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    node: (u64, u64),
+    #[cfg(not(unix))]
+    created: Option<std::time::SystemTime>,
+}
+
+impl Ident {
+    pub fn of(m: &fs::Metadata) -> Self {
+        let t = m.file_type();
+        Self {
+            kind: if t.is_symlink() {
+                2
+            } else if t.is_dir() {
+                1
+            } else if t.is_file() {
+                0
+            } else {
+                3
+            },
+            len: m.len(),
+            modified: m.modified().ok(),
+            #[cfg(unix)]
+            node: {
+                use std::os::unix::fs::MetadataExt;
+                (m.dev(), m.ino())
+            },
+            #[cfg(not(unix))]
+            created: m.created().ok(),
+        }
+    }
+
+    pub fn is_dir(&self) -> bool {
+        self.kind == 1
+    }
+
+    /// What is at `p` now (a link as itself), if anything.
+    pub fn at(p: &Path) -> Option<Self> {
+        fs::symlink_metadata(p).ok().map(|m| Self::of(&m))
+    }
+
+    /// As one word for a journal line (no spaces): read back by [`Ident::decode`] on the
+    /// same system. A time before 1970 is written as none, so it never matches again:
+    /// the file is then asked about, which is the safe side.
+    pub fn encode(&self) -> String {
+        let t = |t: Option<std::time::SystemTime>| {
+            t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or("-".to_string(), |d| {
+                    format!("{}.{}", d.as_secs(), d.subsec_nanos())
+                })
+        };
+        #[cfg(unix)]
+        let rest = format!("{}:{}", self.node.0, self.node.1);
+        #[cfg(not(unix))]
+        let rest = t(self.created);
+        format!("i1:{}:{}:{}:{rest}", self.kind, self.len, t(self.modified))
+    }
+
+    pub fn decode(s: &str) -> Option<Self> {
+        let t = |s: &str| -> Option<Option<std::time::SystemTime>> {
+            if s == "-" {
+                return Some(None);
+            }
+            let (a, b) = s.split_once('.')?;
+            let d = std::time::Duration::new(a.parse().ok()?, b.parse().ok()?);
+            Some(Some(std::time::UNIX_EPOCH + d))
+        };
+        let mut w = s.split(':');
+        if w.next()? != "i1" {
+            return None;
+        }
+        let kind = w.next()?.parse().ok()?;
+        let len = w.next()?.parse().ok()?;
+        let modified = t(w.next()?)?;
+        #[cfg(unix)]
+        let id = Self {
+            kind,
+            len,
+            modified,
+            node: (w.next()?.parse().ok()?, w.next()?.parse().ok()?),
+        };
+        #[cfg(not(unix))]
+        let id = Self {
+            kind,
+            len,
+            modified,
+            created: t(w.next()?)?,
+        };
+        Some(id)
+    }
+}
+
+/// What a synchronisation plan saw at a destination when the user confirmed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect {
+    /// Nothing: the copy is new there.
+    Absent,
+    /// This file, which the copy replaces.
+    Replace(Ident),
+    /// Whatever is there is left as it is (a planned skip: the user's choice for its
+    /// group, or a row the plan found cannot be done).
+    Skip,
+}
+
+/// Something a copy made, for undoing it (Round 031): a file, link or directory that
+/// was not there before, as it was right after the copy made it. `old`: the file it
+/// replaced, put in the trash on the way; undoing puts it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Made {
+    pub path: PathBuf,
+    pub ident: Ident,
+    pub old: Option<crate::trashed::Trashed>,
+}
+
+/// The most a copy remembers for its undo, as the plan's own cap: past it the copy
+/// cannot be undone, and says so.
+pub const MADE_CAP: usize = crate::plan::CAP;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Question {
-    /// The destination already exists.
+    /// The destination already exists. `changed`: it is not the file the user agreed
+    /// to replace, or the one the plan saw (replaced, or made, since): asked again.
     Conflict {
         path: PathBuf,
         existing_bytes: u64,
         incoming_bytes: u64,
+        changed: bool,
     },
     /// A move would cross a filesystem boundary, so it becomes a copy then a delete.
     CrossDevice { path: PathBuf },
@@ -195,6 +398,10 @@ pub enum Question {
     TrashUnavailable { path: PathBuf, reason: String },
     /// Something went wrong and the user decides whether it is fatal.
     Failed { path: PathBuf, error: String },
+    /// Safe operations' journal cannot be written (`error`): at the start, or before a
+    /// step that cannot be undone. [`Answer::Yes`] goes on without it for the rest of the
+    /// job; anything else stops the job there. Asked once per job.
+    NoJournal { error: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,6 +435,17 @@ pub struct Summary {
     /// Safe operations were on but this job's journal could not be made: why. The job ran
     /// as with safe operations off; a kill now is not tidied up at the next start.
     pub journal_off: Option<String>,
+    /// A copy: what it made, in the order made (a directory before what is in it), for
+    /// its undo. Empty past [`MADE_CAP`], with `made_over` set.
+    pub made: Vec<Made>,
+    pub made_over: bool,
+    /// A copy: files it replaced with no trash to keep the old one in. Undo leaves those.
+    pub replaced_for_good: u64,
+    /// Files replaced whose old version went to the trash (Round 031).
+    pub replaced_to_trash: u64,
+    /// A move: each source that went, and where it is now (the sources the request
+    /// named, not what is under them). Lists kept in the app follow them (Round 031).
+    pub relocated: Vec<(PathBuf, PathBuf)>,
 }
 
 impl Summary {
@@ -245,6 +463,17 @@ impl Summary {
         }
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
+        }
+        if self.replaced_to_trash > 0 {
+            s.push_str(&format!(
+                ", {} replaced (the old {} in the trash)",
+                self.replaced_to_trash,
+                if self.replaced_to_trash == 1 {
+                    "one"
+                } else {
+                    "ones"
+                }
+            ));
         }
         if self.left > 0 {
             s.push_str(&format!(
@@ -266,9 +495,27 @@ impl Summary {
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    Scanned { files: u64, bytes: u64 },
-    Begin { path: PathBuf },
-    Progress { bytes_done: u64 },
+    Scanned {
+        files: u64,
+        bytes: u64,
+    },
+    Begin {
+        path: PathBuf,
+    },
+    /// Bytes written so far, and files finished (done, skipped or failed).
+    Progress {
+        bytes_done: u64,
+        files_done: u64,
+    },
+    /// `path` failed with an error that may pass (`error`): tried again after `wait`,
+    /// try `attempt` of `of` (Round 031). Cleared by the next `Progress` or `Begin`.
+    Retrying {
+        path: PathBuf,
+        error: String,
+        attempt: u32,
+        of: u32,
+        wait: std::time::Duration,
+    },
     Ask(Question),
     Done(Summary),
 }
@@ -289,6 +536,23 @@ impl Handle {
             events,
             answers,
             cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// A job that asks nothing, run by `work` on its own thread with the events'
+    /// sender and the cancel flag: undoing a copy.
+    pub(crate) fn spawn(
+        work: impl FnOnce(Sender<Event>, Arc<AtomicBool>) + Send + 'static,
+    ) -> Self {
+        let (etx, events) = channel();
+        let (answers, _) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let c = cancel.clone();
+        std::thread::spawn(move || work(etx, c));
+        Self {
+            events,
+            answers,
+            cancel,
         }
     }
 
@@ -319,15 +583,28 @@ pub fn start(req: Request) -> Handle {
             resuming: false,
             cross_all: false,
             trash_all: false,
-            planned: None,
+            expect: Default::default(),
+            agreed: None,
+            changed: None,
             abort: false,
             bytes_done: 0,
             last_report: 0,
+            last_tick: std::time::Instant::now(),
             sum: Summary::default(),
             moving: false,
             approved: None,
             journal: None,
+            removing: Vec::new(),
+            removing_bytes: 0,
+            moved_file: None,
             safe: req.safe,
+            recording: req.kind == Kind::Copy,
+            trash_root: req.trash_root.clone(),
+            backoff: req.backoff.clone(),
+            retry: false,
+            network: Default::default(),
+            keeps: Default::default(),
+            old_trashed: None,
         };
         w.run(req);
     });
@@ -353,12 +630,19 @@ struct Worker {
     resuming: bool,
     cross_all: bool,
     trash_all: bool,
-    /// Synchronising: the destinations the confirmed plan overwrites. Only these are
-    /// replaced without asking; a file that appears elsewhere is asked about.
-    planned: Option<std::collections::HashSet<PathBuf>>,
+    /// Synchronising: [`Request::expect`].
+    expect: std::collections::HashMap<PathBuf, Expect>,
+    /// The file a decision to replace was about: the destination and what was there
+    /// when the user was asked (what they saw) or the plan was made. Checked again
+    /// right before the step that replaces it ([`Worker::still_agreed`]).
+    agreed: Option<(PathBuf, Ident)>,
+    /// A destination found changed since it was agreed to: its next question says so.
+    changed: Option<PathBuf>,
     abort: bool,
     bytes_done: u64,
     last_report: u64,
+    /// When progress was last said.
+    last_tick: std::time::Instant,
     sum: Summary,
     /// Copying for a move across devices: each source is removed as soon as its copy
     /// is complete, so what was skipped or failed stays where it was.
@@ -366,12 +650,38 @@ struct Worker {
     /// A destination the user already agreed to replace, so the copy a cross-device
     /// move falls back to does not ask about it a second time.
     approved: Option<PathBuf>,
+    /// A move across devices: copies complete and synced whose sources wait to be
+    /// removed, a batch at a time ([`Worker::remove_moved`]).
+    /// Each with the handle that wrote the copy, still open, to sync it through: a
+    /// handle opened afresh cannot write a read-only copy, and on a network file system
+    /// would not be told of a write that failed on the first (at most
+    /// [`MOVE_BATCH_FILES`] are held). `None`: already synced (a replacement), or a link.
+    removing: Vec<(PathBuf, PathBuf, Option<File>)>,
+    /// Their size, in bytes.
+    removing_bytes: u64,
+    /// The copy [`Worker::copy_bytes`] just made while moving, still open, for
+    /// [`Worker::moved`] to keep with it.
+    moved_file: Option<File>,
     /// Safe operations: what this job is in the middle of, for the next start if it is
     /// killed. Removed when the job ends.
     journal: Option<crate::journal::Journal>,
     /// [`Request::safe`]: decides the journal and whether a new file is written under
     /// a temporary name.
     safe: bool,
+    /// A copy: what it makes is kept in [`Summary::made`], for its undo.
+    recording: bool,
+    /// [`Request::trash_root`]: tests' trash, for a replaced file too.
+    trash_root: Option<PathBuf>,
+    /// [`Request::backoff`].
+    backoff: Vec<std::time::Duration>,
+    /// The user answered Retry to the last failed file.
+    retry: bool,
+    /// Per directory: whether it is reached over a network ([`crate::plan::is_network`]).
+    network: std::collections::HashMap<PathBuf, bool>,
+    /// Per destination directory: whether a file replaced there goes to the trash.
+    keeps: std::collections::HashMap<PathBuf, bool>,
+    /// The file the last replace put in the trash, for its undo.
+    old_trashed: Option<crate::trashed::Trashed>,
 }
 
 impl Worker {
@@ -400,18 +710,19 @@ impl Worker {
             match crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash)
             {
                 Some(Ok(j)) => self.journal = Some(j),
-                // The job runs all the same, as it would with safe operations off: but
-                // the summary says so, once, rather than leave the user believing a kill
-                // now would be tidied up.
-                Some(Err(e)) => self.sum.journal_off = Some(e.to_string()),
+                // Asked before anything is done (the owner's decision, Round 029): go on
+                // as with safe operations off, said in the summary, or stop now.
+                Some(Err(e)) if !self.go_without_journal(e.to_string()) => {
+                    self.finish();
+                    return;
+                }
+                Some(Err(_)) => {}
                 None => {}
             }
         }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
-            self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
-            self.sum.bytes = self.bytes_done;
-            let _ = self.tx.send(Event::Done(self.sum.clone()));
+            self.finish();
             return;
         }
         match req.existing {
@@ -421,14 +732,15 @@ impl Worker {
             Existing::Replace => self.overwrite_all = true,
             Existing::Resume => self.resuming = true,
         }
-        if req.overwrite_confirmed {
-            self.planned = Some(
-                req.pairs
-                    .iter()
-                    .filter_map(|(src, into)| Some(into.join(src.file_name()?)))
-                    .filter(|dst| dst.symlink_metadata().is_ok())
-                    .collect(),
-            );
+        self.expect = req.expect.clone();
+        // The plan's decisions, for a resume to keep them (Round 030): written before
+        // the first step, synced with the first commit like every line.
+        if req.planned.is_some() {
+            if let Some(j) = self.journal.as_mut() {
+                for (dst, e) in &req.expect {
+                    let _ = j.decided(dst, e);
+                }
+            }
         }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
@@ -445,12 +757,10 @@ impl Worker {
                 }
                 self.copy_into(src, into, None);
             }
-            self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
-            self.sum.bytes = self.bytes_done;
-            let _ = self.tx.send(Event::Done(self.sum.clone()));
+            self.finish();
             return;
         }
-        let (files, bytes) = scan(&req.sources);
+        let (files, bytes) = req.planned.unwrap_or_else(|| scan(&req.sources));
         let _ = self.tx.send(Event::Scanned { files, bytes });
 
         for src in &req.sources {
@@ -467,20 +777,140 @@ impl Worker {
                 Kind::Move => {
                     if let Some(d) = req.dest.as_deref() {
                         self.move_into(src, d, req.rename_to.as_deref());
+                        if let Some(name) = req.rename_to.as_deref().or(src.file_name()) {
+                            let to = d.join(name);
+                            if fs::symlink_metadata(src).is_err()
+                                && fs::symlink_metadata(&to).is_ok()
+                            {
+                                self.sum.relocated.push((src.clone(), to));
+                            }
+                        }
                     }
                 }
                 Kind::Delete => self.delete(src, req.to_trash, req.trash_root.as_deref()),
                 Kind::Extract | Kind::Pack => {}
             }
+            // Finished with this source (not stopped part way): a resume leaves it.
+            if !self.stopped() && matches!(req.kind, Kind::Copy | Kind::Move) {
+                if let Some(j) = self.journal.as_mut() {
+                    let _ = j.done(src);
+                }
+            }
         }
 
-        self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
-        self.sum.bytes = self.bytes_done;
-        let _ = self.tx.send(Event::Done(self.sum.clone()));
+        self.finish();
     }
 
     fn stopped(&self) -> bool {
         self.abort || self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Whether `p` is in a directory reached over a network, asked once per directory.
+    fn on_network(&mut self, p: &Path) -> bool {
+        let dir = p.parent().unwrap_or(Path::new("")).to_path_buf();
+        *self
+            .network
+            .entry(dir)
+            .or_insert_with_key(|d| crate::plan::is_network(d))
+    }
+
+    /// Wait `d`, in short steps, ending at once on Esc: false when stopped.
+    fn wait(&self, d: std::time::Duration) -> bool {
+        let end = std::time::Instant::now() + d;
+        loop {
+            if self.stopped() {
+                return false;
+            }
+            let now = std::time::Instant::now();
+            if now >= end {
+                return true;
+            }
+            std::thread::sleep((end - now).min(std::time::Duration::from_millis(50)));
+        }
+    }
+
+    /// Whether the file `dst` replaces goes to the trash first (Round 031): where the
+    /// trash is on the same volume ([`crate::plan::trash_keeps`]), asked once per
+    /// directory. Tests give their own trash, and always use it.
+    fn replace_into_trash(&mut self, dst: &Path) -> bool {
+        if self.trash_root.is_some() {
+            return true;
+        }
+        // A unit test without its own trash never touches the real one.
+        if cfg!(test) {
+            return false;
+        }
+        let dir = dst.parent().unwrap_or(Path::new("")).to_path_buf();
+        *self
+            .keeps
+            .entry(dir)
+            .or_insert_with_key(|d| crate::plan::trash_keeps(d) == Some(true))
+    }
+
+    /// A copy made `path` (replacing `old`, if it went to the trash): kept for its undo,
+    /// as it is now. Past the cap, nothing more is kept and the copy cannot be undone.
+    fn made(&mut self, path: &Path, old: Option<crate::trashed::Trashed>) {
+        if !self.recording {
+            return;
+        }
+        if self.sum.made.len() >= MADE_CAP {
+            self.recording = false;
+            self.sum.made_over = true;
+            self.sum.made = Vec::new();
+            return;
+        }
+        if let Some(ident) = Ident::at(path) {
+            self.sum.made.push(Made {
+                path: path.to_path_buf(),
+                ident,
+                old,
+            });
+        }
+    }
+
+    /// The job is over: say how it went. A journal that broke on a line no step needed
+    /// synced (a new file's) is said here, since nobody was asked about it.
+    fn finish(&mut self) {
+        self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
+        self.sum.bytes = self.bytes_done;
+        if let Some(why) = self.journal.as_ref().and_then(|j| j.broken()) {
+            self.sum.journal_off = Some(format!("its journal failed: {why}"));
+        }
+        let _ = self.tx.send(Event::Done(self.sum.clone()));
+    }
+
+    /// Before a step that cannot be undone, about `about`: the journal's lines are on
+    /// disk. A journal that cannot be (now or before) is asked about, once: go on
+    /// without it, or stop here (`false`; the job ends).
+    fn durable(&mut self, about: &Path) -> bool {
+        // Stopped (Stop at the journal's question, Abort): nothing more that cannot be
+        // undone, with or without a journal: a batch's sources are kept.
+        if self.abort {
+            return false;
+        }
+        let Some(j) = self.journal.as_mut() else {
+            return true;
+        };
+        let Err(e) = j.commit(about) else {
+            return true;
+        };
+        self.go_without_journal(e.to_string())
+    }
+
+    /// Ask whether to go on without the journal, which cannot be written (`why`). Its
+    /// file goes either way: half a journal is not one.
+    fn go_without_journal(&mut self, why: String) -> bool {
+        self.journal = None;
+        match self.ask(Question::NoJournal { error: why.clone() }) {
+            Answer::Yes | Answer::YesToAll => {
+                self.sum.journal_off = Some(why);
+                true
+            }
+            _ => {
+                self.abort = true;
+                false
+            }
+        }
     }
 
     /// Extract or pack, through `archive.rs`, with this worker answering its hooks so
@@ -541,12 +971,19 @@ impl Worker {
         }
     }
 
+    /// `n` more bytes done (0: a file finished). Said every [`PROGRESS_STEP`] bytes,
+    /// and at least every [`PROGRESS_EVERY`] while files are finishing, so a run of small
+    /// files moves the bar and the ETA too (Round 031).
     fn advance(&mut self, n: u64) {
         self.bytes_done += n;
-        if self.bytes_done - self.last_report >= PROGRESS_STEP {
+        if self.bytes_done - self.last_report >= PROGRESS_STEP
+            || self.last_tick.elapsed() >= PROGRESS_EVERY
+        {
             self.last_report = self.bytes_done;
+            self.last_tick = std::time::Instant::now();
             let _ = self.tx.send(Event::Progress {
                 bytes_done: self.bytes_done,
+                files_done: self.sum.done + self.sum.skipped + self.sum.failed,
             });
         }
     }
@@ -554,15 +991,31 @@ impl Worker {
     /// Decide what to do about an existing destination. `Some(true)` means go ahead.
     /// `src`: the file that would replace it, for the update rule; none for an archive.
     fn resolve_conflict(&mut self, src: Option<&Path>, dst: &Path, incoming: u64) -> Option<bool> {
-        if dst.symlink_metadata().is_err() {
+        let Some(now) = Ident::at(dst) else {
             return Some(true);
-        }
+        };
         if self.approved.as_deref() == Some(dst) {
+            // Agreed already, at the move's question: that file is still the one.
             self.approved = None;
             return Some(true);
         }
-        if self.overwrite_all || self.planned.as_ref().is_some_and(|p| p.contains(dst)) {
+        self.agreed = None;
+        // "Replace all" is a rule, not a file: applied to whatever is there.
+        if self.overwrite_all {
             return Some(true);
+        }
+        // The plan's word holds for the file it saw, and for nothing else. A skip is
+        // safe whatever is there now.
+        if self.expect.get(dst) == Some(&Expect::Skip) {
+            return Some(false);
+        }
+        match self.expect.get(dst) {
+            Some(Expect::Replace(id)) if *id == now && self.changed.as_deref() != Some(dst) => {
+                self.agreed = Some((dst.to_path_buf(), now));
+                return Some(true);
+            }
+            Some(_) => self.changed = Some(dst.to_path_buf()),
+            None => {}
         }
         if self.skip_all {
             return Some(false);
@@ -577,12 +1030,20 @@ impl Worker {
                 Same::No => {}
             }
         }
-        let existing = fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
-        match self.ask(Question::Conflict {
+        let changed = self.changed.as_deref() == Some(dst);
+        self.changed = None;
+        // What the user is shown is what they agree to: kept, and compared again
+        // before the file is replaced.
+        let answer = self.ask(Question::Conflict {
             path: dst.to_path_buf(),
-            existing_bytes: existing,
+            existing_bytes: now.len,
             incoming_bytes: incoming,
-        }) {
+            changed,
+        });
+        if answer == Answer::Yes {
+            self.agreed = Some((dst.to_path_buf(), now));
+        }
+        match answer {
             Answer::Yes => Some(true),
             Answer::YesToAll => {
                 self.overwrite_all = true;
@@ -602,6 +1063,23 @@ impl Worker {
                 None
             }
         }
+    }
+
+    /// Right before replacing `dst`: whether it is still the file that was agreed to (an
+    /// answer, the plan), or still one the update rule replaces. If not, it is marked
+    /// changed and `false`: the caller goes back to the question.
+    fn still_agreed(&mut self, src: Option<&Path>, dst: &Path) -> bool {
+        let now = Ident::at(dst);
+        let ok = match &self.agreed {
+            // Kept, not taken: a move that falls back to copying checks it again.
+            Some((p, id)) if p == dst => now == Some(*id),
+            // A rule: re-applied to what is there now.
+            _ => self.overwrite_all || !self.update || self.is_older(src, dst),
+        };
+        if !ok {
+            self.changed = Some(dst.to_path_buf());
+        }
+        ok
     }
 
     /// The update rule: `dst` is replaced only when `src` is newer (beyond a FAT drive's
@@ -660,12 +1138,32 @@ impl Worker {
         }
         if meta.file_type().is_symlink() {
             let before = self.sum.done;
+            let new = dst.symlink_metadata().is_err();
             self.copy_symlink(src, dst);
-            self.moved(src, before);
+            if self.sum.done > before {
+                if new {
+                    self.made(dst, None);
+                } else if self.recording {
+                    self.sum.replaced_for_good += 1;
+                }
+            }
+            self.moved(src, dst, before);
         } else if meta.is_dir() {
+            let made = dst.symlink_metadata().is_err();
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
                 return;
+            }
+            if made {
+                self.made(dst, None);
+            }
+            // Moving: a directory made here keeps its name in a power cut before any
+            // source under it is removed (its files sync their own names).
+            if self.moving && made {
+                if let Err(e) = dst.parent().map_or(Ok(()), crate::faults::sync_dir) {
+                    self.note_error(dst, &e);
+                    return;
+                }
             }
             let entries = match fs::read_dir(src) {
                 Ok(it) => it,
@@ -684,22 +1182,109 @@ impl Worker {
             self.sum.done += 1;
             // Moving: the directory goes only once empty, that is when everything in
             // it was copied and removed; anything skipped keeps it.
+            if self.moving {
+                // Its files' sources first: the directory goes only once empty.
+                self.remove_moved();
+            }
             if self.moving && !self.stopped() {
-                let _ = fs::remove_dir(src);
+                let _ = crate::faults::at(crate::faults::Point::RemoveSource, src)
+                    .and_then(|()| fs::remove_dir(src));
             }
         } else {
             let before = self.sum.done;
             self.copy_file(src, dst, meta.len());
-            self.moved(src, before);
+            self.moved(src, dst, before);
         }
     }
 
-    /// While moving across devices: remove `src` if its copy just completed (the count
-    /// of done items went up). A skipped or failed copy leaves it.
-    fn moved(&mut self, src: &Path, done_before: u64) {
-        if self.moving && self.sum.done > done_before {
-            if let Err(e) = fs::remove_file(src) {
-                self.note_error(src, &e);
+    /// While moving across devices: `src`'s copy `dst` just completed (the count of
+    /// done items went up), so its source is to be removed. A skipped or failed copy
+    /// leaves it. All of that waits for [`Worker::remove_moved`], a batch at a time.
+    fn moved(&mut self, src: &Path, dst: &Path, done_before: u64) {
+        if !self.moving || self.sum.done <= done_before {
+            return;
+        }
+        let file = self.moved_file.take();
+        self.removing_bytes += fs::symlink_metadata(dst).map(|m| m.len()).unwrap_or(0);
+        self.removing
+            .push((src.to_path_buf(), dst.to_path_buf(), file));
+        if self.removing.len() >= MOVE_BATCH_FILES || self.removing_bytes >= MOVE_BATCH_BYTES {
+            self.remove_moved();
+        }
+    }
+
+    /// Remove the sources of the copies waiting in [`Worker::removing`]. First each
+    /// copy's data is synced, then each copy's directory (its name then survives a power
+    /// cut too), then the journal's `moved` lines, one sync for the batch (a kill from
+    /// here on is told at the next start that both are there), and only then do the
+    /// sources go. A file's source never goes before its copy is on disk. A copy that
+    /// cannot be synced may not hold what was read: it is removed and its source kept.
+    ///
+    /// Batched (the owner's decision 4, Round 029): three syncs per file made a move of
+    /// 10,000 small files to a disk eight times slower. Syncing a batch of files after
+    /// writing them all lets the system write them out together.
+    fn remove_moved(&mut self) {
+        let batch = std::mem::take(&mut self.removing);
+        self.removing_bytes = 0;
+        if batch.is_empty() {
+            return;
+        }
+        let mut kept = Vec::with_capacity(batch.len());
+        for (src, dst, file) in batch {
+            // Through the handle that wrote it; none for a link (no data of its own;
+            // its name is synced below) or a replacement (synced before its rename).
+            let synced = match &file {
+                Some(f) => crate::faults::sync_data(f, &dst),
+                None => Ok(()),
+            };
+            drop(file);
+            match synced {
+                Ok(()) => kept.push((src, dst)),
+                Err(e) => {
+                    // Never synced again (fsyncgate): this copy goes, its source stays,
+                    // and a later move copies it afresh.
+                    let _ = remove_file_anyway(&dst);
+                    self.sum.done = self.sum.done.saturating_sub(1);
+                    self.note_error(&dst, &e);
+                }
+            }
+        }
+        let mut batch: Vec<(PathBuf, PathBuf)> = kept;
+        let mut dirs: Vec<PathBuf> = batch
+            .iter()
+            .filter_map(|(_, d)| d.parent())
+            .map(Path::to_path_buf)
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        for dir in dirs {
+            if let Err(e) = crate::faults::sync_dir(&dir) {
+                // Its copies are complete but their names may not last: their sources stay.
+                for (src, _) in batch
+                    .iter()
+                    .filter(|(_, d)| d.parent() == Some(dir.as_path()))
+                {
+                    self.note_error(src, &e);
+                }
+                batch.retain(|(_, d)| d.parent() != Some(dir.as_path()));
+            }
+        }
+        let Some((first, _)) = batch.first().cloned() else {
+            return;
+        };
+        if let Some(j) = self.journal.as_mut() {
+            for (src, dst) in &batch {
+                let _ = j.moved(src, dst);
+            }
+        }
+        if !self.durable(&first) {
+            return;
+        }
+        for (src, _) in batch {
+            if let Err(e) = crate::faults::at(crate::faults::Point::RemoveSource, &src)
+                .and_then(|()| remove_file_anyway(&src))
+            {
+                self.note_error(&src, &e);
             }
         }
     }
@@ -714,9 +1299,36 @@ impl Worker {
                     }
                     return;
                 }
-                let _ = fs::remove_file(dst);
-                match std::os::unix::fs::symlink(&target, dst) {
-                    Ok(()) => self.sum.done += 1,
+                // A link replacing something is made under a temporary name and renamed
+                // over it, like a file: removing the old entry first lost it whenever
+                // making the link then failed.
+                let replacing = dst.symlink_metadata().is_ok();
+                let made = if replacing {
+                    let tmp = part_name(dst);
+                    if let Some(j) = self.journal.as_mut() {
+                        let _ = j.part(&tmp);
+                    }
+                    let r = crate::faults::at(crate::faults::Point::Write, dst)
+                        .and_then(|()| std::os::unix::fs::symlink(&target, &tmp))
+                        .and_then(|()| {
+                            if !self.durable(dst) {
+                                return Ok(false);
+                            }
+                            crate::faults::at(crate::faults::Point::Rename, dst)?;
+                            fs::rename(&tmp, dst).map(|()| true)
+                        });
+                    if !matches!(r, Ok(true)) {
+                        let _ = fs::remove_file(&tmp);
+                    }
+                    r
+                } else {
+                    crate::faults::at(crate::faults::Point::Write, dst)
+                        .and_then(|()| std::os::unix::fs::symlink(&target, dst))
+                        .map(|()| true)
+                };
+                match made {
+                    Ok(true) => self.sum.done += 1,
+                    Ok(false) => {}
                     Err(e) => self.note_error(dst, &e),
                 }
             }
@@ -731,6 +1343,8 @@ impl Worker {
     }
 
     fn copy_file(&mut self, src: &Path, dst: &Path, size: u64) {
+        // Tries made of this file after an error that may pass (Round 031).
+        let mut tries = 0;
         loop {
             if self.stopped() {
                 return;
@@ -754,29 +1368,73 @@ impl Worker {
             match self.copy_bytes(src, dst, free) {
                 Ok(true) => {
                     self.sum.done += 1;
+                    self.advance(0);
+                    if free {
+                        self.made(dst, None);
+                    } else if let Some(t) = self.old_trashed.take() {
+                        self.sum.replaced_to_trash += 1;
+                        self.made(dst, Some(t));
+                    } else if self.recording {
+                        self.sum.replaced_for_good += 1;
+                    }
                     return;
                 }
                 // Taken since it was found free: round again, to the question.
                 Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
+                // Not the file agreed to any more: asked again.
+                Ok(false) if self.changed.as_deref() == Some(dst) => continue,
                 // Cancelled mid-file: copy_bytes removed what it wrote, and a file
                 // being replaced is still the old one.
                 Ok(false) => return,
-                Err(e) => match self.ask(Question::Failed {
-                    path: dst.to_path_buf(),
-                    error: e.to_string(),
-                }) {
-                    Answer::Retry => continue,
-                    Answer::Skip | Answer::SkipAll => {
-                        self.note_error(dst, &e);
-                        self.sum.skipped += 1;
+                Err(e) => {
+                    let network = self.on_network(dst) || self.on_network(src);
+                    if transient(&e, network) && tries < self.backoff.len() {
+                        let wait = self.backoff[tries];
+                        tries += 1;
+                        let _ = self.tx.send(Event::Retrying {
+                            path: dst.to_path_buf(),
+                            error: e.to_string(),
+                            attempt: tries as u32,
+                            of: self.backoff.len() as u32,
+                            wait,
+                        });
+                        if self.wait(wait) {
+                            continue;
+                        }
                         return;
                     }
-                    _ => {
-                        self.note_error(dst, &e);
-                        self.abort = true;
-                        return;
+                    let error = if tries > 0 {
+                        format!("{e} (a network error: tried {} times)", tries + 1)
+                    } else {
+                        e.to_string()
+                    };
+                    self.failed_file(dst, &e, error);
+                    if self.retry {
+                        self.retry = false;
+                        tries = 0;
+                        continue;
                     }
-                },
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A file failed for good: the user says whether to try again (`retry` set), skip
+    /// it, or stop the job.
+    fn failed_file(&mut self, dst: &Path, e: &io::Error, error: String) {
+        match self.ask(Question::Failed {
+            path: dst.to_path_buf(),
+            error,
+        }) {
+            Answer::Retry => self.retry = true,
+            Answer::Skip | Answer::SkipAll => {
+                self.note_error(dst, e);
+                self.sum.skipped += 1;
+            }
+            _ => {
+                self.note_error(dst, e);
+                self.abort = true;
             }
         }
     }
@@ -798,17 +1456,29 @@ impl Worker {
         } else {
             part_name(dst)
         };
+        self.moved_file = None;
         writing_in_test(&target);
         if !in_place {
             if let Some(j) = self.journal.as_mut() {
-                j.part(&target);
+                // A failure breaks the journal; asked about before a step that needs it.
+                let _ = j.part(&target);
             }
         }
         let mut w = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&target)?;
-        let written = self.write_all_from(&mut r, &mut w);
+        let written = self.write_all_from(&mut r, &mut w, &target);
+        // A new file on a network target is synced before its rename (the owner's
+        // decision 3, Round 031): SMB and NFS report a failed write only at the sync or
+        // the close, and a dropped handle hides the close's error. A replacement is
+        // synced anyway; a move's copies are synced with their batch.
+        let written = match written {
+            Ok(true) if new_only && !self.moving && self.on_network(dst) => {
+                crate::faults::sync_data(&w, &target).map(|()| true)
+            }
+            other => other,
+        };
         let kept = match written {
             Ok(true) => {
                 // Permissions and mtime are part of the file as far as a user is
@@ -817,15 +1487,70 @@ impl Worker {
                 if let Ok(mtime) = meta.modified() {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
-                drop(w);
+                // A new file is not synced here (the owner's call: new files stay
+                // fast). One whose source is to be removed (a move across devices) is
+                // synced with its batch, before any source goes (`remove_moved`).
+                // Moving: the handle is kept, to be synced through with its batch.
+                let keep = |me: &mut Self, w: File| {
+                    if me.moving {
+                        me.moved_file = Some(w);
+                    }
+                };
                 if in_place {
+                    keep(self, w);
                     Ok(true)
                 } else if new_only {
                     // Taken only if still free: a file that appeared meanwhile is asked
                     // about (the caller goes round again on AlreadyExists).
-                    crate::noreplace::rename_noreplace(&target, dst).map(|()| true)
+                    let r = crate::faults::at(crate::faults::Point::Rename, dst)
+                        .and_then(|()| crate::noreplace::rename_noreplace(&target, dst))
+                        .map(|()| true);
+                    if r.is_ok() {
+                        keep(self, w);
+                    }
+                    r
                 } else {
-                    fs::rename(&target, dst).map(|()| true)
+                    // Removes the temporary file itself on any failure. The file there is
+                    // checked once more right before the rename: no portable rename
+                    // compares first, so a window of microseconds is left, not the
+                    // whole copy.
+                    // Where the trash is on this volume the old file goes there right
+                    // before the rename, so undo brings it back (Round 031). The
+                    // journal's `swap` line first: killed between the two, the next
+                    // start renames the complete new file in.
+                    let trash = self.replace_into_trash(dst);
+                    self.old_trashed = None;
+                    let r = commit_replace(w, &target, dst, || {
+                        if trash {
+                            if let Some(j) = self.journal.as_mut() {
+                                let _ = j.swap(&target, dst);
+                            }
+                        }
+                        // The journal first: its question can be open for minutes, and
+                        // the look at the target is the last thing before the rename.
+                        if !(self.durable(dst) && self.still_agreed(Some(src), dst)) {
+                            return Ok(false);
+                        }
+                        if trash {
+                            let t = crate::faults::at(crate::faults::Point::Trash, dst)
+                                .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
+                                .map_err(|e| {
+                                    io::Error::new(
+                                        e.kind(),
+                                        format!("the old file could not go to the trash: {e}"),
+                                    )
+                                })?;
+                            self.old_trashed = Some(t);
+                        }
+                        Ok(true)
+                    });
+                    // The rename failed after the old file went: it comes back.
+                    if !matches!(r, Ok(true)) {
+                        if let Some(t) = self.old_trashed.take() {
+                            let _ = crate::trashed::restore(&t);
+                        }
+                    }
+                    return r;
                 }
             }
             other => other,
@@ -836,8 +1561,8 @@ impl Worker {
         kept
     }
 
-    /// Copy `r` into `w`; Ok(false) when cancelled part-way.
-    fn write_all_from(&mut self, r: &mut File, w: &mut File) -> io::Result<bool> {
+    /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
+    fn write_all_from(&mut self, r: &mut File, w: &mut File, path: &Path) -> io::Result<bool> {
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -847,6 +1572,7 @@ impl Worker {
             if n == 0 {
                 break;
             }
+            crate::faults::at(crate::faults::Point::Write, path)?;
             w.write_all(&buf[..n])?;
             self.advance(n as u64);
         }
@@ -891,6 +1617,13 @@ impl Worker {
             appear_in_test(&dst);
             let r = if free {
                 crate::noreplace::rename_noreplace(src, &dst)
+            } else if !self.durable(&dst) {
+                return;
+            } else if !self.still_agreed(Some(src), &dst) {
+                // Changed since it was agreed to (or while the journal was asked
+                // about): back to the question.
+                self.approved = None;
+                continue;
             } else {
                 fs::rename(src, &dst)
             };
@@ -935,6 +1668,7 @@ impl Worker {
                 // user chose to skip was deleted with it, never copied (0.2.0).
                 self.moving = true;
                 self.copy_node(src, &dst);
+                self.remove_moved();
                 self.moving = false;
                 self.approved = None;
             }
@@ -1006,8 +1740,20 @@ impl crate::archive::Hooks for Worker {
         // Only what is made is written down: a later start removes only what is
         // still there.
         if let Some(j) = self.journal.as_mut().filter(|_| made) {
-            j.part(p);
+            let _ = j.part(p);
         }
+    }
+    fn durable(&mut self, dst: &Path) -> bool {
+        Worker::durable(self, dst)
+    }
+    fn recheck(&mut self, dst: &Path) -> io::Result<()> {
+        if self.still_agreed(None, dst) {
+            return Ok(());
+        }
+        self.changed = None;
+        Err(io::Error::other(
+            "it changed since you answered \u{2014} kept as it is",
+        ))
     }
     fn wrote(&mut self, bytes: u64) {
         self.advance(bytes);
@@ -1167,6 +1913,62 @@ pub fn safe() -> bool {
     SAFE.load(Ordering::Relaxed)
 }
 
+/// The one way xdevcmd replaces a file (Round 029). `tmp`, complete and still open as
+/// `f`, is synced to the disk (a close error, or an NFS or SMB write that failed, is told
+/// here, not lost when the file is dropped), then `ready` runs (the journal's line
+/// synced, the target looked at once more) and may stop it with `Ok(false)`, and only
+/// then is `tmp` renamed over `dst`. Without the sync, a power cut after the rename can
+/// leave `dst` empty or short where ext4's defaults do not happen to save it.
+///
+/// Whatever does not end in the rename removes `tmp`, and `dst` is as it was. A sync
+/// that failed is never tried again on the same file: Linux may have dropped the data
+/// and cleared the error ("fsyncgate", PostgreSQL 2018), so the caller writes the file
+/// again from its source.
+pub(crate) fn commit_replace(
+    f: File,
+    tmp: &Path,
+    dst: &Path,
+    ready: impl FnOnce() -> io::Result<bool>,
+) -> io::Result<bool> {
+    let r = (|| {
+        crate::faults::sync_data(&f, tmp)?;
+        drop(f);
+        if !ready()? {
+            return Ok(false);
+        }
+        crate::faults::at(crate::faults::Point::Rename, dst)?;
+        fs::rename(tmp, dst)?;
+        Ok(true)
+    })();
+    if !matches!(r, Ok(true)) {
+        let _ = fs::remove_file(tmp);
+    }
+    r
+}
+
+/// Remove the file `p`. On Windows a read-only file cannot be removed until its
+/// read-only attribute is cleared: a moved read-only source, or a read-only copy that
+/// failed its sync, would otherwise stay.
+fn remove_file_anyway(p: &Path) -> io::Result<()> {
+    let r = fs::remove_file(p);
+    #[cfg(windows)]
+    if let Err(e) = &r {
+        if e.kind() == io::ErrorKind::PermissionDenied {
+            if let Ok(m) = fs::symlink_metadata(p) {
+                let mut perm = m.permissions();
+                if perm.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    perm.set_readonly(false);
+                    if fs::set_permissions(p, perm).is_ok() {
+                        return fs::remove_file(p);
+                    }
+                }
+            }
+        }
+    }
+    r
+}
+
 /// A temporary name beside `dst` to write a replacement under: hidden, and unique to
 /// this run (pid and start time, [`crate::journal::run_tag`]) and call, so two jobs
 /// never share one and a later process given the same pid never takes it for its own.
@@ -1322,6 +2124,53 @@ fn volume_trash(path: &Path, home: &Path) -> io::Result<Option<(PathBuf, PathBuf
         fs::DirBuilder::new().mode(0o700).create(&own)?;
     }
     Ok(Some((own, topdir)))
+}
+
+/// Whether a file in the directory `dir` can go to a trash on its own file system:
+/// the home trash on the same one, or one [`volume_trash`] would use or may make at the
+/// top of its mount. Reads only: nothing is made here (the planner asks it).
+#[cfg(target_os = "linux")]
+pub(crate) fn volume_trash_usable(dir: &Path) -> Option<bool> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let home = default_trash_base()?;
+    let dev = fs::metadata(dir).ok()?.dev();
+    let home_dev = home
+        .ancestors()
+        .find_map(|a| fs::metadata(a).ok())
+        .map(|m| m.dev());
+    if home_dev == Some(dev) {
+        return Some(true);
+    }
+    let mut topdir = dir.to_path_buf();
+    while let Some(up) = topdir.parent() {
+        match fs::metadata(up) {
+            Ok(m) if m.dev() == dev => topdir = up.to_path_buf(),
+            _ => break,
+        }
+    }
+    let uid = rustix::process::getuid().as_raw();
+    let usable_dir = |p: &Path| {
+        rustix::fs::access(
+            p,
+            rustix::fs::Access::WRITE_OK | rustix::fs::Access::EXEC_OK,
+        )
+        .is_ok()
+    };
+    let shared = topdir.join(".Trash");
+    if let Ok(m) = fs::symlink_metadata(&shared) {
+        let sticky = m.permissions().mode() & 0o1000 != 0;
+        if m.is_dir() && !m.file_type().is_symlink() && sticky {
+            let mine = shared.join(uid.to_string());
+            if mine.is_dir() && usable_dir(&mine) || !mine.exists() && usable_dir(&shared) {
+                return Some(true);
+            }
+        }
+    }
+    let own = topdir.join(format!(".Trash-{uid}"));
+    Some(match fs::symlink_metadata(&own) {
+        Ok(m) => m.is_dir() && !m.file_type().is_symlink() && m.uid() == uid,
+        Err(_) => usable_dir(&topdir),
+    })
 }
 
 /// Where deleted files go on Linux: `$XDG_DATA_HOME/Trash`, per the freedesktop spec.
@@ -1486,6 +2335,282 @@ mod tests {
         run_with(req, Answer::Yes).0
     }
 
+    /// A copy of one file `tag` from a fresh `src` into `to`, with `backoff`, its events
+    /// collected; questions answered `answer`, and the job cancelled at the first
+    /// `Retrying` when `cancel_at_retry`.
+    fn retry_job(
+        name: &str,
+        backoff: Vec<Duration>,
+        answer: Answer,
+        cancel_at_retry: bool,
+    ) -> (Summary, Vec<Event>, PathBuf) {
+        let d = tmp(name);
+        fs::create_dir_all(d.join("src")).unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("src").join(name), "payload").unwrap();
+        let mut req = Request::copy(vec![d.join("src").join(name)], d.join("to"));
+        req.backoff = backoff;
+        let h = start(req);
+        let mut seen = Vec::new();
+        loop {
+            let e = h.events.recv_timeout(Duration::from_secs(20)).unwrap();
+            match &e {
+                Event::Ask(_) => h.answer(answer),
+                Event::Retrying { .. } if cancel_at_retry => h.cancel(),
+                Event::Done(s) => return (s.clone(), seen, d.join("to").join(name)),
+                _ => {}
+            }
+            seen.push(e);
+        }
+    }
+
+    fn timed_out() -> crate::faults::Fault {
+        #[cfg(unix)]
+        let code = rustix::io::Errno::TIMEDOUT.raw_os_error();
+        #[cfg(not(unix))]
+        let code = 121; // ERROR_SEM_TIMEOUT
+        crate::faults::Fault::Os(code)
+    }
+
+    /// The first `n` writes of `name` time out.
+    fn fail_first(name: &str, n: u32) -> Vec<crate::faults::Guard> {
+        (1..=n)
+            .map(|k| crate::faults::fail(crate::faults::Point::Write, name, k, timed_out()))
+            .collect()
+    }
+
+    fn retries(seen: &[Event]) -> Vec<u32> {
+        seen.iter()
+            .filter_map(|e| match e {
+                Event::Retrying { attempt, .. } => Some(*attempt),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Round 031: an error that passes (a timeout) is tried again, without a question,
+    /// and the copy completes.
+    #[test]
+    fn a_network_error_that_passes_is_tried_again_without_asking() {
+        let name = format!("xnet-ok-{}", std::process::id());
+        let _f = fail_first(&name, 2);
+        let (s, seen, dst) = retry_job(&name, vec![Duration::ZERO; 5], Answer::Abort, false);
+        assert_eq!(retries(&seen), [1, 2]);
+        assert!(!seen.iter().any(|e| matches!(e, Event::Ask(_))), "{seen:?}");
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert_eq!(fs::read_to_string(dst).unwrap(), "payload");
+    }
+
+    /// After the last try the user is asked, told how many tries were made.
+    #[test]
+    fn a_network_error_that_stays_is_asked_about_after_the_tries() {
+        let name = format!("xnet-stays-{}", std::process::id());
+        let _f = fail_first(&name, 6);
+        let (s, seen, dst) = retry_job(&name, vec![Duration::ZERO; 5], Answer::Skip, false);
+        assert_eq!(retries(&seen), [1, 2, 3, 4, 5]);
+        let asked: Vec<_> = seen
+            .iter()
+            .filter_map(|e| match e {
+                Event::Ask(Question::Failed { error, .. }) => Some(error.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked.len(), 1, "{seen:?}");
+        assert!(asked[0].contains("tried 6 times"), "{asked:?}");
+        assert_eq!(s.skipped, 1);
+        assert!(!dst.exists());
+    }
+
+    /// An I/O error on a local disk is the disk failing: asked at once, not retried.
+    #[cfg(unix)]
+    #[test]
+    fn an_io_error_on_a_local_disk_is_not_tried_again() {
+        let name = format!("xnet-eio-{}", std::process::id());
+        let _f = crate::faults::fail(
+            crate::faults::Point::Write,
+            &name,
+            1,
+            crate::faults::Fault::Os(rustix::io::Errno::IO.raw_os_error()),
+        );
+        let (_, seen, _) = retry_job(&name, vec![Duration::ZERO; 5], Answer::Skip, false);
+        assert!(retries(&seen).is_empty(), "{seen:?}");
+        assert!(transient(
+            &io::Error::from_raw_os_error(rustix::io::Errno::IO.raw_os_error()),
+            true
+        ));
+    }
+
+    /// Esc while waiting for the next try ends the job at once, not after the wait.
+    #[test]
+    fn a_wait_before_trying_again_ends_at_once_on_cancel() {
+        let name = format!("xnet-esc-{}", std::process::id());
+        let _f = fail_first(&name, 1);
+        let t = std::time::Instant::now();
+        let (s, _, dst) = retry_job(&name, vec![Duration::from_secs(30); 5], Answer::Abort, true);
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        assert!(s.cancelled, "{s:?}");
+        assert!(!dst.exists());
+    }
+
+    /// Round 031: with a trash on the volume, a replaced file goes there, after the
+    /// journal is on disk and before the rename; undo removes the new one and brings
+    /// the old one back.
+    #[test]
+    fn a_replaced_file_goes_to_the_trash_first_and_undo_brings_it_back() {
+        journals();
+        let d = tmp("replace-trash");
+        let tag = format!("xrt-{}", std::process::id());
+        fs::create_dir_all(d.join("src")).unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("src").join(&tag), "new contents").unwrap();
+        fs::write(d.join("to").join(&tag), "old").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::copy(vec![d.join("src").join(&tag)], d.join("to"));
+        req.trash_root = Some(d.join("trash"));
+        req.safe = true;
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&tag);
+        let dst = d.join("to").join(&tag);
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "new contents");
+        assert_eq!(
+            (s.done, s.replaced_to_trash, s.replaced_for_good),
+            (1, 1, 0),
+            "{s:?}"
+        );
+        assert!(s
+            .describe(Kind::Copy)
+            .contains("1 replaced (the old one in the trash)"));
+        let old = s.made[0].old.clone().expect("the old file is remembered");
+        let crate::trashed::Place::Freedesktop { file, .. } = &old.place else {
+            panic!("{old:?}")
+        };
+        assert_eq!(fs::read_to_string(file).unwrap(), "old");
+        let at = |point: &str| {
+            seen.iter()
+                .rposition(|(p, path)| p.name() == point && path.to_string_lossy().contains(&tag))
+                .unwrap_or_else(|| panic!("no {point} in {seen:?}"))
+        };
+        assert!(at("sync-data") < at("trash"), "{seen:?}");
+        assert!(at("journal-sync") < at("trash"), "{seen:?}");
+        assert!(at("trash") < at("rename"), "{seen:?}");
+
+        let h = crate::undo::unmake(s.made.clone());
+        let u = loop {
+            if let Event::Done(u) = h
+                .events
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+            {
+                break u;
+            }
+        };
+        assert_eq!((u.done, u.failed), (1, 0), "{u:?}");
+        assert_eq!(
+            fs::read_to_string(&dst).unwrap(),
+            "old",
+            "the old file is back"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The rename failing after the old file went to the trash: the old file comes back
+    /// under its name, and the temporary file goes.
+    #[test]
+    fn a_failed_rename_after_the_trash_puts_the_old_file_back() {
+        let d = tmp("replace-trash-fail");
+        let tag = format!("xrtf-{}", std::process::id());
+        fs::create_dir_all(d.join("src")).unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("src").join(&tag), "new contents").unwrap();
+        fs::write(d.join("to").join(&tag), "old").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::Rename,
+            &tag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![d.join("src").join(&tag)], d.join("to"));
+        req.trash_root = Some(d.join("trash"));
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Skip);
+        assert_eq!(s.replaced_to_trash, 0, "{s:?}");
+        assert_eq!(fs::read_to_string(d.join("to").join(&tag)).unwrap(), "old");
+        let left: Vec<_> = fs::read_dir(d.join("to")).unwrap().flatten().collect();
+        assert_eq!(left.len(), 1, "no temporary file left: {left:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Round 031: a copy says what it made, a directory before what is in it, and not
+    /// what it merged into, replaced or skipped.
+    #[test]
+    fn a_copy_reports_what_it_made_in_order() {
+        let d = tmp("made");
+        fs::create_dir_all(d.join("src/sub")).unwrap();
+        fs::write(d.join("src/sub/new.txt"), "n").unwrap();
+        fs::write(d.join("src/sub/old.txt"), "new contents").unwrap();
+        fs::write(d.join("src/sub/kept.txt"), "k").unwrap();
+        fs::create_dir_all(d.join("to/src/sub")).unwrap();
+        fs::write(d.join("to/src/sub/old.txt"), "old").unwrap();
+        fs::write(d.join("to/src/sub/kept.txt"), "mine").unwrap();
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.expect
+            .insert(d.join("to/src/sub/kept.txt"), Expect::Skip);
+        let sum = run(req);
+        let made: Vec<_> = sum.made.iter().map(|m| m.path.clone()).collect();
+        assert_eq!(made, [d.join("to/src/sub/new.txt")], "{sum:?}");
+        assert_eq!(sum.replaced_for_good, 1);
+        assert_eq!(
+            sum.made[0].ident,
+            Ident::at(&d.join("to/src/sub/new.txt")).unwrap()
+        );
+
+        let e = tmp("made-dirs");
+        fs::create_dir_all(e.join("a/b")).unwrap();
+        fs::write(e.join("a/b/f"), "f").unwrap();
+        fs::create_dir_all(e.join("to")).unwrap();
+        let sum = run(Request::copy(vec![e.join("a")], e.join("to")));
+        let made: Vec<_> = sum.made.iter().map(|m| m.path.clone()).collect();
+        assert_eq!(made, [e.join("to/a"), e.join("to/a/b"), e.join("to/a/b/f")]);
+        assert!(sum.made[0].ident.is_dir());
+    }
+
+    /// A move remembers nothing of the kind: its undo moves back. It says where each
+    /// source went, for the lists that follow them.
+    #[test]
+    fn a_move_reports_nothing_made() {
+        let d = tmp("made-move");
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("f"), "x").unwrap();
+        let sum = run(Request::mv(
+            vec![d.join("f"), d.join("missing")],
+            d.join("to"),
+        ));
+        assert!(sum.made.is_empty() && !sum.made_over);
+        assert_eq!(sum.relocated, [(d.join("f"), d.join("to/f"))]);
+    }
+
+    #[test]
+    fn a_planned_job_does_not_walk_its_sources_again() {
+        let d = tmp("planned");
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("f"), "x").unwrap();
+        let mut req = Request::copy(vec![d.join("f")], d.join("to"));
+        // Numbers no walk of this one file would give: they can only be the plan's.
+        req.planned = Some((7, 70));
+        let h = start(req);
+        let scanned = loop {
+            let e = h
+                .events
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            if let Event::Scanned { files, bytes } = e {
+                break (files, bytes);
+            }
+        };
+        assert_eq!(scanned, (7, 70));
+    }
+
     #[test]
     fn copies_a_tree_and_leaves_the_source_alone() {
         let root = tmp("copy-tree");
@@ -1606,24 +2731,9 @@ mod tests {
     }
 
     /// A directory on another file system than the temporary directory, for moves
-    /// across devices: tmpfs at /dev/shm on Linux. None where there is no such place.
+    /// across devices. None, and said, where there is no such place.
     fn other_device(tag: &str) -> Option<PathBuf> {
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let shm = Path::new("/dev/shm");
-            let tmp = fs::metadata(std::env::temp_dir()).ok()?;
-            let other = fs::metadata(shm).ok()?;
-            if other.dev() != tmp.dev() {
-                let d = shm.join(format!("xdevcmd-xdev-{tag}-{}", std::process::id()));
-                let _ = fs::remove_dir_all(&d);
-                fs::create_dir_all(&d).ok()?;
-                return Some(d);
-            }
-        }
-        #[cfg(not(target_os = "linux"))]
-        let _ = tag;
-        None
+        crate::faults::places::other_device(tag)
     }
 
     /// Run `req`, answering each question with `answer(question)`; the summary and
@@ -1711,6 +2821,614 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A real "disk full" from the kernel (CI's small file system): the replacement fails,
+    /// the old file is kept, and nothing is left under a temporary name.
+    #[test]
+    fn a_replacement_that_fills_the_disk_keeps_the_old_file() {
+        let Some(small) = crate::faults::places::small_fs("full-replace") else {
+            return;
+        };
+        let root = tmp("full-replace");
+        // Sparse: bigger than the whole small file system, free to make here.
+        let big = File::create(root.join("f")).unwrap();
+        big.set_len(64 << 20).unwrap();
+        drop(big);
+        fs::write(small.join("f"), b"old").unwrap();
+        let (s, asked) =
+            run_answering(
+                Request::copy(vec![root.join("f")], small.clone()),
+                |q| match q {
+                    Question::Failed { .. } => Answer::Skip,
+                    _ => Answer::Yes,
+                },
+            );
+        assert!(
+            asked.iter().any(|q| q.starts_with("Failed")),
+            "the full disk is asked about: {asked:?}"
+        );
+        assert_eq!((s.done, s.failed), (0, 1), "{s:?}");
+        assert_eq!(fs::read(small.join("f")).unwrap(), b"old");
+        assert_eq!(
+            fs::read_dir(&small).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        fs::remove_dir_all(&small).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Journals for these tests, in a directory of their own (set once per test run).
+    fn journals() {
+        crate::journal::init(
+            std::env::temp_dir().join(format!("xdevcmd-test-journals-{}", std::process::id())),
+        );
+    }
+
+    /// The journal's line for a replacement cannot be written (disk full, say): the
+    /// replacement is not made until the user says go on without it, and Stop keeps the
+    /// old file. Before Round 029 the line's error was dropped and the file replaced.
+    #[test]
+    fn a_journal_that_fails_before_a_replace_is_asked_about_and_stop_keeps_the_old_file() {
+        journals();
+        let root = tmp("journal-line");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("jl-a1.txt"), b"new").unwrap();
+        fs::write(dst.join("jl-a1.txt"), b"old").unwrap();
+        // The line naming the temporary file's directory, written as the copy starts.
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            ".jl-a1.txt.xdevcmd-part",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("jl-a1.txt")], dst.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |q| match q {
+            Question::Conflict { .. } => Answer::Yes,
+            _ => Answer::Abort,
+        });
+        assert!(
+            asked.iter().any(|q| q.starts_with("NoJournal")),
+            "asked before replacing: {asked:?}"
+        );
+        assert_eq!(fs::read(dst.join("jl-a1.txt")).unwrap(), b"old", "{s:?}");
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        // Go on without it: replaced, and the summary says the job ran without one.
+        drop(_f);
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            ".jl-a1.txt.xdevcmd-part",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("jl-a1.txt")], dst.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |_| Answer::Yes);
+        let asked_once = asked.iter().filter(|q| q.starts_with("NoJournal")).count();
+        assert_eq!(asked_once, 1, "{asked:?}");
+        assert_eq!(fs::read(dst.join("jl-a1.txt")).unwrap(), b"new");
+        assert!(
+            s.describe(Kind::Copy).contains("safe operations off"),
+            "{s:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The journal cannot be begun: asked before anything is done. Stop does nothing;
+    /// go on copies and says it ran without one. Before Round 029 nothing was asked and
+    /// only the summary said so, once the job was over.
+    #[test]
+    fn a_journal_that_cannot_be_begun_is_asked_about_before_anything_is_done() {
+        journals();
+        let root = tmp("journal-begin");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("a"), b"a").unwrap();
+        let frag = root.to_string_lossy().into_owned();
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalBegin,
+            &frag,
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("a")], dst.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |_| Answer::Abort);
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].starts_with("NoJournal"), "{asked:?}");
+        assert!(!dst.join("a").exists(), "stopped before anything: {s:?}");
+        assert!(s.cancelled);
+        drop(_f);
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalBegin,
+            &frag,
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::copy(vec![root.join("a")], dst.clone());
+        req.safe = true;
+        let (s, _) = run_answering(req, |_| Answer::Yes);
+        assert_eq!(fs::read(dst.join("a")).unwrap(), b"a");
+        assert!(
+            s.describe(Kind::Copy)
+                .contains("safe operations off for this job"),
+            "{s:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The points a trace saw, in order, as their names.
+    fn points(fragment: &str) -> Vec<&'static str> {
+        crate::faults::traced(fragment)
+            .into_iter()
+            .map(|(p, _)| p.name())
+            .collect()
+    }
+
+    fn first(seen: &[&str], name: &str) -> usize {
+        seen.iter()
+            .position(|p| *p == name)
+            .unwrap_or_else(|| panic!("no {name} in {seen:?}"))
+    }
+
+    /// A replacement's data is on disk before its rename, with safe operations on (the
+    /// journal's line synced in between) or off (the rule holds either way: the
+    /// owner's decision 1). Before Round 029 nothing was synced.
+    #[test]
+    fn a_replacement_is_synced_before_it_is_renamed_into_place() {
+        journals();
+        for safe in [false, true] {
+            let root = tmp(if safe {
+                "sync-order-safe"
+            } else {
+                "sync-order"
+            });
+            let dst = root.join("dst");
+            fs::create_dir_all(&dst).unwrap();
+            fs::write(root.join("f"), b"new").unwrap();
+            fs::write(dst.join("f"), b"old").unwrap();
+            let frag = root.to_string_lossy().into_owned();
+            crate::faults::trace(&frag);
+            let mut req = Request::copy(vec![root.join("f")], dst.clone());
+            req.safe = safe;
+            let (s, _) = run_with(req, Answer::Yes);
+            let seen = points(&frag);
+            assert_eq!(s.done, 1, "{s:?}");
+            assert!(
+                first(&seen, "sync-data") < first(&seen, "rename"),
+                "safe {safe}: {seen:?}"
+            );
+            if safe {
+                let (synced, renamed) = (first(&seen, "sync-data"), first(&seen, "rename"));
+                assert!(
+                    seen[synced..renamed].contains(&"journal-sync"),
+                    "the journal's line is synced between: {seen:?}"
+                );
+            }
+            assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
+            fs::remove_dir_all(&root).unwrap();
+        }
+    }
+
+    /// A sync that fails: the temporary file goes, the old file stays, and Retry writes
+    /// the file again from its source instead of syncing the same one twice.
+    #[test]
+    fn a_failed_sync_keeps_the_old_file_and_retry_copies_again() {
+        let root = tmp("sync-fail");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("f"), b"new").unwrap();
+        fs::write(dst.join("f"), b"old").unwrap();
+        let frag = root.to_string_lossy().into_owned();
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &frag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let (s, asked) = run_answering(
+            Request::copy(vec![root.join("f")], dst.clone()),
+            |q| match q {
+                Question::Failed { .. } => Answer::Skip,
+                _ => Answer::Yes,
+            },
+        );
+        assert!(asked.iter().any(|q| q.starts_with("Failed")), "{asked:?}");
+        assert_eq!((s.done, s.failed), (0, 1));
+        assert_eq!(fs::read(dst.join("f")).unwrap(), b"old");
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        drop(_f);
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &frag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        crate::faults::trace(&frag);
+        let (s, _) = run_answering(
+            Request::copy(vec![root.join("f")], dst.clone()),
+            |q| match q {
+                Question::Failed { .. } => Answer::Retry,
+                _ => Answer::Yes,
+            },
+        );
+        let seen = points(&frag);
+        assert_eq!(s.done, 1, "{s:?}");
+        let order: Vec<&str> = seen
+            .iter()
+            .copied()
+            .filter(|p| matches!(*p, "write" | "sync-data" | "rename"))
+            .collect();
+        assert_eq!(
+            order,
+            ["write", "sync-data", "write", "sync-data", "rename"],
+            "written again, never synced twice"
+        );
+        assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
+        assert_eq!(fs::read_dir(&dst).unwrap().count(), 1);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Replacing with a link: making the link fails, and the old file is still there.
+    /// Before Round 029 the old file was removed first and lost.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_that_cannot_be_made_does_not_lose_the_file_it_was_to_replace() {
+        let root = tmp("link-replace");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        std::os::unix::fs::symlink("target", root.join("l")).unwrap();
+        fs::write(dst.join("l"), b"the only copy").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::Write,
+            &dst.join("l").to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let (s, _) = run_with(
+            Request::copy(vec![root.join("l")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.failed, 1, "{s:?}");
+        assert_eq!(fs::read(dst.join("l")).unwrap(), b"the only copy");
+        drop(_f);
+        let (s, _) = run_with(
+            Request::copy(vec![root.join("l")], dst.clone()),
+            Answer::Yes,
+        );
+        assert_eq!(s.done, 1, "{s:?}");
+        assert_eq!(fs::read_link(dst.join("l")).unwrap(), Path::new("target"));
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary link left"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A move across devices, per file: the copy's data synced, its directory synced,
+    /// the journal's `moved` line synced, and only then the source removed. Before Round
+    /// 029 the source was removed right after an unsynced copy.
+    #[test]
+    fn a_move_across_devices_removes_a_source_only_once_its_copy_is_on_disk() {
+        journals();
+        let Some(other) = other_device("move-order") else {
+            return;
+        };
+        let root = tmp("move-order");
+        let tag = format!("xmvd-{}", std::process::id());
+        let dir = root.join(&tag);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("f"), b"payload").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::mv(vec![dir.clone()], other.clone());
+        req.safe = true;
+        let (s, _) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert_eq!(fs::read(other.join(&tag).join("f")).unwrap(), b"payload");
+        assert!(!dir.exists(), "moved in full");
+        let at = |point: &str, file: bool| {
+            seen.iter()
+                .position(|(p, path)| p.name() == point && (path.ends_with("f") || !file))
+                .unwrap_or_else(|| panic!("no {point} in {seen:?}"))
+        };
+        let gone = at("remove-source", true);
+        for before in ["sync-data", "sync-dir", "journal-sync"] {
+            assert!(
+                at(before, false) < gone,
+                "{before} before the source goes: {seen:?}"
+            );
+        }
+        let synced_dir = seen
+            .iter()
+            .position(|(p, path)| p.name() == "sync-dir" && path.ends_with(&tag))
+            .unwrap_or_else(|| panic!("the copy's directory is synced: {seen:?}"));
+        assert!(synced_dir < gone);
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The copy's sync fails: the source stays, and the copy, which may not be what was
+    /// read, is removed.
+    #[test]
+    fn a_move_across_devices_whose_copy_cannot_be_synced_keeps_the_source() {
+        let Some(other) = other_device("move-sync-fail") else {
+            return;
+        };
+        let root = tmp("move-sync-fail");
+        fs::write(root.join("only.txt"), b"the only copy").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &other.to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let (s, _) = run_with(
+            Request::mv(vec![root.join("only.txt")], other.clone()),
+            Answer::Yes,
+        );
+        assert_eq!((s.done, s.failed), (0, 1), "{s:?}");
+        assert_eq!(fs::read(root.join("only.txt")).unwrap(), b"the only copy");
+        assert_eq!(
+            fs::read_dir(&other).unwrap().count(),
+            0,
+            "no copy, no temporary file"
+        );
+        fs::remove_dir_all(&other).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Whether this process can write to a file whatever its mode (root on Unix): a test
+    /// about a read-only file then proves nothing, and says it is skipped.
+    fn writes_anything(tag: &str) -> bool {
+        #[cfg(unix)]
+        if rustix::process::geteuid().is_root() {
+            eprintln!("{tag}: skipped, root writes a read-only file; run it as another user");
+            return true;
+        }
+        let _ = tag;
+        false
+    }
+
+    /// A read-only file moved across devices: its copy is read-only as soon as it is
+    /// written (the mode is copied), so syncing it through a handle opened afresh for
+    /// writing failed (EACCES), the move failed, and on Windows the copy was left. The
+    /// handle that wrote it is the one synced.
+    #[test]
+    fn a_read_only_file_moves_across_devices() {
+        if writes_anything("read-only-move") {
+            return;
+        }
+        let Some(other) = other_device("read-only-move") else {
+            return;
+        };
+        let root = tmp("read-only-move");
+        let f = root.join("ro.txt");
+        fs::write(&f, b"read only").unwrap();
+        let mut perm = fs::metadata(&f).unwrap().permissions();
+        perm.set_readonly(true);
+        fs::set_permissions(&f, perm).unwrap();
+        let (s, _) = run_with(Request::mv(vec![f.clone()], other.clone()), Answer::Yes);
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(!f.exists(), "the source is gone");
+        assert_eq!(fs::read(other.join("ro.txt")).unwrap(), b"read only");
+        assert!(fs::metadata(other.join("ro.txt"))
+            .unwrap()
+            .permissions()
+            .readonly());
+        let mut perm = fs::metadata(other.join("ro.txt")).unwrap().permissions();
+        // Cleaning up: writable again so the directory can go (Windows).
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        let _ = fs::set_permissions(other.join("ro.txt"), perm);
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A write error that surfaces only at the sync (NFS, SMB: at close or at the sync
+    /// of the handle that wrote) keeps that file's source and removes its copy; the rest
+    /// of the batch moves.
+    #[test]
+    fn a_copy_whose_sync_fails_keeps_its_source_and_the_rest_moves() {
+        let Some(other) = other_device("sync-one-fails") else {
+            return;
+        };
+        let root = tmp("sync-one-fails");
+        for n in ["a", "b", "c"] {
+            fs::write(root.join(n), n).unwrap();
+        }
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            &other.join("b").to_string_lossy(),
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let srcs = vec![root.join("a"), root.join("b"), root.join("c")];
+        let mut req = Request::mv(srcs, other.clone());
+        req.existing = Existing::Ask;
+        let (s, _) = run_with(req, Answer::YesToAll);
+        assert_eq!((s.done, s.failed), (2, 1), "{s:?}");
+        assert_eq!(fs::read(root.join("b")).unwrap(), b"b", "b's source stays");
+        assert!(!other.join("b").exists(), "b's copy goes");
+        assert!(!root.join("a").exists() && !root.join("c").exists());
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Stop at the journal's question means nothing more that cannot be undone: a source
+    /// whose copy was waiting in the batch is kept. Before, the batch was still flushed
+    /// once the journal was gone (no journal: nothing to wait for), and its sources went.
+    #[test]
+    fn stop_at_the_journal_question_keeps_the_sources_of_a_move() {
+        journals();
+        let Some(other) = other_device("stop-keeps") else {
+            return;
+        };
+        let root = tmp("stop-keeps");
+        let tag = format!("stopkeep-{}", std::process::id());
+        fs::create_dir_all(root.join(&tag)).unwrap();
+        fs::create_dir_all(other.join(&tag)).unwrap();
+        for n in ["a", "b"] {
+            fs::write(root.join(&tag).join(n), b"ours").unwrap();
+            fs::write(other.join(&tag).join(n), b"theirs").unwrap();
+        }
+        // The job's start (1), the move onto the existing directory (2), the first
+        // replacement (3), the second (4) fails.
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalSync,
+            &tag,
+            4,
+            crate::faults::Fault::Os(28),
+        );
+        let mut req = Request::mv(vec![root.join(&tag)], other.clone());
+        req.safe = true;
+        let (s, asked) = run_answering(req, |q| match q {
+            Question::NoJournal { .. } => Answer::Abort,
+            _ => Answer::YesToAll,
+        });
+        assert!(
+            asked.iter().any(|q| q.starts_with("NoJournal")),
+            "{asked:?}"
+        );
+        for n in ["a", "b"] {
+            assert!(
+                root.join(&tag).join(n).exists(),
+                "{n}'s source is kept: {s:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Every file of a move across devices, across batch boundaries (64, 65, 128, 129…):
+    /// its copy's data, then its directory, then the journal, are synced after it was
+    /// written and before ITS source goes. An off-by-one at a boundary shows here.
+    #[test]
+    fn every_file_of_a_batched_move_is_on_disk_before_its_own_source_goes() {
+        journals();
+        let Some(other) = other_device("batch-order") else {
+            return;
+        };
+        let root = tmp("batch-order");
+        let tag = format!("batchord-{}", std::process::id());
+        let dir = root.join(&tag);
+        fs::create_dir_all(&dir).unwrap();
+        let n = 2 * MOVE_BATCH_FILES + 2;
+        for i in 0..n {
+            fs::write(dir.join(format!("f{i:03}")), b"x").unwrap();
+        }
+        crate::faults::trace(&tag);
+        let mut req = Request::mv(vec![dir.clone()], other.clone());
+        req.safe = true;
+        let (s, _) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(s.failed, 0, "{s:?}");
+        let to_dir = other.join(&tag);
+        for i in 0..n {
+            let name = format!("f{i:03}");
+            let at = |point: &str, path: &Path| {
+                seen.iter()
+                    .position(|(p, q)| p.name() == point && q == path)
+                    .unwrap_or_else(|| panic!("{name}: no {point} for {}", path.display()))
+            };
+            let gone = at("remove-source", &dir.join(&name));
+            let data = at("sync-data", &to_dir.join(&name));
+            assert!(data < gone, "{name}: its data before its source goes");
+            let between = |point: &str| {
+                seen[data..gone]
+                    .iter()
+                    .any(|(p, q)| p.name() == point && (point != "sync-dir" || q == &to_dir))
+            };
+            assert!(
+                between("sync-dir"),
+                "{name}: its directory synced after its data, before its source goes"
+            );
+            assert!(
+                between("journal-sync"),
+                "{name}: the journal synced after its data, before its source goes"
+            );
+        }
+        let _ = fs::remove_dir_all(&other);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The cost of the sync rules on a move across devices, measured: `n` files of
+    /// `size` bytes moved with every sync made and again with the seam leaving them out.
+    /// `XDEVCMD_MEASURE=<n>x<size>[,…]`, from where `XDEVCMD_MEASURE_FROM` says (default:
+    /// the temporary directory) to the other device, or back with `XDEVCMD_MEASURE_BACK`.
+    /// Run by hand: `cargo test -p xdevcmd-core --release -- --ignored --nocapture measure`.
+    #[test]
+    #[ignore = "a measurement; run by hand (Round 029, step 3)"]
+    fn measure_a_move_across_devices_with_and_without_syncs() {
+        journals();
+        let Some(other) = other_device("measure") else {
+            return;
+        };
+        let spec =
+            std::env::var("XDEVCMD_MEASURE").unwrap_or_else(|_| "10000x1024,3x104857600".into());
+        let back = std::env::var_os("XDEVCMD_MEASURE_BACK").is_some();
+        for case in spec.split(',') {
+            let Some((n, size)) = case.split_once('x') else {
+                continue;
+            };
+            let (n, size): (usize, u64) = (n.parse().unwrap(), size.parse().unwrap());
+            for synced in [true, false] {
+                let here = tmp("measure");
+                let (from, to) = if back {
+                    (other.clone(), here.clone())
+                } else {
+                    (here.clone(), other.clone())
+                };
+                let src = from.join(format!("m-{n}-{size}-{synced}"));
+                fs::create_dir_all(&src).unwrap();
+                let chunk = vec![0x5au8; size as usize];
+                for i in 0..n {
+                    fs::write(src.join(format!("f{i}")), &chunk).unwrap();
+                }
+                let frag = src.file_name().unwrap().to_string_lossy().into_owned();
+                let _skips: Vec<_> = if synced {
+                    Vec::new()
+                } else {
+                    [
+                        crate::faults::Point::SyncData,
+                        crate::faults::Point::SyncDir,
+                        crate::faults::Point::JournalSync,
+                    ]
+                    .into_iter()
+                    .map(|p| crate::faults::set(p, &frag, crate::faults::Action::Skip))
+                    .collect()
+                };
+                // What was written to make the files is not the move's to flush.
+                let _ = std::process::Command::new("sync").status();
+                let mut req = Request::mv(vec![src.clone()], to.clone());
+                req.safe = true;
+                let t = std::time::Instant::now();
+                let (s, _) = run_with(req, Answer::Yes);
+                let took = t.elapsed();
+                assert_eq!(s.failed, 0, "{s:?}");
+                eprintln!(
+                    "MEASURE {n} x {size} B {} {}: {:.3} s",
+                    if back { "back" } else { "out" },
+                    if synced { "synced" } else { "no sync" },
+                    took.as_secs_f64()
+                );
+                let _ = fs::remove_dir_all(to.join(src.file_name().unwrap()));
+                let _ = fs::remove_dir_all(&here);
+            }
+        }
+        let _ = fs::remove_dir_all(&other);
+    }
+
     #[test]
     fn a_replacement_cancelled_part_way_keeps_the_old_file() {
         let root = tmp("replace-cancel");
@@ -1790,8 +3508,12 @@ mod tests {
         APPEAR.lock().unwrap().push(dst.join("b"));
         let (_, asked) = run_with(
             Request::sync(vec![
-                (root.join("a"), dst.clone()),
-                (root.join("b"), dst.clone()),
+                (
+                    root.join("a"),
+                    dst.clone(),
+                    Expect::Replace(Ident::at(&dst.join("a")).unwrap()),
+                ),
+                (root.join("b"), dst.clone(), Expect::Absent),
             ]),
             Answer::Skip,
         );
@@ -1801,6 +3523,161 @@ mod tests {
         );
         assert_eq!(fs::read(dst.join("a")).unwrap(), b"new a");
         assert_eq!(fs::read(dst.join("b")).unwrap(), b"theirs");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The fault test (B05): the user says Yes to replacing a file, and another program
+    /// replaces that file while the copy is written. Asked again, saying so; Skip keeps
+    /// the newcomer. Before Round 029 it was overwritten unasked.
+    #[test]
+    fn a_file_replaced_after_the_user_agreed_is_asked_about_again() {
+        let root = tmp("swap-after-yes");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("f"), b"ours").unwrap();
+        fs::write(dst.join("f"), b"the file the user saw").unwrap();
+        // At the replacement's sync: after the answer, before the rename.
+        let _g = crate::faults::set(
+            crate::faults::Point::SyncData,
+            &root.to_string_lossy(),
+            crate::faults::Action::Swap {
+                target: dst.join("f"),
+                body: b"another program's file".to_vec(),
+            },
+        );
+        let (s, asked) = run_answering(Request::copy(vec![root.join("f")], dst.clone()), |q| {
+            if format!("{q:?}").contains("changed: true") {
+                Answer::Skip
+            } else {
+                Answer::Yes
+            }
+        });
+        assert_eq!(asked.len(), 2, "asked again: {asked:?}");
+        assert!(asked[1].contains("changed: true"), "{asked:?}");
+        assert_eq!(
+            fs::read(dst.join("f")).unwrap(),
+            b"another program's file",
+            "{s:?}"
+        );
+        assert_eq!(
+            fs::read_dir(&dst).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The re-check is the last thing before the rename: the journal's question can be
+    /// open for minutes, and a file replaced while it is was overwritten on a check made
+    /// before it. Asked again instead.
+    #[test]
+    fn a_file_replaced_while_the_journal_question_is_open_is_asked_about_again() {
+        journals();
+        let root = tmp("swap-during-nojournal");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("sq-a1.txt"), b"ours").unwrap();
+        fs::write(dst.join("sq-a1.txt"), b"seen").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::JournalLine,
+            ".sq-a1.txt.xdevcmd-part",
+            1,
+            crate::faults::Fault::Os(28),
+        );
+        let target = dst.join("sq-a1.txt");
+        let mut req = Request::copy(vec![root.join("sq-a1.txt")], dst.clone());
+        req.safe = true;
+        let (_, asked) = run_answering(req, |q| {
+            let q = format!("{q:?}");
+            if q.starts_with("NoJournal") {
+                // Another program replaces it while the question is open.
+                fs::remove_file(&target).unwrap();
+                fs::write(&target, b"replaced while asked, longer").unwrap();
+                Answer::Yes
+            } else if q.contains("changed: true") {
+                Answer::Skip
+            } else {
+                Answer::Yes
+            }
+        });
+        assert!(
+            asked.iter().any(|q| q.contains("changed: true")),
+            "{asked:?}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"replaced while asked, longer");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The same on a move within one file system, whose replace is a rename.
+    #[test]
+    fn a_move_onto_a_file_replaced_after_the_user_agreed_asks_again() {
+        let root = tmp("swap-move");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("m"), b"ours").unwrap();
+        fs::write(dst.join("m"), b"seen").unwrap();
+        let target = dst.join("m");
+        let mut first = true;
+        let h = start(Request::mv(vec![root.join("m")], dst.clone()));
+        let mut asked = Vec::new();
+        loop {
+            match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                Event::Ask(q) => {
+                    asked.push(format!("{q:?}"));
+                    if first {
+                        // Another program replaces it as the user answers.
+                        fs::remove_file(&target).unwrap();
+                        fs::write(&target, b"replaced meanwhile, longer").unwrap();
+                        first = false;
+                        h.answer(Answer::Yes);
+                    } else {
+                        h.answer(Answer::Skip);
+                    }
+                }
+                Event::Done(_) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert_eq!(fs::read(&target).unwrap(), b"replaced meanwhile, longer");
+        assert_eq!(
+            fs::read(root.join("m")).unwrap(),
+            b"ours",
+            "the source stays"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A file made, after Alt+Y's compare, where the plan saw nothing: asked about, not
+    /// overwritten. Before Round 029 the job took every destination that existed when
+    /// it started for one the plan named.
+    #[test]
+    fn a_file_made_where_the_plan_saw_none_is_asked_about() {
+        let root = tmp("sync-absent");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("only-left"), b"left").unwrap();
+        let req = Request::sync(vec![(root.join("only-left"), dst.clone(), Expect::Absent)]);
+        // Between the compare and Enter.
+        fs::write(dst.join("only-left"), b"made since").unwrap();
+        let (_, asked) = run_with(req, Answer::Skip);
+        assert_eq!(asked, 1);
+        assert_eq!(fs::read(dst.join("only-left")).unwrap(), b"made since");
+        // And a planned replacement whose file changed since the compare: asked too.
+        let seen = Ident::at(&dst.join("only-left")).unwrap();
+        fs::remove_file(dst.join("only-left")).unwrap();
+        fs::write(dst.join("only-left"), b"changed since the plan").unwrap();
+        let req = Request::sync(vec![(
+            root.join("only-left"),
+            dst.clone(),
+            Expect::Replace(seen),
+        )]);
+        let (_, asked) = run_with(req, Answer::Skip);
+        assert_eq!(asked, 1);
+        assert_eq!(
+            fs::read(dst.join("only-left")).unwrap(),
+            b"changed since the plan"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -2157,8 +4034,10 @@ mod tests {
             panic!("{t:?}");
         };
         let uid = rustix::process::getuid().as_raw();
+        // The top of that volume: /dev/shm, or what XDEVCMD_TEST_OTHER_DEV names.
+        let top = other.parent().unwrap().to_path_buf();
         assert!(
-            file.starts_with(format!("/dev/shm/.Trash-{uid}/files")),
+            file.starts_with(top.join(format!(".Trash-{uid}/files"))),
             "{file:?}"
         );
         let record = fs::read_to_string(info).unwrap();
@@ -2168,7 +4047,7 @@ mod tests {
         assert_eq!(fs::read(&f).unwrap(), b"v");
         fs::remove_dir_all(&other).unwrap();
         // Leave no trash directory behind if this test made it (only empty ones go).
-        let trash = PathBuf::from(format!("/dev/shm/.Trash-{uid}"));
+        let trash = top.join(format!(".Trash-{uid}"));
         let _ = fs::remove_dir(trash.join("files"));
         let _ = fs::remove_dir(trash.join("info"));
         let _ = fs::remove_dir(&trash);

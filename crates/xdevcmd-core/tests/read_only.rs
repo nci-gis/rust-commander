@@ -49,6 +49,13 @@ fn nothing_writes_once_read_only_is_installed() {
     let e = xdevcmd_core::document::save_bytes(&saved, b"h", false, true).unwrap_err();
     assert!(e.to_string().contains("read-only"), "{e}");
     assert!(xdevcmd_core::document::save_bytes(&d.join("f.txt"), b"h", true, true).is_err());
+    // A terminal tab's log: neither a new file nor appending to one that exists.
+    let log = d.join("dst").join("tab.log");
+    let e = xdevcmd_core::termlog::open(&log).unwrap_err();
+    assert!(e.to_string().contains("read-only"), "{e}");
+    assert!(!log.exists());
+    assert!(xdevcmd_core::termlog::open(&d.join("f.txt")).is_err());
+    assert_eq!(fs::read(d.join("f.txt")).unwrap(), b"keep");
 
     // A killed run's journal and its part file: tidying them is a write too.
     let jdir = d.join("journal");

@@ -10,6 +10,216 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **How long start-up took**, step by step up to the first frame, in Help → Usage
+  (Shift+F1);
+  `--timings` (or `XDEVCMD_TIMINGS=1`) also says it on the status line and prints it as
+  one JSON line on stderr at the end.
+- **Ctrl+Z undoes a copy** (Round 031): it removes what the copy (F5, Alt+Y) made, only
+  while each file is still as the copy made it; a file changed since, or a folder holding
+  something else, is kept and listed. Up to 200,000 items, run as a job.
+- **A replaced file goes to the trash** where the trash is on the same drive (Linux: the
+  home trash or the drive's own; macOS: local drives; Windows: the system drive), so
+  undoing the copy brings it back. A kill between the two steps is finished at the next
+  start. Elsewhere a replace is for good, and the table marks it ⚠.
+- **Network errors are tried again before asking**: a timeout, a dropped connection or a
+  stale handle retries the file after 1, 2, 4, 8 and 15 s, counting down in the job box;
+  then Retry, Skip or Stop. Esc during a wait stops at once. New files on a network mount
+  (NFS, SMB, sshfs, rclone, UNC) are synced before their rename, so a late write error
+  is not lost.
+- **The job box says how long is left** ("about 4 min left"), from what it has done,
+  counting bytes and files, once the speed has settled.
+- **Kept lists follow a move or a rename**: rows moved elsewhere, renamed, or moved back
+  by Ctrl+Z keep their place in the list under their new path.
+- **F5 and F6 look before they start** (Round 030, the Smart Planner's first part). The
+  dialog opens at once and checks the destination meanwhile: files already there (newer,
+  older, another size, identical), a file where a folder is and the reverse, names
+  that differ only in case where the drive ignores case, names a FAT, exFAT or NTFS
+  drive (or Windows) cannot hold, files of 4 GiB or more onto FAT, free space, and
+  whether you can write there. With nothing to decide the dialog is the one it always
+  was (identical files are left, and it says how many). Otherwise it becomes a table,
+  one line per group, worst first: ⛔ what cannot be done, with why; ⚠ what would lose
+  data, each **skip** by default, **↑↓** and **Space** to make it **replace** or **ask
+  each**; ℹ what is only said. A summary line counts what is created, replaced and
+  skipped and the space needed. Enter before the check ends starts as before; Tab
+  checks again for the other pane. The job walks its files once, not twice.
+- **Continuing an interrupted copy or move keeps what you chose**: the plan's decisions
+  and each finished source are in its journal, so Resume leaves what you said to leave
+  and replaces what you said to replace, without asking again.
+- **Data safety, the first part of 0.4.0's** (Round 029). A file replaced is synced to
+  the disk before it is renamed over the old one; a move across drives removes each
+  source only once its copy, the copy's folder and the journal's line are on disk (a
+  batch at a time); safe operations' journal is synced at the start of a job and before
+  each step that cannot be undone. With safe operations off too. See
+  [docs/security.md](docs/security.md#safe-operations) for what survives a kill and a
+  power cut.
+- **A journal that cannot be written is asked about**: before the job starts, or before
+  the next step that cannot be undone. Stop (the default) or continue without it. Rename
+  many renames nothing without its journal, and offers "rename anyway".
+- **A file is replaced only if it is still the one you agreed to.** Right before the
+  rename, xdevcmd looks again; a file another program changed or replaced meanwhile is
+  asked about again. Alt+Y's plan remembers what it saw at each file it replaces, and
+  asks about a file that appeared where it saw none.
+- **Compare shows what it could not read.** A folder that cannot be read is a ⚠ row,
+  never "only on the other side", and nothing under it is copied; names that differ only
+  in case on a drive that ignores case are a clash, left alone. Names that are not UTF-8
+  are compared as they are.
+- **The viewer colours source code.** F3 and quick view colour Rust, Python,
+  JavaScript/TypeScript, JSON, TOML, YAML, Markdown, shell, C/C++, Go, Java, Kotlin, C#,
+  HTML/XML, CSS, SQL, INI, diffs and logs, chosen by the file's name or its first line,
+  in the theme's own colours (every theme, yours included, with no new keys). A big
+  file opens as fast as before: only the lines on screen are coloured, from states a
+  background pass keeps every 128 lines, so a jump to line 1,000,000 never reads the
+  file on the spot. Up to 64 MiB in F3 and 1 MiB in quick view; lines over 4 KiB plain.
+  `[viewer] highlight = false` or `NO_COLOR` turns it off. Our own small lexer, not a
+  library: about 90 KB, where syntect would have taken the binary past its 7 MB budget.
+- **Log a terminal tab to a file.** A terminal tab's right-click menu has **Log to
+  file…**: everything that tab's shell prints goes to a file from then on, including
+  what scrolls past the history. **text** (the default) removes escapes and keeps a
+  line a CR rewrote once, as it ended; **raw** (Tab in the prompt) keeps the bytes. The
+  file is appended to and, when new, readable by you only. The tab shows ● while it is
+  logged; **Stop logging**, closing the tab, `exit` and quitting end it after a last
+  flush. A disk that fails or cannot keep up stops the log, says so on the status line
+  and turns the ● into a red !: never a silent gap. F1 has both ("log tab"). Off in
+  the read-only modes; nothing is logged unless you ask.
+- **F1 is Commands: every command, found by typing, with its key.** Type a few letters
+  of a name, a group's name or a key ("f5"), and Enter runs it on the pane you were in;
+  the status line then says the key for next time. Alt+1…9 run the first nine rows.
+  With nothing typed, the commands you ran last (kept across restarts, 8 of them) come
+  first, then those for where you are. F1 again makes it the whole window, the
+  commands by group as F1 was before. Your `[[menu]]` commands, Settings…, Theme… and
+  About are rows too; mouse gestures and the viewer's keys are listed to read. Over the
+  viewer, F1 lists the viewer's keys and Esc gives it back.
+- **Help → Config in use**: the config in effect in its own read-only window, with a
+  filter; what F1's Settings tab showed, `[keys]` included.
+- **Help → Documentation** (and a row in F1): the docs for the version you have. The
+  release archives now carry `docs/` beside the program, and the window names that copy
+  first (Enter reads it); then the link to `docs/` at your version's tag, not `main`,
+  which C copies. Nothing is opened: no network. `docs/README.md` gives the reading
+  order. F1's link to troubleshooting follows the version too.
+- **A slow directory no longer freezes the screen.** A directory that takes more than
+  150 ms to read (a network mount, a sleeping disk, a huge folder) is read in the
+  background: the pane keeps what it showed, a bar on its bottom edge names what is
+  being opened and counts the entries, the move happens when the listing arrives, and
+  Esc stops waiting. The periodic check for changes reads a directory once, not up to
+  three times, and never puts the bar up. Alt+F7 and a list being checked show the bar
+  too.
+- **docs/guide.md: remote files through a mount** (sshfs, rclone, SMB, NFS), since
+  xdevcmd itself opens no network connection.
+- **A list from the shell's output.** In the history (Shift+F12), `p` makes a list of
+  the paths in the lines dragged over, or in the last command's output when the shell
+  sends prompt marks; it opens in a file pane, where F3, F4, F5, F6, F8, marking and
+  renaming work on the real files. `P` adds the paths to a list instead (a menu asks
+  which). A terminal tab's menu has "List from the last command…".
+- **Lists are kept for the session** (the last 10, in memory only): Back returns to a
+  list after Enter on a row, Alt+L shows the list used last from anywhere (Alt+X Alt+L
+  in the shell), and Alt+Down/Alt+J lists them above the directories. Alt+F7's results
+  are kept the same way. Coming back checks every row again and names what was deleted
+  or moved meanwhile.
+- **Paths in the shell's output can be opened.** In the history (Shift+F12), paths
+  that exist are underlined: compiler and grep locations (`src/main.rs:42:9`), Python
+  tracebacks, MSBuild's `x.cs(12,5)`, `ls` listings. Tab and Shift+Tab choose one, and
+  the line under the viewer gives its full path; Enter (or a click) takes the file pane
+  there, F3 views the file at its line, F4 edits it at its line (vim, nano, emacs,
+  helix, VS Code, Sublime, Zed, Notepad++ and others told the line their own way). A
+  relative path is taken from the directory its command ran in when the shell sends
+  prompt marks, else from the shell's directory now, and it says which.
+- **Two more looks in xdevtheme's family**, in `themes/`: **xdevtheme-neon** (the light
+  runs teal, violet, pink, and the focused frame glows into the cells around it) and
+  **xdevtheme-glass** (no lines: panes are cards, the focused path and the cursor row
+  are pills).
+- **xdevtheme-light**, in `themes/`: xdevtheme for a terminal with a light background,
+  such as macOS Terminal's default profile. Every name, title and key reads at 4.5:1 or
+  more on white, on the bars and on the cursor row, at true colour and at 256 colours;
+  the frames at 3:1. Pick it in View → Theme…; it is not the default.
+- **`--print-theme` prints a theme file too** (`xdevcmd --print-theme xdevtheme-light`),
+  every colour and its style written out, to start your own from it.
+- **A theme file can say how it draws**, in a `[style]` table: `borders` (plain,
+  rounded, thick, double, none), `titles` (line, notch, pill), `gradient` (one or two
+  colours after the accent), `gradient_runs` (across, down), `cursor` (block, glow,
+  pill), `marker`, `keys` (plain, caps, slant), `shadow` (none, dim, glow), `glow`, `sky`
+  and `stars`. Off unless a theme sets it, and off on a 16-colour terminal. No Nerd Font
+  needed, and the programs in the terminal panel keep their own colours and lines.
+  `--print-theme` writes it too.
+- **`XDEVCMD_THEME`** overrides `[theme] name` for one run, to try a theme without
+  editing the config.
+- **`cargo binstall xdevcmd`** installs the ready-made build from the GitHub release,
+  with no compiling: the crate says where each target's archive is.
+- **A long name is shown whole on the cursor's row.** When the Name column cuts a name,
+  the row under the cursor shows all of it, extension included, over Ext, Size and
+  Modified (the status line still gives that file's size). The other rows keep their
+  columns.
+- **The menu bar shows which xdevcmd this is**, at its right in the dim colour:
+  `xdevcmd 18144`, its process number, which Help → Usage also shows. Hidden where the
+  menus need the room.
+
+### Changed
+- **F1 opens Commands, not a screen of keys and settings**; the settings are in Help →
+  Config in use, and the Help menu is Commands… · Config in use · Usage · About.
+- **Alt+X F1 opens F1**, from the shell too (where F1 alone stays the program's). It was
+  Usage's second key; Usage keeps Shift+F1 and is a row in F1 and the Help menu.
+  `[keys] usage = ["Shift+F1", "Alt+x F1"]` brings the old key back in the file panes;
+  in the shell Alt+X F1 then goes to the program, and Commands is F12, then F1.
+- **F1 always opens Commands**: a config whose `[keys] help` leaves F1 out, or that gives
+  F1 to another action, is refused, saying so.
+- **Names sort as people read them, in any script.** Case, accents and width no longer
+  split letters (`Éclair` with `eclair`, `Ölfeld` with `öl`, full-width `ｆｉｌｅ２` with
+  `file2`, its `２` a number); katakana sort with hiragana and voiced kana with plain
+  ones; Vietnamese letters with marks sort with their letter, `đ` after `d`; a name a
+  Mac stored decomposed sorts with its composed form. ASCII names sort as before.
+- **The default theme is xdevtheme, xdevcmd's own look**: its teal turns into a light
+  that runs across the screen to violet, with rounded frames and the titles in a notch,
+  a lit cursor row with a bar on the frame, the F keys and the selected tab as slanted
+  segments, and a shadow under dialogs. The plain look is still there as `dark`:
+  `[theme] name = "dark"` keeps it, and a config that already names a theme keeps that
+  one. On a 16-colour terminal the default is the 16-colour theme, as before.
+- **On Windows, xdevcmd started from its terminal panel asks first**: "Start another
+  xdevcmd here? [y/N]", naming the xdevcmd whose panel it is; Enter is no and ends it.
+  Windows cannot tell that panel from a new window opened from it (`start cmd`), so it
+  asks in both; before, it started and only said so on the status line. Without a
+  terminal to ask on, it starts. Linux and macOS are unchanged: refused in the panel
+  itself, started in any other window.
+
+### Fixed
+- **Alt+Y no longer copies into a folder it could not read** (as if it were empty), nor
+  plans two non-UTF-8 names that read alike as one path that does not exist, nor copies
+  a file onto its twin on the other side when that twin could not be looked at.
+- **Alt+Y no longer replaces a file that appeared after the compare** at a place the
+  plan saw empty (it took every file there when the job started for one it named).
+- **A link copied over a file no longer loses the file** when making the link fails: it
+  is made under a temporary name and renamed over.
+- **A journal write that fails is no longer silent** (it was dropped, and a kill then
+  left nothing to tidy up with).
+- **Enter on a search result in a slow folder lands on the file**, not on `..`, once the
+  folder has been read; so do a typed path, a link's Go and "both panes here".
+- **Panelize takes a line whole when it names a file**: `report:2026.txt`, `a b.txt` and
+  `2026` are those files, not `report` at line 2026, `a` and `b.txt`, or nothing.
+- A path in the shell's history was shown as joined, not resolved (`src/../lib/a.rs`);
+  it is shown, and acted on, as the file it is.
+- **A theme that is not there no longer throws away the whole config.** A `[theme] name`
+  whose file was deleted or does not read made xdevcmd ignore every setting; now the
+  default theme stands in, the rest of the config holds, and the status line says which
+  theme was missing. `--check-config` still reports it.
+- **Names in Chinese, Japanese or Korean keep the columns in line**: such a character
+  takes two columns, and names were fitted by counting characters, so a row with one ran
+  past the others, pushed Ext, Size and Modified to the right and cut the date. Names are
+  now fitted, padded and shortened in columns as the terminal draws them; the same goes
+  for pane titles and the status line.
+- **A status message no longer runs into the terminal's keys**: with the terminal in
+  focus and a long message, the status line read "…Shift+F12 historytoo small to split";
+  the two keep their gap now.
+- **A second tab on one pane no longer puts its list a row below the other pane's.** The
+  pane beside it shows its tab bar too, with its one tab, so both lists start on the
+  same row. A lone tab has no × now, since the last tab cannot be closed.
+- **A dialog over a Chinese, Japanese or Korean name keeps its left border.** When the
+  dialog's edge fell on the second half of a wide character, the terminal printed the
+  character over the border; that character is now blanked.
+
+### Removed
+- **The Night Owl example theme**: it was nearly the built-in `dark` (the closest pair of
+  all the themes), and close to Nord and Tokyo Night. A copy you keep in your own
+  `themes/` folder still works; without it, xdevtheme stands in (see Fixed).
+
 ## [0.3.0] - 2026-11-10
 
 ### Added

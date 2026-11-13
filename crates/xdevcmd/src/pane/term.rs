@@ -18,7 +18,6 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
 use ratatui::Frame;
 
 use crate::pane::shell_report::{Mark, ShellReports};
@@ -73,7 +72,15 @@ pub struct TermPane {
     /// When the shell last printed anything: a new shell's prompt is taken to be up
     /// once it has printed and gone quiet ([`TermPane::prompt_ready`]).
     last_output: Arc<std::sync::Mutex<Option<Instant>>>,
+    /// The file this shell's output is logged to, if any (the tab menu's Log to file…).
+    /// The reader thread hands it each chunk before the parser sees it.
+    log: LogSlot,
+    /// The log's failure has been said on the status line.
+    log_said: std::cell::Cell<bool>,
 }
+
+/// Where a shell's log is kept, shared with its reader thread.
+type LogSlot = Arc<std::sync::Mutex<Option<Arc<xdevcmd_core::termlog::Log>>>>;
 
 /// Whether a shell can take typed text: what every action that types into it asks
 /// first (`App::send_to_shell`).
@@ -472,7 +479,8 @@ impl TermPane {
             });
         }
 
-        let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows));
+        let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows))
+            .with_pid(pid.clone());
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
             nz(rows),
             nz(cols),
@@ -481,20 +489,36 @@ impl TermPane {
         )));
         let (tx, rx) = channel::<Vec<u8>>();
         let last_output = Arc::new(std::sync::Mutex::new(None));
+        let log: LogSlot = Arc::new(std::sync::Mutex::new(None));
         {
             let parser = parser.clone();
             let answers = tx.clone();
             let last_output = last_output.clone();
+            let log = log.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 let mut tail = Vec::new();
+                // Taken out of the slot, so the UI thread never waits behind a send.
+                let logging = || log.lock().ok().and_then(|l| l.clone());
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => {
+                            // The shell is gone: its log ends here, flushed by its
+                            // writer; the panel says so (`TermPanel::take_notes`).
+                            if let Some(l) = logging() {
+                                l.finish();
+                            }
                             OUTPUT.store(true, Ordering::Relaxed);
                             break;
                         }
                         Ok(n) => {
+                            // Before the parser: what scrolls off its history is
+                            // still logged. Never waits on the disk (`Log::tap`).
+                            if let Some(l) = logging() {
+                                if !l.tap(&buf[..n]) {
+                                    OUTPUT.store(true, Ordering::Relaxed);
+                                }
+                            }
                             let asked = cursor_queries(&mut tail, &buf[..n]);
                             if let Ok(mut t) = last_output.lock() {
                                 *t = Some(Instant::now());
@@ -538,7 +562,32 @@ impl TermPane {
             keep,
             ended,
             last_output,
+            log,
+            log_said: std::cell::Cell::new(false),
         })
+    }
+
+    /// This shell's log, while it has one.
+    pub fn log(&self) -> Option<Arc<xdevcmd_core::termlog::Log>> {
+        self.log.lock().ok().and_then(|l| l.clone())
+    }
+
+    /// Log this shell's output from now on.
+    pub fn set_log(&self, l: Arc<xdevcmd_core::termlog::Log>) {
+        if let Ok(mut slot) = self.log.lock() {
+            *slot = Some(l);
+        }
+        self.log_said.set(false);
+    }
+
+    /// Stop handing output to the log; the caller closes it.
+    pub fn take_log(&self) -> Option<Arc<xdevcmd_core::termlog::Log>> {
+        self.log.lock().ok().and_then(|mut l| l.take())
+    }
+
+    /// Whether the log's failure was said yet; marks it said.
+    pub fn log_failure_said(&self) -> bool {
+        self.log_said.replace(true)
     }
 
     /// Started for one program: kept after it ends (see `keep`).
@@ -851,14 +900,31 @@ impl TermPane {
         }
     }
 
-    /// The whole history and screen as text, for the viewer (Shift+F12), and whether a
-    /// full-screen program has the other screen up: vt100 keeps no history there, so
-    /// the text is that screen only.
-    pub fn history_text(&self) -> (String, bool) {
-        self.parser
-            .read()
-            .map(|p| (history_text(&p), p.screen().alternate_screen()))
-            .unwrap_or_default()
+    /// The whole history and screen as text, for the viewer (Shift+F12), with the commands the shell
+    /// reported (OSC 133): the line each one's output starts on in that text, and the
+    /// directory it ran in (none for a shell that sends no prompt marks); and whether
+    /// a full-screen program has the other screen up, its screen being the text then.
+    pub fn history_commands(&self) -> (String, Vec<(usize, Option<std::path::PathBuf>)>, bool) {
+        let Ok(p) = self.parser.read() else {
+            return Default::default();
+        };
+        if p.screen().alternate_screen() {
+            return (history_text(&p), Vec::new(), true);
+        }
+        let (mut text, first) = p.callbacks().history(p.screen());
+        let kept = text.trim_end_matches(['\n', ' ']).len();
+        text.truncate(kept);
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        let commands = p
+            .callbacks()
+            .commands
+            .iter()
+            .filter(|c| c.line >= first)
+            .map(|c| ((c.line - first) as usize, c.dir.clone()))
+            .collect();
+        (text, commands, false)
     }
 
     fn history(&self) -> usize {
@@ -929,12 +995,13 @@ impl TermPane {
             ),
             Span::raw(" "),
         ]);
-        let block = Block::bordered()
+        let block = crate::decor::bordered()
             .border_style(theme::border_style(active))
             .style(Style::new().bg(theme::t().bg))
             .title(title);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        crate::decor::notch(frame.buffer_mut(), area);
 
         if inner.width == 0 || inner.height == 0 {
             return;
@@ -1067,11 +1134,43 @@ fn foreground_of(pid: u32) -> Fg {
         return Fg::Unknown;
     };
     if tpgid > 0 && tpgid != pgrp {
-        let comm = ps(&["-o", "comm=", "-p", &tpgid.to_string()]).unwrap_or_default();
-        let name = comm.rsplit('/').next().unwrap_or("").trim();
-        return Fg::Program(if name.is_empty() { "a program" } else { name }.to_string());
+        let group = tpgid.to_string();
+        let comm = ps(&["-o", "comm=", "-p", &group]).unwrap_or_default();
+        let args = || ps(&["-o", "args=", "-p", &group]).unwrap_or_default();
+        let name = program_name(&comm, args);
+        return Fg::Program(if name.is_empty() {
+            "a program".into()
+        } else {
+            name
+        });
     }
     Fg::Shell
+}
+
+/// Interpreters a script names on its `#!` line.
+const INTERPRETERS: &[&str] = &[
+    "sh", "bash", "dash", "zsh", "ksh", "perl", "python", "python3", "ruby",
+];
+
+/// The program's name from macOS's `ps -o comm=`, and its command line if needed.
+/// macOS names a script run by its `#!` line after its interpreter (`/bin/sh`), where
+/// Linux names it after the script; so a script called `ssh`, or mosh (a Perl script),
+/// went unseen. For an interpreter, the name is the first word after it that is not an
+/// option (`/bin/sh /usr/local/bin/ssh` is `ssh`); a path with a space in it is cut
+/// there, as ps prints the words joined.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn program_name(comm: &str, args: impl FnOnce() -> String) -> String {
+    let name = comm.trim().rsplit('/').next().unwrap_or("").to_string();
+    if !INTERPRETERS.contains(&name.as_str()) {
+        return name;
+    }
+    args()
+        .split_whitespace()
+        .skip(1)
+        .find(|w| !w.starts_with('-'))
+        .and_then(|w| w.rsplit('/').next())
+        .filter(|w| !w.is_empty())
+        .map_or(name, str::to_string)
 }
 
 #[cfg(target_os = "macos")]
@@ -1311,6 +1410,27 @@ fn function_key_bytes(n: u8, mods: KeyModifiers) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// macOS calls a script by its interpreter's name; the script's own is the program
+    /// (CI run 43177254223: a stand-in `ssh` script was not seen as ssh there).
+    #[test]
+    fn a_script_is_named_for_itself_not_its_interpreter() {
+        let never = || -> String { panic!("a binary needs no command line") };
+        assert_eq!(program_name("/usr/bin/ssh", never), "ssh");
+        assert_eq!(program_name("vim\n", never), "vim");
+        assert_eq!(
+            program_name("/bin/sh", || "/bin/sh /tmp/x/bin/ssh".into()),
+            "ssh"
+        );
+        assert_eq!(
+            program_name("perl", || "/usr/bin/perl -w /usr/local/bin/mosh host"
+                .into()),
+            "mosh"
+        );
+        // An interpreter with nothing after it (a subshell) is itself.
+        assert_eq!(program_name("/bin/bash", || "-bash".into()), "bash");
+        assert_eq!(program_name("/bin/zsh", String::new), "zsh");
+    }
 
     #[test]
     fn a_shell_is_idle_only_when_that_is_known() {
@@ -1600,6 +1720,50 @@ mod tests {
             text.lines().count(),
             text.len()
         );
+    }
+
+    /// Not a check: how fast a shell's output is read with its log off, text and raw
+    /// (Round 027). 50 MB of `yes` through a real pty, timed until the program has
+    /// ended (its output read), then until the log is closed. `cargo test --release
+    /// -p xdevcmd --bin xdevcmd -- --ignored --nocapture log_throughput`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn log_throughput() {
+        use xdevcmd_core::termlog::{About, Log, Mode};
+        const BYTES: u64 = 50_000_000;
+        let dir = std::env::temp_dir().join(format!("xdevcmd-log-bench-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        for mode in [None, Some(Mode::Text), Some(Mode::Raw)] {
+            let argv: Vec<std::ffi::OsString> = ["sh", "-c", "yes | head -c 50000000"]
+                .iter()
+                .map(Into::into)
+                .collect();
+            let t = TermPane::spawn_argv(&dir, 40, 120, &argv, 5000).expect("a pty");
+            let path = dir.join(format!("{mode:?}.log"));
+            if let Some(m) = mode {
+                let (f, _) = xdevcmd_core::termlog::open(&path).expect("the log");
+                let about = About {
+                    label: "bench".into(),
+                };
+                t.set_log(Log::start(path.clone(), m, Box::new(f), about));
+            }
+            let t0 = Instant::now();
+            while !t.has_exited() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let read = t0.elapsed();
+            let said = t
+                .take_log()
+                .map(|l| l.close(Duration::from_secs(30)))
+                .unwrap_or_default();
+            let all = t0.elapsed();
+            let mbs = BYTES as f64 / read.as_secs_f64() / 1e6;
+            eprintln!(
+                "log {mode:?}: read in {read:?} ({mbs:.0} MB/s), closed after {all:?} {said}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

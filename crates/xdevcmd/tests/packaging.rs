@@ -126,3 +126,101 @@ fn the_winget_installer_points_at_the_archive_release_yml_makes() {
         assert!(text.contains("PackageVersion: <VERSION>\n"), "{f}");
     }
 }
+
+/// Every target release.yml builds, as its matrix names them.
+const TARGETS: &[&str] = &[
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    WINDOWS,
+];
+
+/// `cargo binstall xdevcmd` reads `[package.metadata.binstall]` in this crate's
+/// Cargo.toml. Filled in as binstall fills it, for each target, it must name the archive
+/// release.yml uploads and the program inside it.
+#[test]
+fn cargo_binstall_finds_the_archive_release_yml_makes() {
+    let text =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let cargo: toml::Table = toml::from_str(&text).unwrap();
+    let meta = &cargo["package"]["metadata"]["binstall"];
+    for target in TARGETS {
+        let Some(folder) = released_archive("v0.3.0", target) else {
+            eprintln!("no release.yml here; skipped");
+            return;
+        };
+        let (suffix, format, ext) = if *target == WINDOWS {
+            (".zip", "zip", ".exe")
+        } else {
+            (".tar.gz", "tgz", "")
+        };
+        let key = |k: &str| {
+            meta.get("overrides")
+                .and_then(|o| o.get(*target))
+                .and_then(|o| o.get(k))
+                .or_else(|| meta.get(k))
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("no {k} for {target}"))
+                .to_string()
+        };
+        let fill = |s: String| {
+            s.replace("{ repo }", env!("CARGO_PKG_REPOSITORY"))
+                .replace("{ version }", "0.3.0")
+                .replace("{ name }", env!("CARGO_PKG_NAME"))
+                .replace("{ target }", target)
+                .replace("{ archive-suffix }", suffix)
+                .replace("{ bin }", "xdevcmd")
+                .replace("{ binary-ext }", ext)
+        };
+        assert_eq!(key("pkg-fmt"), format, "{target}");
+        assert_eq!(
+            fill(key("pkg-url")),
+            download("v0.3.0", &format!("{folder}{suffix}")),
+            "{target}"
+        );
+        assert_eq!(
+            fill(key("bin-dir")),
+            format!("{folder}/xdevcmd{ext}"),
+            "{target}"
+        );
+    }
+}
+
+/// Every archive carries `docs/` beside the binary and `themes/` (Help → Documentation
+/// names it first), and its index, `docs/README.md`, lists every page.
+#[test]
+fn every_archive_carries_the_docs_beside_the_binary() {
+    let Ok(yml) = fs::read_to_string(top().join(".github/workflows/release.yml")) else {
+        eprintln!("no release.yml here; skipped");
+        return;
+    };
+    let package = yml
+        .split("- name: package")
+        .nth(1)
+        .and_then(|s| s.split("- uses:").next())
+        .expect("release.yml has a package step");
+    for line in [
+        "cp -r themes \"$name/\"",
+        "mkdir \"$name/docs\"",
+        "cp docs/*.md \"$name/docs/\"",
+    ] {
+        assert!(package.contains(line), "the package step lost: {line}");
+    }
+    // Before the archive is made, for both kinds of archive.
+    let docs_at = package.find("cp docs/*.md").unwrap();
+    assert!(docs_at < package.find("7z a").unwrap());
+    assert!(docs_at < package.find("tar czf").unwrap());
+
+    let index = fs::read_to_string(top().join("docs/README.md")).expect("docs/README.md");
+    for e in fs::read_dir(top().join("docs")).unwrap().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".md") && name != "README.md" {
+            assert!(
+                index.contains(&format!("]({name})")),
+                "docs/README.md does not list {name}"
+            );
+        }
+    }
+}

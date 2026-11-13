@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn a_word_too_long_for_any_line_starts_where_it_is() {
-        let url = "https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md";
+        let url = crate::docs::docs_url(Some("troubleshooting.md"));
         let got = plain(&format!("    More      {url}"), 50, 14);
         assert!(got[0].starts_with("    More      https://"), "{got:?}");
         assert_eq!(

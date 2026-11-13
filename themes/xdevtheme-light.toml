@@ -1,0 +1,32 @@
+# xdevtheme-light: xdevtheme for a terminal with a light background (macOS Terminal's
+# default profile, for one). The same style; the colours are darker than the dark
+# theme's, so every name reads at 4.5:1 or more on white, on the bar and on the cursor
+# row, at true colour and at 256 colours.
+# Pick "xdevtheme-light" in View > Theme... or with [theme] name = "xdevtheme-light".
+# On a 16-colour terminal the [style] part is left off.
+base = "light"
+background = "#eef1f8"
+panel = "#fbfcff"
+bar = "#e3e7f3"
+border = "#878fa5"
+border_active = "#006e78"
+accent = "#006e78"
+text = "#1b2232"
+text_dim = "#555c70"
+directory = "#2a48c2"
+executable = "#196f2f"
+symlink = "#792ed3"
+archive = "#984600"
+error = "#bd1e2e"
+marked = "#6e5c00"
+cursor = "#e4e8f2"
+cursor_active = "#d2eee8"
+
+[style]
+borders = "rounded"
+titles = "notch"
+gradient = "#6c3fd6"                # the teal (the accent) turns violet across the screen
+cursor = "glow"
+marker = true
+keys = "slant"
+shadow = "dim"

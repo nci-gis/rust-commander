@@ -276,6 +276,15 @@ Round 030 closed first, then "go as recommended": all five as the kickoff recomm
   is), shorten its limit there, or move it after the first frame and parse the keys it
   swallowed ourselves (more code, a second key parser).
 
+### 2026-11-13, decision 4 settled; the cut
+
+- The owner, on keeping the check as it is, a shorter limit, or after the first frame
+  with our own key parser: "okay, go" after the recommendation to keep it as it is for
+  beta.1. Kept before the first frame, limit unchanged. A shorter limit would let a slow
+  terminal's late answer (SSH) arrive as typed keys; beta.1's testers record
+  "terminal check" in the checklist, and the numbers decide again.
+- The same "okay, go" is the word for step 6, the cut.
+
 ### 2026-11-13, step 4: the benchmark harness
 
 - `xtask/` (`publish = false`, `release = false`, only crates already in the lock),

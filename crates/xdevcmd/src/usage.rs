@@ -273,26 +273,6 @@ fn ellipsize(s: &str, width: usize) -> String {
 
 pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     let th = theme::t();
-    let w = area.width.min(84);
-    let ht = area.height.min(22);
-    let r = Rect::new(
-        area.x + (area.width - w) / 2,
-        area.y + (area.height - ht) / 2,
-        w,
-        ht,
-    );
-    crate::modal::clear_overlay(frame, r);
-    let block = crate::decor::bordered()
-        .border_style(Style::new().fg(th.accent))
-        .style(Style::new().bg(th.bg_panel).fg(th.fg))
-        .title(Line::from(Span::styled(
-            " Usage ",
-            Style::new().fg(th.accent).add_modifier(Modifier::BOLD),
-        )));
-    let inner = block.inner(r);
-    frame.render_widget(block, r);
-    crate::decor::notch(frame.buffer_mut(), r);
-
     let mut lines: Vec<(String, Style)> = Vec::new();
     let dim = Style::new().fg(th.fg_dim);
     let plain = Style::new().fg(th.fg);
@@ -398,6 +378,33 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     ));
     lines.push((String::new(), plain));
     // What the graph shows: the newest samples, one per column.
+    // As wide as its longest line (the start-up steps are the longest), never past the
+    // screen: a line is cut, with "…", only where the screen itself is too narrow.
+    let longest = lines
+        .iter()
+        .map(|(t, _)| unicode_width::UnicodeWidthStr::width(t.as_str()))
+        .max()
+        .unwrap_or(0);
+    let w = ((longest + 4).max(84) as u16).min(area.width);
+    let ht = area.height.min(22);
+    let r = Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - ht) / 2,
+        w,
+        ht,
+    );
+    crate::modal::clear_overlay(frame, r);
+    let block = crate::decor::bordered()
+        .border_style(Style::new().fg(th.accent))
+        .style(Style::new().bg(th.bg_panel).fg(th.fg))
+        .title(Line::from(Span::styled(
+            " Usage ",
+            Style::new().fg(th.accent).add_modifier(Modifier::BOLD),
+        )));
+    let inner = block.inner(r);
+    frame.render_widget(block, r);
+    crate::decor::notch(frame.buffer_mut(), r);
+
     let width = inner.width.saturating_sub(2) as usize;
     let shown: Vec<u64> = u
         .samples

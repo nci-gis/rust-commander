@@ -410,7 +410,15 @@ fn start_up_times_are_said_when_asked_and_in_usage() {
     x.send(SHIFT_F1);
     x.wait_for("start-up ");
     x.wait_for(" to the first frame");
-    assert!(x.screen().contains("terminal check "), "{}", x.screen());
+    x.wait_for("first frame ");
+    // The box is as wide as the steps' line where the screen allows: shown whole,
+    // not cut to "…".
+    let screen = x.screen();
+    let steps = screen
+        .lines()
+        .find(|l| l.contains("terminal check "))
+        .unwrap_or_else(|| panic!("no steps line:\n{screen}"));
+    assert!(!steps.contains('\u{2026}'), "{steps}");
     x.send(b"\x1b");
     x.wait_gone(" to the first frame");
     x.quit();

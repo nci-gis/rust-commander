@@ -9,6 +9,7 @@ Read in this order; each page stands on its own.
 5. [Security](security.md): what xdevcmd guards against, read-only and restricted modes
 6. [Troubleshooting](troubleshooting.md): known problems on each system, and fixes
 7. [Development](development.md): build, test, release, contribute
+8. [Testing by hand](testing-by-hand.md): what to try on each pre-release, data first
 
 These pages on GitHub's `main` describe the newest code, which may be ahead of yours.
 **For the version you have installed, use Help → Documentation** in xdevcmd (or F1, type

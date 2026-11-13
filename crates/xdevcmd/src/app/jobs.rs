@@ -54,8 +54,15 @@ impl App {
     pub(super) fn finish_job(&mut self) {
         if let Some(Modal::Job(j)) = self.modal.take() {
             if let Some(s) = &j.done {
-                self.status = s.describe(j.kind);
+                self.status = match &j.title {
+                    Some(t) => format!(
+                        "{t}: {}",
+                        s.describe(j.kind).replace(" deleted", " removed")
+                    ),
+                    None => s.describe(j.kind),
+                };
                 self.note_trashed(s);
+                self.note_copied(j.kind, s);
             }
         }
         // Marks are cleared once an operation has run, the way every orthodox manager
@@ -83,6 +90,7 @@ impl App {
                 self.status = format!("background: {}", s.describe(j.kind));
                 let s = s.clone();
                 self.note_trashed(&s);
+                self.note_copied(j.kind, &s);
                 // A job that ended in errors comes forward so they can be read.
                 if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
                     self.modal = Some(Modal::Job(j));
@@ -136,7 +144,10 @@ impl App {
                 dest: r.dest.clone().unwrap_or_default(),
                 rename_to: r.rename_to.clone(),
             },
-            ops::Kind::Copy => Undo::Cannot("a copy".into()),
+            ops::Kind::Copy => {
+                self.expect_copy_undo(format!("copy of {}", Self::describe(&r.sources)));
+                return;
+            }
             ops::Kind::Delete if r.to_trash => {
                 // Undoable once it has finished and said where each item went.
                 self.trash_pending = Some(r.sources.clone());
@@ -321,6 +332,40 @@ impl App {
         }
     }
 
+    /// A copy is starting: once it ends, what it made is the undo; until then undo says
+    /// it is still running, so nothing older is undone behind it.
+    pub(super) fn expect_copy_undo(&mut self, what: String) {
+        self.copy_pending = Some(what);
+        self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot(COPY_RUNNING.into()));
+    }
+
+    /// A copy has ended: if it is still the last operation, undo can now remove what it
+    /// made. Past the cap it says it cannot.
+    pub(super) fn note_copied(&mut self, kind: ops::Kind, s: &ops::Summary) {
+        use xdevcmd_core::undo::Undo;
+        if kind != ops::Kind::Copy {
+            return;
+        }
+        let Some(what) = self.copy_pending.take() else {
+            return;
+        };
+        if !matches!(&self.last_undo, Some(Undo::Cannot(w)) if w == COPY_RUNNING) {
+            return;
+        }
+        self.last_undo = Some(if s.made_over {
+            Undo::Cannot(format!(
+                "a copy of more than {} items",
+                xdevcmd_core::ops::MADE_CAP
+            ))
+        } else {
+            Undo::Copy {
+                made: s.made.clone(),
+                what,
+                for_good: s.replaced_for_good,
+            }
+        });
+    }
+
     /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
     pub(super) fn ask_undo(&mut self) {
         let Some(u) = &self.last_undo else {
@@ -334,7 +379,7 @@ impl App {
                 return;
             }
         };
-        use xdevcmd_core::undo::Plan;
+        use xdevcmd_core::undo::{Plan, Undo};
         let what = match &plan {
             Plan::Rename(m) => m
                 .iter()
@@ -353,6 +398,30 @@ impl App {
                 tidy(into)
             )],
             Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+            Plan::Unmake { made, kept } => {
+                let n = made.len() - kept;
+                let back = made.iter().filter(|m| m.old.is_some()).count();
+                let mut lines = vec![format!(
+                    "remove the {n} item{} it made, as it made {}",
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "it" } else { "them" }
+                )];
+                if back > 0 {
+                    lines.push(format!("put back from the trash the {back} it replaced"));
+                }
+                if *kept > 0 {
+                    lines.push(format!("keep {kept} changed since the copy"));
+                }
+                if let Undo::Copy { for_good, .. } = u {
+                    if *for_good > 0 {
+                        lines.push(format!(
+                            "{for_good} file{} it replaced had no trash: those stay as copied",
+                            if *for_good == 1 { "" } else { "s" }
+                        ));
+                    }
+                }
+                lines
+            }
             Plan::Restore(items) => {
                 let mut lines: Vec<String> = items
                     .iter()
@@ -471,6 +540,12 @@ impl App {
             Plan::Move { back, into } => {
                 let request = Request::mv(back, into);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
+                self.status = format!("undoing the {}", u.describe());
+            }
+            Plan::Unmake { made, .. } => {
+                let mut job = Job::new(ops::Kind::Delete, xdevcmd_core::undo::unmake(made));
+                job.title = Some("Undo the copy".into());
+                self.modal = Some(Modal::Job(job));
                 self.status = format!("undoing the {}", u.describe());
             }
             Plan::Remove(p) => {

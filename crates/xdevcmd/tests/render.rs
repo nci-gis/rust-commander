@@ -3687,6 +3687,14 @@ fn ctrl_z_undoes_a_rename_a_new_directory_and_a_move_after_asking() {
     // Ctrl+Z comes while it runs (a Windows runner, CI run 43371746802).
     shot_keys("110x24", "Down,F6,Enter,wait,Ctrl+z,Enter", &a, &b);
     assert!(a.join("victim.txt").exists() && !b.join("victim.txt").exists());
+
+    // A copy, then its undo: the copy goes, the source stays (Round 031).
+    let s = shot_keys("110x24", "Down,F5,Enter,wait,Ctrl+z,Enter,wait", &a, &b);
+    assert!(
+        a.join("victim.txt").exists() && !b.join("victim.txt").exists(),
+        "{s}"
+    );
+    assert!(s.contains("Undo the copy: 1 removed"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
@@ -3695,12 +3703,21 @@ fn ctrl_z_says_what_cannot_be_undone_and_refuses_what_changed() {
     let (a, b) = fixture();
     let s = shot_keys("110x24", "Ctrl+z", &a, &b);
     assert!(s.contains("nothing to undo"), "{s}");
-    // A copy is not undone, and an older rename is not undone behind it.
+    // A copy is undone (Round 031), not the older rename behind it.
     // `wait`: the copy ends first, or its "1 copied" replaces the answer to Ctrl+Z
     // (seen on a Windows runner).
     let s = shot_keys("110x24", "Down,F2,x,Enter,F5,Enter,wait,Ctrl+z", &a, &b);
     assert!(
-        s.contains("the last operation, a copy, cannot be undone"),
+        s.contains("Undo the copy of x.txt?") && s.contains("remove the 1 item it made"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+
+    // A permanent delete is not undone, and says so.
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,S-F8,y,wait,Ctrl+z", &a, &b);
+    assert!(
+        s.contains("the last operation, a permanent delete, cannot be undone"),
         "{s}"
     );
     let _ = fs::remove_dir_all(a.parent().unwrap());

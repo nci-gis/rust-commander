@@ -333,6 +333,8 @@ struct Comparing {
 
 /// What undo says while a delete to the trash is still running.
 const TRASH_RUNNING: &str = "a delete to the trash that is still running";
+/// What undo says while a copy is still running.
+const COPY_RUNNING: &str = "a copy that is still running";
 /// Names to type into a new shell at its prompt; see `App::pending_type`.
 struct PendingType {
     key: ShellKey,
@@ -442,6 +444,9 @@ pub struct App {
     /// The sources of a delete to the trash still running, so its result can become
     /// the undo once it has said where everything went.
     trash_pending: Option<Vec<PathBuf>>,
+    /// A copy still running, as undo will name it ("copy of a.txt"): once it ends, what
+    /// it made becomes the undo (Round 031).
+    copy_pending: Option<String>,
     /// The key bar's buttons as last drawn.
     footer_hits: Vec<(Action, Rect)>,
     /// The panes' share of the frame as last drawn; dividers are measured against it.
@@ -641,6 +646,7 @@ impl App {
             theme_name,
             last_undo: None,
             trash_pending: None,
+            copy_pending: None,
             footer_hits: Vec::new(),
             main: Rect::ZERO,
             interactive: false,

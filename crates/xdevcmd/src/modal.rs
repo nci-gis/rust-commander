@@ -456,6 +456,8 @@ pub struct Job {
     pub current: Option<PathBuf>,
     pub question: Option<Question>,
     pub done: Option<Summary>,
+    /// Its box's title when not the kind's verb: "Undo the copy".
+    pub title: Option<String>,
     /// Cancel while running, Close once done.
     pub buttons: Vec<Rect>,
     /// The answers on the question box, when one is up.
@@ -473,6 +475,7 @@ impl Job {
             current: None,
             question: None,
             done: None,
+            title: None,
             buttons: Vec::new(),
             answer_buttons: Vec::new(),
         }
@@ -1006,7 +1009,12 @@ fn render_input(frame: &mut Frame, area: Rect, i: &mut Input) {
 fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
     let th = theme::t();
     let r = centered(area, 74, 8);
-    let inner = frame_box(frame, r, j.kind.verb(), th.accent);
+    let inner = frame_box(
+        frame,
+        r,
+        j.title.as_deref().unwrap_or(j.kind.verb()),
+        th.accent,
+    );
 
     match &j.done {
         Some(s) => {

@@ -236,6 +236,10 @@ impl Ident {
         }
     }
 
+    pub fn is_dir(&self) -> bool {
+        self.kind == 1
+    }
+
     /// What is at `p` now (a link as itself), if anything.
     pub fn at(p: &Path) -> Option<Self> {
         fs::symlink_metadata(p).ok().map(|m| Self::of(&m))
@@ -304,6 +308,20 @@ pub enum Expect {
     Skip,
 }
 
+/// Something a copy made, for undoing it (Round 031): a file, link or directory that
+/// was not there before, as it was right after the copy made it. `old`: the file it
+/// replaced, put in the trash on the way; undoing puts it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Made {
+    pub path: PathBuf,
+    pub ident: Ident,
+    pub old: Option<crate::trashed::Trashed>,
+}
+
+/// The most a copy remembers for its undo, as the plan's own cap: past it the copy
+/// cannot be undone, and says so.
+pub const MADE_CAP: usize = crate::plan::CAP;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Question {
     /// The destination already exists. `changed`: it is not the file the user agreed
@@ -358,6 +376,12 @@ pub struct Summary {
     /// Safe operations were on but this job's journal could not be made: why. The job ran
     /// as with safe operations off; a kill now is not tidied up at the next start.
     pub journal_off: Option<String>,
+    /// A copy: what it made, in the order made (a directory before what is in it), for
+    /// its undo. Empty past [`MADE_CAP`], with `made_over` set.
+    pub made: Vec<Made>,
+    pub made_over: bool,
+    /// A copy: files it replaced with no trash to keep the old one in. Undo leaves those.
+    pub replaced_for_good: u64,
 }
 
 impl Summary {
@@ -422,6 +446,23 @@ impl Handle {
         }
     }
 
+    /// A job that asks nothing, run by `work` on its own thread with the events'
+    /// sender and the cancel flag: undoing a copy.
+    pub(crate) fn spawn(
+        work: impl FnOnce(Sender<Event>, Arc<AtomicBool>) + Send + 'static,
+    ) -> Self {
+        let (etx, events) = channel();
+        let (answers, _) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let c = cancel.clone();
+        std::thread::spawn(move || work(etx, c));
+        Self {
+            events,
+            answers,
+            cancel,
+        }
+    }
+
     pub fn answer(&self, a: Answer) {
         let _ = self.answers.send(a);
     }
@@ -463,6 +504,7 @@ pub fn start(req: Request) -> Handle {
             removing_bytes: 0,
             moved_file: None,
             safe: req.safe,
+            recording: req.kind == Kind::Copy,
         };
         w.run(req);
     });
@@ -524,6 +566,8 @@ struct Worker {
     /// [`Request::safe`]: decides the journal and whether a new file is written under
     /// a temporary name.
     safe: bool,
+    /// A copy: what it makes is kept in [`Summary::made`], for its undo.
+    recording: bool,
 }
 
 impl Worker {
@@ -637,6 +681,27 @@ impl Worker {
 
     fn stopped(&self) -> bool {
         self.abort || self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// A copy made `path` (replacing `old`, if it went to the trash): kept for its undo,
+    /// as it is now. Past the cap, nothing more is kept and the copy cannot be undone.
+    fn made(&mut self, path: &Path, old: Option<crate::trashed::Trashed>) {
+        if !self.recording {
+            return;
+        }
+        if self.sum.made.len() >= MADE_CAP {
+            self.recording = false;
+            self.sum.made_over = true;
+            self.sum.made = Vec::new();
+            return;
+        }
+        if let Some(ident) = Ident::at(path) {
+            self.sum.made.push(Made {
+                path: path.to_path_buf(),
+                ident,
+                old,
+            });
+        }
     }
 
     /// The job is over: say how it went. A journal that broke on a line no step needed
@@ -902,13 +967,24 @@ impl Worker {
         }
         if meta.file_type().is_symlink() {
             let before = self.sum.done;
+            let new = dst.symlink_metadata().is_err();
             self.copy_symlink(src, dst);
+            if self.sum.done > before {
+                if new {
+                    self.made(dst, None);
+                } else if self.recording {
+                    self.sum.replaced_for_good += 1;
+                }
+            }
             self.moved(src, dst, before);
         } else if meta.is_dir() {
             let made = dst.symlink_metadata().is_err();
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
                 return;
+            }
+            if made {
+                self.made(dst, None);
             }
             // Moving: a directory made here keeps its name in a power cut before any
             // source under it is removed (its files sync their own names).
@@ -1119,6 +1195,11 @@ impl Worker {
             match self.copy_bytes(src, dst, free) {
                 Ok(true) => {
                     self.sum.done += 1;
+                    if free {
+                        self.made(dst, None);
+                    } else if self.recording {
+                        self.sum.replaced_for_good += 1;
+                    }
                     return;
                 }
                 // Taken since it was found free: round again, to the question.
@@ -1953,6 +2034,50 @@ mod tests {
 
     fn run(req: Request) -> Summary {
         run_with(req, Answer::Yes).0
+    }
+
+    /// Round 031: a copy says what it made, a directory before what is in it, and not
+    /// what it merged into, replaced or skipped.
+    #[test]
+    fn a_copy_reports_what_it_made_in_order() {
+        let d = tmp("made");
+        fs::create_dir_all(d.join("src/sub")).unwrap();
+        fs::write(d.join("src/sub/new.txt"), "n").unwrap();
+        fs::write(d.join("src/sub/old.txt"), "new contents").unwrap();
+        fs::write(d.join("src/sub/kept.txt"), "k").unwrap();
+        fs::create_dir_all(d.join("to/src/sub")).unwrap();
+        fs::write(d.join("to/src/sub/old.txt"), "old").unwrap();
+        fs::write(d.join("to/src/sub/kept.txt"), "mine").unwrap();
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.expect
+            .insert(d.join("to/src/sub/kept.txt"), Expect::Skip);
+        let sum = run(req);
+        let made: Vec<_> = sum.made.iter().map(|m| m.path.clone()).collect();
+        assert_eq!(made, [d.join("to/src/sub/new.txt")], "{sum:?}");
+        assert_eq!(sum.replaced_for_good, 1);
+        assert_eq!(
+            sum.made[0].ident,
+            Ident::at(&d.join("to/src/sub/new.txt")).unwrap()
+        );
+
+        let e = tmp("made-dirs");
+        fs::create_dir_all(e.join("a/b")).unwrap();
+        fs::write(e.join("a/b/f"), "f").unwrap();
+        fs::create_dir_all(e.join("to")).unwrap();
+        let sum = run(Request::copy(vec![e.join("a")], e.join("to")));
+        let made: Vec<_> = sum.made.iter().map(|m| m.path.clone()).collect();
+        assert_eq!(made, [e.join("to/a"), e.join("to/a/b"), e.join("to/a/b/f")]);
+        assert!(sum.made[0].ident.is_dir());
+    }
+
+    /// A move remembers nothing of the kind: its undo moves back.
+    #[test]
+    fn a_move_reports_nothing_made() {
+        let d = tmp("made-move");
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("f"), "x").unwrap();
+        let sum = run(Request::mv(vec![d.join("f")], d.join("to")));
+        assert!(sum.made.is_empty() && !sum.made_over);
     }
 
     #[test]

@@ -736,8 +736,13 @@ impl App {
             }
             Cmd::Resume(it) => self.resume(it),
             Cmd::Sync(pairs) => {
+                let pairs_len = pairs.len();
                 let req = Request::sync(pairs);
-                self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot("a synchronisation".into()));
+                self.expect_copy_undo(format!(
+                    "synchronisation of {} item{}",
+                    pairs_len,
+                    if pairs_len == 1 { "" } else { "s" }
+                ));
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
             }
             Cmd::CopyText(t) => self.copy_text(t),

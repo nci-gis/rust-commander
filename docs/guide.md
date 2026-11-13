@@ -120,14 +120,32 @@ tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shi
   undone, and Ctrl+Z says so.
 - xdevcmd always asks before it deletes or overwrites anything. **Shift+F8** deletes
   only on **Y** (or a click on its button), never on Enter.
-- **F5** / **F6** say what happens to a file already at the destination, and **U**
-  changes it: ask about each (the default); replace it only when yours is newer and
-  skip the same ones (like robocopy); leave them all; or replace them all. At an
-  overwrite question, **U** applies the "only if newer" rule to the rest of the job.
+- **F5** / **F6** look before they start: the dialog opens at once and checks the
+  destination while you read it (files already there, newer or older, a file where a
+  folder is, names that differ only in case where the drive ignores case, names or
+  sizes the drive cannot take, free space, whether you can write there).
+  - **Nothing to decide**: the dialog is the plain one, with **U** for what happens to
+    a file that turns up during the job: ask about each (the default); replace it only
+    when yours is newer and skip the same ones (like robocopy); leave them all; or
+    replace them all. Files already there and identical (same size and date) are left,
+    and the count line says how many.
+  - **Something to decide**: the dialog becomes a short table, one line per group,
+    worst first: ⛔ what cannot be done (left out, with the reason), ⚠ what would lose
+    data (a newer file replaced, an older one, one of another size, a name that differs
+    only in case…), ℹ what is only said (identical files). Each ⚠ group is **skip** by
+    default; **↑↓** picks a group and **Space** turns it to **replace** or to **ask
+    each** (the old question, file by file). The first line sums it up: create ·
+    replace · skip · the space it needs and what is free.
+  - **Enter** before the check has finished starts the job as before, asking as it
+    goes. **Tab** checks again for the other pane.
+  - A file replaced is replaced only while it is still the one the check saw; changed
+    since, you are asked. At an overwrite question, **U** applies the "only if newer"
+    rule to the rest of the job.
 - A file being replaced stays as it was until its new copy is complete: cancelling
   part-way leaves the old one. With **Safe operations** (Settings → General, on by
   default) a new file is written the same way, and if xdevcmd is killed in the middle of
-  a job, the next start cleans up and offers to continue it (what is identical is
+  a job, the next start cleans up and offers to continue it (what it finished is left;
+  what you chose in the table still holds, without asking again; what is identical is
   skipped; you are asked about anything else already there). Closing the terminal stops
   jobs tidily and saves the session. Details in [security.md](security.md#safe-operations).
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.

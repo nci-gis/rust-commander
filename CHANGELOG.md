@@ -11,6 +11,21 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **F5 and F6 look before they start** (Round 030, the Smart Planner's first part). The
+  dialog opens at once and checks the destination meanwhile: files already there (newer,
+  older, another size, identical), a file where a folder is and the reverse, names
+  that differ only in case where the drive ignores case, names a FAT, exFAT or NTFS
+  drive (or Windows) cannot hold, files of 4 GiB or more onto FAT, free space, and
+  whether you can write there. With nothing to decide the dialog is the one it always
+  was (identical files are left, and it says how many). Otherwise it becomes a table,
+  one line per group, worst first: ⛔ what cannot be done, with why; ⚠ what would lose
+  data, each **skip** by default, **↑↓** and **Space** to make it **replace** or **ask
+  each**; ℹ what is only said. A summary line counts what is created, replaced and
+  skipped and the space needed. Enter before the check ends starts as before; Tab
+  checks again for the other pane. The job walks its files once, not twice.
+- **Continuing an interrupted copy or move keeps what you chose**: the plan's decisions
+  and each finished source are in its journal, so Resume leaves what you said to leave
+  and replaces what you said to replace, without asking again.
 - **Data safety, the first part of 0.4.0's** (Round 029). A file replaced is synced to
   the disk before it is renamed over the old one; a move across drives removes each
   source only once its copy, the copy's folder and the journal's line are on disk (a

@@ -136,9 +136,17 @@ operations on or off:
 **Replaced only if it is still the file you agreed to.** The answer to "Already exists"
 is about the file it showed: right before replacing it, xdevcmd looks again (size,
 date, and on Unix which file it is), and if another program changed or replaced it
-meanwhile, asks again ("It changed since you answered"). Alt+Y's plan does the same for
-each file it said it would replace, and asks about a file that appeared where the plan
-saw none. "Overwrite all" and "Update" are rules, applied to whatever is there. What no
+meanwhile, asks again ("It changed since you answered"). Alt+Y's plan, and F5/F6's
+(the table before a copy or move starts), do the same for each file they said they
+would replace; a file the plan said to leave is left, whatever is there by then.
+
+**The plan's decisions survive a kill.** With safe operations on, a copy or move from
+the table writes its decisions to the journal before its first step (which files to
+leave, which to replace and what each one was), and marks each source as it finishes
+it. Continuing it after a kill leaves the finished sources and carries out the same
+decisions without asking again; a file to be replaced that has changed since is asked
+about, as above. Files are "identical" when size and date agree (within a FAT drive's
+two seconds), as rsync's and robocopy's quick check: the content is not read. "Overwrite all" and "Update" are rules, applied to whatever is there. What no
 program can close without a rename that compares first: another program replacing the
 file in the microseconds between that last look and the rename.
 

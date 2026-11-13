@@ -384,6 +384,14 @@ rows with a decision are kept.
 - fmt; clippy ×3; `cargo test --workspace --no-fail-fast` all green (core 282, pty 110,
   render 210).
 
+### 2026-11-13, step 6: docs and CHANGELOG
+
+- `docs/guide.md` (F5/F6: the check, the plain dialog with U, the table, Start now,
+  Tab, the re-check; Resume keeping the choices), `docs/security.md` (F5/F6's plan
+  re-checks like Alt+Y's; the decisions in the journal; "identical" is size and date,
+  the content not read), `CHANGELOG.md` Unreleased → Added (two entries).
+- CI on the branch by `gh workflow run ci --ref feat/v0.4.0` (below, Check).
+
 ## Check
 
 ## Act

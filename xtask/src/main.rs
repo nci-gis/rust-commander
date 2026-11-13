@@ -22,7 +22,7 @@
 //!   load is printed first).
 //!
 //! ```text
-//! cargo xtask sync-sweep [--files N] [--dir PATH]
+//! cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
 //! ```
 //!
 //! How making many small files durable scales with threads on this disk (Round 033,
@@ -30,6 +30,9 @@
 //! it, on 1, 4, 8, 16, 32 and 64 threads; the median of three runs each. Run by the
 //! `bench` workflow on Linux, macOS and Windows runners to see the shape on ext4, APFS
 //! and NTFS: whether more threads help at all, which sets the number xdevcmd uses.
+//! `--probe` then compares, on one job of N files, 1 thread, this system's default, and
+//! probing with the job's own first files (16 on 1 thread, 32 on 8, 64 on 16; the
+//! fastest kept for the rest).
 //!
 //! Not a CI gate: shared runners vary by tens of per cent. CI keeps hard budgets only
 //! (`crates/xdevcmd/tests/budgets.rs`).
@@ -42,7 +45,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
-       cargo xtask sync-sweep [--files N] [--dir PATH]";
+       cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]";
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -158,17 +161,25 @@ impl Result_ {
 fn sync_sweep(args: &[String]) -> i32 {
     let mut files: usize = 1000;
     let mut base = std::env::temp_dir();
+    let mut probe = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        match (a.as_str(), it.next()) {
-            ("--files", Some(n)) => match n.parse() {
-                Ok(n) if n > 0 => files = n,
+        match a.as_str() {
+            "--probe" => probe = true,
+            "--files" => match it.next().and_then(|n| n.parse().ok()) {
+                Some(n) if n > 0 => files = n,
                 _ => {
                     eprintln!("--files takes a number above 0");
                     return 2;
                 }
             },
-            ("--dir", Some(d)) => base = PathBuf::from(d),
+            "--dir" => match it.next() {
+                Some(d) => base = PathBuf::from(d),
+                None => {
+                    eprintln!("--dir takes a path");
+                    return 2;
+                }
+            },
             _ => {
                 eprintln!("{USAGE}");
                 return 2;
@@ -207,6 +218,9 @@ fn sync_sweep(args: &[String]) -> i32 {
         let base = *one.get_or_insert(median);
         println!("{threads:>8} {median:>10.0} {:>10.1}", base / median);
     }
+    if probe {
+        code = code.max(probe_table(&dir, files));
+    }
     let _ = std::fs::remove_dir_all(&dir);
     code
 }
@@ -214,6 +228,15 @@ fn sync_sweep(args: &[String]) -> i32 {
 /// `files` files of 1 KiB written in `dir`, then synced on `threads` threads, each
 /// taking the next file: the milliseconds the syncs took.
 fn sweep_once(dir: &Path, files: usize, threads: usize) -> std::io::Result<f64> {
+    let open = write_files(dir, files)?;
+    let took = sync_files(&open, threads);
+    drop(open);
+    let _ = std::fs::remove_dir_all(dir);
+    took
+}
+
+/// `files` files of 1 KiB in `dir`, still open.
+fn write_files(dir: &Path, files: usize) -> std::io::Result<Vec<std::fs::File>> {
     use std::io::Write;
     std::fs::create_dir_all(dir)?;
     let mut open = Vec::with_capacity(files);
@@ -222,11 +245,17 @@ fn sweep_once(dir: &Path, files: usize, threads: usize) -> std::io::Result<f64> 
         f.write_all(&[b'x'; 1024])?;
         open.push(f);
     }
+    Ok(open)
+}
+
+/// Sync every file of `open` on `threads` threads, each taking the next file: the
+/// milliseconds it took.
+fn sync_files(open: &[std::fs::File], threads: usize) -> std::io::Result<f64> {
     let next = std::sync::atomic::AtomicUsize::new(0);
     let failed = std::sync::Mutex::new(None);
     let t = Instant::now();
     std::thread::scope(|s| {
-        for _ in 0..threads {
+        for _ in 0..threads.max(1) {
             s.spawn(|| loop {
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some(f) = open.get(i) else { break };
@@ -238,12 +267,112 @@ fn sweep_once(dir: &Path, files: usize, threads: usize) -> std::io::Result<f64> 
         }
     });
     let took = ms(t);
-    drop(open);
-    let _ = std::fs::remove_dir_all(dir);
     match failed.into_inner().unwrap() {
         Some(e) => Err(e),
         None => Ok(took),
     }
+}
+
+/// The thread count group commit would use without probing (Round 033, from the CI
+/// sweep): Linux 16, macOS 8, Windows 1.
+fn default_threads() -> usize {
+    if cfg!(target_os = "linux") {
+        16
+    } else if cfg!(target_os = "macos") {
+        8
+    } else {
+        1
+    }
+}
+
+/// How the files of one job are synced, for `--probe`.
+#[derive(Clone, Copy)]
+enum Way {
+    Fixed(usize),
+    /// The owner's idea: the job's own first files synced with 1, 8 and 16 threads in
+    /// turn ([`probe_sample`] each), and the fastest kept for the rest. No extra writes:
+    /// the probe is work.
+    Probe,
+}
+
+const PROBE: [usize; 3] = [1, 8, 16];
+
+/// How many of the job's files one probe step syncs: four rounds of its threads, at
+/// least 16. One thread costs the most per file where threads help, so it gets fewest.
+fn probe_sample(threads: usize) -> usize {
+    (4 * threads).max(16)
+}
+
+/// One job's files synced the given way: the total milliseconds, and the threads used
+/// for the bulk.
+fn job_once(dir: &Path, files: usize, way: Way) -> std::io::Result<(f64, usize)> {
+    let open = write_files(dir, files)?;
+    let r = (|| match way {
+        Way::Fixed(n) => Ok((sync_files(&open, n)?, n)),
+        Way::Probe => {
+            let mut total = 0.0;
+            let mut at = 0;
+            let mut best = (f64::INFINITY, default_threads());
+            for n in PROBE {
+                let end = (at + probe_sample(n)).min(open.len());
+                if end == at {
+                    break;
+                }
+                let took = sync_files(&open[at..end], n)?;
+                total += took;
+                let each = took / (end - at) as f64;
+                if each < best.0 {
+                    best = (each, n);
+                }
+                at = end;
+            }
+            total += sync_files(&open[at..], best.1)?;
+            Ok((total, best.1))
+        }
+    })();
+    drop(open);
+    let _ = std::fs::remove_dir_all(dir);
+    r
+}
+
+/// `--probe`: one job of `files` synced with 1 thread, with this system's default, and
+/// probed; the median of three runs each.
+fn probe_table(dir: &Path, files: usize) -> i32 {
+    let d = default_threads();
+    println!();
+    println!(
+        "probe · {files} files: the first {}, {} and {} on 1, 8 and 16 threads, then the fastest",
+        probe_sample(1),
+        probe_sample(8),
+        probe_sample(16)
+    );
+    println!("{:>22} {:>10} {:>10}", "way", "ms", "threads");
+    let mut code = 0;
+    let ways: [(String, Way); 3] = [
+        ("fixed 1".into(), Way::Fixed(1)),
+        (format!("fixed {d} (default)"), Way::Fixed(d)),
+        ("probe".into(), Way::Probe),
+    ];
+    for (label, way) in ways {
+        let mut runs = Vec::new();
+        for run in 0..3 {
+            match job_once(&dir.join(format!("probe-{run}")), files, way) {
+                Ok(r) => runs.push(r),
+                Err(e) => {
+                    eprintln!("{label}: {e}");
+                    code = 1;
+                }
+            }
+        }
+        if runs.is_empty() {
+            continue;
+        }
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (ms, _) = runs[runs.len() / 2];
+        let chose: Vec<String> = runs.iter().map(|r| r.1.to_string()).collect();
+        println!("{label:>22} {ms:>10.0} {:>10}", chose.join("/"));
+    }
+    code
 }
 
 fn root() -> PathBuf {

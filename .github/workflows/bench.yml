@@ -42,4 +42,4 @@ jobs:
         shell: bash
         env:
           FILES: ${{ inputs.files || '1000' }}
-        run: cargo xtask sync-sweep --files "$FILES" --dir "$RUNNER_TEMP" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: cargo xtask sync-sweep --files "$FILES" --dir "$RUNNER_TEMP" --probe | tee -a "$GITHUB_STEP_SUMMARY"

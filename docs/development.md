@@ -68,8 +68,9 @@ directory, never your files. Results go to `bench/` (its README says which file 
 which); `--host` names the machine in them, and nothing is read from the system to name
 it. Two machines' numbers are not comparable, nor a busy machine's (the load is printed
 first). CI does not compare times, which vary too much on shared runners: it keeps hard
-budgets only (`tests/budgets.rs`; start-up without the terminal check under 150 ms, in
-`tests/pty.rs`).
+budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
+(everything but the terminal check under 1 s, a debug build: an order of magnitude over
+the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
 ## Docs that are generated
 

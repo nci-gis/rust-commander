@@ -402,10 +402,11 @@ fn start_up_times_are_said_when_asked_and_in_usage() {
     ] {
         assert!(screen.contains(step), "{step:?} missing:\n{screen}");
     }
-    // The start-up budget (pillar 4, Round 032): everything but the terminal check,
-    // which is the terminal's to answer (this harness never does), under 150 ms. A debug
-    // build on a shared runner: generous on purpose, it is there to catch a step that
-    // grew by an order of magnitude.
+    // A tripwire, not the budget: everything but the terminal check (the terminal's to
+    // answer; this harness never does) under 1 s. The 150 ms budget is `cargo xtask
+    // bench`'s, on a release build; here a debug build shares a CI runner with the other
+    // pty tests, and its first frame alone took 195–240 ms (Round 032). This catches a
+    // step that grew by an order of magnitude.
     let line = screen
         .lines()
         .find(|l| l.contains("started in "))
@@ -422,7 +423,7 @@ fn start_up_times_are_said_when_asked_and_in_usage() {
     };
     let ours = ms("started in ") - ms("terminal check ");
     assert!(
-        ours < 150.0,
+        ours < 1000.0,
         "start-up without the terminal check took {ours} ms: {line}"
     );
     x.quit();

@@ -286,6 +286,13 @@ Round 030 closed first, then "go as recommended": all five as the kickoff recomm
   in portable-pty answering and silent, idle CPU from `/proc/<pid>/stat`; results and
   per-host baselines in `bench/`; `docs/development.md` "Benchmarks", `bench/README.md`.
 - The budget: start-up without the terminal check < 150 ms, asserted in the pty test.
+- CI run 43409507585 (aa410e7) failed that assertion on all three Unix runners: the
+  first frame alone took 195–240 ms in a debug build sharing the runner with the other
+  pty tests (locally 11 ms in all). Critique 3 of the kickoff was wrong about 150 ms
+  holding on a runner. The pty test is now a tripwire at 1 s; the 150 ms budget stays
+  with `cargo xtask bench` (release build). Windows failed `render.rs`
+  `tilde_goes_home_and_ctrl_backslash_to_the_root` in the same run: no source changed
+  in aa410e7, and it passed on 4d4892b; taken as a flake, watched on the next run.
 - First quick run (this sandbox, 3 runs; not saved as a baseline, not the owner's
   machine): binary 5.39 MiB, 277 crates in the lock; list 10,000 8.9 ms; plan 10,000
   8.3 ms; copy 2,000 × 1 KiB 47 ms; one 32 MiB file 9.9 ms; undo 2,000 8.3 ms; start-up

@@ -42,4 +42,8 @@ jobs:
         shell: bash
         env:
           FILES: ${{ inputs.files || '1000' }}
-        run: cargo xtask sync-sweep --files "$FILES" --dir "$RUNNER_TEMP" --probe | tee -a "$GITHUB_STEP_SUMMARY"
+        # On a push, a branch named bench/<name>-<number> sets the files (5,000 for
+        # bench/sync-sweep-5000), since a push has no inputs.
+        run: |
+          if [[ $GITHUB_REF_NAME =~ -([0-9]+)$ ]]; then FILES=${BASH_REMATCH[1]}; fi
+          cargo xtask sync-sweep --files "$FILES" --dir "$RUNNER_TEMP" --probe | tee -a "$GITHUB_STEP_SUMMARY"

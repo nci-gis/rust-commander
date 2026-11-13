@@ -11,6 +11,9 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **How long start-up took**, step by step up to the first frame, in Help → About;
+  `--timings` (or `XDEVCMD_TIMINGS=1`) also says it on the status line and prints it as
+  one JSON line on stderr at the end.
 - **Ctrl+Z undoes a copy** (Round 031): it removes what the copy (F5, Alt+Y) made, only
   while each file is still as the copy made it; a file changed since, or a folder holding
   something else, is kept and listed. Up to 200,000 items, run as a job.

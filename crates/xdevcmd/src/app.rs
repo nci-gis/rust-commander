@@ -548,6 +548,10 @@ pub struct App {
     hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The "running in …" note shown at start, cleared by the first key or click.
     boot_note: Option<String>,
+    /// How long start-up took, step by step ([`crate::startup`]); `timings`: said on
+    /// the status line too (`--timings`).
+    pub startup: crate::startup::Clock,
+    pub timings: bool,
     /// Quitting with jobs running: they were cancelled, and until this moment xdevcmd
     /// waits for them to clean up, drawing as usual and taking no keys ([`App::stop_step`]).
     stopping: Option<Instant>,
@@ -691,6 +695,8 @@ impl App {
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             input: None,
             boot_note: None,
+            startup: Default::default(),
+            timings: false,
             stopping: None,
             graphic_want: None,
             graphic_shown: None,

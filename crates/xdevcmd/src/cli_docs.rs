@@ -19,6 +19,11 @@ pub const OPTIONS: &[(&str, Arg, &str)] = &[
         "start fresh instead of reopening the last session",
     ),
     (
+        "--timings",
+        Arg::None,
+        "say how long start-up took (status line, and stderr at the end)",
+    ),
+    (
         "--read-only",
         Arg::None,
         "write nothing: no copy, move, delete, rename, edit",

@@ -700,6 +700,14 @@ impl App {
                         },
                         // xdevcmd never looks for updates itself (no network): where to.
                         format!("Releases: {}/releases", env!("CARGO_PKG_REPOSITORY")),
+                        // Empty in screenshots: they never start for real.
+                        if self.startup.finished() {
+                            let mut l = self.startup.line();
+                            l.replace_range(..1, "S");
+                            l
+                        } else {
+                            String::new()
+                        },
                     ],
                     danger: false,
                     yes: None,

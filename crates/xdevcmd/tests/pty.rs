@@ -379,6 +379,39 @@ fn starts_draws_both_panes_and_quits_cleanly() {
     xdevcmd.quit();
 }
 
+/// How long start-up took: on the status line with XDEVCMD_TIMINGS, step by step up to
+/// the first frame; in Help → About always.
+#[test]
+fn start_up_times_are_said_when_asked_and_in_about() {
+    let s = Scratch::new("timings");
+    s.file("left/notes.txt", "x");
+    let x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_TIMINGS", "1")],
+    );
+    x.wait_for("started in ");
+    let screen = x.screen();
+    for step in ["config ", "panes ", "terminal check ", "first frame "] {
+        assert!(screen.contains(step), "{step:?} missing:\n{screen}");
+    }
+    x.quit();
+
+    let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
+    x.wait_for("notes");
+    assert!(!x.screen().contains("started in "), "{}", x.screen());
+    x.send(F1);
+    x.wait_for("Commands");
+    x.send(b"about");
+    x.wait_for("About");
+    x.send(ENTER);
+    x.wait_for("Started in ");
+    x.send(b"\x1b");
+    x.wait_gone("Started in ");
+    x.quit();
+}
+
 #[test]
 fn the_shell_pane_runs_commands() {
     let s = Scratch::new("shell");

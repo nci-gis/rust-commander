@@ -25,6 +25,12 @@ xdevcmd and type what you want to do to find yours, or see [keys.md](keys.md).
 - **Ctrl+U** swaps two panes. **Alt+=** shows this pane's directory in the other one.
 - xdevcmd remembers your panes, tabs and directories, and opens them again next time.
   Start with `--no-restore`, or name directories on the command line, to start fresh.
+- **How long start-up took** is in Help → About, step by step up to the first frame
+  ("Started in 6 ms · config 0.3 · panes 0.9 · terminal check 2.1 · …"). `--timings`
+  (or `XDEVCMD_TIMINGS=1`) says it on the status line too, and prints it as one JSON line
+  on stderr when xdevcmd ends. A slow "terminal check" is the terminal not answering
+  what it can draw: over a slow SSH link, or a terminal that never answers, it waits up
+  to 1.5 s; `[viewer] images = "none"` skips it.
 - **Names sort as you read them**, in any script: `file2` before `file10`; case,
   accents and width do not split letters apart (`Éclair` with `eclair`, `ｆｉｌｅ２` with
   `file2`); katakana with hiragana and `が` with `か`; and a name copied from a Mac sorts

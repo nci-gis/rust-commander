@@ -36,6 +36,7 @@ mod scrollbar;
 mod search;
 mod session;
 mod settings_dialog;
+mod startup;
 mod tempfiles;
 mod theme;
 mod usage;
@@ -70,6 +71,7 @@ pub(crate) const USAGE: &str = "\
 Usage:
   xdevcmd [LEFT] [RIGHT]       start with these directories in the two panes
   xdevcmd --no-restore         start fresh instead of reopening the last session
+  xdevcmd --timings            say how long start-up took (status line, and stderr at the end)
   xdevcmd --read-only          xdevcmd writes nothing: no copy, move, delete, rename, edit
   xdevcmd --restricted         read-only, and no shell, no editor, no clipboard
   xdevcmd --root DIR           never navigate above DIR
@@ -122,6 +124,7 @@ struct Cli {
     show_keys: bool,
     check_config: bool,
     no_restore: bool,
+    timings: bool,
     read_only: bool,
     restricted: bool,
     root: Option<PathBuf>,
@@ -158,6 +161,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
             "--show-keys" => cli.show_keys = true,
             "--check-config" => cli.check_config = true,
             "--no-restore" => cli.no_restore = true,
+            "--timings" => cli.timings = true,
             "--read-only" => cli.read_only = true,
             "--restricted" => cli.restricted = true,
             "--root" => {
@@ -193,6 +197,7 @@ fn parse_cli() -> std::result::Result<Cli, String> {
 }
 
 fn main() -> Result<()> {
+    let mut clock = startup::Clock::start();
     crash::mark_main();
     let cli = match parse_cli() {
         Ok(c) => c,
@@ -251,6 +256,7 @@ fn main() -> Result<()> {
     tempfiles::sweep();
 
     let (mut settings, outcome) = config::load(cli.config.as_deref());
+    clock.mark("config");
     if cli.check_config {
         match &outcome {
             // The app starts with the default theme in its place, but a check says so.
@@ -388,6 +394,8 @@ fn main() -> Result<()> {
         None => App::new(&left, &right, settings, outcome),
     };
     app.cwd_file = cli.cwd_file.clone();
+    clock.mark("panes");
+    app.timings = startup::wanted(cli.timings, std::env::var("XDEVCMD_TIMINGS").ok());
 
     if let Some((w, h)) = cli.screenshot {
         return screenshot(app, w, h, &cli.keys);
@@ -421,6 +429,9 @@ fn main() -> Result<()> {
         // as keys.
         app.probe = graphics::probe(Duration::from_millis(1500));
     }
+    clock.mark("terminal check");
+    app.startup = clock;
+    let timings = app.timings;
     let mut terminal = ratatui::Terminal::new(
         quiet::Quiet::new(ratatui::backend::CrosstermBackend::new(stdout())).with_depth(depth),
     )?;
@@ -462,6 +473,11 @@ fn main() -> Result<()> {
 
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
+    if timings {
+        if let Some(json) = startup::last_json() {
+            eprintln!("xdevcmd startup {json}");
+        }
+    }
     result
 }
 

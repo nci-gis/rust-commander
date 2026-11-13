@@ -49,6 +49,7 @@ impl App {
         self.recover_interrupted();
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
+        self.startup.mark("tidy and shell");
         // Said once, unless start-up had something to say: where xdevcmd is running. It
         // gives way at the first key or click to the line it covers (the pane's own).
         if self.status.is_empty() && self.modal.is_none() {
@@ -176,6 +177,16 @@ impl App {
             self.usage.frame(t0.elapsed());
             *drawn = Instant::now();
             *dirty = false;
+            // The first frame is on screen: start-up is over. With --timings the
+            // status line says how long it took, in place of where xdevcmd runs.
+            if self.startup.first_frame() && self.timings {
+                let before = self.boot_note.take();
+                if self.status.is_empty() || before.as_deref() == Some(self.status.as_str()) {
+                    self.status = self.startup.line();
+                    self.boot_note = Some(self.status.clone());
+                    *dirty = true;
+                }
+            }
         }
         let input = self.input.get_or_insert_with(KeyReader::new);
         if let Some(event) = input.next(TICK)? {

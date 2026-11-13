@@ -9,6 +9,10 @@ name: bench
 # sync-sweep (Round 033, group commit): how making 1,000 small files durable scales
 # with threads on each system's file system.
 on:
+  # Run workflow appears only once this file is on main; until then (and for a branch
+  # made only to measure), pushing a branch named bench/<anything> runs it too.
+  push:
+    branches: ["bench/**"]
   workflow_dispatch:
     inputs:
       files:
@@ -37,5 +41,5 @@ jobs:
       - name: sweep
         shell: bash
         env:
-          FILES: ${{ inputs.files }}
+          FILES: ${{ inputs.files || '1000' }}
         run: cargo xtask sync-sweep --files "$FILES" --dir "$RUNNER_TEMP" | tee -a "$GITHUB_STEP_SUMMARY"

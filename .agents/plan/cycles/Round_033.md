@@ -379,6 +379,34 @@ the rest. One job of 1,000 files, the median of three:
   never lost and on macOS won 20 %. Windows syncs one at a time, as today, until the
   owner's machine is measured (`cargo xtask sync-sweep --probe`).
 
+### 2026-11-13, the owner's Windows 11 laptop (xtask from run 43466099106)
+
+`sync-sweep --probe` on the laptop's system drive (`%TEMP%`, Defender on):
+
+| Threads | 2,000 files | 5,000 files | 10,000 files |
+|---|---|---|---|
+| 1 | 844 ms | 2,207 ms | 5,100 ms |
+| 8 | 367 (2.3×) | 799 (2.8×) | 1,892 (2.7×) |
+| 16 | 198 (4.3×) | 477 (4.6×) | 1,117 (4.6×) |
+| 32 | 131 (6.5×) | 331 (6.7×) | 599 (8.5×) |
+| 64 | 104 (8.1×) | 421 (5.2×) | 467 (10.9×) |
+| probe (chose 16, 16, 8) | 230 ms | 563 ms | 1,118 ms |
+| fixed 1 (the proposed Windows default) | 944 ms | 2,422 ms | 4,852 ms |
+
+- **The runner misled us**: on a real Windows disk, parallel syncs help as much as on
+  Linux. One thread there is 0.4–0.5 ms a file. The runner's 0.1 ms meant its flush
+  never reached a disk, and its parallel penalty was the virtual disk's.
+- The probe found it at once (4× the fixed 1). It never tried 32, which is better
+  still (1.5–1.9× over 16).
+- Revised, final proposal:
+  - default 16 on Linux and Windows, 8 on macOS;
+  - the probe tries 1, 8, 16 and 32 (32 is the owner's maximum), starting from the
+    default and dropping a candidate after its first round when it is twice the
+    default's time per file or worse;
+  - jobs of 1,000 small replacements or more probe; smaller jobs use the default.
+  - The lesson: CI's virtual disks do not answer questions about flushing. A real
+    machine does.
+
 ## Check
 
 ## Act

@@ -1,7 +1,7 @@
 # Round 030: Smart Planner v1, the core (v0.4.0-beta.1, part 2 of 4, item 42)
 
-**Status**: In Progress (the owner's go, 2026-11-13: "Go as recommended"; decisions 1–6
-as recommended)
+**Status**: Review (steps 1–6 done, CI green 2026-11-13, run 43372568824; for the
+owner's hand tests)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42 ("Notes on the items → 42
 Smart Planner v1"); the owner's decisions of 2026-11-13
 **Date started**: 2026-11-13
@@ -406,5 +406,28 @@ rows with a decision are kept.
   before): a flake for pillar 4's list.
 
 ## Check
+
+- [x] Step 1: the plan's model and scan (classes, blocked rows, cap, progress, stop)
+- [x] Step 2: pre-checks (file system, free space, writable, case, Windows' names,
+  length, FAT's 4 GiB)
+- [x] Step 3: the confirm table; nothing to decide → the plain dialog; Start now; Tab
+  plans again; render at 118×34, 80×24, 60×20
+- [x] Step 4: one walk per job; the plan's choices through `Request::expect`; a file
+  changed after the plan is asked about
+- [x] Step 5: decisions and finished sources in the journal (`v 3`); Resume keeps them;
+  the kill test fails without the change
+- [x] Step 6: docs/guide.md, docs/security.md, CHANGELOG
+- [x] fmt, clippy ×3, `cargo deny`, `cargo test --workspace --no-fail-fast` locally;
+  CI run 43372568824 green on all six jobs (after two runs that found a Windows-only
+  test name and a known Ctrl+Z race; a macOS picture-timing flake noted for pillar 4)
+- [ ] **Not verified**: by hand on a real terminal (the table's look and keys, Start
+  now on a slow disk, Tab re-planning); a FAT/exFAT/NTFS USB stick on Linux and macOS
+  (the file-system detection is only unit-tested through a given `Target`); a
+  case-insensitive macOS volume for real (the lookup is tested through the seam);
+  Windows by hand (free space and FAT are "unknown" there by decision 1); a plan of a
+  very large tree (memory past the cap only unit-tested with a cap of 3); the "needs"
+  figure counts every conflict as written (an upper bound)
+- [ ] **Deviations for the owner**: Alt+Y and Shift+F5 not moved onto `plan::Plan`
+  (step 4, reasons there); Resume does not re-plan or show a table (step 5)
 
 ## Act

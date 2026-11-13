@@ -1,11 +1,11 @@
 # Round 030: Smart Planner v1, the core (v0.4.0-beta.1, part 2 of 4, item 42)
 
-**Status**: Review (steps 1–6 done, CI green 2026-11-13, run 43372568824; for the
-owner's hand tests)
+**Status**: Complete (closed by the owner, 2026-11-13: "close r30 trước, xong go as
+recommended")
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42 ("Notes on the items → 42
 Smart Planner v1"); the owner's decisions of 2026-11-13
 **Date started**: 2026-11-13
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-13
 
 ## Goal
 
@@ -431,3 +431,13 @@ rows with a decision are kept.
   (step 4, reasons there); Resume does not re-plan or show a table (step 5)
 
 ## Act
+
+- Closed with its hand tests not run: the "Not verified" list above goes into Round
+  032's beta.1 checklist (`docs/testing-by-hand.md`).
+- Built on by Round 031 (the trash's level in the table, `Target::trash`, the
+  network file system, the ETA's file counts).
+- Deviations kept: Alt+Y and Shift+F5 not on `plan::Plan`; Resume does not re-plan.
+  Candidates for beta.2 if the owner's use finds them wanting.
+- The plan's numbers (the floor, the 200,000-row cap, the "needs" upper bound) are to be
+  measured by Round 032's harness before beta.2's scope is set.
+- Nothing promoted to `context/` or `reference/`.

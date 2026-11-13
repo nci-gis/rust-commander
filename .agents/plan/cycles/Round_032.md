@@ -1,13 +1,13 @@
 # Round 032: Pre-release plumbing and 0.4.0-beta.1 (v0.4.0-beta.1, part 4 of 4)
 
-**Status**: Planning — kickoff review written 2026-11-13 (the owner: "close r31, xong
-start r32"); no code until the owner answers the decisions below
+**Status**: Do (started 2026-11-13; the owner: "close r30 trước, xong go as
+recommended")
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`; Decisions "Release path" and "Where
 pre-releases go" (owner, 2026-11-13: GitHub only, marked pre-release, never "Latest";
 crates.io, Scoop, winget and binstall start at 0.4.0); the benchmark harness (owner,
 2026-11-13: "Thêm harness benchmark vào Round 032"), so that beta.1's numbers, which set
 beta.2's scope (item 43), are measured the same way each time
-**Date started**: YYYY-MM-DD
+**Date started**: 2026-11-13
 **Date completed**: YYYY-MM-DD
 
 ## Goal
@@ -144,8 +144,7 @@ About a week, then the week of use.
 - **Moving the terminal check** changes the order of the first second for every user;
   the picture tests (kitty, iTerm2, sixel, the cell size) and a silent-terminal test
   guard it.
-- **Round 030 still at Review** when beta.1 is cut: the cut waits for the owner's close
-  of 030 or carries it in the checklist (owner's call).
+- ~~Round 030 still at Review~~: closed by the owner before this round started.
 
 ## Plan (outline)
 
@@ -239,6 +238,19 @@ About a week, then the week of use.
   benchmarking service (no network, and none is needed for one owner's machine).
 
 ## Do
+
+### 2026-11-13, the owner's decisions
+
+Round 030 closed first, then "go as recommended": all five as the kickoff recommends.
+
+1. CHANGELOG: a dated section per pre-release; 0.4.0's section says everything since
+   0.3.0 again, in full.
+2. The plumbing lands in this round.
+3. The harness is `cargo xtask bench`; its results in `bench/` in the repository.
+4. The terminal check moves after the first frame.
+5. The beta.1 checklist lives in `docs/testing-by-hand.md`.
+- The cut itself (step 6: the pull request into `dev`, the version, the tag) waits for
+  the owner's word once steps 1–5 are done and green: it publishes a draft.
 
 ## Check
 

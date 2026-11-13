@@ -10,6 +10,13 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **`o` and Open with… say what happened**: "opening …" on the status line if the
+  system's opener has not answered after 300 ms (a quick open shows nothing in between),
+  then "opened …" when it hands the file over, or its error. An opener that waits for the
+  program it started (some desktops' xdg-open) counts as handed over after 5 s; a failure
+  after that is still said.
+
 ### Changed
 - **F1's own row, chosen inside F1, switches between the small and the large window**
   instead of closing and opening F1 again.

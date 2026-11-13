@@ -291,8 +291,10 @@ impl App {
         }
         let mut cmd = std::process::Command::new(&argv[0]);
         cmd.args(&argv[1..]);
-        self.status = match opener::spawn(cmd, name.clone(), self.notes.0.clone()) {
-            Ok(()) => format!("opened {name} with {}", rule.command[0]),
+        let done = format!("opened {name} with {}", rule.command[0]);
+        // Said when the opener hands it over (item 45), not before.
+        self.status = match opener::spawn(cmd, name, done, self.notes.0.clone()) {
+            Ok(()) => String::new(),
             Err(e) => e,
         };
     }
@@ -382,8 +384,10 @@ impl App {
             );
             return;
         }
-        self.status = match opener::spawn(cmd, name.clone(), self.notes.0.clone()) {
-            Ok(()) => format!("opened {name}"),
+        let done = format!("opened {name}");
+        // Said when the opener hands it over (item 45), not before.
+        self.status = match opener::spawn(cmd, name, done, self.notes.0.clone()) {
+            Ok(()) => String::new(),
             Err(e) => e,
         };
     }

@@ -232,8 +232,17 @@ Design. It changes the order of Round 029's steps for small replacements only:
 
 Expected: 1,000 small replaces from about 7 s to well under 1 s on ext4. Measured with
 `cargo xtask bench` ("replace small files") here and on the owner's machine. `syncfs`
-also flushes other programs' dirty data on that file system; on a busy disk it can take
-longer than the files alone, but it is never slower than the sum of their syncs.
+also flushes other programs' dirty data on that file system.
+
+**Correction (the owner asked, 2026-11-13)**: "never slower than the sum of their
+syncs" was wrong. If another program has 2 GB waiting to be written, `syncfs` waits for
+all of it (about 10 s at 200 MB/s), longer than 1,000 small syncs (about 6 s). Others
+are not made wrong: their data only reaches the disk sooner, and no lock or ordering
+they rely on changes, so there is no race. But they can be slowed for a moment by the
+burst of writing. Revised proposal: syncs of the batch's own files in parallel (up to 32
+threads, 326 ms here for 1,000): only our files, the same code on every system.
+`syncfs` is dropped, or kept only when the system's dirty data is small
+(`/proc/meminfo` `Dirty:`). That choice is the owner's.
 
 ## Check
 

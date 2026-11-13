@@ -1,11 +1,11 @@
 # Round 029: Pillar 1, data correct (v0.4.0-beta.1, part 1 of 4)
 
-**Status**: Review (steps 0–8 done, CI green 2026-11-13; the owner's go was 2026-11-13: "OK, go"; every open decision taken as recommended)
+**Status**: Complete (closed by the owner, 2026-11-13: "Close 029, start 030")
 **Part of**: v0.4.0, step 6 of `ROADMAP.md` ("Step 6: three pre-releases", beta.1); pillar 1
 of `memory/2026-11-12-four-pillars-for-rc1.md` (B01–B05, A08's sync gap); the owner's
 decisions of 2026-11-12 and 2026-11-13 (below, §1)
 **Date started**: 2026-11-13
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-13
 
 ## Goal
 
@@ -963,4 +963,29 @@ root; CI is not).
 
 ## Check
 
+- [x] B01: an unreadable folder, a non-UTF-8 name or a file whose details cannot be read
+  never enters a sync plan; the case clash (A.txt / a.txt on macOS and Windows) found and
+  fixed, tested on Linux too
+- [x] B02 cursor after a slow move; B03 panelize takes a whole existing line first
+- [x] B04: a journal that cannot be begun is asked about (default Stop, sources kept);
+  rename-many without a journal renames nothing unless told to; a failed line is no
+  longer silent
+- [x] B05: the target re-checked right before the rename, after the journal's question
+- [x] Sync rules: a replaced file synced before its rename; a cross-device move synced
+  through the handle that wrote it, the folder and the journal line before the source
+  goes; batched (64 files / 64 MiB)
+- [x] Review blocker fixed (0444 files across devices), tested as `nobody`
+- [x] Every fix with a test that fails without it (mutation check by the reviewer)
+- [x] QA: 30 kill runs at the seam's phases, 0 files lost or partial; ENOSPC on a 4 MiB
+  tmpfs leaves every file intact
+- [x] fmt, clippy (three targets), `cargo deny`, `cargo test --workspace`; CI run
+  43322352193 green on all six jobs at the first attempt (at 8e74497)
+- [x] Owner's decisions after Review: the sync cost kept for beta.1; the fault seam in
+  `reference/testing.md`
+- [ ] **Not verified**: the cost on a real USB stick and a real Mac; a real power cut
+  (only the order is tested); a kill test on Windows; rename-many's "no journal" dialog
+  end to end. Carried to beta.1's week and to pillar 4.
+
 ## Act
+
+- Promoted: the fault seam → `reference/testing.md` ("Faults"), see `promotions.md`.

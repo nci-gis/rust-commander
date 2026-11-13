@@ -1,7 +1,7 @@
 # Round 030: Smart Planner v1, the core (v0.4.0-beta.1, part 2 of 4, item 42)
 
-**Status**: Planning — outline; the full kickoff review is written when Round 029 is
-Complete, and the owner says go then
+**Status**: Planning — kickoff review written 2026-11-13 (below); waiting for the
+owner's go and decisions 1–6
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42 ("Notes on the items → 42
 Smart Planner v1"); the owner's decisions of 2026-11-13
 **Date started**: YYYY-MM-DD
@@ -15,6 +15,126 @@ the plan. Everything that can be known before the first byte is known and said b
 it, once per group, with a default that never loses data; a job whose plan has nothing
 to decide looks exactly like today's F5 dialog. The journal holds the plan, so a resume
 knows exactly what is left.
+
+## Kickoff review (2026-11-13, after Round 029 closed)
+
+### 1. What changed since the outline
+
+- Round 029 is Complete (closed by the owner 2026-11-13). What it leaves for this round:
+  `Request::expect` with `Expect::{Absent, Replace(Ident)}` and `Worker::still_agreed`
+  (a sync replaces only what its plan named, and only while it is still that file);
+  `Journal::begin` asked about before anything is done; the batched cross-device move;
+  the fault seam (`ReadDir`, `Stat`, `Delay`, `Halt`) now in `reference/testing.md`.
+- The owner kept the sync cost (~2.4× for many small files across devices) for beta.1;
+  group commit is beta.2. Nothing here should add a second sync per file.
+
+### 2. The code this round touches
+
+| Where | What is there today | What the planner does with it |
+|---|---|---|
+| `core/ops.rs` `count` / `Count::spawn` (1461) | the F5 dialog's background walk: files and bytes, stoppable | becomes the plan's scan (same thread and stop flag), returning rows, not two numbers |
+| `core/ops.rs` `Worker::run` (471) | walks the tree **again** (`scan`) before working; `Existing` decides each conflict; questions mid-job | fed the plan's decisions; its own `scan` goes for copy/move |
+| `core/ops.rs` `Request::expect`, `Expect`, `Ident` (241, 198) | the sync's per-destination expectation, checked right before a replace | **the carrier**: every planned copy/move sends its decisions this way (below, critique 1) |
+| `core/ops.rs` `resolve_conflict`, `still_agreed` (683, 757) | asks or applies `overwrite_all` / `skip_all` / `update` | a planned row is never asked again unless the target changed since the plan (B05 as is) |
+| `core/compare.rs` + `app/compare.rs` | Alt+Y builds `(src, into, Expect)` pairs → `Request::sync` | its rows become the same `Plan` type; no second scan |
+| `core/journal.rs` `begin`, `moved`, `Interrupted` (190, 349, 366) | kind, sources, dest; tidy-up lines | records the plan's **decisions** and done markers |
+| `app/file_ops.rs` `begin_transfer` (64) | `Modal::Confirm` with `counting: ops::count(..)`, the `U` key cycling `Existing` | the confirm table when there is something to decide; otherwise this dialog unchanged |
+| `app/jobs.rs` `resume` (235) | re-runs with `Existing::Resume` on the sources still there | re-plans, applies the recorded decisions, re-checks each `Ident` |
+| `core/archive.rs:594` | `rustix::fs::statvfs` for free space before extracting | moved to one helper the pre-checks share |
+
+### 3. Outside check
+
+The outline's models stand (robocopy `/L` classes, `rsync -n --itemize-changes`,
+Explorer's grouped conflict dialog, Total Commander's overwrite classes). Two additions:
+FreeFileSync's comparison grid (left / action / right per row, actions changeable per
+group before "Synchronize") is the closest model for the confirm table; and its
+"Database" file is the precedent for **keeping decisions, not snapshots**: it stores the
+last synced state and re-derives the plan, rather than replaying a stored list.
+
+### 4. Critique of the outline
+
+1. **The executor does not need a new input type.** `Request::expect` already carries,
+   per destination, what the confirmed plan expects and the `Ident` to re-check. Extend
+   `Expect` with `Skip` (and `Merge` for a directory onto a directory) and every planned
+   F5/F6/Shift+F5 sends its decisions the way Alt+Y already does. Step 6 shrinks from
+   "the Worker takes `Plan` rows" (a rewrite of a 3,456-line file the data-safety work
+   just settled) to "the Worker stops scanning twice and trusts `expect`". The item's own
+   rule is "the executor unchanged"; this keeps it.
+2. **Streaming is the riskiest part and not needed to earn the trust.** Executing while
+   questions are open needs the ancestor rule, a partial plan in the journal, and a
+   resume of a plan that was never finished. A full plan behind a cancellable progress
+   line ("Planning… 41,200 files, 3.1 GB", Esc to stop, **Start now** to fall back to
+   today's ask-as-you-go job) covers the slow network and huge-tree cases with today's
+   tested path. Recommend: streaming to beta.2 with the lanes (decision 2).
+3. **The journal should hold the decisions, not every row.** A million-row plan written
+   and synced at the start is a large write before the first byte, and a resume must
+   re-check every remaining target anyway. Record what cannot be re-derived: each
+   per-group answer, each row that replaces (path + `Ident`) or is skipped, and `done`
+   markers per top-level source (unsynced). Resume = scan again, apply the recorded
+   decisions, re-check each `Ident`, ask about anything new. Exact where it matters,
+   small on disk, and the memory cap stops mattering for the journal (decision 3).
+4. **Case collisions cost one `read_dir` per target directory, not one lookup per name**:
+   read each target directory once, keep its names folded, compare. On a network target
+   that is the difference between N round trips and one per directory.
+5. **FAT32 is not "FAT"**: exFAT has no 4 GB limit. Linux `statfs` `f_type` 0x4d44 is
+   vfat (both FAT32 and FAT16); exFAT is 0x2011BAB0. macOS `f_fstypename` "msdos" vs
+   "exfat". Windows: unknown (decision 1).
+6. **The F5 dialog must stay instant.** The plan runs on `Count::spawn`'s thread and
+   pattern; the floor (≤64 files, ≤128 MB) is a scan that finishes before the dialog's
+   first frame on a local disk. A timing test guards it (budgets.rs, release build).
+
+### 5. Steps (each a commit; every fix or behaviour first as a failing test)
+
+1. **`core/plan.rs`, the model and the scan** — `Plan { rows, groups, totals, target:
+   Volume }`, `Row { src, dst, action: Create | Replace(Ident) | Merge | Skip, class:
+   New | Identical | Older | Newer | FileOverDir | DirOverFile, blocked: Option<Why> }`;
+   built on `Count::spawn`'s thread; unreadable sources are rows with a `Why` (compare's
+   states), never gaps. Unit tests on a temp tree, the seam's `ReadDir`/`Stat` for the
+   unreadable cases. **M.**
+2. **Pre-checks** — free space (the `statvfs` helper; Windows unknown), names the target
+   cannot hold (Windows' characters and reserved names, trailing dot/space, length in the
+   target's units), case collisions (critique 4), FAT32's 4 GB (critique 5), write
+   permission. Each check that cannot be made is "unknown", shown as such. **M.**
+3. **The confirm table** — three levels (⛔ / ⚠️ / ℹ️), asked once per group, the default
+   never the losing one; the summary line `create · replace · skip · needed / free`;
+   only when there is something to decide, otherwise today's dialog unchanged. Render
+   tests at 118×34, 80×24, 60×20; a test that a plan with nothing to decide draws the
+   old dialog byte for byte. **M.**
+4. **The executor fed by decisions** — `Expect::{Skip, Merge}`; copy/move send `expect`;
+   `Worker::run` no longer scans copy/move twice (totals from the plan); a planned row is
+   not asked again unless its target changed (existing B05 tests stay green). Alt+Y's
+   pairs become a `Plan`. **S–M.**
+5. **Decisions in the journal; exact resume** — journal `v 3`: `answer`, `replace <path>
+   <ident>`, `skip <path>`, `done <source>` lines; Resume re-plans and applies them; kill
+   tests at each phase through `Halt` (planning, after confirm, mid-row, between rows).
+   An old `v 2` journal still resumes the old way. **M.**
+6. **Docs and CHANGELOG** — `docs/guide.md` (the confirm table, what each level means),
+   `docs/safety.md` or the recovery contract (what Resume now knows). **S.**
+
+About two weeks without streaming; two and a half with it.
+
+### 6. Decisions for the owner
+
+1. **Windows free space and FAT type**: "unknown" for beta.1 (recommended; no new
+   dependency), or the `fs4` crate (its `unsafe` inside a dependency, as the project's
+   rule allows).
+2. **Streaming**: to beta.2 with the lanes (recommended, critique 2), or in this round.
+3. **The journal holds decisions, not every row** (recommended, critique 3).
+4. **Operations in v1**: F5, F6, Shift+F5, Alt+Y, Resume; not delete, extract, pack
+   (the outline's leaning; agreed).
+5. **Group answers for the job only**, not remembered (agreed).
+6. **The floor and the cap**: ≤64 files / ≤128 MB always planned first (outline);
+   past 200,000 rows the plan keeps only rows with a decision and counts the rest
+   (recommended), measured again before beta.1.
+
+### 7. Risks
+
+- Changing what F5 shows is the most visible change since 0.1: the "nothing to decide
+  → old dialog" rule and its byte-for-byte render test are the guard.
+- A plan is a moment; the execution is later: every replace re-checks its `Ident`
+  (Round 029), free space is checked again before each file over 64 MiB.
+- Windows has the weakest `Ident` (creation time, not a file index): said in the
+  recovery contract (pillar 3).
 
 ## Plan (outline)
 

@@ -97,7 +97,7 @@ proceed"). Each step is a round with its kickoff. About 2.5–3 weeks, then a we
 | Pre-release | Contents | Rule |
 |---|---|---|
 | **0.4.0-beta.1** | Pillar 1 (data correct) + **Smart Planner v1** (item 42), in four rounds (kickoff 2026-11-13): [029](cycles/Round_029.md) pillar 1 (B01–B05, the sync rules, a durable journal, the fault seam); [030](cycles/Round_030.md) the planner's core (scan → plan → confirm → execute, pre-checks, warnings, the plan in the journal, exact resume); [031](cycles/Round_031.md) undo for a copy, replace into the trash, network pause, ETA, kept lists follow a move; [032](cycles/Round_032.md) pre-release plumbing and the cut | features may still land |
-| **0.4.0-beta.2** | **Smart Planner v2** (item 43, its scope set by beta.1's measurements) + pillar 2 (responsive and bounded) | features may still land |
+| **0.4.0-beta.2** | **Smart Planner v2** (item 43, its scope set by beta.1's measurements; group commit for replaces too: 7 ms a file in Round 032's bench) + pillar 2 (responsive and bounded), with items 45 and 46 | features may still land |
 | **0.4.0-rc.1** | Pillars 3 (honest contracts) and 4 (release proof) | **feature freeze: fixes only** |
 | **0.4.0** | all tests and the owner's week green | packages, then launch |
 
@@ -179,6 +179,7 @@ Steered by launch feedback. Not started before 0.4.0 ships.
 | A docs site (mdBook / GitHub Pages) | Item 40's link then points there; nothing else changes |
 | 39 which-key | If not done in 0.4.0 |
 | 11 File icon sets; 12–13 plugins | Optional extras; plugins not for now (owner, 2026-11-09, 2026-11-11) |
+| 47 **[draft] Go to anything**: a direction, not a commitment; it may change or be dropped (owner, 2026-11-13). (a) a search box (Ctrl+Space, with another key too: macOS uses Ctrl+Space to switch input source) over places you go: visited folders, history and hotlist, by how often and how recently, plus the current tree; (b) an index of folders you choose, kept on disk while xdevcmd runs, updated by watchers and a rescan, with its age shown ("indexed 2 h ago"); the system's own index first where there is one (mdfind, plocate, Windows Search); (c) F1's commands, built-in and your own, on what is found, the results as a list; (d) last: shared with other tools and AI agents through MCP: local stdio only, off by default, read-only, the chosen folders only | After 0.4.0; (a) needs no index. A background daemon only if (b) shows it is needed. The index is a map of someone's files: it never leaves the machine except through (d), which they turn on |
 
 ## Order (every item, for reference)
 
@@ -226,6 +227,9 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 42 | **Smart Planner v1** (trust): scan → plan → confirm → execute, the executor unchanged | M–L | [030](cycles/Round_030.md), [031](cycles/Round_031.md) | Planning (0.4.0-beta.1; pillar 1 first, [029](cycles/Round_029.md)) |
 | 43 | **Smart Planner v2** (speed): lanes, adaptive concurrency, group commit, checkpointed resume, item 22 | M–L | — | 0.4.0-beta.2, scope after beta.1's numbers |
 | 44 | The planner hands work to trusted tools (rsync, robocopy, rclone) | M | — | 0.5 |
+| 45 | `o` says what happened: "opening …" only after 300 ms, "opened" when the system's opener hands it over, its error otherwise; it gives up waiting after about 5 s (some openers wait for the program) | S | — | 0.4.0-beta.2 |
+| 46 | The status line's past: the last messages with their times, each whole; the line itself stays one row (`[general] status_lines = 2` for those who want two) | S | — | 0.4.0-beta.2 |
+| 47 | [draft] Go to anything: places you go, an index of chosen folders, commands on what is found, MCP last | L | — | draft, after 0.4.0 |
 | ~~—~~ | ~~SFTP, remote panes~~ | — | — | dropped 2026-11-06 |
 
 Sizes are relative: **S** a day or two, **M** under a week, **L** one to two weeks.

@@ -115,3 +115,13 @@ through the shell.
 layers: what the seam is, where it exists (never in the release build), the rule for a
 new write path, and how to show a seam test fails on the old code.
 **Promoted by**: XDevTeam ("Yes to both", 2026-11-13). Written by Claude Code.
+
+## 2026-11-13: ROADMAP, items 45–47 and beta.2's row
+
+**Source**: the owner, before the beta.1 cut ("hoàn toàn đồng ý, mình chỉ đề xuất nó trong
+roadmap là [draft]…", 2026-11-13).
+**What**: item 45 (`o` reports opening/opened) and item 46 (a status message history,
+the line stays one row) into 0.4.0-beta.2; item 47 "Go to anything" in Later, marked
+[draft]: a direction that may change or be dropped; beta.2's row also names group
+commit for replaces (Round 032's bench finding).
+**Promoted by**: XDevTeam. Written by Claude Code.

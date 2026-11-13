@@ -471,6 +471,9 @@ pub struct Job {
     pub done: Option<Summary>,
     /// Its box's title when not the kind's verb: "Undo the copy".
     pub title: Option<String>,
+    /// A file failed with an error that may pass and is tried again (Round 031): the
+    /// error, the try and of how many, and when the next try is.
+    pub retrying: Option<(String, u32, u32, std::time::Instant)>,
     /// Cancel while running, Close once done.
     pub buttons: Vec<Rect>,
     /// The answers on the question box, when one is up.
@@ -489,6 +492,7 @@ impl Job {
             question: None,
             done: None,
             title: None,
+            retrying: None,
             buttons: Vec::new(),
             answer_buttons: Vec::new(),
         }
@@ -502,8 +506,24 @@ impl Job {
                     self.total_files = files;
                     self.total_bytes = bytes;
                 }
-                ops::Event::Begin { path } => self.current = Some(path),
-                ops::Event::Progress { bytes_done } => self.bytes_done = bytes_done,
+                ops::Event::Begin { path } => {
+                    self.current = Some(path);
+                    self.retrying = None;
+                }
+                ops::Event::Progress { bytes_done } => {
+                    self.bytes_done = bytes_done;
+                    self.retrying = None;
+                }
+                ops::Event::Retrying {
+                    path,
+                    error,
+                    attempt,
+                    of,
+                    wait,
+                } => {
+                    self.current = Some(path);
+                    self.retrying = Some((error, attempt, of, std::time::Instant::now() + wait));
+                }
                 ops::Event::Ask(q) => self.question = Some(q),
                 ops::Event::Done(s) => {
                     self.bytes_done = self.total_bytes;
@@ -516,6 +536,21 @@ impl Job {
     pub fn answer(&mut self, a: Answer) {
         self.handle.answer(a);
         self.question = None;
+    }
+
+    /// "network error — trying again in 4 s (3 of 5): Connection timed out", while a
+    /// file waits for its next try.
+    pub fn retrying_line(&self, now: std::time::Instant) -> Option<String> {
+        let (error, attempt, of, at) = self.retrying.as_ref()?;
+        let secs = at.saturating_duration_since(now).as_secs_f64().ceil() as u64;
+        let when = if secs == 0 {
+            "trying again now".to_string()
+        } else {
+            format!("trying again in {secs} s")
+        };
+        Some(format!(
+            "network error \u{2014} {when} ({attempt} of {of}): {error}"
+        ))
     }
 
     pub fn ratio(&self) -> f64 {
@@ -1071,6 +1106,9 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 ),
                 Style::new().fg(th.fg_dim),
             );
+            if let Some(line) = j.retrying_line(std::time::Instant::now()) {
+                put(frame, inner, 2, &line, Style::new().fg(th.mark));
+            }
         }
     }
 
@@ -1136,6 +1174,33 @@ mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    /// Round 031: a job waiting to try a file again says so, counting down, and the
+    /// line goes once the work moves on.
+    #[test]
+    fn a_job_waiting_to_try_again_says_when_and_which_try() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Retrying {
+            path: PathBuf::from("/mnt/share/f"),
+            error: "Connection timed out".into(),
+            attempt: 3,
+            of: 5,
+            wait: std::time::Duration::from_secs(4),
+        })
+        .unwrap();
+        j.pump();
+        let at = j.retrying.as_ref().unwrap().3;
+        assert_eq!(
+            j.retrying_line(at - std::time::Duration::from_millis(3500))
+                .unwrap(),
+            "network error \u{2014} trying again in 4 s (3 of 5): Connection timed out"
+        );
+        assert!(j.retrying_line(at).unwrap().contains("trying again now"));
+        tx.send(ops::Event::Progress { bytes_done: 1 }).unwrap();
+        j.pump();
+        assert!(j.retrying_line(at).is_none());
+    }
 
     /// "設計書" from column 2: 書 covers columns 6 and 7. A box from column 7 would lose
     /// its left border to it on a real terminal, so 書 goes.

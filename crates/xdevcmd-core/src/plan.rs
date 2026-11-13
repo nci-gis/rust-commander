@@ -374,6 +374,9 @@ pub enum Fs {
     Fat,
     Exfat,
     Ntfs,
+    /// Reached over a network (NFS, SMB, sshfs, rclone, a UNC path): errors that pass
+    /// are retried, and new files synced before their rename (Round 031).
+    Network,
     Other,
     /// It could not be told (Windows, for beta.1: owner, 2026-11-13).
     Unknown,
@@ -484,10 +487,82 @@ fn fs_kind(dest: &Path) -> Fs {
         0x4d44 => Fs::Fat,
         0x2011_bab0 => Fs::Exfat,
         0x5346_544e | 0x7366_746e => Fs::Ntfs,
-        // ntfs-3g and exfat-fuse are both "fuseblk": not told apart.
-        0x6573_5546 => Fs::Unknown,
+        // NFS, SMB2/3, CIFS, SMB1, Ceph, AFS.
+        0x6969 | 0xfe53_4d42 | 0xff53_4d42 | 0x517b | 0x00c3_6400 | 0x5346_414f => Fs::Network,
+        // Every FUSE mount has this one number, sshfs and a local ntfs-3g alike: its
+        // type in the mount table tells them apart.
+        0x6573_5546 => match linux_mount_type(dest).as_deref().map(network_fuse) {
+            Some(true) => Fs::Network,
+            // ntfs-3g and exfat-fuse are both "fuseblk": not told apart.
+            _ => Fs::Unknown,
+        },
         _ => Fs::Other,
     }
+}
+
+/// A FUSE type from the mount table that reaches over a network.
+#[cfg(any(target_os = "linux", test))]
+fn network_fuse(t: &str) -> bool {
+    let name = t.strip_prefix("fuse.").unwrap_or(t);
+    matches!(
+        name,
+        "sshfs"
+            | "rclone"
+            | "s3fs"
+            | "gcsfuse"
+            | "goofys"
+            | "davfs"
+            | "davfs2"
+            | "curlftpfs"
+            | "smbnetfs"
+            | "glusterfs"
+            | "cephfs"
+            | "ceph-fuse"
+            | "afpfs"
+            | "mountpoint-s3"
+    )
+}
+
+/// The type of the mount holding `dest` ("fuse.sshfs"), from `/proc/self/mountinfo`:
+/// the mount point that is the longest prefix of `dest`, the last such in the table.
+#[cfg(target_os = "linux")]
+fn linux_mount_type(dest: &Path) -> Option<String> {
+    let dest = std::fs::canonicalize(dest).ok()?;
+    mount_type_in(
+        &std::fs::read_to_string("/proc/self/mountinfo").ok()?,
+        &dest,
+    )
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn mount_type_in(table: &str, dest: &Path) -> Option<String> {
+    // Spaces and the like are written as octal escapes (`\040`).
+    let unescape = |s: &str| {
+        let b = s.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(u8::is_ascii_digit) {
+                let n = (b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0');
+                out.push(n);
+                i += 4;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    let mut best: Option<(usize, String)> = None;
+    for line in table.lines() {
+        let (left, right) = line.split_once(" - ")?;
+        let point = unescape(left.split(' ').nth(4)?);
+        let kind = right.split(' ').next()?.to_string();
+        if dest.starts_with(&point) && best.as_ref().is_none_or(|(n, _)| point.len() >= *n) {
+            best = Some((point.len(), kind));
+        }
+    }
+    best.map(|(_, k)| k)
 }
 
 /// The file system's name macOS gives: "apfs", "msdos", "smbfs" …
@@ -512,13 +587,36 @@ fn fs_kind(dest: &Path) -> Fs {
         b"msdos" => Fs::Fat,
         b"exfat" => Fs::Exfat,
         b"ntfs" | b"ufsd_NTFS" => Fs::Ntfs,
+        b"smbfs" | b"nfs" | b"afpfs" | b"webdav" | b"cifs" | b"ftp" => Fs::Network,
+        n if n.starts_with(b"macfuse") || n.starts_with(b"osxfuse") => Fs::Unknown,
         _ => Fs::Other,
     }
 }
 
+/// Windows: a UNC path is a network share; a mapped drive letter cannot be told
+/// without the console API, and stays unknown.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn fs_kind(_: &Path) -> Fs {
-    Fs::Unknown
+fn fs_kind(dest: &Path) -> Fs {
+    if unc(dest) {
+        Fs::Network
+    } else {
+        Fs::Unknown
+    }
+}
+
+/// `\\server\share` or `\\?\UNC\server\share`.
+#[cfg(any(windows, test))]
+fn unc(p: &Path) -> bool {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => rest.len() >= 4 && rest[..4].eq_ignore_ascii_case("UNC\\"),
+        None => s.starts_with(r"\\") || s.starts_with("//"),
+    }
+}
+
+/// Whether the directory `dir` is reached over a network ([`Fs::Network`]).
+pub fn is_network(dir: &Path) -> bool {
+    fs_kind(dir) == Fs::Network
 }
 
 /// Bytes free at `dest` for this user; `None` where it cannot be asked (Windows).
@@ -1310,6 +1408,27 @@ mod tests {
         ignores_case: Some(true),
         trash: None,
     };
+
+    /// Round 031: a network target from the mount table (the longest mount point
+    /// holding the path, spaces escaped), FUSE's network types, and UNC paths.
+    #[test]
+    fn network_targets_are_told_from_the_mount_table_and_unc_paths() {
+        let table = "\
+22 1 8:1 / / rw - ext4 /dev/sda1 rw
+40 22 0:50 / /mnt/box rw - fuse.sshfs me@box: rw
+41 40 0:51 / /mnt/box/my\\040disk rw - fuse.ntfs-3g /dev/sdb1 rw
+";
+        let t = |p: &str| mount_type_in(table, Path::new(p));
+        assert_eq!(t("/home/me").as_deref(), Some("ext4"));
+        assert_eq!(t("/mnt/box/x").as_deref(), Some("fuse.sshfs"));
+        assert_eq!(t("/mnt/box/my disk/x").as_deref(), Some("fuse.ntfs-3g"));
+        assert!(network_fuse("fuse.sshfs") && network_fuse("fuse.rclone"));
+        assert!(!network_fuse("fuse.ntfs-3g") && !network_fuse("fuseblk"));
+        assert!(unc(Path::new(r"\\server\share\x")));
+        assert!(unc(Path::new(r"\\?\UNC\server\share")));
+        assert!(!unc(Path::new(r"\\?\C:\x")));
+        assert!(!unc(Path::new(r"C:\x")));
+    }
 
     /// Round 031, the owner's decision 1: on Windows only the system drive's Recycle
     /// Bin is trusted to keep a replaced file; a UNC path never.

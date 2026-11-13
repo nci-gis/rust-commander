@@ -103,6 +103,60 @@ pub struct Request {
     /// between two ways of writing, and tests set it here rather than in a global
     /// other tests read.
     pub safe: bool,
+    /// The waits between tries of a file that failed with an error that passes (a
+    /// network one): [`BACKOFF_SECS`]; then the user is asked. Tests shorten them.
+    pub backoff: Vec<std::time::Duration>,
+}
+
+/// The owner's decision 2, Round 031: five tries more, about 30 s in all, then the
+/// question.
+pub const BACKOFF_SECS: [u64; 5] = [1, 2, 4, 8, 15];
+
+fn backoff() -> Vec<std::time::Duration> {
+    BACKOFF_SECS
+        .iter()
+        .map(|s| std::time::Duration::from_secs(*s))
+        .collect()
+}
+
+/// Whether `e` is an error that may pass if tried again: the network's (a timeout, a
+/// lost connection, a stale handle). An I/O error only on a network target: on a local
+/// disk it is the disk failing, and trying again is wrong.
+pub fn transient(e: &io::Error, network: bool) -> bool {
+    let Some(code) = e.raw_os_error() else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        let n = Errno::from_raw_os_error(code);
+        [
+            Errno::TIMEDOUT,
+            Errno::NOTCONN,
+            Errno::HOSTDOWN,
+            Errno::HOSTUNREACH,
+            Errno::CONNRESET,
+            Errno::CONNABORTED,
+            Errno::NETDOWN,
+            Errno::NETUNREACH,
+            Errno::NETRESET,
+            Errno::STALE,
+        ]
+        .contains(&n)
+            || network && n == Errno::IO
+    }
+    #[cfg(windows)]
+    {
+        // BAD_NETPATH, UNEXP_NET_ERR, NETNAME_DELETED, BAD_NET_NAME, SEM_TIMEOUT,
+        // NETWORK_UNREACHABLE, CONNECTION_ABORTED, CONNECTION_INVALID.
+        let _ = network;
+        matches!(code, 53 | 59 | 64 | 67 | 121 | 1231 | 1236 | 1229)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (code, network);
+        false
+    }
 }
 
 impl Request {
@@ -157,6 +211,7 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            backoff: backoff(),
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -175,6 +230,7 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            backoff: backoff(),
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -193,6 +249,7 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            backoff: backoff(),
         }
     }
 }
@@ -433,9 +490,25 @@ impl Summary {
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    Scanned { files: u64, bytes: u64 },
-    Begin { path: PathBuf },
-    Progress { bytes_done: u64 },
+    Scanned {
+        files: u64,
+        bytes: u64,
+    },
+    Begin {
+        path: PathBuf,
+    },
+    Progress {
+        bytes_done: u64,
+    },
+    /// `path` failed with an error that may pass (`error`): tried again after `wait`,
+    /// try `attempt` of `of` (Round 031). Cleared by the next `Progress` or `Begin`.
+    Retrying {
+        path: PathBuf,
+        error: String,
+        attempt: u32,
+        of: u32,
+        wait: std::time::Duration,
+    },
     Ask(Question),
     Done(Summary),
 }
@@ -519,6 +592,9 @@ pub fn start(req: Request) -> Handle {
             safe: req.safe,
             recording: req.kind == Kind::Copy,
             trash_root: req.trash_root.clone(),
+            backoff: req.backoff.clone(),
+            retry: false,
+            network: Default::default(),
             keeps: Default::default(),
             old_trashed: None,
         };
@@ -586,6 +662,12 @@ struct Worker {
     recording: bool,
     /// [`Request::trash_root`]: tests' trash, for a replaced file too.
     trash_root: Option<PathBuf>,
+    /// [`Request::backoff`].
+    backoff: Vec<std::time::Duration>,
+    /// The user answered Retry to the last failed file.
+    retry: bool,
+    /// Per directory: whether it is reached over a network ([`crate::plan::is_network`]).
+    network: std::collections::HashMap<PathBuf, bool>,
     /// Per destination directory: whether a file replaced there goes to the trash.
     keeps: std::collections::HashMap<PathBuf, bool>,
     /// The file the last replace put in the trash, for its undo.
@@ -703,6 +785,30 @@ impl Worker {
 
     fn stopped(&self) -> bool {
         self.abort || self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Whether `p` is in a directory reached over a network, asked once per directory.
+    fn on_network(&mut self, p: &Path) -> bool {
+        let dir = p.parent().unwrap_or(Path::new("")).to_path_buf();
+        *self
+            .network
+            .entry(dir)
+            .or_insert_with_key(|d| crate::plan::is_network(d))
+    }
+
+    /// Wait `d`, in short steps, ending at once on Esc: false when stopped.
+    fn wait(&self, d: std::time::Duration) -> bool {
+        let end = std::time::Instant::now() + d;
+        loop {
+            if self.stopped() {
+                return false;
+            }
+            let now = std::time::Instant::now();
+            if now >= end {
+                return true;
+            }
+            std::thread::sleep((end - now).min(std::time::Duration::from_millis(50)));
+        }
     }
 
     /// Whether the file `dst` replaces goes to the trash first (Round 031): where the
@@ -1212,6 +1318,8 @@ impl Worker {
     }
 
     fn copy_file(&mut self, src: &Path, dst: &Path, size: u64) {
+        // Tries made of this file after an error that may pass (Round 031).
+        let mut tries = 0;
         loop {
             if self.stopped() {
                 return;
@@ -1252,22 +1360,55 @@ impl Worker {
                 // Cancelled mid-file: copy_bytes removed what it wrote, and a file
                 // being replaced is still the old one.
                 Ok(false) => return,
-                Err(e) => match self.ask(Question::Failed {
-                    path: dst.to_path_buf(),
-                    error: e.to_string(),
-                }) {
-                    Answer::Retry => continue,
-                    Answer::Skip | Answer::SkipAll => {
-                        self.note_error(dst, &e);
-                        self.sum.skipped += 1;
+                Err(e) => {
+                    let network = self.on_network(dst) || self.on_network(src);
+                    if transient(&e, network) && tries < self.backoff.len() {
+                        let wait = self.backoff[tries];
+                        tries += 1;
+                        let _ = self.tx.send(Event::Retrying {
+                            path: dst.to_path_buf(),
+                            error: e.to_string(),
+                            attempt: tries as u32,
+                            of: self.backoff.len() as u32,
+                            wait,
+                        });
+                        if self.wait(wait) {
+                            continue;
+                        }
                         return;
                     }
-                    _ => {
-                        self.note_error(dst, &e);
-                        self.abort = true;
-                        return;
+                    let error = if tries > 0 {
+                        format!("{e} (a network error: tried {} times)", tries + 1)
+                    } else {
+                        e.to_string()
+                    };
+                    self.failed_file(dst, &e, error);
+                    if self.retry {
+                        self.retry = false;
+                        tries = 0;
+                        continue;
                     }
-                },
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A file failed for good: the user says whether to try again (`retry` set), skip
+    /// it, or stop the job.
+    fn failed_file(&mut self, dst: &Path, e: &io::Error, error: String) {
+        match self.ask(Question::Failed {
+            path: dst.to_path_buf(),
+            error,
+        }) {
+            Answer::Retry => self.retry = true,
+            Answer::Skip | Answer::SkipAll => {
+                self.note_error(dst, e);
+                self.sum.skipped += 1;
+            }
+            _ => {
+                self.note_error(dst, e);
+                self.abort = true;
             }
         }
     }
@@ -1302,6 +1443,16 @@ impl Worker {
             .create_new(true)
             .open(&target)?;
         let written = self.write_all_from(&mut r, &mut w, &target);
+        // A new file on a network target is synced before its rename (the owner's
+        // decision 3, Round 031): SMB and NFS report a failed write only at the sync or
+        // the close, and a dropped handle hides the close's error. A replacement is
+        // synced anyway; a move's copies are synced with their batch.
+        let written = match written {
+            Ok(true) if new_only && !self.moving && self.on_network(dst) => {
+                crate::faults::sync_data(&w, &target).map(|()| true)
+            }
+            other => other,
+        };
         let kept = match written {
             Ok(true) => {
                 // Permissions and mtime are part of the file as far as a user is
@@ -2156,6 +2307,123 @@ mod tests {
 
     fn run(req: Request) -> Summary {
         run_with(req, Answer::Yes).0
+    }
+
+    /// A copy of one file `tag` from a fresh `src` into `to`, with `backoff`, its events
+    /// collected; questions answered `answer`, and the job cancelled at the first
+    /// `Retrying` when `cancel_at_retry`.
+    fn retry_job(
+        name: &str,
+        backoff: Vec<Duration>,
+        answer: Answer,
+        cancel_at_retry: bool,
+    ) -> (Summary, Vec<Event>, PathBuf) {
+        let d = tmp(name);
+        fs::create_dir_all(d.join("src")).unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("src").join(name), "payload").unwrap();
+        let mut req = Request::copy(vec![d.join("src").join(name)], d.join("to"));
+        req.backoff = backoff;
+        let h = start(req);
+        let mut seen = Vec::new();
+        loop {
+            let e = h.events.recv_timeout(Duration::from_secs(20)).unwrap();
+            match &e {
+                Event::Ask(_) => h.answer(answer),
+                Event::Retrying { .. } if cancel_at_retry => h.cancel(),
+                Event::Done(s) => return (s.clone(), seen, d.join("to").join(name)),
+                _ => {}
+            }
+            seen.push(e);
+        }
+    }
+
+    fn timed_out() -> crate::faults::Fault {
+        #[cfg(unix)]
+        let code = rustix::io::Errno::TIMEDOUT.raw_os_error();
+        #[cfg(not(unix))]
+        let code = 121; // ERROR_SEM_TIMEOUT
+        crate::faults::Fault::Os(code)
+    }
+
+    /// The first `n` writes of `name` time out.
+    fn fail_first(name: &str, n: u32) -> Vec<crate::faults::Guard> {
+        (1..=n)
+            .map(|k| crate::faults::fail(crate::faults::Point::Write, name, k, timed_out()))
+            .collect()
+    }
+
+    fn retries(seen: &[Event]) -> Vec<u32> {
+        seen.iter()
+            .filter_map(|e| match e {
+                Event::Retrying { attempt, .. } => Some(*attempt),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Round 031: an error that passes (a timeout) is tried again, without a question,
+    /// and the copy completes.
+    #[test]
+    fn a_network_error_that_passes_is_tried_again_without_asking() {
+        let name = format!("xnet-ok-{}", std::process::id());
+        let _f = fail_first(&name, 2);
+        let (s, seen, dst) = retry_job(&name, vec![Duration::ZERO; 5], Answer::Abort, false);
+        assert_eq!(retries(&seen), [1, 2]);
+        assert!(!seen.iter().any(|e| matches!(e, Event::Ask(_))), "{seen:?}");
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert_eq!(fs::read_to_string(dst).unwrap(), "payload");
+    }
+
+    /// After the last try the user is asked, told how many tries were made.
+    #[test]
+    fn a_network_error_that_stays_is_asked_about_after_the_tries() {
+        let name = format!("xnet-stays-{}", std::process::id());
+        let _f = fail_first(&name, 6);
+        let (s, seen, dst) = retry_job(&name, vec![Duration::ZERO; 5], Answer::Skip, false);
+        assert_eq!(retries(&seen), [1, 2, 3, 4, 5]);
+        let asked: Vec<_> = seen
+            .iter()
+            .filter_map(|e| match e {
+                Event::Ask(Question::Failed { error, .. }) => Some(error.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked.len(), 1, "{seen:?}");
+        assert!(asked[0].contains("tried 6 times"), "{asked:?}");
+        assert_eq!(s.skipped, 1);
+        assert!(!dst.exists());
+    }
+
+    /// An I/O error on a local disk is the disk failing: asked at once, not retried.
+    #[cfg(unix)]
+    #[test]
+    fn an_io_error_on_a_local_disk_is_not_tried_again() {
+        let name = format!("xnet-eio-{}", std::process::id());
+        let _f = crate::faults::fail(
+            crate::faults::Point::Write,
+            &name,
+            1,
+            crate::faults::Fault::Os(rustix::io::Errno::IO.raw_os_error()),
+        );
+        let (_, seen, _) = retry_job(&name, vec![Duration::ZERO; 5], Answer::Skip, false);
+        assert!(retries(&seen).is_empty(), "{seen:?}");
+        assert!(transient(
+            &io::Error::from_raw_os_error(rustix::io::Errno::IO.raw_os_error()),
+            true
+        ));
+    }
+
+    /// Esc while waiting for the next try ends the job at once, not after the wait.
+    #[test]
+    fn a_wait_before_trying_again_ends_at_once_on_cancel() {
+        let name = format!("xnet-esc-{}", std::process::id());
+        let _f = fail_first(&name, 1);
+        let t = std::time::Instant::now();
+        let (s, _, dst) = retry_job(&name, vec![Duration::from_secs(30); 5], Answer::Abort, true);
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        assert!(s.cancelled, "{s:?}");
+        assert!(!dst.exists());
     }
 
     /// Round 031: with a trash on the volume, a replaced file goes there, after the

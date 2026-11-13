@@ -18,6 +18,7 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `F9` | The menu bar: File, View, Help |
 | `Menu` `Shift+F10` `Alt+x F10` | The right-click menu, for the row under the cursor |
 | `Shift+F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
+| `Alt+m` | The status line's last 50 messages, each whole, with the time |
 
 ## Navigate
 

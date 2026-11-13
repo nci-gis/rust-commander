@@ -398,6 +398,9 @@ pub const BAR: &[&str] = &["File", "View", "Help"];
 /// What quick view has open: the file, and a viewer on it.
 type Preview = (PathBuf, Box<Viewer>);
 
+/// How many status messages Messages (Alt+M) keeps.
+const MESSAGES: usize = 50;
+
 pub struct App {
     tree: Node,
     panes: BTreeMap<PaneId, Pane>,
@@ -407,6 +410,11 @@ pub struct App {
     term_id: Option<PaneId>,
     term_shown: bool,
     status: String,
+    /// The status line's past (item 46): each message as it was first shown, with its
+    /// time, the newest last; at most [`MESSAGES`].
+    messages: std::collections::VecDeque<(std::time::SystemTime, String)>,
+    /// The status as last recorded in `messages`, so a message is kept once.
+    noted: String,
     quit: bool,
     last_click: Option<(Instant, u16, u16)>,
     modal: Option<Modal>,
@@ -632,6 +640,8 @@ impl App {
             term_id: None,
             term_shown: false,
             status: notice.unwrap_or_default(),
+            messages: std::collections::VecDeque::new(),
+            noted: String::new(),
             quit: false,
             last_click: None,
             modal: None,

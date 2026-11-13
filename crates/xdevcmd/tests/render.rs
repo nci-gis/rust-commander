@@ -4085,6 +4085,31 @@ fn a_slow_directory_is_waited_for_before_the_next_key_and_the_frame() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Item 46: Alt+M shows the status line's past in the viewer, each message whole with
+/// its time; with none yet, it says so.
+#[test]
+fn messages_keeps_what_the_status_line_said() {
+    let (a, b) = fixture();
+    let s = shot_keys("100x20", "A-m", &a, &b);
+    assert!(s.contains("No messages yet"), "{s}");
+    let s = shot_keys("100x20", "Down,o,A-m", &a, &b);
+    let line = s
+        .lines()
+        .find(|l| l.contains("would open victim.txt"))
+        .unwrap_or_else(|| panic!("the message, kept\n{s}"));
+    let clock = line.split('\u{2502}').nth(2).unwrap_or("").trim_start();
+    let b = clock.as_bytes();
+    assert!(
+        b.len() > 8
+            && b[2] == b':'
+            && b[5] == b':'
+            && b[..8].iter().filter(|c| c.is_ascii_digit()).count() == 6,
+        "its time first: {line}"
+    );
+    assert!(s.contains("in memory only"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn bulk_rename_is_off_in_read_only_mode() {
     let (a, b) = fixture();

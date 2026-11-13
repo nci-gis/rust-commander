@@ -16,6 +16,8 @@ that heading and starts a new, empty one here. -->
   then "opened …" when it hands the file over, or its error. An opener that waits for the
   program it started (some desktops' xdg-open) counts as handed over after 5 s; a failure
   after that is still said.
+- **Messages (Alt+M, Help → Messages, and in F1)**: the status line's last 50 messages,
+  each whole and with its time, in the viewer. The status line stays one row.
 
 ### Changed
 - **F1's own row, chosen inside F1, switches between the small and the large window**

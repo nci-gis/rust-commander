@@ -71,7 +71,8 @@ impl App {
         ];
         // Commands… and Config in use are put in at the top, Documentation and About
         // at the end, below.
-        let help: &[Option<(&str, A)>] = &[Some(("Usage", A::Usage))];
+        let help: &[Option<(&str, A)>] =
+            &[Some(("Usage", A::Usage)), Some(("Messages", A::Messages))];
         let list = match i {
             0 => file,
             1 => view,
@@ -327,6 +328,7 @@ impl App {
             }
         }
 
+        self.note_status();
         self.draw_status(frame, status);
         self.draw_footer(frame, footer);
 
@@ -349,6 +351,46 @@ impl App {
             })
             .collect();
         crate::decor::decorate(frame.buffer_mut(), &screens);
+    }
+
+    /// Keep the status line's message in Messages (item 46) the first time it shows.
+    /// Every message passes the frame that draws it, whoever set it.
+    fn note_status(&mut self) {
+        if self.status == self.noted {
+            return;
+        }
+        self.noted.clone_from(&self.status);
+        if self.status.trim().is_empty() {
+            return;
+        }
+        if self.messages.len() == MESSAGES {
+            self.messages.pop_front();
+        }
+        self.messages
+            .push_back((std::time::SystemTime::now(), self.status.clone()));
+    }
+
+    /// Messages (Alt+M): the status line's past in the viewer, the newest at the
+    /// bottom, where it opens.
+    pub(super) fn show_messages(&mut self) {
+        let text: String = if self.messages.is_empty() {
+            "No messages yet.\n".into()
+        } else {
+            self.messages
+                .iter()
+                .map(|(t, m)| format!("{}  {m}\n", xdevcmd_core::format::format_clock(*t)))
+                .collect()
+        };
+        let n = self.messages.len();
+        let doc = xdevcmd_core::document::Document::from_bytes("Messages", text.into_bytes());
+        let v = &self.settings.config.viewer;
+        let mut viewer = crate::viewer::Viewer::open(doc, v.wrap, v.tab_width);
+        viewer.show_end();
+        viewer.note(&format!(
+            "{n} message{} of the last {MESSAGES}, in memory only \u{2014} Esc back",
+            if n == 1 { "" } else { "s" }
+        ));
+        self.modal = Some(Modal::View(Box::new(viewer)));
     }
 
     pub(super) fn draw_status(&self, frame: &mut Frame, area: Rect) {

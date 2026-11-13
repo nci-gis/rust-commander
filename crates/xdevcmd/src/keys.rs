@@ -96,6 +96,7 @@ pub enum Action {
     SyncDirs,
     MenuBar,
     Usage,
+    Messages,
     ContextMenu,
 }
 
@@ -838,6 +839,14 @@ pub const BINDINGS: &[Binding] = &[
         // 2026-11-12), and Usage is a row in F1 and in the Help menu.
         keys: &["Shift+F1"],
     },
+    Binding {
+        action: Action::Messages,
+        name: "messages",
+        title: "Messages",
+        group: "General",
+        about: "The status line's last 50 messages, each whole, with the time",
+        keys: &["Alt+m"],
+    },
 ];
 
 /// The order groups are shown in, F1 and `--print-keys` alike. A group not listed here
@@ -993,6 +1002,7 @@ impl Action {
             | A::Help
             | A::MenuBar
             | A::Usage
+            | A::Messages
             | A::UserMenu
             | A::SplitRight
             | A::SplitDown
@@ -1598,6 +1608,7 @@ mod tests {
             Action::SyncDirs,
             Action::MenuBar,
             Action::Usage,
+            Action::Messages,
             Action::ContextMenu,
         ];
         for a in all {

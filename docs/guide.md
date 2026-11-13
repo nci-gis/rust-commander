@@ -25,6 +25,8 @@ xdevcmd and type what you want to do to find yours, or see [keys.md](keys.md).
 - **Ctrl+U** swaps two panes. **Alt+=** shows this pane's directory in the other one.
 - xdevcmd remembers your panes, tabs and directories, and opens them again next time.
   Start with `--no-restore`, or name directories on the command line, to start fresh.
+- **A message gone from the status line**, or cut short there, is in Help → Messages
+  (**Alt+M**): the last 50, each whole and with its time.
 - **How long start-up took** is in Help → Usage (**Shift+F1**), step by step up to the
   first frame ("start-up 6 ms to the first frame", then config, panes, terminal check,
   shell, first frame). `--timings`

@@ -111,6 +111,43 @@ group commit against beta.1's "replace small files" and "copy small files".
 3. Item 46: the history only; the status line stays one row.
 4. The Help row inside F1 switches the size.
 
+### 2026-11-13, parts A–E
+
+- **A** (40b854e): `scripts/ci-green.sh` waits for a `ci` run on the tag's commit (up to
+  60 min) and fails on none or a failed one; `release.yml`'s check job runs it on a tag
+  push (`actions: read`). Tried against the real runs: d4ce202 passes, aa410e7 fails.
+  Its first real use is beta.2's tag.
+- **E, D** (97164c3):
+  - F1's row inside F1 switches the size. The unit test
+    `f1_inside_f1_switches_size_and_never_runs_itself` pins that F1 from F1 never loops.
+  - `~` takes the first of `HOME` and `USERPROFILE` that is an absolute path here.
+  - The Windows Ctrl+\ flake: `--screenshot` took its frame while `C:\` was still being
+    read past `SLOW` (150 ms), so the pane still showed the old directory. Inputs and
+    the frame now wait for such a read. The new render test, with
+    `XDEVCMD_TEST_SLOW_DIR`, fails without the change and passes with it.
+- **B** (31c3179): item 45. Nothing is said for 300 ms; then "opening …", then "opened …",
+  "handed … to <program>" after 5 s, or the error, even a late one. Unit tests with
+  `sh` scripts (Unix).
+- **C**: item 46. Alt+M, Help → Messages and F1 show the last 50 status messages, each
+  whole and with its time, in the viewer. They are recorded at the frame that draws
+  them, so every setter is covered. Render test.
+
+### 2026-11-13, the owner's beta.1 test on Windows 11, observation 1
+
+- The owner "probed" a folder of about 1,500 small files (`.git`, source, 35 MB): a few
+  milliseconds. Another of about 1,500 files (docs, about 500 MB): 1–1.5 s.
+- **The same count of files, with time following the bytes.** The planner's walk reads
+  metadata only, never contents (`compare_files`: time and size), so bytes should not
+  matter.
+- Suspect, not yet measured: on Windows `fs::symlink_metadata` opens each file, and
+  Defender's real-time scan may look at it on open, longer for bigger documents.
+  `DirEntry::metadata()` on Windows comes from the directory listing itself, with no
+  open. The planner calls `symlink_metadata` per source and per destination
+  (`plan.rs` around lines 900 and 917).
+- Asked of the owner: which action "probe" was (the F5/F6 check, a folder's size, or the
+  copy itself); whether a second run is as slow (a cold cache); and whether the folder
+  is excluded from Defender. Goes with pillar 2 and item 43.
+
 ## Check
 
 ## Act

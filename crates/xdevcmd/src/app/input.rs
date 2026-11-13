@@ -431,6 +431,7 @@ impl App {
             Action::Pack => self.begin_pack(),
             Action::MenuBar => self.open_bar(0),
             Action::Usage => self.modal = Some(Modal::Usage),
+            Action::Messages => self.show_messages(),
             Action::ContextMenu => self.context_menu_at_cursor(),
             Action::CompareDirs => self.compare_panes(),
             Action::SyncDirs => self.begin_sync(),

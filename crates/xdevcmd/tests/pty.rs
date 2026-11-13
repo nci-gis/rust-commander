@@ -380,9 +380,9 @@ fn starts_draws_both_panes_and_quits_cleanly() {
 }
 
 /// How long start-up took: on the status line with XDEVCMD_TIMINGS, step by step up to
-/// the first frame; in Help → About always.
+/// the first frame; in Help → Usage (Shift+F1) always.
 #[test]
-fn start_up_times_are_said_when_asked_and_in_about() {
+fn start_up_times_are_said_when_asked_and_in_usage() {
     let s = Scratch::new("timings");
     s.file("left/notes.txt", "x");
     let x = Session::start_env(
@@ -393,7 +393,13 @@ fn start_up_times_are_said_when_asked_and_in_about() {
     );
     x.wait_for("started in ");
     let screen = x.screen();
-    for step in ["config ", "panes ", "terminal check ", "first frame "] {
+    for step in [
+        "config ",
+        "panes ",
+        "terminal check ",
+        "shell ",
+        "first frame ",
+    ] {
         assert!(screen.contains(step), "{step:?} missing:\n{screen}");
     }
     x.quit();
@@ -401,14 +407,12 @@ fn start_up_times_are_said_when_asked_and_in_about() {
     let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
     x.wait_for("notes");
     assert!(!x.screen().contains("started in "), "{}", x.screen());
-    x.send(F1);
-    x.wait_for("Commands");
-    x.send(b"about");
-    x.wait_for("About");
-    x.send(ENTER);
-    x.wait_for("Started in ");
+    x.send(SHIFT_F1);
+    x.wait_for("start-up ");
+    x.wait_for(" to the first frame");
+    assert!(x.screen().contains("terminal check "), "{}", x.screen());
     x.send(b"\x1b");
-    x.wait_gone("Started in ");
+    x.wait_gone(" to the first frame");
     x.quit();
 }
 
@@ -3107,6 +3111,7 @@ fn alt_x_then_enter_in_the_shell_reaches_the_program() {
 }
 
 const SHIFT_F12: &[u8] = b"\x1b[24;2~";
+const SHIFT_F1: &[u8] = b"\x1b[1;2P";
 
 /// Shift+F12: the shell's history in the viewer, at its end; Home goes to its first
 /// line; a drag and y put those lines on the clipboard (OSC 52); Esc is back in the

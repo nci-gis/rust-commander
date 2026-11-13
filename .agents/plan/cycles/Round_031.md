@@ -351,10 +351,11 @@ About a week and a half.
 ### 2026-11-13, start-up timings (the owner's request, added to this round)
 
 - Asked after the kickoff ("thêm boost time vào status bar … để observe"), as a check
-  beside the tests, not instead of them; agreed form: always in Help → About, on the
-  status line only when asked, and as JSON for the coming benchmark harness.
+  beside the tests, not instead of them; agreed form: always in Help → Usage (the
+  owner moved it there from About: Usage is what xdevcmd itself uses), on the status
+  line only when asked, and as JSON for the coming benchmark harness.
 - `xdevcmd/src/startup.rs`: a `Clock` from the start of `main`, steps `config`, `panes`,
-  `terminal check`, `tidy and shell`, `first frame`; stops at the first frame. `--timings`
+  `terminal check`, `shell` (the start-up tidy and the shell panel), `first frame`; stops at the first frame. `--timings`
   / `XDEVCMD_TIMINGS=1` → the status line ("started in … · config … · …") in place of
   "running in …", and `xdevcmd startup {json}` on stderr after the screen is restored.
 - Measured at once (release build, under `script`, which answers no terminal query):
@@ -363,7 +364,7 @@ About a week and a half.
   The 150 ms start-up budget (pillar 4) is therefore the terminal's to keep or break:
   worth a look in Round 032 (a shorter limit, or the check after the first frame).
 - Tests: the clock's line and JSON, the opt-in rule; pty: the status line with
-  XDEVCMD_TIMINGS, nothing without it, and About always.
+  XDEVCMD_TIMINGS, nothing without it, and Usage (Shift+F1) always.
 
 ## Check
 
@@ -376,7 +377,7 @@ About a week and a half.
 - [x] Step 5: the ETA (progress per file and per 250 ms; settled, never during a stall)
 - [x] Step 6: kept lists and results tabs follow moves and renames
 - [x] Step 7: guide, security, CHANGELOG
-- [x] Start-up timings (added at the owner's request): About, `--timings`, JSON
+- [x] Start-up timings (added at the owner's request): Usage, `--timings`, JSON
 - [x] fmt, clippy ×3 (Linux, `x86_64-pc-windows-gnu`, `x86_64-apple-darwin`),
   `cargo test --workspace --no-fail-fast` locally (core 297, app 253, render 212, pty
   112)

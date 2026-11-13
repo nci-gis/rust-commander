@@ -1,5 +1,5 @@
 //! How long xdevcmd took to start, step by step, from `main` to the first frame on
-//! screen: shown in Help → About, on the status line with `--timings` (or
+//! screen: shown in Help → Usage (Shift+F1), on the status line with `--timings` (or
 //! `XDEVCMD_TIMINGS=1`), and with `--timings` printed as one JSON line on stderr when
 //! xdevcmd ends, for a script to read. What the system does before `main` (loading the
 //! program) is not counted: a few milliseconds for one static binary.
@@ -70,21 +70,31 @@ impl Clock {
         true
     }
 
-    pub fn finished(&self) -> bool {
-        self.done
-    }
-
     pub fn total(&self) -> Duration {
         self.last.saturating_duration_since(self.start)
     }
 
     /// "started in 48 ms · config 2 · panes 3 · terminal check 31 · first frame 4".
     pub fn line(&self) -> String {
-        let mut s = format!("started in {}", ms(self.total()));
-        for (name, d) in &self.steps {
-            s.push_str(&format!(" \u{b7} {name} {}", ms_bare(*d)));
-        }
-        s
+        format!(
+            "started in {} \u{b7} {}",
+            ms(self.total()),
+            self.steps_line()
+        )
+    }
+
+    /// "config 2 · panes 3 · terminal check 31 · first frame 4".
+    pub fn steps_line(&self) -> String {
+        self.steps
+            .iter()
+            .map(|(name, d)| format!("{name} {}", ms_bare(*d)))
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ")
+    }
+
+    /// "48 ms", the whole of it.
+    pub fn total_text(&self) -> String {
+        ms(self.total())
     }
 
     /// One line of JSON: `{"total_ms":48.1,"config_ms":2.0,…}`, names with `_` for spaces.

@@ -56,6 +56,9 @@ pub struct Usage {
     frames: u64,
     /// The terminal it runs in and how it draws pictures, for a bug report.
     pub terminal: String,
+    /// How long start-up took, and its steps ([`crate::startup`]); none in screenshots,
+    /// which never start for real.
+    pub startup: Option<(String, String)>,
 }
 
 impl Default for Usage {
@@ -68,6 +71,7 @@ impl Default for Usage {
             draws: VecDeque::new(),
             frames: 0,
             terminal: String::new(),
+            startup: None,
         }
     }
 }
@@ -347,6 +351,10 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         ),
         plain,
     ));
+    if let Some((total, steps)) = &u.startup {
+        lines.push((format!("start-up   {total} to the first frame"), plain));
+        lines.push((format!("           {steps}"), dim));
+    }
     if !u.terminal.is_empty() {
         lines.push((format!("terminal   {}", u.terminal), plain));
     }

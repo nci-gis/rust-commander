@@ -11,7 +11,8 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
-- **How long start-up took**, step by step up to the first frame, in Help → About;
+- **How long start-up took**, step by step up to the first frame, in Help → Usage
+  (Shift+F1);
   `--timings` (or `XDEVCMD_TIMINGS=1`) also says it on the status line and prints it as
   one JSON line on stderr at the end.
 - **Ctrl+Z undoes a copy** (Round 031): it removes what the copy (F5, Alt+Y) made, only

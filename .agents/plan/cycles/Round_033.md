@@ -275,6 +275,31 @@ after), so a check before `syncfs` is a guess, not a guarantee.
   `.git` upward, no process run), else to the pane's directory. The same control-
   character guard and OSC 52 as Copy path. A row in F1 and the right-click menu.
 
+### 2026-11-13, the owner's answers: status messages, auto-adjust, a config that fails
+
+- **Item 48 says what it was relative to**, on the status line:
+  - "copied src/main.rs, relative to the repository rust-commander";
+  - "copied notes.txt, relative to this folder (not in a repository)";
+  - several paths: "copied 3 paths, relative to …".
+- **Auto-adjust only if CI shows it is worth it**; else a fixed 16. The CI sweep decides.
+- **A `[system] sync_threads` setting (1–32)**: not proposed. The owner's "a bad value
+  becomes 16" would go against the config's rule that a mistake is an error, never
+  silence (`a_misspelt_key_is_an_error_not_silence`). A setting that follows the rule
+  is only worth having if CI or the owner's machines show machines differ enough.
+  Revisited after the sweep.
+- **A config that fails to load** (the owner: "Default | Exit?"). Today the whole file is
+  ignored, xdevcmd starts with the defaults, the status line names the error (Messages
+  now keeps it), Help → Config in use shows why, and Settings refuses to save over it.
+  A status line is easy to miss, so it is proposed as item 49: on the first frame, a
+  dialog naming the file, the line and the error, with:
+  - **Continue with the defaults** (Enter, the default);
+  - **Edit config.toml** (opens it in the editor, as F4);
+  - **Quit**.
+
+  It never blocks a non-interactive run (`--screenshot`, `--check-config` is already
+  exit 1). It does not count in the start-up budget, since it comes after the first
+  frame.
+
 ## Check
 
 ## Act

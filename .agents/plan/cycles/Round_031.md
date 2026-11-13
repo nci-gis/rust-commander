@@ -1,6 +1,7 @@
 # Round 031: Smart Planner v1, around the executor (v0.4.0-beta.1, part 3 of 4, item 42)
 
-**Status**: Do (started 2026-11-13; the owner: "Go as recommended")
+**Status**: Review (steps 1–7 done, CI green 2026-11-13, run 43394099654; for the
+owner's hand tests)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42; the owner's decisions of
 2026-11-13 (undo for a copy, replace to trash on by default, network pause and ETA
 pulled from v2, kept lists follow a move)
@@ -361,7 +362,9 @@ About a week and a half.
 - [x] fmt, clippy ×3 (Linux, `x86_64-pc-windows-gnu`, `x86_64-apple-darwin`),
   `cargo test --workspace --no-fail-fast` locally (core 297, app 253, render 212, pty
   112)
-- [ ] CI on the branch
+- [x] CI on the branch: run 43394099654 green on all six jobs, after run 43393224998
+  found two test-only faults (the trash kill test assumed trashing on macOS, where the
+  test build does not by design: now Linux only; a Windows path separator)
 - [ ] **Not verified**: a real network mount (an SMB or NFS share pulled mid-copy, an
   sshfs that drops; the retries are tested through the fault seam only, and the
   mount-table parse on a sample); the replace into the trash on macOS and Windows (the

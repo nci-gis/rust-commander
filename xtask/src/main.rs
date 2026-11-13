@@ -21,6 +21,16 @@
 //!   Numbers from two machines are not comparable; nor are runs on a busy machine (the
 //!   load is printed first).
 //!
+//! ```text
+//! cargo xtask sync-sweep [--files N] [--dir PATH]
+//! ```
+//!
+//! How making many small files durable scales with threads on this disk (Round 033,
+//! group commit): N files of 1 KiB written, then `File::sync_data`, as xdevcmd calls
+//! it, on 1, 4, 8, 16, 32 and 64 threads; the median of three runs each. Run by the
+//! `bench` workflow on Linux, macOS and Windows runners to see the shape on ext4, APFS
+//! and NTFS: whether more threads help at all, which sets the number xdevcmd uses.
+//!
 //! Not a CI gate: shared runners vary by tens of per cent. CI keeps hard budgets only
 //! (`crates/xdevcmd/tests/budgets.rs`).
 
@@ -31,7 +41,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]";
+const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
+       cargo xtask sync-sweep [--files N] [--dir PATH]";
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -39,6 +50,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("bench") => bench(&args[1..]),
+        Some("sync-sweep") => sync_sweep(&args[1..]),
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);
@@ -139,6 +151,98 @@ impl Result_ {
     }
     fn best(&self) -> f64 {
         self.sorted().first().copied().unwrap_or(f64::NAN)
+    }
+}
+
+/// `cargo xtask sync-sweep`: see the top of this file.
+fn sync_sweep(args: &[String]) -> i32 {
+    let mut files: usize = 1000;
+    let mut base = std::env::temp_dir();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match (a.as_str(), it.next()) {
+            ("--files", Some(n)) => match n.parse() {
+                Ok(n) if n > 0 => files = n,
+                _ => {
+                    eprintln!("--files takes a number above 0");
+                    return 2;
+                }
+            },
+            ("--dir", Some(d)) => base = PathBuf::from(d),
+            _ => {
+                eprintln!("{USAGE}");
+                return 2;
+            }
+        }
+    }
+    let dir = base.join(format!("xdevcmd-sync-sweep-{}", std::process::id()));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("{}: {e}", dir.display());
+        return 1;
+    }
+    println!(
+        "sync-sweep · {} · {files} files of 1 KiB · {}",
+        std::env::consts::OS,
+        dir.display()
+    );
+    println!("{:>8} {:>10} {:>10}", "threads", "ms", "× 1 thread");
+    let mut one = None;
+    let mut code = 0;
+    for threads in [1usize, 4, 8, 16, 32, 64] {
+        let mut runs = Vec::new();
+        for run in 0..3 {
+            match sweep_once(&dir.join(format!("t{threads}-{run}")), files, threads) {
+                Ok(ms) => runs.push(ms),
+                Err(e) => {
+                    eprintln!("{threads} threads: {e}");
+                    code = 1;
+                }
+            }
+        }
+        if runs.is_empty() {
+            continue;
+        }
+        runs.sort_by(f64::total_cmp);
+        let median = runs[runs.len() / 2];
+        let base = *one.get_or_insert(median);
+        println!("{threads:>8} {median:>10.0} {:>10.1}", base / median);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    code
+}
+
+/// `files` files of 1 KiB written in `dir`, then synced on `threads` threads, each
+/// taking the next file: the milliseconds the syncs took.
+fn sweep_once(dir: &Path, files: usize, threads: usize) -> std::io::Result<f64> {
+    use std::io::Write;
+    std::fs::create_dir_all(dir)?;
+    let mut open = Vec::with_capacity(files);
+    for i in 0..files {
+        let mut f = std::fs::File::create(dir.join(format!("f{i:05}")))?;
+        f.write_all(&[b'x'; 1024])?;
+        open.push(f);
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let failed = std::sync::Mutex::new(None);
+    let t = Instant::now();
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(f) = open.get(i) else { break };
+                if let Err(e) = f.sync_data() {
+                    *failed.lock().unwrap() = Some(e);
+                    break;
+                }
+            });
+        }
+    });
+    let took = ms(t);
+    drop(open);
+    let _ = std::fs::remove_dir_all(dir);
+    match failed.into_inner().unwrap() {
+        Some(e) => Err(e),
+        None => Ok(took),
     }
 }
 

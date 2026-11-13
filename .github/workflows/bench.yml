@@ -1,0 +1,41 @@
+name: bench
+
+# Measurements that need another system than the one at hand, run by hand only: Actions
+# -> bench -> Run workflow, or `gh workflow run bench --ref <branch>`. Never on a push
+# or a pull request, and never a gate: shared runners' disks are virtual and vary by
+# tens of per cent, so their numbers show a shape (does this help on NTFS, on APFS?),
+# not a laptop's times.
+#
+# sync-sweep (Round 033, group commit): how making 1,000 small files durable scales
+# with threads on each system's file system.
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Files per run"
+        required: false
+        default: "1000"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sync-sweep:
+    name: sync-sweep ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The runner's own temporary directory: on its main disk, as a user's files are.
+      - name: sweep
+        shell: bash
+        env:
+          FILES: ${{ inputs.files }}
+        run: cargo xtask sync-sweep --files "$FILES" --dir "$RUNNER_TEMP" | tee -a "$GITHUB_STEP_SUMMARY"

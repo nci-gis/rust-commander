@@ -242,10 +242,11 @@ impl App {
     /// skipped and anything else already there is asked about, never decided; a move or
     /// delete on the sources still there.
     pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted) {
+        // What it finished is left; what is gone cannot be done again.
         let still: Vec<PathBuf> = it
             .sources
             .iter()
-            .filter(|p| std::fs::symlink_metadata(p).is_ok())
+            .filter(|p| !it.done.contains(p) && std::fs::symlink_metadata(p).is_ok())
             .cloned()
             .collect();
         if still.is_empty() {
@@ -259,6 +260,9 @@ impl App {
             _ => return,
         };
         req.existing = ops::Existing::Resume;
+        // The plan's decisions stand (Round 030): what the user chose to leave is left,
+        // what they chose to replace is replaced while it is still that file.
+        req.expect = it.decided.iter().cloned().collect();
         let kind = req.kind;
         self.remember_job(&req);
         self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));

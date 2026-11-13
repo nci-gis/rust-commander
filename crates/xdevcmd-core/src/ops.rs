@@ -240,6 +240,56 @@ impl Ident {
     pub fn at(p: &Path) -> Option<Self> {
         fs::symlink_metadata(p).ok().map(|m| Self::of(&m))
     }
+
+    /// As one word for a journal line (no spaces): read back by [`Ident::decode`] on the
+    /// same system. A time before 1970 is written as none, so it never matches again:
+    /// the file is then asked about, which is the safe side.
+    pub fn encode(&self) -> String {
+        let t = |t: Option<std::time::SystemTime>| {
+            t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or("-".to_string(), |d| {
+                    format!("{}.{}", d.as_secs(), d.subsec_nanos())
+                })
+        };
+        #[cfg(unix)]
+        let rest = format!("{}:{}", self.node.0, self.node.1);
+        #[cfg(not(unix))]
+        let rest = t(self.created);
+        format!("i1:{}:{}:{}:{rest}", self.kind, self.len, t(self.modified))
+    }
+
+    pub fn decode(s: &str) -> Option<Self> {
+        let t = |s: &str| -> Option<Option<std::time::SystemTime>> {
+            if s == "-" {
+                return Some(None);
+            }
+            let (a, b) = s.split_once('.')?;
+            let d = std::time::Duration::new(a.parse().ok()?, b.parse().ok()?);
+            Some(Some(std::time::UNIX_EPOCH + d))
+        };
+        let mut w = s.split(':');
+        if w.next()? != "i1" {
+            return None;
+        }
+        let kind = w.next()?.parse().ok()?;
+        let len = w.next()?.parse().ok()?;
+        let modified = t(w.next()?)?;
+        #[cfg(unix)]
+        let id = Self {
+            kind,
+            len,
+            modified,
+            node: (w.next()?.parse().ok()?, w.next()?.parse().ok()?),
+        };
+        #[cfg(not(unix))]
+        let id = Self {
+            kind,
+            len,
+            modified,
+            created: t(w.next()?)?,
+        };
+        Some(id)
+    }
 }
 
 /// What a synchronisation plan saw at a destination when the user confirmed it.
@@ -525,6 +575,15 @@ impl Worker {
             Existing::Resume => self.resuming = true,
         }
         self.expect = req.expect.clone();
+        // The plan's decisions, for a resume to keep them (Round 030): written before
+        // the first step, synced with the first commit like every line.
+        if req.planned.is_some() {
+            if let Some(j) = self.journal.as_mut() {
+                for (dst, e) in &req.expect {
+                    let _ = j.decided(dst, e);
+                }
+            }
+        }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
@@ -564,6 +623,12 @@ impl Worker {
                 }
                 Kind::Delete => self.delete(src, req.to_trash, req.trash_root.as_deref()),
                 Kind::Extract | Kind::Pack => {}
+            }
+            // Finished with this source (not stopped part way): a resume leaves it.
+            if !self.stopped() && matches!(req.kind, Kind::Copy | Kind::Move) {
+                if let Some(j) = self.journal.as_mut() {
+                    let _ = j.done(src);
+                }
             }
         }
 

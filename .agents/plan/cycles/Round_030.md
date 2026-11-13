@@ -349,6 +349,41 @@ rows with a decision are kept.
   for pillar 4's flake list.
 - fmt; clippy ×3; `cargo test --workspace` green, the pty suite five times in a row.
 
+### 2026-11-13, step 5: decisions in the journal; Resume carries them out
+
+- Journal `v 3`: after `begin`, a planned job writes the plan's word per destination
+  (`skip <dst>`, `replace <dst> <ident>`; nothing for a row the job will ask about),
+  and `done <src>` when it has finished a source (copy and move). Unsynced lines,
+  committed with the first sync before any step that cannot be undone, as every line
+  since Round 029. `Ident::encode`/`decode` (one word: kind, size, modified time, and
+  device + inode on Unix or the creation time on Windows; a time before 1970 is written
+  as none, so it never matches and the file is asked about). 0.3.0's tidy-up skips the
+  new tags; this version reads `v 2` and older as before.
+- `Interrupted { decided, done }`; Resume leaves the finished sources and sends the
+  decisions as `Request::expect` beside `Existing::Resume`: a file the user chose to
+  leave is left without a question; one they chose to replace is replaced while it is
+  still the file the plan saw, and, already replaced (identical now), skipped. No
+  re-plan and no table on Resume: deviation from the kickoff's "Resume re-plans", taken
+  because the worker's rules already give the exact result and Resume has no dialog
+  today; a new conflict is still asked about.
+- Tests: core (decisions and finished sources come back from a dead run's journal, a
+  damaged identity dropped; an identity reads back as itself, junk refused); pty
+  `a_planned_copy_killed_then_continued_keeps_every_decision` (four files, older set to
+  replace, newer left; halted at the second file's rename through the seam, `kill -9`;
+  continue: no question, the older replaced, the newer kept, the first file not done
+  again (its date unchanged)). **Shown failing** with Resume's wiring taken out (the
+  job stops to ask: timed out waiting for "copied").
+- Found while running the whole suite with `--no-fail-fast` (step 3's runs had stopped
+  at the pty binary, so render never ran): three render tests from before the planner
+  (`f5_can_replace_only_older_files`, `alt_k_…_f5_copies_it`, `with_three_panes_…`).
+  Two expected the old per-file question and now go through the table (same outcome:
+  the file kept, nothing asked). The third was a real loss: the table dropped "Same
+  directory as the source — nothing would change." It is kept now, and a blocked row's
+  line says why (`Blocked::describe`: its own destination, a name the target cannot
+  hold, …).
+- fmt; clippy ×3; `cargo test --workspace --no-fail-fast` all green (core 282, pty 110,
+  render 210).
+
 ## Check
 
 ## Act

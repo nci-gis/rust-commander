@@ -79,6 +79,21 @@ pub enum Blocked {
     TooBig,
 }
 
+impl Blocked {
+    /// Why, in the confirm table's words.
+    pub fn describe(&self) -> String {
+        match self {
+            Blocked::Unreadable(e) => format!("it could not be read ({e})"),
+            Blocked::Special(kind) => format!("a {kind}, whose contents cannot be copied"),
+            Blocked::IntoItself => "a folder into itself".into(),
+            Blocked::SameFile => "it is its own destination".into(),
+            Blocked::BadName(why) => format!("a name the destination cannot hold: {why}"),
+            Blocked::TooLong => "a name longer than the destination allows".into(),
+            Blocked::TooBig => "4 GiB or more, onto a FAT drive".into(),
+        }
+    }
+}
+
 /// Something the user is told before the job, and asked about: data that would be lost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warn {

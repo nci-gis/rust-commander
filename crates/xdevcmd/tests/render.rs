@@ -301,11 +301,11 @@ fn f5_can_replace_only_older_files() {
         .unwrap()
         .set_times(fs::FileTimes::new().set_modified(later))
         .unwrap();
+    // The plan finds it before the start (Round 030): a newer file there is a group of
+    // its own, left by default; Enter asks nothing.
     let s = shot_keys("110x24", "Down,Insert,F5", &a, &b);
-    assert!(s.contains("if a file is there: ask"), "{s}");
-    let s = shot_keys("110x24", "Down,Insert,F5,u", &a, &b);
-    assert!(s.contains("replace it only if older"), "{s}");
-    let s = shot_keys("110x24", "Down,Insert,F5,u,Enter", &a, &b);
+    assert!(s.contains("would replace a newer file  [skip]"), "{s}");
+    let s = shot_keys("110x24", "Down,Insert,F5,Enter", &a, &b);
     assert!(!s.contains("Already exists"), "no question\n{s}");
     assert_eq!(fs::read(b.join("victim.txt")).unwrap(), b"newer there");
     let _ = fs::remove_dir_all(a.parent().unwrap());
@@ -4357,13 +4357,16 @@ fn alt_k_marks_what_the_other_side_lacks_and_f5_copies_it() {
         s.contains("2 items"),
         "F5 takes exactly the marked two\n{s}"
     );
-    // newer.txt sorts first and exists there: the job stops to ask, as F5 always does.
+    // newer.txt exists there, older: the plan says so before the start, and leaves it
+    // unless told otherwise (Round 030); the job asks nothing.
+    let s = shot_keys("110x24", "Alt+k,F5", &a, &b);
+    assert!(s.contains("would replace an older file  [skip]"), "{s}");
     let s = shot_keys("110x24", "Alt+k,F5,Enter", &a, &b);
-    assert!(s.contains("overwrite"), "{s}");
+    assert!(!s.contains("overwrite"), "{s}");
     assert_eq!(
         fs::read_to_string(b.join("newer.txt")).unwrap(),
         "old",
-        "not before the answer"
+        "left, as the plan said"
     );
 }
 

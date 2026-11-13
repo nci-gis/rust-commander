@@ -1071,6 +1071,109 @@ fn other_device(tag: &str) -> Option<PathBuf> {
 /// journal says so, before its source is removed: the next start says both are there,
 /// and both are, whole (Round 029, step 3). The fault seam holds the job at that point.
 #[cfg(unix)]
+/// Round 030: a planned copy killed part way, then continued, does exactly what was
+/// left of the plan: the file the user chose to replace is replaced, the one they chose
+/// to leave is left, and neither is asked about again; a source finished is not redone.
+#[test]
+fn a_planned_copy_killed_then_continued_keeps_every_decision() {
+    let s = Scratch::new("kill-plan");
+    let aged = |p: &Path, body: &str, secs: u64| {
+        std::fs::write(p, body).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(secs))
+            .unwrap();
+    };
+    s.file("left/a-fresh.txt", "a");
+    s.file("left/b-fresh.txt", "b");
+    aged(&s.left().join("c-newer.txt"), "mine", 3600);
+    s.file("right/c-newer.txt", "theirs");
+    s.file("left/d-older.txt", "new");
+    aged(&s.right().join("d-older.txt"), "old", 3600);
+    let marker = s.0.join("halted");
+    let spec = format!(
+        "halt|rename|{}|{}",
+        s.right().join("b-fresh.txt").display(),
+        marker.display()
+    );
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_FAULTS", spec.as_str())],
+    );
+    x.wait_for("d-older ");
+    x.send(b"*");
+    x.wait_for("4 selected");
+    x.send(F5);
+    // Groups worst first: newer, then older. Older to replace; newer stays skip.
+    x.wait_for("would replace a newer file  [skip]");
+    x.send(DOWN);
+    x.send(b" ");
+    x.wait_for("would replace an older file  [replace]");
+    x.send(ENTER);
+    wait_file(&marker, "the job held at b's rename", |c| c.is_some());
+    let pid = x.child.process_id().expect("a pid");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let start = Instant::now();
+    while !matches!(x.child.try_wait(), Ok(Some(_))) {
+        assert!(start.elapsed() < PATIENCE, "xdevcmd did not die");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    drop(x);
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("a-fresh.txt")).unwrap(),
+        "a"
+    );
+    assert!(
+        !s.right().join("b-fresh.txt").exists(),
+        "held before its rename"
+    );
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("d-older.txt")).unwrap(),
+        "old"
+    );
+    // a-fresh is written over by nobody: a resume that redid it would change its date.
+    let a_before = std::fs::metadata(s.right().join("a-fresh.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
+    x.wait_for("Interrupted");
+    x.send(ENTER); // continue
+    x.wait_for("copied");
+    assert!(!x.screen().contains("Already exists"), "{}", x.screen());
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("b-fresh.txt")).unwrap(),
+        "b"
+    );
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("d-older.txt")).unwrap(),
+        "new"
+    );
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("c-newer.txt")).unwrap(),
+        "theirs"
+    );
+    assert_eq!(
+        std::fs::metadata(s.right().join("a-fresh.txt"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        a_before,
+        "a finished source is not done again"
+    );
+    x.until("marks to clear", |scr| !scr.contains('\u{2022}'));
+    x.quit();
+}
+
 #[test]
 fn a_move_killed_before_removing_its_source_says_both_are_there() {
     let s = Scratch::new("kill-move");

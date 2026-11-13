@@ -37,8 +37,10 @@
 //! journal with a hole in it look whole. The job is told (the error comes back) and asks
 //! the user before its next step that cannot be undone.
 //!
-//! `v 2` names this layout; `moved` lines are new in it. Both are unknown tags to 0.3.0's
-//! tidy-up, which skips them, and this version reads 0.3.0's journals as before.
+//! `v 3` names this layout. `moved` lines came with `v 2` (Round 029); `skip`, `replace`
+//! (the confirmed plan's decisions) and `done` (a source finished) with `v 3` (Round
+//! 030), for Resume to carry out exactly what is left. All are unknown tags to 0.3.0's
+//! tidy-up, which skips them, and this version reads older journals as before.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -251,7 +253,7 @@ impl Journal {
             dirty: false,
         };
         j.line(&format!("host {}", enc(Path::new(&hostname()))), about)?;
-        j.line("v 2", about)?;
+        j.line("v 3", about)?;
         j.line(&format!("kind {kind}"), about)?;
         for s in sources {
             j.line(&format!("src {}", enc(s)), about)?;
@@ -349,6 +351,23 @@ impl Journal {
     pub fn moved(&mut self, src: &Path, dst: &Path) -> std::io::Result<()> {
         self.line(&format!("moved {} {}", enc(src), enc(dst)), src)
     }
+
+    /// The confirmed plan's word on `dst` (Round 030): left, or replaced while it is the
+    /// file the plan saw. A resume keeps it instead of asking again. Nothing for a row
+    /// the job will ask about.
+    pub fn decided(&mut self, dst: &Path, e: &crate::ops::Expect) -> std::io::Result<()> {
+        use crate::ops::Expect;
+        match e {
+            Expect::Skip => self.line(&format!("skip {}", enc(dst)), dst),
+            Expect::Replace(id) => self.line(&format!("replace {} {}", enc(dst), id.encode()), dst),
+            Expect::Absent => Ok(()),
+        }
+    }
+
+    /// The job has finished with `src`, one of its sources: a resume leaves it.
+    pub fn done(&mut self, src: &Path) -> std::io::Result<()> {
+        self.line(&format!("done {}", enc(src)), src)
+    }
 }
 
 impl Drop for Journal {
@@ -379,6 +398,10 @@ pub struct Interrupted {
     /// its source: (source, copy), both still there. Nothing is removed: Resume leaves
     /// such a source where it is and says so.
     pub moved: Vec<(PathBuf, PathBuf)>,
+    /// The confirmed plan's decisions (Round 030): each destination left or replaced.
+    pub decided: Vec<(PathBuf, crate::ops::Expect)>,
+    /// Sources the job finished with.
+    pub done: Vec<PathBuf>,
 }
 
 /// Tidy up after runs that ended without warning, and say what they were doing.
@@ -567,6 +590,8 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         restored: 0,
         stranded: Vec::new(),
         moved: Vec::new(),
+        decided: Vec::new(),
+        done: Vec::new(),
     };
     let mut parts: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -588,6 +613,14 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("ren", Some(t), Some(o)) => renames.push((t, o)),
             ("unren", Some(t), _) => renames.retain(|(x, _)| *x != t),
             ("moved", Some(s), Some(d)) => it.moved.push((s, d)),
+            ("skip", Some(p), _) => it.decided.push((p, crate::ops::Expect::Skip)),
+            ("replace", Some(p), _) => {
+                // The third word is the file's identity, not a path.
+                if let Some(id) = line.split(' ').nth(2).and_then(crate::ops::Ident::decode) {
+                    it.decided.push((p, crate::ops::Expect::Replace(id)));
+                }
+            }
+            ("done", Some(p), _) => it.done.push(p),
             _ => {}
         }
     }
@@ -1076,7 +1109,7 @@ mod tests {
         let mut j =
             Journal::begin_in(&d, "copy", &[d.join("broken-src")], Some(&d), false).unwrap();
         let text = fs::read_to_string(&j.path).unwrap();
-        assert!(text.contains("\nv 2\n"), "{text}");
+        assert!(text.contains("\nv 3\n"), "{text}");
         let _f = crate::faults::fail(
             crate::faults::Point::JournalSync,
             "broken-part",
@@ -1121,6 +1154,62 @@ mod tests {
             "the source of c is gone"
         );
         assert!(src.exists() && dst.exists(), "neither removed");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The plan's decisions and the sources finished come back from a dead run's
+    /// journal, for Resume; a damaged identity is dropped, not guessed.
+    #[test]
+    fn decisions_and_finished_sources_come_back_from_a_dead_run() {
+        use crate::ops::{Expect, Ident};
+        let d = dir("decided");
+        fs::write(d.join("there"), "x").unwrap();
+        let id = Ident::at(&d.join("there")).unwrap();
+        let mut j =
+            Journal::begin_in(&d, "copy", &[d.join("a"), d.join("b")], Some(&d), false).unwrap();
+        j.decided(&d.join("left"), &Expect::Skip).unwrap();
+        j.decided(&d.join("there"), &Expect::Replace(id)).unwrap();
+        j.decided(&d.join("new"), &Expect::Absent).unwrap();
+        j.done(&d.join("a")).unwrap();
+        let text = fs::read_to_string(&j.path).unwrap();
+        let it = tidy(
+            &format!("{text}replace {} i1:junk\n", enc(&d.join("bad"))),
+            "x",
+        );
+        assert_eq!(it.kind, "copy");
+        assert_eq!(
+            it.decided,
+            vec![
+                (d.join("left"), Expect::Skip),
+                (d.join("there"), Expect::Replace(id)),
+            ]
+        );
+        assert_eq!(it.done, vec![d.join("a")]);
+        drop(j);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_identity_reads_back_as_itself() {
+        use crate::ops::Ident;
+        let d = dir("ident");
+        fs::write(d.join("f"), "x").unwrap();
+        fs::create_dir(d.join("sub")).unwrap();
+        for p in [d.join("f"), d.join("sub")] {
+            let id = Ident::at(&p).unwrap();
+            assert_eq!(Ident::decode(&id.encode()), Some(id), "{}", id.encode());
+            assert!(!id.encode().contains(' '));
+        }
+        for junk in [
+            "",
+            "i1",
+            "i2:0:1:-:1:2",
+            "i1:x:1:-:1:2",
+            "i1:0:1:5:1:2",
+            "i1:0:1:-",
+        ] {
+            assert_eq!(Ident::decode(junk), None, "{junk}");
+        }
         let _ = fs::remove_dir_all(&d);
     }
 }

@@ -226,10 +226,18 @@ impl Table {
                 };
                 let what = g.describe(*n);
                 if g.choices().is_empty() {
+                    // What cannot be done says why: the first such row's reason.
                     let tail = if *g == Group::Blocked {
-                        ": left out"
+                        let why = self
+                            .plan
+                            .rows
+                            .iter()
+                            .find_map(|r| r.blocked.as_ref())
+                            .map(|b| b.describe())
+                            .unwrap_or_default();
+                        format!(", left out: {why}")
                     } else {
-                        ""
+                        String::new()
                     };
                     format!("{icon} {what}{tail}")
                 } else {
@@ -357,6 +365,11 @@ impl Confirm {
         self.body.truncate(3);
         let (head, groups) = t.lines();
         self.body.extend(head);
+        // Said before Enter, as the plain dialog says it (set_destination).
+        if self.source_dir.is_some() && self.source_dir == self.request.dest {
+            self.body
+                .push("Same directory as the source \u{2014} nothing would change.".into());
+        }
         self.body.push(String::new());
         t.first_line = self.body.len();
         self.body.extend(groups);

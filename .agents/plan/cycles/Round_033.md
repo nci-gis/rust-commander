@@ -517,6 +517,13 @@ the rest. One job of 1,000 files, the median of three:
   core module looked missing. `cargo clean -p xdevcmd-core` fixed it. CI builds from
   nothing and is not affected.
 
+### 2026-11-13, the owner on Windows' fast copy
+
+- Deferred: "because we are avoiding the unsafe, defer that till we really need that,
+  or just let it to 3rd party." Core stays `forbid(unsafe_code)`; Windows keeps
+  xdevcmd's own copy. The third-party route is item 44 (0.5): the plan handed to a
+  trusted tool (robocopy, which uses the system's copy), its engine named at the top.
+
 ## Check
 
 ## Act

@@ -416,6 +416,45 @@ impl FilePane {
         }
     }
 
+    /// Files moved or renamed, each (from, to), are about to be followed in the kept
+    /// lists (Round 031): if this results tab shows any of them, it becomes its kept
+    /// list now, from the rows as they were, and that list is returned to be shown again
+    /// once relinked ([`FilePane::reopen_list`]). A search still running is left alone.
+    pub fn holds_moved(&mut self, moved: &[(PathBuf, PathBuf)]) -> Option<crate::lists::Id> {
+        let r = self.results.as_ref()?;
+        if r.running() {
+            return None;
+        }
+        let touched = self
+            .all
+            .iter()
+            .any(|e| !e.is_parent() && moved.iter().any(|(from, _)| e.path.starts_with(from)));
+        if !touched {
+            return None;
+        }
+        match self.place() {
+            Place::List(id) => Some(id),
+            Place::Dir(_) => None,
+        }
+    }
+
+    /// Show kept list `id` again, its rows as they now are, the cursor where it was.
+    pub fn reopen_list(&mut self, id: crate::lists::Id) {
+        let row = self
+            .current()
+            .filter(|e| !e.is_parent())
+            .map(|e| e.path.clone());
+        let back = std::mem::take(&mut self.back);
+        let forward = std::mem::take(&mut self.forward);
+        crate::lists::set_chosen(id, row);
+        self.open_list(id, false);
+        if let Some(r) = self.results.as_mut() {
+            r.select = crate::lists::get(id).and_then(|l| l.chosen);
+        }
+        self.back = back;
+        self.forward = forward;
+    }
+
     /// The kept list this tab shows, if any.
     pub fn list_id(&self) -> Option<crate::lists::Id> {
         self.results.as_ref().and_then(|r| r.list)

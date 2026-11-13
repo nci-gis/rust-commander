@@ -443,6 +443,9 @@ pub struct Summary {
     pub replaced_for_good: u64,
     /// Files replaced whose old version went to the trash (Round 031).
     pub replaced_to_trash: u64,
+    /// A move: each source that went, and where it is now (the sources the request
+    /// named, not what is under them). Lists kept in the app follow them (Round 031).
+    pub relocated: Vec<(PathBuf, PathBuf)>,
 }
 
 impl Summary {
@@ -774,6 +777,14 @@ impl Worker {
                 Kind::Move => {
                     if let Some(d) = req.dest.as_deref() {
                         self.move_into(src, d, req.rename_to.as_deref());
+                        if let Some(name) = req.rename_to.as_deref().or(src.file_name()) {
+                            let to = d.join(name);
+                            if fs::symlink_metadata(src).is_err()
+                                && fs::symlink_metadata(&to).is_ok()
+                            {
+                                self.sum.relocated.push((src.clone(), to));
+                            }
+                        }
                     }
                 }
                 Kind::Delete => self.delete(src, req.to_trash, req.trash_root.as_deref()),
@@ -2564,14 +2575,19 @@ mod tests {
         assert!(sum.made[0].ident.is_dir());
     }
 
-    /// A move remembers nothing of the kind: its undo moves back.
+    /// A move remembers nothing of the kind: its undo moves back. It says where each
+    /// source went, for the lists that follow them.
     #[test]
     fn a_move_reports_nothing_made() {
         let d = tmp("made-move");
         fs::create_dir_all(d.join("to")).unwrap();
         fs::write(d.join("f"), "x").unwrap();
-        let sum = run(Request::mv(vec![d.join("f")], d.join("to")));
+        let sum = run(Request::mv(
+            vec![d.join("f"), d.join("missing")],
+            d.join("to"),
+        ));
         assert!(sum.made.is_empty() && !sum.made_over);
+        assert_eq!(sum.relocated, [(d.join("f"), d.join("to/f"))]);
     }
 
     #[test]

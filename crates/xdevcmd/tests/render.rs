@@ -3937,6 +3937,32 @@ fn alt_f7_results_are_kept_and_back_returns_to_them() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Round 031: a row moved elsewhere from a results tab stays in the list, naming the
+/// file where it went, instead of being dropped as gone.
+#[test]
+fn a_row_moved_from_a_results_tab_follows_it() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("src/deep")).unwrap();
+    fs::write(a.join("src/main.rs"), "fn main() {}").unwrap();
+    fs::write(a.join("src/deep/lib.rs"), "").unwrap();
+    // End: src/main.rs, the last row; F6 moves it to the other pane.
+    let s = shot_keys("110x24", "Alt+F7,*,.,r,s,Enter,End,F6,Enter,wait", &a, &b);
+    assert!(b.join("main.rs").exists(), "moved\n{s}");
+    assert!(!s.contains("gone"), "{s}");
+    let left = |s: &str| -> String {
+        s.lines()
+            .map(|l| l.chars().take(55).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(
+        left(&s).contains("main"),
+        "the row is kept, where it went\n{s}"
+    );
+    assert!(left(&s).contains("deep/lib"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// A row in a results tab lives in another directory: renaming it in place renames it
 /// there, and the row follows.
 #[test]

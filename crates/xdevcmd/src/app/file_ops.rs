@@ -441,6 +441,8 @@ impl App {
             InputKind::Rename { from } => match xdevcmd_core::rename::rename(from, &text) {
                 Ok(to) => {
                     if to != *from {
+                        let pair = [(from.clone(), to.clone())];
+                        self.follow_renames(&pair);
                         self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(vec![(
                             from.clone(),
                             to.clone(),

@@ -150,6 +150,42 @@ pub fn set_chosen(id: Id, row: Option<PathBuf>) {
     }
 }
 
+/// Files moved or renamed, each (from, to): every kept list's rows at or under `from`
+/// now name the same file under `to`, instead of being found gone at the next check
+/// (Round 031). Returns how many rows followed.
+pub fn relink(moved: &[(PathBuf, PathBuf)]) -> usize {
+    let follow = |p: &Path| {
+        moved.iter().find_map(|(from, to)| {
+            // Not `to.join("")`: that adds a slash, and "f.txt/" is no file.
+            p.strip_prefix(from).ok().map(|rest| {
+                if rest.as_os_str().is_empty() {
+                    to.clone()
+                } else {
+                    to.join(rest)
+                }
+            })
+        })
+    };
+    let mut n = 0;
+    for l in store().lists.iter_mut() {
+        for r in l.rows.iter_mut() {
+            if let Some(to) = follow(r) {
+                if l.fresh.remove(r) {
+                    l.fresh.insert(to.clone());
+                }
+                *r = to;
+                n += 1;
+            }
+        }
+        if let Some(to) = l.chosen.as_deref().and_then(follow) {
+            l.chosen = Some(to);
+        }
+        let mut seen = std::collections::HashSet::new();
+        l.rows.retain(|r| seen.insert(r.clone()));
+    }
+    n
+}
+
 /// A check of list `id` ended: drop the rows found gone, and say which of them had
 /// been there (the rest were never files). Every row is checked from now on.
 pub fn checked(id: Id, gone: &[PathBuf]) -> Vec<PathBuf> {
@@ -267,6 +303,45 @@ mod tests {
 
     // The store is one for the process, and tests run at once: each test works only
     // with the ids it made.
+
+    /// Round 031: a row moved or renamed, or under a directory that was, follows it;
+    /// the rest of the list stays as it was.
+    #[test]
+    fn rows_follow_what_was_moved_or_renamed() {
+        let id = keep(
+            "moved".into(),
+            "/r031".into(),
+            vec![
+                "/r031/a/one.txt".into(),
+                "/r031/a/sub/two.txt".into(),
+                "/r031/b.txt".into(),
+                "/r031/ab.txt".into(),
+            ],
+            false,
+            0,
+            false,
+            Vec::new(),
+        );
+        set_chosen(id, Some("/r031/a/one.txt".into()));
+        let n = relink(&[
+            ("/r031/a".into(), "/r031/x/a".into()),
+            ("/r031/b.txt".into(), "/r031/c.txt".into()),
+        ]);
+        assert_eq!(n, 3);
+        let l = get(id).unwrap();
+        assert_eq!(
+            l.rows,
+            [
+                PathBuf::from("/r031/x/a/one.txt"),
+                "/r031/x/a/sub/two.txt".into(),
+                "/r031/c.txt".into(),
+                "/r031/ab.txt".into(),
+            ],
+            "ab.txt is not under a"
+        );
+        assert_eq!(l.chosen, Some(PathBuf::from("/r031/x/a/one.txt")));
+        assert!(l.fresh.contains(Path::new("/r031/c.txt")));
+    }
 
     #[test]
     fn a_list_is_kept_and_the_one_used_last_is_active() {

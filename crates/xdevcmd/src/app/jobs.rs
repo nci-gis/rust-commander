@@ -63,6 +63,7 @@ impl App {
                 };
                 self.note_trashed(s);
                 self.note_copied(j.kind, s);
+                self.follow_moves(&s.relocated);
             }
         }
         // Marks are cleared once an operation has run, the way every orthodox manager
@@ -91,6 +92,7 @@ impl App {
                 let s = s.clone();
                 self.note_trashed(&s);
                 self.note_copied(j.kind, &s);
+                self.follow_moves(&s.relocated);
                 // A job that ended in errors comes forward so they can be read.
                 if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
                     self.modal = Some(Modal::Job(j));
@@ -499,11 +501,54 @@ impl App {
         None
     }
 
+    /// Renames done, each (from, to): kept lists follow those that went through
+    /// (Round 031). Rename many's own pairs may go through a temporary name; only where
+    /// each ended counts.
+    pub(super) fn follow_renames(&mut self, moves: &[(PathBuf, PathBuf)]) {
+        let done: Vec<_> = moves
+            .iter()
+            .filter(|(f, t)| f.symlink_metadata().is_err() && t.symlink_metadata().is_ok())
+            .cloned()
+            .collect();
+        self.follow_moves(&done);
+    }
+
+    /// Files moved, each (from, to): the kept lists name them where they went, and a
+    /// results tab showing any of them shows them there, instead of dropping them as
+    /// gone at its next check (Round 031).
+    pub(super) fn follow_moves(&mut self, moved: &[(PathBuf, PathBuf)]) {
+        if moved.is_empty() {
+            return;
+        }
+        let mut reopen = Vec::new();
+        for (key, p) in self.panes.iter_mut() {
+            if let Some(tabs) = p.as_tabs_mut() {
+                for (i, f) in tabs.tabs_mut().iter_mut().enumerate() {
+                    if let Some(id) = f.holds_moved(moved) {
+                        reopen.push((*key, i, id));
+                    }
+                }
+            }
+        }
+        crate::lists::relink(moved);
+        for (key, i, id) in reopen {
+            if let Some(f) = self
+                .panes
+                .get_mut(&key)
+                .and_then(|p| p.as_tabs_mut())
+                .and_then(|t| t.tabs_mut().get_mut(i))
+            {
+                f.reopen_list(id);
+            }
+        }
+    }
+
     /// Shift+F2's plan, carried out; it becomes the one step undo takes back.
     pub(super) fn batch_rename(&mut self, moves: Vec<(PathBuf, PathBuf)>, safe: bool) {
         let Some(out) = self.rename_many(moves.clone(), safe, false) else {
             return;
         };
+        self.follow_renames(&moves);
         self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves));
         self.status = match (out.renamed, out.errors.first()) {
             (n, None) => format!("renamed {n}"),
@@ -518,9 +563,10 @@ impl App {
             .as_ref()
             .map(|u| u.describe())
             .unwrap_or_else(|| "rename".into());
-        let Some(out) = self.rename_many(moves, safe, true) else {
+        let Some(out) = self.rename_many(moves.clone(), safe, true) else {
             return;
         };
+        self.follow_renames(&moves);
         self.status = match out.errors.first() {
             None => format!("undone: {what}"),
             Some(e) => format!(

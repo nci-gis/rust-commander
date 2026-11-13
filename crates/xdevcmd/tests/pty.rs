@@ -1176,7 +1176,9 @@ fn a_planned_copy_killed_then_continued_keeps_every_decision() {
 
 /// Round 031: killed after the old file went to the trash and before the new one was
 /// renamed in, the next start finishes the rename and says so; the old file is in the
-/// trash (the scratch one: XDG_DATA_HOME).
+/// trash (the scratch one: XDG_DATA_HOME). Linux only: the test build puts a replaced
+/// file in the trash only there, where the trash is the test's own.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
     let s = Scratch::new("kill-swap");

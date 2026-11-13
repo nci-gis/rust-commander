@@ -3959,7 +3959,10 @@ fn a_row_moved_from_a_results_tab_follows_it() {
         left(&s).contains("main"),
         "the row is kept, where it went\n{s}"
     );
-    assert!(left(&s).contains("deep/lib"), "{s}");
+    assert!(
+        left(&s).contains("deep/lib") || left(&s).contains("deep\\lib"),
+        "{s}"
+    );
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

@@ -1,10 +1,10 @@
 # Round 030: Smart Planner v1, the core (v0.4.0-beta.1, part 2 of 4, item 42)
 
-**Status**: Planning — kickoff review written 2026-11-13 (below); waiting for the
-owner's go and decisions 1–6
+**Status**: In Progress (the owner's go, 2026-11-13: "Go as recommended"; decisions 1–6
+as recommended)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, beta.1; item 42 ("Notes on the items → 42
 Smart Planner v1"); the owner's decisions of 2026-11-13
-**Date started**: YYYY-MM-DD
+**Date started**: 2026-11-13
 **Date completed**: YYYY-MM-DD
 
 ## Goal
@@ -239,6 +239,33 @@ About two and a half weeks.
   43, beta.2). Handing the plan to rsync, robocopy or rclone (item 44, 0.5).
 
 ## Do
+
+### 2026-11-13, the owner's decisions
+
+All six as recommended ("Go as recommended"): (1) Windows free space and FAT type are
+"unknown" for beta.1; (2) streaming goes to beta.2 with the lanes, this round plans in
+full behind a cancellable progress line with **Start now** as the fallback; (3) the
+journal keeps decisions, not rows; (4) F5, F6, Shift+F5, Alt+Y, Resume; (5) group
+answers for the job only; (6) the 64 files / 128 MB floor, and past 200,000 rows only
+rows with a decision are kept.
+
+### 2026-11-13, step 1: the model and the scan
+
+- `xdevcmd-core/src/plan.rs`: `Plan { kind, dest, rows, totals, same_device }`, `Row {
+  src, dst, dir, bytes, class, target: Option<Ident>, blocked }`, `Class` (New,
+  Identical, Older, Newer, Differs, FileOverDir, DirOverFile, Merge), `Blocked`
+  (Unreadable, Special, IntoItself, SameFile). One walk: each destination looked at
+  once (not under a directory that is itself new); a directory over a file is one row
+  with its subtree's size. `start` runs it on its own thread with progress every 512
+  entries; dropping the handle stops it. Past `CAP` (200,000) only rows with a decision
+  are kept, the rest counted (`dropped`). `same_device`: `st_dev` on Unix, the drive or
+  share on Windows.
+- Not wired yet: the F5 dialog still counts with `ops::count` (step 3), the worker
+  still scans (step 4).
+- Tests (8, core): all new; every class with the old file's `Ident`; an unreadable
+  directory and an unreadable file as blocked rows through the seam (`ReadDir`,
+  `Stat`); into itself and onto itself; Shift+F5's rename; a stopped scan; the cap; the
+  thread's progress and end. fmt; clippy for Linux, windows-gnu and darwin.
 
 ## Check
 

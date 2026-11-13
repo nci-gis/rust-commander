@@ -28,6 +28,7 @@ pub mod name_mask;
 pub mod noreplace;
 pub mod ops;
 pub mod paths;
+pub mod plan;
 pub mod policy;
 pub mod rename;
 pub mod sha256;

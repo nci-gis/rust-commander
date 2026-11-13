@@ -1100,7 +1100,12 @@ mod tests {
         let req = Request::copy(vec![a.join("new.txt")], b.clone());
         app.jobs.push(Job::new(ops::Kind::Copy, ops::start(req)));
         wait_until(&mut app, "the job to finish", |a| a.jobs.is_empty());
-        assert_eq!(app.status, "background: 1 copied");
+        // "(by the kernel)" or "(cloned)" after it where the platform's copy ran.
+        assert!(
+            app.status.starts_with("background: 1 copied"),
+            "{}",
+            app.status
+        );
         assert!(app.modal.is_none(), "a clean finish stays out of the way");
         assert!(b.join("new.txt").exists());
 

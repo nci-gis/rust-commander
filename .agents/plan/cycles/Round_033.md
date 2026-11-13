@@ -486,6 +486,37 @@ the rest. One job of 1,000 files, the median of three:
   editor that mends the file → "is right now".
 - Docs: `docs/config.md`, CHANGELOG.
 
+### 2026-11-13, item 22: the platform's fast copy, behind a fallback
+
+- `fastcopy.rs` (core): the engines, all through rustix, so no unsafe code:
+  - Linux: `FICLONE`, else `copy_file_range` in 4 MiB steps (Esc and progress between
+    steps), else the old loop from the offsets where the kernel stopped. Refused:
+    EXDEV, ENOSYS, EOPNOTSUPP, EINVAL, EBADF, EPERM, EOVERFLOW, ETXTBSY, and a 0 on the
+    first step (/proc files). Other errors are the copy's errors.
+  - macOS: `fclonefileat(NOFOLLOW | NOOWNERCOPY)` before the temporary file is created
+    (it makes the file itself), else the old way.
+  - Windows: unchanged. `CopyFile2` (SMB server-side copy, ReFS and Dev Drive block
+    cloning) needs FFI, and core is `forbid(unsafe_code)`; `std::fs::copy`
+    (CopyFileExW) has neither progress nor Esc. **For the owner.**
+- Only the bytes change hands: the temporary name, the journal line, the syncs, group
+  commit and the rename are as before. A planted `Write` fault is met once per step.
+- **Named**: `Summary::cloned` and `by_kernel`; the status line says "(cloned)", "(by
+  the kernel)", or counts when mixed. The F5 dialog says nothing yet (the engine is
+  known only once a file is copied).
+- `[general] fast_copy` (default on), `Request::fast` (taken per job, as `safe`).
+- **Tests** (core): a 9 MiB file arrives whole, the engine named, and off is the own
+  loop with nothing said; a /proc file the kernel will not copy is read and written.
+- **Measured** (this sandbox, ext4, data in memory, `XDEVCMD_BENCH_FAST=0` against
+  the default, 3 runs each): `copy-big` 2 GiB 465 ms against 518 ms; `copy-small`
+  5,000 files 106 ms against 127 ms. Not measured: clones (Btrfs, XFS, APFS) and
+  server-side copies (NFS, SMB), where the gain is the point.
+- Docs: `docs/security.md` "Who moves the bytes", `docs/config.md`, CHANGELOG.
+- Found on the way: a local `cargo package --workspace` verified `xdevcmd` against a
+  stale build of the overlay's `xdevcmd-core` 0.4.0-beta.1 (cargo keys a registry
+  crate by name and version, and the version has not moved since beta.1), so a new
+  core module looked missing. `cargo clean -p xdevcmd-core` fixed it. CI builds from
+  nothing and is not affected.
+
 ## Check
 
 ## Act

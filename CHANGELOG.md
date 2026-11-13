@@ -36,6 +36,12 @@ that heading and starts a new, empty one here. -->
   are on disk. 5,000 files: 2.9 s instead of 59.7 s (Linux). A job past 1,000 files
   tries 2, 8, 16 and 32 threads on its next batches and keeps the fastest.
   `cargo xtask sync-sweep` measures a drive.
+- **Copies use the system's fast copy where the drive allows it** (Linux and macOS): a
+  clone on Btrfs, XFS and APFS (instant, no space used until a file changes), else on
+  Linux the kernel's `copy_file_range` (server-side on NFS 4.2 and SMB; on ext4 about
+  10–15% faster). Anything refused falls back to xdevcmd's own read and write. The
+  status line says which ran ("5 copied (by the kernel)"). `[general] fast_copy = false`
+  turns it off.
 
 ### Fixed
 - **F5 and F6 check faster on Windows the first time**: inside a folder, what a file is

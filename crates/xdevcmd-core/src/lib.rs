@@ -14,6 +14,7 @@ pub mod color;
 pub mod compare;
 pub mod document;
 pub mod entry;
+pub mod fastcopy;
 #[doc(hidden)]
 pub mod faults;
 pub mod find;

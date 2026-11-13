@@ -745,6 +745,9 @@ fn run_case(case: &str, size: u64, dir: &Path) -> Result<f64, String> {
             let mut req = Request::copy(vec![src.clone()], to.clone());
             // Whatever the user's setting, the default's way of writing.
             req.safe = true;
+            // The platform's fast copy (item 22) is the default; XDEVCMD_BENCH_FAST=0
+            // measures xdevcmd's own read and write against it.
+            req.fast = std::env::var("XDEVCMD_BENCH_FAST").as_deref() != Ok("0");
             let t = Instant::now();
             let s = run_job(ops::start(req))?;
             if case != "undo" {

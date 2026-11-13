@@ -103,6 +103,7 @@ impl App {
         s.depth = self.settings.depth;
         crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
         xdevcmd_core::ops::set_safe(s.config.general.safe_operations);
+        xdevcmd_core::fastcopy::set_enabled(s.config.general.fast_copy);
         if self.interactive {
             self.graphics_found = crate::graphics::detect(
                 &s.config.viewer.images,

@@ -340,6 +340,7 @@ fn main() -> Result<()> {
     let files = &settings.config.files;
     crate::pane::files::set_fuzzy(files.filter == "fuzzy");
     xdevcmd_core::ops::set_safe(settings.config.general.safe_operations);
+    xdevcmd_core::fastcopy::set_enabled(settings.config.general.fast_copy);
     // Safe operations' journal sits beside the session, in the state directory.
     if let Some(dir) = session::default_path()
         .as_deref()

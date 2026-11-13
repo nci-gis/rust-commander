@@ -130,6 +130,24 @@ operations on or off:
   job. Syncing every new file would make a copy of many small files several times
   slower, for a protection only a power cut needs.
 
+**Who moves the bytes** (item 22, Round 033). The plan, the temporary name, the syncs
+and the rename above are xdevcmd's, whatever copies the data in between. With
+`[general] fast_copy` on (the default), the system's own fast copy does that part where
+the drive allows it:
+- **Linux**: a **clone** first (Btrfs, XFS, bcachefs: the copy shares the source's
+  blocks until either changes, so no data is written and no space used), else the
+  kernel's `copy_file_range` (the data does not pass through xdevcmd; NFS 4.2 and SMB
+  servers copy on their side), else xdevcmd reads and writes as before.
+- **macOS**: a clone (`fclonefileat`) on APFS, owned by you, else read and write.
+- **Windows**: read and write, as before.
+
+A step the drive refuses (another file system, an old kernel, a special file) falls back
+to read and write where it stopped, without a question; a real error (disk full, I/O) is
+the copy's error as before. The status line at the end says which ran: "120 copied
+(cloned)", "5 copied (by the kernel)", or counts when mixed. Turn it off if a file
+system's cloning is in doubt (OpenZFS 2.2.0 and 2.2.1 had a block-cloning bug, fixed in
+2.2.2): xdevcmd then always reads and writes.
+
 **What survives a kill, and what survives a power cut.**
 - A **kill** (`kill -9`, a crash, the terminal closed): with safe operations on, never a
   short file under a real name; the next start tidies up and offers to continue. A move

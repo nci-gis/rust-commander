@@ -35,6 +35,10 @@ const GROUP_PROBE_AFTER: u64 = 1000;
 const GROUP_PROBE: [usize; 4] = [2, 8, 16, 32];
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
+/// Bytes a `copy_file_range` step asks the kernel for: progress and Esc are seen
+/// between steps (item 22).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const KERNEL_CHUNK: usize = 4 << 20;
 /// And at least this often while anything moves.
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -117,6 +121,9 @@ pub struct Request {
     /// between two ways of writing, and tests set it here rather than in a global
     /// other tests read.
     pub safe: bool,
+    /// The platform's fast copy for this job (item 22, `[general] fast_copy`), taken
+    /// as `safe` is.
+    pub fast: bool,
     /// The waits between tries of a file that failed with an error that passes (a
     /// network one): [`BACKOFF_SECS`]; then the user is asked. Tests shorten them.
     pub backoff: Vec<std::time::Duration>,
@@ -225,6 +232,7 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            fast: crate::fastcopy::enabled(),
             backoff: backoff(),
         }
     }
@@ -244,6 +252,7 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            fast: crate::fastcopy::enabled(),
             backoff: backoff(),
         }
     }
@@ -263,6 +272,7 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            fast: crate::fastcopy::enabled(),
             backoff: backoff(),
         }
     }
@@ -458,6 +468,10 @@ pub struct Summary {
     /// A move: each source that went, and where it is now (the sources the request
     /// named, not what is under them). Lists kept in the app follow them (Round 031).
     pub relocated: Vec<(PathBuf, PathBuf)>,
+    /// Files whose bytes the platform's fast copy moved (item 22): cloned by the drive,
+    /// and copied by the kernel (`copy_file_range`). The rest, xdevcmd read and wrote.
+    pub cloned: u64,
+    pub by_kernel: u64,
 }
 
 impl Summary {
@@ -470,6 +484,19 @@ impl Summary {
             Kind::Pack => "packed",
         };
         let mut s = format!("{} {verb}", self.done);
+        // The engine that ran (item 22), when it was not xdevcmd's own loop: named
+        // alone when it did every file, counted when engines were mixed.
+        let fast = match (self.cloned, self.by_kernel) {
+            (0, 0) => None,
+            (n, 0) if n == self.done => Some("cloned".to_string()),
+            (0, n) if n == self.done => Some("by the kernel".to_string()),
+            (0, k) => Some(format!("{k} by the kernel")),
+            (c, 0) => Some(format!("{c} cloned")),
+            (c, k) => Some(format!("{c} cloned, {k} by the kernel")),
+        };
+        if let Some(f) = fast {
+            s.push_str(&format!(" ({f})"));
+        }
         if self.skipped > 0 {
             s.push_str(&format!(", {} skipped", self.skipped));
         }
@@ -618,6 +645,8 @@ pub fn start(req: Request) -> Handle {
             keeps: Default::default(),
             old_trashed: None,
             group: Group::new(),
+            fast: req.fast,
+            engine: crate::fastcopy::Engine::Own,
         };
         w.run(req);
     });
@@ -697,6 +726,15 @@ struct Worker {
     old_trashed: Option<crate::trashed::Trashed>,
     /// Group commit: replacements written and waiting for their batch's sync.
     group: Group,
+    /// `[general] fast_copy` when the job started (item 22). Nothing reads it where
+    /// there is no fast copy yet (Windows).
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "android", target_vendor = "apple")),
+        allow(dead_code)
+    )]
+    fast: bool,
+    /// The engine that moved the last file's bytes.
+    engine: crate::fastcopy::Engine,
 }
 
 /// A replacement written under its temporary name, its handle open, waiting for the
@@ -1636,6 +1674,7 @@ impl Worker {
             part_name(dst)
         };
         self.moved_file = None;
+        self.engine = crate::fastcopy::Engine::Own;
         writing_in_test(&target);
         if !in_place {
             if let Some(j) = self.journal.as_mut() {
@@ -1643,11 +1682,44 @@ impl Worker {
                 let _ = j.part(&target);
             }
         }
-        let mut w = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)?;
-        let written = self.write_all_from(&mut r, &mut w, &target);
+        // macOS clones by making the file itself, so before it is created (item 22).
+        #[cfg(target_vendor = "apple")]
+        let cloned = self.fast && crate::fastcopy::clone_at(&r, &target);
+        #[cfg(not(target_vendor = "apple"))]
+        let cloned = false;
+        let opened = if cloned {
+            fs::OpenOptions::new().write(true).open(&target)
+        } else {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+        };
+        let mut w = match opened {
+            Ok(w) => w,
+            Err(e) => {
+                if cloned {
+                    let _ = fs::remove_file(&target);
+                }
+                return Err(e);
+            }
+        };
+        let written = if cloned {
+            crate::faults::at(crate::faults::Point::Write, &target).map(|()| {
+                self.advance(meta.len());
+                self.engine = crate::fastcopy::Engine::Clone;
+                true
+            })
+        } else {
+            self.write_all_from(&mut r, &mut w, &target)
+        };
+        if matches!(written, Ok(true)) {
+            match self.engine {
+                crate::fastcopy::Engine::Clone => self.sum.cloned += 1,
+                crate::fastcopy::Engine::Kernel => self.sum.by_kernel += 1,
+                crate::fastcopy::Engine::Own => {}
+            }
+        }
         // A new file on a network target is synced before its rename (the owner's
         // decision 3, Round 031): SMB and NFS report a failed write only at the sync or
         // the close, and a dropped handle hides the close's error. A replacement is
@@ -1886,6 +1958,12 @@ impl Worker {
 
     /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
     fn write_all_from(&mut self, r: &mut File, w: &mut File, path: &Path) -> io::Result<bool> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if self.fast {
+            if let Some(done) = self.kernel_copy(r, w, path)? {
+                return Ok(done);
+            }
+        }
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -1901,6 +1979,38 @@ impl Worker {
         }
         w.flush()?;
         Ok(true)
+    }
+
+    /// Linux's fast copy (item 22): a clone, else `copy_file_range`. `None`: neither
+    /// would, and the file's offsets are where the kernel stopped, so read and write
+    /// go on from there. A fault planted at `Write` is met once per step taken.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn kernel_copy(&mut self, r: &File, w: &File, path: &Path) -> io::Result<Option<bool>> {
+        use crate::fastcopy::{Engine, Step};
+        if crate::fastcopy::clone_into(r, w) {
+            crate::faults::at(crate::faults::Point::Write, path)?;
+            self.advance(r.metadata()?.len());
+            self.engine = Engine::Clone;
+            return Ok(Some(true));
+        }
+        let mut first = true;
+        loop {
+            if self.cancel.load(Ordering::Relaxed) {
+                return Ok(Some(false));
+            }
+            match crate::fastcopy::kernel_step(r, w, KERNEL_CHUNK, first)? {
+                Step::Copied(n) => {
+                    crate::faults::at(crate::faults::Point::Write, path)?;
+                    self.advance(n as u64);
+                    first = false;
+                }
+                Step::End => {
+                    self.engine = Engine::Kernel;
+                    return Ok(Some(true));
+                }
+                Step::Refused => return Ok(None),
+            }
+        }
     }
 
     // ── move ───────────────────────────────────────────────────────────────────────
@@ -2967,6 +3077,77 @@ mod tests {
         assert!(src.join("a.txt").exists(), "copy must not move");
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Item 22: a file of several kernel steps arrives whole by the platform's fast copy
+    /// (a clone, or the kernel's copy), which the summary names; off, xdevcmd reads and
+    /// writes, and says nothing about an engine.
+    #[test]
+    fn the_fast_copy_brings_the_file_whole_and_is_named_and_off_is_the_own_loop() {
+        let root = tmp("fast-copy");
+        let dst_on = root.join("on");
+        let dst_off = root.join("off");
+        fs::create_dir_all(&dst_on).unwrap();
+        fs::create_dir_all(&dst_off).unwrap();
+        // Not a multiple of a step, and not the same byte everywhere.
+        let body: Vec<u8> = (0..(9 << 20) + 12_345u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+        let src = root.join("big.bin");
+        fs::write(&src, &body).unwrap();
+
+        let mut req = Request::copy(vec![src.clone()], dst_on.clone());
+        req.fast = true;
+        let s = run(req);
+        assert_eq!((s.done, s.failed), (1, 0), "{:?}", s.errors);
+        assert!(fs::read(dst_on.join("big.bin")).unwrap() == body);
+        let fast = s.cloned + s.by_kernel;
+        if cfg!(any(target_os = "linux", target_vendor = "apple")) {
+            assert_eq!(fast, 1, "{s:?}");
+            let said = s.describe(Kind::Copy);
+            assert!(
+                said == "1 copied (cloned)" || said == "1 copied (by the kernel)",
+                "{said}"
+            );
+        } else {
+            assert_eq!(fast, 0, "{s:?}");
+        }
+
+        let mut req = Request::copy(vec![src.clone()], dst_off.clone());
+        req.fast = false;
+        let s = run(req);
+        assert_eq!((s.done, s.cloned, s.by_kernel), (1, 0, 0), "{s:?}");
+        assert!(fs::read(dst_off.join("big.bin")).unwrap() == body);
+        assert_eq!(s.describe(Kind::Copy), "1 copied");
+        let _ = fs::remove_dir_all(&root);
+
+        // Engines mixed in one job are counted.
+        let mixed = Summary {
+            done: 3,
+            cloned: 2,
+            by_kernel: 1,
+            ..Summary::default()
+        };
+        assert_eq!(
+            mixed.describe(Kind::Copy),
+            "3 copied (2 cloned, 1 by the kernel)"
+        );
+    }
+
+    /// A file the kernel will not copy (a /proc file says it is empty, and
+    /// `copy_file_range` copies nothing) is read and written by xdevcmd instead.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn what_the_kernel_will_not_copy_is_read_and_written_instead() {
+        let root = tmp("fast-refused");
+        fs::create_dir_all(&root).unwrap();
+        let mut req = Request::copy(vec![PathBuf::from("/proc/self/mounts")], root.clone());
+        req.fast = true;
+        let s = run(req);
+        assert_eq!((s.done, s.failed), (1, 0), "{:?}", s.errors);
+        assert_eq!((s.cloned, s.by_kernel), (0, 0), "{s:?}");
+        assert!(!fs::read(root.join("mounts")).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]

@@ -34,6 +34,7 @@ delete_to_trash = true    # F8 uses the trash; Shift+F8 always deletes for good
 restore_session = true    # reopen last time's panes and tabs
 autosave_secs = 5         # save them this often when they change: 5-3600, or 0 = on quit
 safe_operations = true    # copies via a temporary name; a killed run is cleaned up (security.md)
+fast_copy = true          # the system's fast copy: a clone, or the kernel's copy (security.md)
 menu_bar = true           # the File | View | Help bar
 
 [files]

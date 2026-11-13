@@ -108,6 +108,16 @@ operations on or off:
   line for it is synced in between. A sync that fails removes the new file and keeps
   the old one; Retry copies it again from its source rather than trusting a second sync
   of the same file (on Linux a failed sync can drop the data and clear the error).
+  Small files (up to 1 MiB) replaced on a local drive are synced **together**, up to
+  64 files (or 16 MiB, or a second's worth) at a time, on several threads at once, and
+  their journal lines in one sync. Each file is still renamed only after its own data
+  and its journal line are on disk; only the waiting is shared (Round 033).
+  - The threads: 16 to start, 8 on macOS. A job past 1,000 such files tries 2, 8, 16
+    and 32 on its next batches and keeps the fastest for its drive.
+  - Measured: 5,000 files replaced in 2.9 s instead of 59.7 s on Linux's ext4. On a
+    Windows 11 laptop the syncs alone were 4.6× faster on 16 threads, up to 8.5× on 32.
+  - A file whose sync fails in a batch is asked about on its own, as above; the rest of
+    its batch goes on.
 - **A move across drives** removes a source only once its copy is on disk: the copy's
   data synced, then its folder (so its name survives too), then the journal's line
   saying both exist, and only then the source. This is done 64 files (or 64 MiB) at a

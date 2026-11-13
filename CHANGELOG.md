@@ -27,6 +27,12 @@ that heading and starts a new, empty one here. -->
 ### Changed
 - **F1's own row, chosen inside F1, switches between the small and the large window**
   instead of closing and opening F1 again.
+- **Replacing many small files is many times faster**: replaced files of up to 1 MiB
+  on a local drive are synced together, in batches, on several threads, with one
+  journal sync a batch. Each is still renamed only once its data and its journal line
+  are on disk. 5,000 files: 2.9 s instead of 59.7 s (Linux). A job past 1,000 files
+  tries 2, 8, 16 and 32 threads on its next batches and keeps the fastest.
+  `cargo xtask sync-sweep` measures a drive.
 
 ### Fixed
 - **F5 and F6 check faster on Windows the first time**: inside a folder, what a file is

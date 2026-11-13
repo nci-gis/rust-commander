@@ -21,6 +21,18 @@ const BUF: usize = 256 * 1024;
 /// [`MOVE_BATCH_BYTES`] of them, whichever comes first.
 const MOVE_BATCH_FILES: usize = 64;
 const MOVE_BATCH_BYTES: u64 = 64 << 20;
+/// Group commit (Round 033): a replaced file this small, on a local drive, waits in a
+/// batch for one parallel sync of the batch instead of its own sync on the way.
+const GROUP_FILE_MAX: u64 = 1 << 20;
+/// A batch is synced at this many bytes...
+const GROUP_BATCH_BYTES: u64 = 16 << 20;
+/// ...or once its first file has waited this long, so the bar and the files keep moving.
+const GROUP_BATCH_AGE: std::time::Duration = std::time::Duration::from_secs(1);
+/// After this many batched files the job tries other thread counts on its next files
+/// (the probe), and keeps the fastest. Smaller jobs keep the system's default.
+const GROUP_PROBE_AFTER: u64 = 1000;
+/// The thread counts the probe tries (the owner: 2 rather than 1, at most 32).
+const GROUP_PROBE: [usize; 4] = [2, 8, 16, 32];
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
 /// And at least this often while anything moves.
@@ -605,6 +617,7 @@ pub fn start(req: Request) -> Handle {
             network: Default::default(),
             keeps: Default::default(),
             old_trashed: None,
+            group: Group::new(),
         };
         w.run(req);
     });
@@ -682,6 +695,155 @@ struct Worker {
     keeps: std::collections::HashMap<PathBuf, bool>,
     /// The file the last replace put in the trash, for its undo.
     old_trashed: Option<crate::trashed::Trashed>,
+    /// Group commit: replacements written and waiting for their batch's sync.
+    group: Group,
+}
+
+/// A replacement written under its temporary name, its handle open, waiting for the
+/// batch's sync before the steps that finish it (Round 033).
+struct Pending {
+    src: PathBuf,
+    dst: PathBuf,
+    tmp: PathBuf,
+    file: File,
+    size: u64,
+    /// What was agreed about `dst` when it was asked or planned ([`Worker::agreed`]).
+    agreed: Option<(PathBuf, Ident)>,
+}
+
+/// The probe under way: thread counts still to try, and what each one tried measured
+/// (milliseconds a file).
+type Probe = (Vec<usize>, Vec<(usize, f64)>);
+
+/// Group commit's state (Round 033). Measured: a sync per file costs a journal commit
+/// each; syncs in flight together share one, so N files on T threads cost about N÷T
+/// commits. On the owner's Windows 11 laptop 16 threads were 4.6× one thread, 32 up
+/// to 8.5×; on ext4 16 were 9.7×; on macOS 8 were 2.4×.
+struct Group {
+    pending: Vec<Pending>,
+    bytes: u64,
+    since: Option<std::time::Instant>,
+    /// Threads for a batch's syncs.
+    threads: usize,
+    /// Files batched so far in this job.
+    batched: u64,
+    /// The probe under way: thread counts still to try, and what each one measured
+    /// (milliseconds a file).
+    probe: Option<Probe>,
+    probed: bool,
+    /// A flush is running: a question it asks (the journal's) must not flush again.
+    flushing: bool,
+    /// The file being written must not join a batch: a batch's own fallback.
+    off: bool,
+    /// Set by `copy_bytes` when the file just written joined the batch.
+    deferred: bool,
+}
+
+impl Group {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            bytes: 0,
+            since: None,
+            threads: group_default_threads(),
+            batched: 0,
+            probe: None,
+            probed: false,
+            flushing: false,
+            off: false,
+            deferred: false,
+        }
+    }
+
+    /// The threads the next batch syncs on.
+    fn threads_now(&self) -> usize {
+        self.probe
+            .as_ref()
+            .and_then(|(left, _)| left.first().copied())
+            .unwrap_or(self.threads)
+    }
+
+    /// The files the next batch holds: four rounds of its threads, at least 16 while
+    /// probing (one sample) and 64 otherwise.
+    fn cap(&self) -> usize {
+        let t = self.threads_now();
+        if self.probe.is_some() {
+            (4 * t).max(16)
+        } else {
+            (4 * t).max(64)
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.pending.len() >= self.cap()
+            || self.bytes >= GROUP_BATCH_BYTES
+            || self.since.is_some_and(|s| s.elapsed() >= GROUP_BATCH_AGE)
+    }
+
+    /// A batch of `files` synced in `ms`: the probe's measurement, and its choice once
+    /// every count is tried. A probe starts once [`GROUP_PROBE_AFTER`] files went by.
+    fn measured(&mut self, files: usize, ms: f64) {
+        if let Some((left, got)) = self.probe.as_mut() {
+            if files > 0 {
+                got.push((left.remove(0), ms / files as f64));
+            }
+            if left.is_empty() {
+                if let Some(best) = got.iter().min_by(|a, b| a.1.total_cmp(&b.1)) {
+                    self.threads = best.0;
+                }
+                self.probe = None;
+                self.probed = true;
+            }
+        } else if !self.probed && self.batched >= GROUP_PROBE_AFTER {
+            // The default first, then the others: what the default measures here is
+            // what the others are compared with.
+            let mut order = vec![self.threads];
+            order.extend(GROUP_PROBE.iter().filter(|n| **n != self.threads));
+            self.probe = Some((order, Vec::new()));
+        }
+    }
+}
+
+/// The thread count group commit starts with (Round 033: the CI sweep and the owner's
+/// laptop): 8 on macOS, where more did not help; 16 elsewhere.
+fn group_default_threads() -> usize {
+    if cfg!(target_os = "macos") {
+        8
+    } else {
+        16
+    }
+}
+
+/// Sync every pending file's data on `threads` threads, each taking the next file: per
+/// file, the error if its sync failed.
+fn sync_all(batch: &[Pending], threads: usize) -> Vec<Option<io::Error>> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut out: Vec<Option<io::Error>> = (0..batch.len()).map(|_| None).collect();
+    let failed: Vec<(usize, io::Error)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads.clamp(1, batch.len().max(1)))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut bad = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(p) = batch.get(i) else { break };
+                        if let Err(e) = crate::faults::sync_data(&p.file, &p.tmp) {
+                            bad.push((i, e));
+                        }
+                    }
+                    bad
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap_or_default())
+            .collect()
+    });
+    for (i, e) in failed {
+        out[i] = Some(e);
+    }
+    out
 }
 
 impl Worker {
@@ -791,6 +953,8 @@ impl Worker {
                 Kind::Extract | Kind::Pack => {}
             }
             // Finished with this source (not stopped part way): a resume leaves it.
+            // Its batch first: a resume leaves a source marked done.
+            self.flush_group();
             if !self.stopped() && matches!(req.kind, Kind::Copy | Kind::Move) {
                 if let Some(j) = self.journal.as_mut() {
                     let _ = j.done(src);
@@ -871,6 +1035,7 @@ impl Worker {
     /// The job is over: say how it went. A journal that broke on a line no step needed
     /// synced (a new file's) is said here, since nobody was asked about it.
     fn finish(&mut self) {
+        self.flush_group();
         self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
         self.sum.bytes = self.bytes_done;
         if let Some(why) = self.journal.as_ref().and_then(|j| j.broken()) {
@@ -956,6 +1121,9 @@ impl Worker {
     }
 
     fn ask(&mut self, q: Question) -> Answer {
+        // What is waiting in a batch is finished first: a question can stay open for
+        // minutes, and what was done before it should be done.
+        self.flush_group();
         if self.tx.send(Event::Ask(q)).is_err() {
             return Answer::Abort;
         }
@@ -1178,6 +1346,10 @@ impl Worker {
                 }
                 self.copy_node(&ent.path(), &dst.join(ent.file_name()));
             }
+            // A directory made read-only would refuse its batch's renames: they go first.
+            if denies_writing(&meta) {
+                self.flush_group();
+            }
             let _ = fs::set_permissions(dst, meta.permissions());
             self.sum.done += 1;
             // Moving: the directory goes only once empty, that is when everything in
@@ -1366,6 +1538,13 @@ impl Worker {
             }
             appear_in_test(dst);
             match self.copy_bytes(src, dst, free) {
+                // Waiting for its batch: counted when the batch finishes it.
+                Ok(true) if std::mem::take(&mut self.group.deferred) => {
+                    if self.group.full() {
+                        self.flush_group();
+                    }
+                    return;
+                }
                 Ok(true) => {
                     self.sum.done += 1;
                     self.advance(0);
@@ -1509,48 +1688,31 @@ impl Worker {
                         keep(self, w);
                     }
                     r
-                } else {
-                    // Removes the temporary file itself on any failure. The file there is
-                    // checked once more right before the rename: no portable rename
-                    // compares first, so a window of microseconds is left, not the
-                    // whole copy.
-                    // Where the trash is on this volume the old file goes there right
-                    // before the rename, so undo brings it back (Round 031). The
-                    // journal's `swap` line first: killed between the two, the next
-                    // start renames the complete new file in.
-                    let trash = self.replace_into_trash(dst);
-                    self.old_trashed = None;
-                    let r = commit_replace(w, &target, dst, || {
-                        if trash {
-                            if let Some(j) = self.journal.as_mut() {
-                                let _ = j.swap(&target, dst);
-                            }
-                        }
-                        // The journal first: its question can be open for minutes, and
-                        // the look at the target is the last thing before the rename.
-                        if !(self.durable(dst) && self.still_agreed(Some(src), dst)) {
-                            return Ok(false);
-                        }
-                        if trash {
-                            let t = crate::faults::at(crate::faults::Point::Trash, dst)
-                                .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
-                                .map_err(|e| {
-                                    io::Error::new(
-                                        e.kind(),
-                                        format!("the old file could not go to the trash: {e}"),
-                                    )
-                                })?;
-                            self.old_trashed = Some(t);
-                        }
-                        Ok(true)
+                } else if self.group_takes(dst, meta.len()) {
+                    // Group commit (Round 033): synced with its batch, then finished as
+                    // below ([`Worker::flush_group`]). The temporary file stays.
+                    self.group.pending.push(Pending {
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        tmp: target.clone(),
+                        file: w,
+                        size: meta.len(),
+                        agreed: self.agreed.clone(),
                     });
-                    // The rename failed after the old file went: it comes back.
-                    if !matches!(r, Ok(true)) {
-                        if let Some(t) = self.old_trashed.take() {
-                            let _ = crate::trashed::restore(&t);
-                        }
+                    self.group.bytes += meta.len();
+                    self.group.since.get_or_insert_with(std::time::Instant::now);
+                    self.group.batched += 1;
+                    self.group.deferred = true;
+                    return Ok(true);
+                } else {
+                    // Removes the temporary file itself on any failure.
+                    let synced = crate::faults::sync_data(&w, &target);
+                    drop(w);
+                    if let Err(e) = synced {
+                        let _ = fs::remove_file(&target);
+                        return Err(e);
                     }
-                    return r;
+                    return self.finish_replace(src, &target, dst);
                 }
             }
             other => other,
@@ -1559,6 +1721,167 @@ impl Worker {
             let _ = fs::remove_file(&target);
         }
         kept
+    }
+
+    /// The last steps of replacing `dst` with `tmp`, complete and synced (Round 029's
+    /// order): the journal's `swap` line where the old file goes to the trash, the
+    /// journal on disk, the target checked once more, the old file to the trash, the
+    /// rename. Whatever does not end in the rename removes `tmp`, and an old file
+    /// already in the trash comes back. The file there is checked right before the
+    /// rename: no portable rename compares first, so a window of microseconds is left,
+    /// not the whole copy.
+    fn finish_replace(&mut self, src: &Path, tmp: &Path, dst: &Path) -> io::Result<bool> {
+        let trash = self.replace_into_trash(dst);
+        if trash {
+            if let Some(j) = self.journal.as_mut() {
+                let _ = j.swap(tmp, dst);
+            }
+        }
+        // The journal first: its question can be open for minutes, and the look at the
+        // target is the last thing before the rename.
+        if !self.durable(dst) {
+            let _ = fs::remove_file(tmp);
+            return Ok(false);
+        }
+        self.rename_into(src, tmp, dst, trash)
+    }
+
+    /// The steps after the journal is on disk: the target checked once more, the old
+    /// file to the trash (`trash`), the rename. See [`Worker::finish_replace`].
+    fn rename_into(&mut self, src: &Path, tmp: &Path, dst: &Path, trash: bool) -> io::Result<bool> {
+        self.old_trashed = None;
+        let r = (|| {
+            if !self.still_agreed(Some(src), dst) {
+                return Ok(false);
+            }
+            if trash {
+                let t = crate::faults::at(crate::faults::Point::Trash, dst)
+                    .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
+                    .map_err(|e| {
+                        io::Error::new(
+                            e.kind(),
+                            format!("the old file could not go to the trash: {e}"),
+                        )
+                    })?;
+                self.old_trashed = Some(t);
+            }
+            crate::faults::at(crate::faults::Point::Rename, dst)?;
+            fs::rename(tmp, dst)?;
+            Ok(true)
+        })();
+        if !matches!(r, Ok(true)) {
+            let _ = fs::remove_file(tmp);
+            // The rename failed after the old file went: it comes back.
+            if let Some(t) = self.old_trashed.take() {
+                let _ = crate::trashed::restore(&t);
+            }
+        }
+        r
+    }
+
+    /// Whether a replacement of `size` bytes at `dst` waits for a batch (Round 033):
+    /// small, on a local drive, not moving (a move batches its own way), and not a
+    /// batch's own fallback.
+    fn group_takes(&mut self, dst: &Path, size: u64) -> bool {
+        !self.group.off && !self.moving && size <= GROUP_FILE_MAX && !self.on_network(dst)
+    }
+
+    /// Sync the waiting batch, then finish each of its files in order, exactly as a
+    /// replacement on its own is finished ([`Worker::finish_replace`]). A file whose
+    /// sync failed, or whose last steps did not end in the rename, is done again on its
+    /// own from its source (a failed sync is never tried again on the same file:
+    /// fsyncgate); that way asks again if the file there changed, and asks about an
+    /// error that stays. Stopped: the temporary files go, and the old files stay.
+    fn flush_group(&mut self) {
+        if self.group.pending.is_empty() || self.group.flushing {
+            return;
+        }
+        self.group.flushing = true;
+        let batch = std::mem::take(&mut self.group.pending);
+        self.group.bytes = 0;
+        self.group.since = None;
+        if self.stopped() {
+            for p in batch {
+                drop(p.file);
+                let _ = fs::remove_file(&p.tmp);
+            }
+            self.group.flushing = false;
+            return;
+        }
+        let threads = self.group.threads_now();
+        let started = std::time::Instant::now();
+        let synced = sync_all(&batch, threads);
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        self.group.measured(batch.len(), ms);
+        // The journal's lines for the whole batch (a `swap` where the old file goes to
+        // the trash), then one commit for them all, before any old file goes or any
+        // rename: each file's order is Round 029's, the journal's sync is shared.
+        let mut trash = Vec::with_capacity(batch.len());
+        for (p, failed) in batch.iter().zip(&synced) {
+            let to_trash = failed.is_none() && self.replace_into_trash(&p.dst);
+            if to_trash {
+                if let Some(j) = self.journal.as_mut() {
+                    let _ = j.swap(&p.tmp, &p.dst);
+                }
+            }
+            trash.push(to_trash);
+        }
+        let any = synced.iter().any(Option::is_none);
+        let journal = !any || self.stopped() || self.durable(&batch[0].dst);
+        for ((p, failed), to_trash) in batch.into_iter().zip(synced).zip(trash) {
+            let Pending {
+                src,
+                dst,
+                tmp,
+                file,
+                size,
+                agreed,
+            } = p;
+            drop(file);
+            let r = match failed {
+                Some(e) => {
+                    let _ = fs::remove_file(&tmp);
+                    Err(e)
+                }
+                None if self.stopped() || !journal => {
+                    let _ = fs::remove_file(&tmp);
+                    Ok(false)
+                }
+                None => {
+                    self.agreed = agreed;
+                    self.rename_into(&src, &tmp, &dst, to_trash)
+                }
+            };
+            // As `copy_file` takes the same outcomes for a file on its own.
+            let again = match r {
+                Ok(true) => {
+                    self.sum.done += 1;
+                    self.advance(0);
+                    if let Some(t) = self.old_trashed.take() {
+                        self.sum.replaced_to_trash += 1;
+                        self.made(&dst, Some(t));
+                    } else if self.recording {
+                        self.sum.replaced_for_good += 1;
+                    }
+                    false
+                }
+                // Not the file agreed to any more: back to the question.
+                Ok(false) => self.changed.as_deref() == Some(dst.as_path()),
+                // Said and asked about: Retry writes it again from its source.
+                Err(e) => {
+                    self.failed_file(&dst, &e, e.to_string());
+                    std::mem::take(&mut self.retry)
+                }
+            };
+            if again && !self.stopped() {
+                // Its bytes are counted again as it is written again.
+                self.bytes_done = self.bytes_done.saturating_sub(size);
+                self.group.off = true;
+                self.copy_file(&src, &dst, size);
+                self.group.off = false;
+            }
+        }
+        self.group.flushing = false;
     }
 
     /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
@@ -1911,6 +2234,21 @@ pub fn set_safe(on: bool) {
 
 pub fn safe() -> bool {
     SAFE.load(Ordering::Relaxed)
+}
+
+/// Whether a directory with `m`'s permissions refuses new names in it: no write bit
+/// for its owner on Unix; on Windows read-only does not stop that for a directory.
+fn denies_writing(m: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o200 == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = m;
+        false
+    }
 }
 
 /// The one way xdevcmd replaces a file (Round 029). `tmp`, complete and still open as
@@ -3013,6 +3351,180 @@ mod tests {
             assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
             fs::remove_dir_all(&root).unwrap();
         }
+    }
+
+    /// Round 033, group commit: `n` small files over older ones in `d/to/src`.
+    fn many_to_replace(d: &Path, n: usize) {
+        for dir in [d.join("src"), d.join("to").join("src")] {
+            fs::create_dir_all(&dir).unwrap();
+        }
+        for i in 0..n {
+            fs::write(d.join("src").join(format!("f-{i:04}")), format!("new {i}")).unwrap();
+            fs::write(d.join("to").join("src").join(format!("f-{i:04}")), "old").unwrap();
+        }
+    }
+
+    /// Every file under `dir` either the old one or the new one, whole, and no
+    /// temporary file left: (new, old).
+    fn whole_files(dir: &Path) -> (usize, usize) {
+        let (mut new, mut old) = (0, 0);
+        for e in fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.contains("xdevcmd-part"),
+                "a temporary file left: {name}"
+            );
+            let i: usize = name.trim_start_matches("f-").parse().unwrap();
+            match fs::read_to_string(e.path()).unwrap().as_str() {
+                "old" => old += 1,
+                s if s == format!("new {i}") => new += 1,
+                s => panic!("{name} is neither: {s:?}"),
+            }
+        }
+        (new, old)
+    }
+
+    /// Group commit: many small replacements go in batches, each file synced before its
+    /// rename (the trace's order holds per file), all replaced, counted and kept for
+    /// undo, nothing temporary left.
+    #[test]
+    fn small_replacements_are_synced_in_batches_and_each_before_its_rename() {
+        let d = tmp("group");
+        many_to_replace(&d, 300);
+        let frag = d.to_string_lossy().into_owned();
+        crate::faults::trace(&frag);
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let (s, asked) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&frag);
+        assert_eq!(asked, 0);
+        assert_eq!(s.replaced_to_trash, 300, "{s:?}");
+        assert_eq!(whole_files(&d.join("to").join("src")), (300, 0));
+        // Per file: its sync before its rename.
+        for i in [0, 150, 299] {
+            let name = format!("f-{i:04}");
+            let at = |what: crate::faults::Point| {
+                seen.iter()
+                    .position(|(p, path)| *p == what && path.to_string_lossy().contains(&name))
+                    .unwrap_or_else(|| panic!("{what:?} of {name}: {seen:?}"))
+            };
+            assert!(
+                at(crate::faults::Point::SyncData) < at(crate::faults::Point::Rename),
+                "{name}"
+            );
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// One file's sync failing in a batch: that file alone is asked about (Skip keeps
+    /// the old one), the rest of the batch is replaced.
+    #[test]
+    fn a_failed_sync_in_a_batch_is_asked_about_that_file_alone() {
+        let d = tmp("group-fail");
+        many_to_replace(&d, 100);
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            // The temporary file's name: `.f-0042.xdevcmd-part-…`.
+            ".f-0042.",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let (s, asked) = run_answering(req, |_| Answer::Skip);
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].contains("f-0042"), "{asked:?}");
+        assert_eq!((s.failed, s.replaced_to_trash), (1, 99), "{s:?}");
+        assert_eq!(whole_files(&d.join("to").join("src")), (99, 1));
+        assert_eq!(
+            fs::read_to_string(d.join("to").join("src").join("f-0042")).unwrap(),
+            "old"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Stopped with a batch waiting: its temporary files go and their old files stay;
+    /// every file is whole, old or new.
+    #[test]
+    fn a_job_stopped_with_a_batch_waiting_leaves_every_file_whole() {
+        let d = tmp("group-stop");
+        many_to_replace(&d, 400);
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let h = start(req);
+        let mut stopped = false;
+        let s = loop {
+            match h.events.recv_timeout(Duration::from_secs(20)) {
+                Ok(Event::Progress { .. }) if !stopped => {
+                    h.cancel();
+                    stopped = true;
+                }
+                Ok(Event::Ask(_)) => h.answer(Answer::Abort),
+                Ok(Event::Done(s)) => break s,
+                Ok(_) => {}
+                Err(e) => panic!("worker never finished: {e}"),
+            }
+        };
+        let (new, old) = whole_files(&d.join("to").join("src"));
+        assert_eq!(new + old, 400);
+        assert_eq!(new as u64, s.replaced_to_trash, "{s:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A directory copied read-only: its batch is finished before its permissions take
+    /// writing away, so its files are still replaced.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_directory_gets_its_batch_before_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("group-ro");
+        many_to_replace(&d, 20);
+        fs::set_permissions(d.join("src"), fs::Permissions::from_mode(0o555)).unwrap();
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let (s, _) = run_with(req, Answer::Yes);
+        let to = d.join("to").join("src");
+        let (new, old) = whole_files(&to);
+        for p in [d.join("src"), to] {
+            let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755));
+        }
+        assert_eq!((new, old), (20, 0), "{s:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The probe: after [`GROUP_PROBE_AFTER`] files, the default first, then 2, 8, 16
+    /// and 32 (the default not twice), one batch each; the fastest a file is kept.
+    #[test]
+    fn the_probe_tries_the_default_first_then_the_others_and_keeps_the_fastest() {
+        let mut g = Group::new();
+        let d = g.threads;
+        g.batched = GROUP_PROBE_AFTER - 1;
+        g.measured(64, 64.0);
+        assert!(g.probe.is_none(), "not before");
+        g.batched = GROUP_PROBE_AFTER;
+        g.measured(64, 64.0);
+        let order = g.probe.as_ref().unwrap().0.clone();
+        assert_eq!(order[0], d);
+        let expected = GROUP_PROBE.len() + usize::from(!GROUP_PROBE.contains(&d));
+        assert_eq!(order.len(), expected);
+        assert_eq!(g.threads_now(), d);
+        assert_eq!(g.cap(), (4 * d).max(16));
+        // Each tried count's time a file: 32 is fastest.
+        for n in order {
+            assert_eq!(g.threads_now(), n);
+            let per = if n == 32 { 0.1 } else { 1.0 };
+            g.measured(g.cap(), per * g.cap() as f64);
+        }
+        assert!(g.probe.is_none() && g.probed);
+        assert_eq!(g.threads, 32);
+        assert_eq!(g.cap(), 128);
+        // Once only.
+        g.measured(64, 64.0);
+        assert!(g.probe.is_none());
     }
 
     /// A sync that fails: the temporary file goes, the old file stays, and Retry writes

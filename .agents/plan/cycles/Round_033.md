@@ -419,6 +419,55 @@ the rest. One job of 1,000 files, the median of three:
   643 ms on 1,000 files.
 - A sync error is unaffected: that file is written again and synced alone, as today.
 
+### 2026-11-13, part G: group commit, built
+
+- `ops.rs`: a replacement of ≤ 1 MiB on a local drive, not moving and not a batch's
+  own fallback, is written to its temporary name as before (journal `part` line), and
+  its handle waits in `Group.pending`. A batch is flushed when it holds
+  max(64, 4 × threads) files, 16 MiB, or 1 s, and also:
+  - before any question (`ask`);
+  - before a source is marked done in the journal;
+  - before a directory's permissions take writing away;
+  - at the end of the job.
+- **The flush**:
+  1. every data sync on T threads (`sync_all`);
+  2. the batch's `swap` lines;
+  3. **one** journal commit;
+  4. per file, in order: the target checked again, the old file to the trash, the
+     rename (`rename_into`, the same code a file on its own uses after its sync).
+  - A failed sync, a failed last step or a changed target goes the way `copy_file`
+    takes it for a single file: asked about, Retry writes it again from its source
+    (never a second sync of the same file).
+  - Stopped: temporaries removed, old files kept. A stale `swap` line is harmless:
+    recovery renames only when the destination is gone and the temporary exists.
+- **Found on the way**:
+  - parallel data syncs alone left 1,000 replacements at 6.7 s. The journal's sync per
+    file was the next wall, hence the shared commit. `strace` of 1,000: 1,017
+    `fdatasync` (1,000 data in parallel, 17 journal);
+  - my first version silently rewrote a file whose batch sync failed. Two existing
+    fault tests caught it, and the rule stands: a failure is asked about.
+- **Threads**: `group_default_threads()` 16, macOS 8. After 1,000 batched files the
+  probe tries the default, then 2, 8, 16 and 32, one batch each, and keeps the fastest
+  a file (`Group::measured`).
+- **Tests** (ops.rs):
+  - batches, with each file's sync before its rename (trace);
+  - one failed sync in a batch asks about that file alone;
+  - stopped with a batch waiting leaves every file whole;
+  - a read-only directory gets its batch before its permissions;
+  - the probe's order and choice.
+
+  The 298 earlier core tests pass unchanged.
+- **Measured** (this sandbox, ext4, `bench-case replace-trash`):
+
+  | Files | Before | Now |
+  |---|---|---|
+  | 1,000 | 6.8–7.1 s | 0.89 s (7.6×) |
+  | 5,000 | 59.7 s | 2.9 s (20.8×) |
+
+  At 5,000 files the probe ran. Not measured: the owner's Windows and macOS machines
+  with the real job (`cargo xtask bench`).
+- Docs: `docs/security.md` "What is synced, and when"; CHANGELOG.
+
 ## Check
 
 ## Act

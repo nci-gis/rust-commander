@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.0-beta.1] - 2026-11-13
+
 ### Added
 - **How long start-up took**, step by step up to the first frame, in Help → Usage
   (Shift+F1);

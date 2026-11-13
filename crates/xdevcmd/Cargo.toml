@@ -46,7 +46,7 @@ path = "src/main.rs"
 [dependencies]
 # The exact version: the engine has no stable API of its own, and the two are released
 # together (cargo-release rewrites this pin; see release.toml).
-xdevcmd-core = { path = "../xdevcmd-core", version = "=0.3.0" }
+xdevcmd-core = { path = "../xdevcmd-core", version = "=0.4.0-beta.1" }
 anyhow = "1"
 # How many cells a character takes, for clicks on the title's path. Already in the
 # tree through ratatui.
@@ -86,7 +86,7 @@ signal-hook = "0.3"
 # The same engine with its fault seam, for the program the tests run (pty.rs sets
 # XDEVCMD_FAULTS). A dev-dependency's features reach only test builds (resolver 2):
 # `cargo build --release` has none of it, which tests/budgets.rs checks.
-xdevcmd-core = { path = "../xdevcmd-core", version = "=0.3.0", features = ["faults"] }
+xdevcmd-core = { path = "../xdevcmd-core", version = "=0.4.0-beta.1", features = ["faults"] }
 tar = { version = "0.4.46", default-features = false }
 # Reads the Scoop manifest in packaging/ (tests/packaging.rs). Tests only.
 serde_json = "1"

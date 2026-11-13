@@ -27,12 +27,12 @@
 //!
 //! How making many small files durable scales with threads on this disk (Round 033,
 //! group commit): N files of 1 KiB written, then `File::sync_data`, as xdevcmd calls
-//! it, on 1, 4, 8, 16, 32 and 64 threads; the median of three runs each. Run by the
+//! it, on 1, 2, 4, 8, 16, 32 and 64 threads; the median of three runs each. Run by the
 //! `bench` workflow on Linux, macOS and Windows runners to see the shape on ext4, APFS
 //! and NTFS: whether more threads help at all, which sets the number xdevcmd uses.
 //! `--probe` then compares, on one job of N files, 1 thread, this system's default, and
-//! probing with the job's own first files (16 on 1 thread, 32 on 8, 64 on 16; the
-//! fastest kept for the rest).
+//! probing with the job's own first files (16 on 2 threads, 32 on 8, 64 on 16, 128 on
+//! 32; the fastest kept for the rest).
 //!
 //! Not a CI gate: shared runners vary by tens of per cent. CI keeps hard budgets only
 //! (`crates/xdevcmd/tests/budgets.rs`).
@@ -199,7 +199,7 @@ fn sync_sweep(args: &[String]) -> i32 {
     println!("{:>8} {:>10} {:>10}", "threads", "ms", "× 1 thread");
     let mut one = None;
     let mut code = 0;
-    for threads in [1usize, 4, 8, 16, 32, 64] {
+    for threads in [1usize, 2, 4, 8, 16, 32, 64] {
         let mut runs = Vec::new();
         for run in 0..3 {
             match sweep_once(&dir.join(format!("t{threads}-{run}")), files, threads) {
@@ -289,13 +289,13 @@ fn default_threads() -> usize {
 #[derive(Clone, Copy)]
 enum Way {
     Fixed(usize),
-    /// The owner's idea: the job's own first files synced with 1, 8 and 16 threads in
-    /// turn ([`probe_sample`] each), and the fastest kept for the rest. No extra writes:
+    /// The owner's idea: the job's own first files synced with 2, 8, 16 and 32 threads
+    /// in turn ([`probe_sample`] each), and the fastest kept for the rest. No extra writes:
     /// the probe is work.
     Probe,
 }
 
-const PROBE: [usize; 3] = [1, 8, 16];
+const PROBE: [usize; 4] = [2, 8, 16, 32];
 
 /// How many of the job's files one probe step syncs: four rounds of its threads, at
 /// least 16. One thread costs the most per file where threads help, so it gets fewest.
@@ -341,10 +341,11 @@ fn probe_table(dir: &Path, files: usize) -> i32 {
     let d = default_threads();
     println!();
     println!(
-        "probe · {files} files: the first {}, {} and {} on 1, 8 and 16 threads, then the fastest",
-        probe_sample(1),
+        "probe · {files} files: the first {}, {}, {} and {} on 2, 8, 16 and 32 threads, then the fastest",
+        probe_sample(2),
         probe_sample(8),
-        probe_sample(16)
+        probe_sample(16),
+        probe_sample(32)
     );
     println!("{:>22} {:>10} {:>10}", "way", "ms", "threads");
     let mut code = 0;

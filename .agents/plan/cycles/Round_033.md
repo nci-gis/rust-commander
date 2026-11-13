@@ -407,6 +407,18 @@ the rest. One job of 1,000 files, the median of three:
   - The lesson: CI's virtual disks do not answer questions about flushing. A real
     machine does.
 
+### 2026-11-13, the probe's floor: 2 instead of 1 (the owner)
+
+- The owner: "2, 8, 16 and 32, instead of 1?" Agreed. 1 was there as a floor for a
+  device where parallel syncs hurt. No real disk has shown one (only the runner's
+  virtual disk), and where flushes are serialized anyway, 2 threads cost about what 1
+  does. The 1-thread step was also the probe's most expensive per file.
+- Probe candidates now 2, 8, 16, 32 (16, 32, 64 and 128 files). The sweep gained a
+  2-thread row. Here (ext4) 2 threads gain only 1.1× (two syncs rarely land in one
+  journal commit), and the probe chose 32 every time: 425 ms against the fixed 16's
+  643 ms on 1,000 files.
+- A sync error is unaffected: that file is written again and synced alone, as today.
+
 ## Check
 
 ## Act

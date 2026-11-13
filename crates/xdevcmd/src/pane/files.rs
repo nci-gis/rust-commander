@@ -276,6 +276,8 @@ impl Results {
 }
 
 const HISTORY: usize = 64;
+/// Search events taken in per tick at most (B08).
+const TAKE_PER_TICK: usize = 10_000;
 /// Up to this many entries a change check re-reads the whole listing, which catches a
 /// file growing as well as one appearing. Beyond it only the directory's own mtime is
 /// compared, so a huge directory costs one stat per check.
@@ -536,7 +538,9 @@ impl FilePane {
         };
         let mut found = Vec::new();
         let mut finished = false;
-        for ev in search.rx.try_iter() {
+        // A bounded share of each tick (B08): the rest waits in the search's queue, and
+        // keys are answered between.
+        for ev in search.rx.try_iter().take(TAKE_PER_TICK) {
             match ev {
                 find::Event::Found(p) => found.push(p),
                 find::Event::Gone(p) => r.gone.push(p),
@@ -550,6 +554,19 @@ impl FilePane {
                     finished = true;
                 }
             }
+        }
+        // A search past its cap stops there and says so (B08).
+        let shown = self.all.iter().filter(|e| !e.is_parent()).count();
+        if r.find && !finished && shown + found.len() >= find::MAX_FOUND {
+            found.truncate(find::MAX_FOUND.saturating_sub(shown));
+            if let Some(s) = r.search.take() {
+                s.cancel();
+            }
+            finished = true;
+            self.notice = Some(format!(
+                "stopped at {} found \u{2014} narrow the search to see the rest",
+                find::MAX_FOUND
+            ));
         }
         if finished {
             r.search = None;

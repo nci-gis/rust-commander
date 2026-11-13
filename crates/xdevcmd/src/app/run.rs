@@ -261,8 +261,13 @@ impl App {
     pub(super) fn background(&mut self) -> bool {
         let mut changed = self.pump_pending_type();
         // The viewer drew lines plain while its scan was behind them; it has moved on.
-        if let Some(Modal::View(v)) = &self.modal {
+        if let Some(Modal::View(v)) = &mut self.modal {
             changed |= v.syntax_moved();
+            // The rest of a big file indexed in the background (A03).
+            changed |= v.index_moved();
+        }
+        if let Some((_, Some((_, v)))) = &mut self.quick_view {
+            changed |= v.index_moved();
         }
         changed |= self.follow_shell();
         // A thread other than this one panicked: xdevcmd goes on, and says where the

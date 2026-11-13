@@ -17,6 +17,13 @@ use std::thread;
 
 use crate::glob::Pattern;
 
+/// Events a search may have waiting for the screen (B08): past this the walk waits, so a
+/// search of a whole disk cannot fill memory faster than the pane takes the rows in.
+pub const QUEUE: usize = 4096;
+/// Rows a search shows at most (B08). It stops there and says so: past this, a list is
+/// too long to read and a narrower search is the answer.
+pub const MAX_FOUND: usize = 100_000;
+
 #[derive(Debug, Clone)]
 pub struct Query {
     pub root: PathBuf,
@@ -61,7 +68,7 @@ impl Drop for Search {
 }
 
 pub fn start(q: Query) -> Search {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(QUEUE);
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     thread::spawn(move || {
@@ -81,7 +88,7 @@ pub fn start(q: Query) -> Search {
 /// anything. Nothing is looked up on another machine (`\\server\…`, `//host/…`): a
 /// lookup there can hang, and the user would see a frozen screen. Those count as gone.
 pub fn list(paths: Vec<PathBuf>) -> Search {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(QUEUE);
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     thread::spawn(move || {
@@ -103,7 +110,7 @@ pub type Group = (Vec<PathBuf>, Vec<PathBuf>);
 /// [`list`], where some rows are a line's candidates ([`Group`]): decided on the
 /// check's own thread, never on the screen's, since a list can hold 10,000 lines.
 pub fn list_grouped(paths: Vec<PathBuf>, groups: Vec<Group>) -> Search {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(QUEUE);
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     thread::spawn(move || {

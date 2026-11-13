@@ -2407,6 +2407,142 @@ fn f3_on_a_fifo_says_so_instead_of_freezing() {
     xdevcmd.quit();
 }
 
+/// A03: F3 on a big file draws at once and the rest of its index comes in behind; the
+/// count is completed on screen with no key pressed, and the end is reachable.
+#[test]
+fn f3_on_a_big_file_finishes_its_index_without_a_key() {
+    let s = Scratch::new("big-view");
+    let body: String = (0..1_000_000).map(|i| format!("line {i}\n")).collect();
+    s.file("left/big.txt", &body);
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(b"\x1bOR"); // F3
+    xdevcmd.wait_for("line 0");
+    xdevcmd.wait_for("1000000 lines");
+    xdevcmd.send(b"\x1b[F"); // End
+    xdevcmd.wait_for("line 999999");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("1000000 lines");
+    xdevcmd.quit();
+}
+
+/// What `/proc` says of a process: resident memory in KiB, threads, open descriptors.
+#[cfg(target_os = "linux")]
+fn usage(pid: u32) -> (u64, u64, usize) {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+    let field = |key: &str| -> u64 {
+        status
+            .lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse().ok())
+            .unwrap()
+    };
+    let fds = std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .unwrap()
+        .count();
+    (field("VmRSS:"), field("Threads:"), fds)
+}
+
+/// B08 (Round 033): everything at once — a shell printing without end, a copy in the
+/// background, a find that reaches its cap, F3 on a big file. Memory, threads and
+/// descriptors stay bounded and level, and Esc and F10 still answer at once.
+#[cfg(target_os = "linux")]
+#[test]
+fn everything_at_once_stays_bounded_and_keys_still_answer() {
+    let s = Scratch::new("all-at-once");
+    let many = s.left().join("many");
+    std::fs::create_dir(&many).unwrap();
+    for i in 0..(find_cap() + 20_000) {
+        std::fs::File::create(many.join(format!("f-{i:06}"))).unwrap();
+    }
+    let body: String = (0..1_000_000).map(|i| format!("line {i}\n")).collect();
+    s.file("right/big.txt", &body);
+
+    let mut x = Session::start(&s, None);
+    let pid = x.child.process_id().unwrap();
+    let (rss0, threads0, fds0) = usage(pid);
+
+    // A shell that never stops printing.
+    x.send(F12);
+    x.send(b"yes xdevcmd-noise\r");
+    x.wait_for("xdevcmd-noise");
+    x.send(F12);
+
+    // A copy of the 120,000 files to the other pane, sent to the background.
+    x.send(DOWN); // many
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(b"\rb");
+    x.wait_for("background");
+
+    // A find that reaches its cap.
+    x.send(b"\x1b[18;3~"); // Alt+F7
+    x.wait_for("Find");
+    x.send(b"f-*");
+    x.send(ENTER);
+    x.wait_for("stopped at 100000 found");
+    // The copy keeps what it made for its undo (up to 200,000 entries, its own cap):
+    // memory is level only once it has ended.
+    x.until("the copy to end", |screen| screen.contains(" copied"));
+
+    // F3 on a big file in the other pane: the last row, after the copy's directory.
+    x.send(b"\t");
+    x.send(b"\x1b[F"); // End
+    x.send(b"\x1bOR");
+    x.wait_for("1000000 lines");
+
+    let (rss1, threads1, fds1) = usage(pid);
+    std::thread::sleep(Duration::from_secs(2));
+    let (rss2, threads2, fds2) = usage(pid);
+    eprintln!(
+        "B08: rss {rss0} → {rss1} → {rss2} KiB, threads {threads0} → {threads1} → {threads2}, fds {fds0} → {fds1} → {fds2}"
+    );
+    // Bounded: what all of it holds (100,000 rows, a million lines' index, the shell's
+    // history) in a debug build.
+    assert!(rss2 < 400 * 1024, "{rss2} KiB");
+    assert!(threads2 < 64, "{threads2} threads");
+    assert!(fds2 < 128, "{fds2} descriptors");
+    // Level: the shell goes on printing, nothing else is added.
+    assert!(rss2 <= rss1 + 16 * 1024, "growing: {rss1} → {rss2} KiB");
+
+    // Keys answer: Esc closes the viewer, F10 ends (a job still running would be asked
+    // about first). Esc's time includes `send`'s own 310 ms after a lone Esc.
+    let t = Instant::now();
+    x.send(b"\x1b");
+    x.wait_gone("1000000 lines");
+    let esc = t.elapsed();
+    let t = Instant::now();
+    x.send(b"\x1b[21~"); // F10
+    let asked = loop {
+        if x.screen().contains("cancel them and quit") {
+            break true;
+        }
+        if x.child.try_wait().unwrap().is_some() {
+            break false;
+        }
+        assert!(t.elapsed() < PATIENCE, "F10 did nothing:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let f10 = t.elapsed();
+    eprintln!("B08: Esc {esc:?}, F10 {f10:?} (the copy still running: {asked})");
+    assert!(esc < Duration::from_secs(1), "Esc took {esc:?}");
+    assert!(f10 < Duration::from_secs(1), "F10 took {f10:?}");
+    if asked {
+        x.send(ENTER);
+    }
+    let start = Instant::now();
+    while x.child.try_wait().unwrap().is_none() {
+        assert!(start.elapsed() < PATIENCE, "still running:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn find_cap() -> usize {
+    xdevcmd_core::find::MAX_FOUND
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

@@ -571,6 +571,8 @@ mod tests {
         f.push_str("fn tail() {}\n");
         let path = temp("long-jump.rs", f.as_bytes());
         let mut doc = Document::open(&path).unwrap();
+        // 6 MiB: past what open indexes itself (A03).
+        doc.wait_indexed();
         let mut h = Highlighter::new(Lang::Rust);
         let t = Instant::now();
         assert_eq!(

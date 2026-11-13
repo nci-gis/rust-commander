@@ -514,8 +514,10 @@ the rest. One job of 1,000 files, the median of three:
 - Found on the way: a local `cargo package --workspace` verified `xdevcmd` against a
   stale build of the overlay's `xdevcmd-core` 0.4.0-beta.1 (cargo keys a registry
   crate by name and version, and the version has not moved since beta.1), so a new
-  core module looked missing. `cargo clean -p xdevcmd-core` fixed it. CI builds from
-  nothing and is not affected.
+  core module looked missing. It comes back with each new core API until the version
+  moves. Clear all three: `rm -rf target/package
+  ~/.cargo/registry/src/-*/xdevcmd-core-0.4.0-beta.1 && cargo clean -p xdevcmd-core`.
+  CI builds from nothing and is not affected.
 
 ### 2026-11-13, the owner on Windows' fast copy
 
@@ -523,6 +525,66 @@ the rest. One job of 1,000 files, the median of three:
   or just let it to 3rd party." Core stays `forbid(unsafe_code)`; Windows keeps
   xdevcmd's own copy. The third-party route is item 44 (0.5): the plan handed to a
   trusted tool (robocopy, which uses the system's copy), its engine named at the top.
+
+### 2026-11-13, part F: A03 (the viewer's progressive index) and B08 (one budget)
+
+- **A03**, `document.rs`:
+  - `open` indexes the first 4 MiB (`INLINE_INDEX`) itself; past that, a thread with
+    its own handle on the file indexes the rest. It sends offsets over a bounded
+    channel (16 chunks of 256 KiB), so it waits rather than piling up offsets when
+    nothing takes them. Dropping the document (Esc) stops it.
+  - While it runs, the line it is in the middle of is not counted (`line_count`), so
+    every line drawn is whole. Search covers what is indexed and says so ("not in the N
+    lines indexed so far; still indexing"). The cap of 4,000,000 lines works as before,
+    inline or behind.
+  - The viewer takes in what arrived on every tick (`App::background`, also for quick
+    view) and draws again. The title says "N lines so far, indexing P%". The syntax scan
+    of a file still being indexed reads to the end itself.
+  - Memory documents (a shell's history, Messages) are still indexed whole: they are
+    already in memory.
+  - Measured (warm cache, 1 GiB log of 11.7 M lines, release): `open` 1.5–6 ms against
+    114–135 ms for the whole index (to the 4 M cap). Cold disk and network not measured
+    (no root here to drop caches); that is where the wait was long.
+  - Tests: a 13 MB file opens with part indexed, the last known line whole, a search
+    past it says nothing found yet; the rest arrives; the cap reached in the background
+    stops at a whole line; dropped while indexing does not wait. pty: F3 on 1,000,000
+    lines completes its count with no key pressed, End reaches the last line.
+- **B08**, the producers without a bound were found's:
+  - `find.rs`: `sync_channel(4096)` for every search and list check (the walk waits);
+  - the pane takes at most 10,000 events a tick (`TAKE_PER_TICK`);
+  - a search stops at 100,000 rows (`find::MAX_FOUND`) and says "stopped at 100000
+    found — narrow the search to see the rest".
+  
+  Already bounded, checked: the terminal's history (`[terminal] scrollback`, a
+  range), the log's queue (sync_channel), directory reads (16 threads), a copy's undo
+  record (200,000, `MADE_CAP`), a job's progress events (one per MiB or 250 ms).
+- **B08's test** (pty, Linux): a shell printing `yes` without end, a copy of 120,000
+  files in the background, a find reaching its cap, F3 on 1,000,000 lines, all at once.
+  Debug build: memory 15 → 162 → 162 MB (2 s apart, after the copy ended), 6 threads,
+  14 descriptors. Esc closes the viewer at once (the test's own 310 ms wait included);
+  F10 answers in 60–135 ms.
+  - Found on the way: while the copy runs, memory climbs by its undo record (27 MB for
+    120,000 files), bounded by its own cap; "level" is measured after it ends.
+- A test of the syntax scan opened a 6 MiB file and needed every line: it waits for the
+  index now (`Document::wait_indexed`).
+
+### 2026-11-13, Linux checked on this machine: beta.1 against now (the owner)
+
+`cargo xtask bench` (full, 5 runs a case after a warm-up, ext4, release), the
+`v0.4.0-beta.1` tag built in a worktree, then this branch, one after the other:
+
+| Case | beta.1 | now | |
+|---|---|---|---|
+| replace small files (synced, old to the trash) | 60,682 ms | 2,864 ms | 21× (group commit) |
+| copy small files | 234 ms | 204 ms | −13 % (fast copy) |
+| copy one large file | 81.3 ms | 76.5 ms | −6 % (fast copy; ext4 has no clone) |
+| plan 200,000 (the cap) | 172 ms | 157 ms | −9 % |
+| list 100,000 | 119 ms | 117 ms | level |
+| undo a copy | 41.0 ms | 41.3 ms | level |
+| start-up to the first frame | 10.6 ms | 10.0 ms | level |
+| binary | 5.39 MiB | 5.46 MiB | +70 KiB, under 7 MiB |
+
+Peak memory level in every case. Windows and macOS: the owner, on the beta.2 build.
 
 ## Check
 

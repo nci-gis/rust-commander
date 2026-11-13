@@ -116,6 +116,11 @@ tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shi
   **Y** the screen, **:** or **Ctrl+G** goes to a line (`40`, `50%`, or in hex an
   offset such as `0x1f00`), **F2** saves a copy under another name (a shell's history
   readable by you only), **q** or **Esc** closes.
+- **A big file opens at once.** The viewer draws the first screens straight away and
+  counts the rest of the lines in the background; the title says "… lines so far,
+  indexing 40%" until it is done, and End goes to the end found so far. A search that
+  does not find its text in the part counted yet says so, rather than "no more
+  matches". Past 4,000,000 lines the viewer shows the first part, and says so.
 - **The viewer colours source** by its language, from the theme's own colours: Rust,
   Python, JavaScript/TypeScript, JSON, TOML, YAML, Markdown, shell (and Dockerfiles,
   Makefiles), C/C++, Go, Java, Kotlin, C#, HTML/XML, CSS, SQL, INI, diffs and logs; the
@@ -215,7 +220,8 @@ it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain
 ## Find, filter, compare
 
 - **Alt+F7** finds files by name, and by text inside if you like. Results open in a new
-  tab. Enter goes to a file.
+  tab. Enter goes to a file. A search stops at 100,000 results and says so: narrow the
+  name or the folder to see the rest.
 - **Ctrl+F** shows only the names that match, best matches first. The letters only
   need to come in order: `cfg` finds `config.toml`. `*.rs` style wildcards work too.
   **Esc** shows everything again. `filter = "plain"` under `[files]` matches the text

@@ -42,6 +42,12 @@ that heading and starts a new, empty one here. -->
   10–15% faster). Anything refused falls back to xdevcmd's own read and write. The
   status line says which ran ("5 copied (by the kernel)"). `[general] fast_copy = false`
   turns it off.
+- **F3 opens a big file at once**: the first 4 MiB are indexed before the first frame
+  and the rest in the background, the title counting ("… lines so far, indexing 40%");
+  Esc closes it at any point. A 1 GiB log: 1.5 ms to open instead of the 120 ms its
+  whole index takes (warm cache; from a cold disk or a share the wait was far longer).
+- **Find stops at 100,000 results** and says so, and takes them in a bounded share per
+  frame: a search of a whole disk no longer grows memory without end or slows every key.
 
 ### Fixed
 - **F5 and F6 check faster on Windows the first time**: inside a folder, what a file is

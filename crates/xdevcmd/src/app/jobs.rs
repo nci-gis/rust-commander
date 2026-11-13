@@ -186,6 +186,19 @@ impl App {
                 if restored == 1 { "its" } else { "their" }
             ));
         }
+        let swapped: Vec<_> = found.iter().flat_map(|i| i.swapped.clone()).collect();
+        if !swapped.is_empty() {
+            let n = swapped.len();
+            body.push(format!(
+                "{n} replacement{} finished: the new file{} put in place, the old one{} in the trash:",
+                plural(n),
+                if n == 1 { "" } else { "s" },
+                if n == 1 { " is" } else { "s are" },
+            ));
+            for p in swapped.iter().take(3) {
+                body.push(format!("  {}", tidy(p)));
+            }
+        }
         let both: Vec<_> = found.iter().flat_map(|i| i.moved.clone()).collect();
         if !both.is_empty() {
             let n = both.len();
@@ -235,7 +248,7 @@ impl App {
             ));
             body.push("Continue it? What was done is skipped; a file cut short starts".into());
             body.push("again; you are asked about any other file already there.".into());
-            ("continue".to_string(), Cmd::Resume(it))
+            ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Interrupted".into(),

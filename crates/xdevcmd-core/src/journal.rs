@@ -364,6 +364,14 @@ impl Journal {
         }
     }
 
+    /// About to put `dst` in the trash and rename `tmp`, its replacement, complete and
+    /// synced, over it (Round 031). Killed in between, the next start finishes the
+    /// rename: the new file is the one that was confirmed, and the old one is in the
+    /// trash. Synced by the commit before the trash step.
+    pub fn swap(&mut self, tmp: &Path, dst: &Path) -> std::io::Result<()> {
+        self.line(&format!("swap {} {}", enc(tmp), enc(dst)), dst)
+    }
+
     /// The job has finished with `src`, one of its sources: a resume leaves it.
     pub fn done(&mut self, src: &Path) -> std::io::Result<()> {
         self.line(&format!("done {}", enc(src)), src)
@@ -400,6 +408,9 @@ pub struct Interrupted {
     pub moved: Vec<(PathBuf, PathBuf)>,
     /// The confirmed plan's decisions (Round 030): each destination left or replaced.
     pub decided: Vec<(PathBuf, crate::ops::Expect)>,
+    /// Replacements finished at the start: killed after the old file went to the trash
+    /// and before the new one was renamed in (Round 031). Each destination.
+    pub swapped: Vec<PathBuf>,
     /// Sources the job finished with.
     pub done: Vec<PathBuf>,
 }
@@ -574,7 +585,7 @@ fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
     text.lines().all(|line| {
         let mut w = line.split(' ');
         match w.next() {
-            Some("dir" | "part" | "ren") => w.filter_map(dec).all(|p| inside(&p)),
+            Some("dir" | "part" | "ren" | "swap") => w.filter_map(dec).all(|p| inside(&p)),
             _ => true,
         }
     })
@@ -592,7 +603,9 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         moved: Vec::new(),
         decided: Vec::new(),
         done: Vec::new(),
+        swapped: Vec::new(),
     };
+    let mut swaps: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut parts: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut renames: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -621,7 +634,22 @@ fn tidy(text: &str, run: &str) -> Interrupted {
                 }
             }
             ("done", Some(p), _) => it.done.push(p),
+            ("swap", Some(t), Some(d)) => swaps.push((t, d)),
             _ => {}
+        }
+    }
+    // Before the temporary files go: one whose destination is empty is the complete,
+    // synced replacement of a file now in the trash. Renamed in, never over anything.
+    for (tmp, dst) in swaps {
+        let ours = tmp
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().contains(".xdevcmd-part-"));
+        if ours
+            && fs::symlink_metadata(&dst).is_err()
+            && fs::symlink_metadata(&tmp).is_ok_and(|m| m.is_file())
+            && crate::noreplace::rename_noreplace(&tmp, &dst).is_ok()
+        {
+            it.swapped.push(dst);
         }
     }
     // The temporary files that run made: `.name.xdevcmd-part-<run>-<n>`. The whole
@@ -1154,6 +1182,35 @@ mod tests {
             "the source of c is gone"
         );
         assert!(src.exists() && dst.exists(), "neither removed");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Killed after the old file went to the trash and before the new one was renamed
+    /// in: the next start renames the complete new file in. If the old one is still
+    /// there (killed before the trash step), the temporary file just goes.
+    #[test]
+    fn a_replacement_killed_after_the_trash_is_finished_at_the_next_start() {
+        let d = dir("swap");
+        let run = "2147483645";
+        let tmp1 = d.join(format!(".a.xdevcmd-part-{run}-1"));
+        let tmp2 = d.join(format!(".b.xdevcmd-part-{run}-2"));
+        fs::write(&tmp1, "new a").unwrap();
+        fs::write(&tmp2, "new b").unwrap();
+        fs::write(d.join("b"), "old b").unwrap();
+        let text = format!(
+            "host {}\nv 3\nkind copy\ndir {}\nswap {} {}\nswap {} {}\n",
+            enc(Path::new(&hostname())),
+            enc(&d),
+            enc(&tmp1),
+            enc(&d.join("a")),
+            enc(&tmp2),
+            enc(&d.join("b")),
+        );
+        let it = tidy(&text, run);
+        assert_eq!(it.swapped, vec![d.join("a")]);
+        assert_eq!(fs::read_to_string(d.join("a")).unwrap(), "new a");
+        assert_eq!(fs::read_to_string(d.join("b")).unwrap(), "old b");
+        assert!(!tmp1.exists() && !tmp2.exists());
         let _ = fs::remove_dir_all(&d);
     }
 

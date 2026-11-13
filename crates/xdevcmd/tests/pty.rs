@@ -1174,6 +1174,72 @@ fn a_planned_copy_killed_then_continued_keeps_every_decision() {
     x.quit();
 }
 
+/// Round 031: killed after the old file went to the trash and before the new one was
+/// renamed in, the next start finishes the rename and says so; the old file is in the
+/// trash (the scratch one: XDG_DATA_HOME).
+#[test]
+fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
+    let s = Scratch::new("kill-swap");
+    s.file("left/d-older.txt", "new");
+    s.file("right/d-older.txt", "old");
+    std::fs::File::options()
+        .write(true)
+        .open(s.right().join("d-older.txt"))
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - Duration::from_secs(3600))
+        .unwrap();
+    let marker = s.0.join("halted");
+    let spec = format!(
+        "halt|rename|{}|{}",
+        s.right().join("d-older.txt").display(),
+        marker.display()
+    );
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_FAULTS", spec.as_str())],
+    );
+    x.wait_for("d-older ");
+    x.send(b"*");
+    x.wait_for("1 selected");
+    x.send(F5);
+    x.wait_for("would replace an older file  [skip]");
+    x.send(b" ");
+    x.wait_for("would replace an older file  [replace]");
+    x.send(ENTER);
+    wait_file(&marker, "the job held at the rename", |c| c.is_some());
+    let pid = x.child.process_id().expect("a pid");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let start = Instant::now();
+    while !matches!(x.child.try_wait(), Ok(Some(_))) {
+        assert!(start.elapsed() < PATIENCE, "xdevcmd did not die");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    drop(x);
+    assert!(
+        !s.right().join("d-older.txt").exists(),
+        "held between the trash and the rename"
+    );
+    let trashed = s.0.join("data/Trash/files/d-older.txt");
+    assert_eq!(std::fs::read_to_string(&trashed).unwrap(), "old");
+
+    let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
+    x.wait_for("1 replacement finished");
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("d-older.txt")).unwrap(),
+        "new"
+    );
+    assert_eq!(std::fs::read_to_string(&trashed).unwrap(), "old");
+    x.send(b"\x1b");
+    x.wait_gone("1 replacement finished");
+    x.quit();
+}
+
 #[test]
 fn a_move_killed_before_removing_its_source_says_both_are_there() {
     let s = Scratch::new("kill-move");

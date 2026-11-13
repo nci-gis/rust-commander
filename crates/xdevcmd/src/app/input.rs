@@ -734,7 +734,7 @@ impl App {
                 self.quit = true;
                 self.quit_cd = true;
             }
-            Cmd::Resume(it) => self.resume(it),
+            Cmd::Resume(it) => self.resume(*it),
             Cmd::Sync(pairs) => {
                 let pairs_len = pairs.len();
                 let req = Request::sync(pairs);

@@ -79,7 +79,7 @@ pub enum Cmd {
     /// Quit now, though cancelled jobs have not finished stopping (a hung drive).
     QuitNow,
     /// Run an interrupted job again (safe operations' journal), "replace only if older".
-    Resume(xdevcmd_core::journal::Interrupted),
+    Resume(Box<xdevcmd_core::journal::Interrupted>),
     /// Help → About.
     About,
     /// Help → Commands…: F1, opened at its large size.

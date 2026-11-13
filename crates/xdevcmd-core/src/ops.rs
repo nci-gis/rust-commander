@@ -382,6 +382,8 @@ pub struct Summary {
     pub made_over: bool,
     /// A copy: files it replaced with no trash to keep the old one in. Undo leaves those.
     pub replaced_for_good: u64,
+    /// Files replaced whose old version went to the trash (Round 031).
+    pub replaced_to_trash: u64,
 }
 
 impl Summary {
@@ -399,6 +401,17 @@ impl Summary {
         }
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
+        }
+        if self.replaced_to_trash > 0 {
+            s.push_str(&format!(
+                ", {} replaced (the old {} in the trash)",
+                self.replaced_to_trash,
+                if self.replaced_to_trash == 1 {
+                    "one"
+                } else {
+                    "ones"
+                }
+            ));
         }
         if self.left > 0 {
             s.push_str(&format!(
@@ -505,6 +518,9 @@ pub fn start(req: Request) -> Handle {
             moved_file: None,
             safe: req.safe,
             recording: req.kind == Kind::Copy,
+            trash_root: req.trash_root.clone(),
+            keeps: Default::default(),
+            old_trashed: None,
         };
         w.run(req);
     });
@@ -568,6 +584,12 @@ struct Worker {
     safe: bool,
     /// A copy: what it makes is kept in [`Summary::made`], for its undo.
     recording: bool,
+    /// [`Request::trash_root`]: tests' trash, for a replaced file too.
+    trash_root: Option<PathBuf>,
+    /// Per destination directory: whether a file replaced there goes to the trash.
+    keeps: std::collections::HashMap<PathBuf, bool>,
+    /// The file the last replace put in the trash, for its undo.
+    old_trashed: Option<crate::trashed::Trashed>,
 }
 
 impl Worker {
@@ -681,6 +703,24 @@ impl Worker {
 
     fn stopped(&self) -> bool {
         self.abort || self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Whether the file `dst` replaces goes to the trash first (Round 031): where the
+    /// trash is on the same volume ([`crate::plan::trash_keeps`]), asked once per
+    /// directory. Tests give their own trash, and always use it.
+    fn replace_into_trash(&mut self, dst: &Path) -> bool {
+        if self.trash_root.is_some() {
+            return true;
+        }
+        // A unit test without its own trash never touches the real one.
+        if cfg!(test) {
+            return false;
+        }
+        let dir = dst.parent().unwrap_or(Path::new("")).to_path_buf();
+        *self
+            .keeps
+            .entry(dir)
+            .or_insert_with_key(|d| crate::plan::trash_keeps(d) == Some(true))
     }
 
     /// A copy made `path` (replacing `old`, if it went to the trash): kept for its undo,
@@ -1197,6 +1237,9 @@ impl Worker {
                     self.sum.done += 1;
                     if free {
                         self.made(dst, None);
+                    } else if let Some(t) = self.old_trashed.take() {
+                        self.sum.replaced_to_trash += 1;
+                        self.made(dst, Some(t));
                     } else if self.recording {
                         self.sum.replaced_for_good += 1;
                     }
@@ -1294,11 +1337,43 @@ impl Worker {
                     // checked once more right before the rename: no portable rename
                     // compares first, so a window of microseconds is left, not the
                     // whole copy.
-                    return commit_replace(w, &target, dst, || {
+                    // Where the trash is on this volume the old file goes there right
+                    // before the rename, so undo brings it back (Round 031). The
+                    // journal's `swap` line first: killed between the two, the next
+                    // start renames the complete new file in.
+                    let trash = self.replace_into_trash(dst);
+                    self.old_trashed = None;
+                    let r = commit_replace(w, &target, dst, || {
+                        if trash {
+                            if let Some(j) = self.journal.as_mut() {
+                                let _ = j.swap(&target, dst);
+                            }
+                        }
                         // The journal first: its question can be open for minutes, and
                         // the look at the target is the last thing before the rename.
-                        Ok(self.durable(dst) && self.still_agreed(Some(src), dst))
+                        if !(self.durable(dst) && self.still_agreed(Some(src), dst)) {
+                            return Ok(false);
+                        }
+                        if trash {
+                            let t = crate::faults::at(crate::faults::Point::Trash, dst)
+                                .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
+                                .map_err(|e| {
+                                    io::Error::new(
+                                        e.kind(),
+                                        format!("the old file could not go to the trash: {e}"),
+                                    )
+                                })?;
+                            self.old_trashed = Some(t);
+                        }
+                        Ok(true)
                     });
+                    // The rename failed after the old file went: it comes back.
+                    if !matches!(r, Ok(true)) {
+                        if let Some(t) = self.old_trashed.take() {
+                            let _ = crate::trashed::restore(&t);
+                        }
+                    }
+                    return r;
                 }
             }
             other => other,
@@ -1874,6 +1949,53 @@ fn volume_trash(path: &Path, home: &Path) -> io::Result<Option<(PathBuf, PathBuf
     Ok(Some((own, topdir)))
 }
 
+/// Whether a file in the directory `dir` can go to a trash on its own file system:
+/// the home trash on the same one, or one [`volume_trash`] would use or may make at the
+/// top of its mount. Reads only: nothing is made here (the planner asks it).
+#[cfg(target_os = "linux")]
+pub(crate) fn volume_trash_usable(dir: &Path) -> Option<bool> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let home = default_trash_base()?;
+    let dev = fs::metadata(dir).ok()?.dev();
+    let home_dev = home
+        .ancestors()
+        .find_map(|a| fs::metadata(a).ok())
+        .map(|m| m.dev());
+    if home_dev == Some(dev) {
+        return Some(true);
+    }
+    let mut topdir = dir.to_path_buf();
+    while let Some(up) = topdir.parent() {
+        match fs::metadata(up) {
+            Ok(m) if m.dev() == dev => topdir = up.to_path_buf(),
+            _ => break,
+        }
+    }
+    let uid = rustix::process::getuid().as_raw();
+    let usable_dir = |p: &Path| {
+        rustix::fs::access(
+            p,
+            rustix::fs::Access::WRITE_OK | rustix::fs::Access::EXEC_OK,
+        )
+        .is_ok()
+    };
+    let shared = topdir.join(".Trash");
+    if let Ok(m) = fs::symlink_metadata(&shared) {
+        let sticky = m.permissions().mode() & 0o1000 != 0;
+        if m.is_dir() && !m.file_type().is_symlink() && sticky {
+            let mine = shared.join(uid.to_string());
+            if mine.is_dir() && usable_dir(&mine) || !mine.exists() && usable_dir(&shared) {
+                return Some(true);
+            }
+        }
+    }
+    let own = topdir.join(format!(".Trash-{uid}"));
+    Some(match fs::symlink_metadata(&own) {
+        Ok(m) => m.is_dir() && !m.file_type().is_symlink() && m.uid() == uid,
+        Err(_) => usable_dir(&topdir),
+    })
+}
+
 /// Where deleted files go on Linux: `$XDG_DATA_HOME/Trash`, per the freedesktop spec.
 pub fn default_trash_base() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
@@ -2034,6 +2156,95 @@ mod tests {
 
     fn run(req: Request) -> Summary {
         run_with(req, Answer::Yes).0
+    }
+
+    /// Round 031: with a trash on the volume, a replaced file goes there, after the
+    /// journal is on disk and before the rename; undo removes the new one and brings
+    /// the old one back.
+    #[test]
+    fn a_replaced_file_goes_to_the_trash_first_and_undo_brings_it_back() {
+        journals();
+        let d = tmp("replace-trash");
+        let tag = format!("xrt-{}", std::process::id());
+        fs::create_dir_all(d.join("src")).unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("src").join(&tag), "new contents").unwrap();
+        fs::write(d.join("to").join(&tag), "old").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::copy(vec![d.join("src").join(&tag)], d.join("to"));
+        req.trash_root = Some(d.join("trash"));
+        req.safe = true;
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&tag);
+        let dst = d.join("to").join(&tag);
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "new contents");
+        assert_eq!(
+            (s.done, s.replaced_to_trash, s.replaced_for_good),
+            (1, 1, 0),
+            "{s:?}"
+        );
+        assert!(s
+            .describe(Kind::Copy)
+            .contains("1 replaced (the old one in the trash)"));
+        let old = s.made[0].old.clone().expect("the old file is remembered");
+        let crate::trashed::Place::Freedesktop { file, .. } = &old.place else {
+            panic!("{old:?}")
+        };
+        assert_eq!(fs::read_to_string(file).unwrap(), "old");
+        let at = |point: &str| {
+            seen.iter()
+                .rposition(|(p, path)| p.name() == point && path.to_string_lossy().contains(&tag))
+                .unwrap_or_else(|| panic!("no {point} in {seen:?}"))
+        };
+        assert!(at("sync-data") < at("trash"), "{seen:?}");
+        assert!(at("journal-sync") < at("trash"), "{seen:?}");
+        assert!(at("trash") < at("rename"), "{seen:?}");
+
+        let h = crate::undo::unmake(s.made.clone());
+        let u = loop {
+            if let Event::Done(u) = h
+                .events
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+            {
+                break u;
+            }
+        };
+        assert_eq!((u.done, u.failed), (1, 0), "{u:?}");
+        assert_eq!(
+            fs::read_to_string(&dst).unwrap(),
+            "old",
+            "the old file is back"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The rename failing after the old file went to the trash: the old file comes back
+    /// under its name, and the temporary file goes.
+    #[test]
+    fn a_failed_rename_after_the_trash_puts_the_old_file_back() {
+        let d = tmp("replace-trash-fail");
+        let tag = format!("xrtf-{}", std::process::id());
+        fs::create_dir_all(d.join("src")).unwrap();
+        fs::create_dir_all(d.join("to")).unwrap();
+        fs::write(d.join("src").join(&tag), "new contents").unwrap();
+        fs::write(d.join("to").join(&tag), "old").unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::Rename,
+            &tag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![d.join("src").join(&tag)], d.join("to"));
+        req.trash_root = Some(d.join("trash"));
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Skip);
+        assert_eq!(s.replaced_to_trash, 0, "{s:?}");
+        assert_eq!(fs::read_to_string(d.join("to").join(&tag)).unwrap(), "old");
+        let left: Vec<_> = fs::read_dir(d.join("to")).unwrap().flatten().collect();
+        assert_eq!(left.len(), 1, "no temporary file left: {left:?}");
+        let _ = fs::remove_dir_all(&d);
     }
 
     /// Round 031: a copy says what it made, a directory before what is in it, and not

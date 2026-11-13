@@ -311,6 +311,18 @@ impl Plan {
         n.into_iter().collect()
     }
 
+    /// How the table shows `g` here: a replace whose old file goes to a trash on the
+    /// same volume can be undone, so it is information, not a loss. It is still asked
+    /// about, with skip first (the job's own default, as before Round 031).
+    pub fn level(&self, g: Group) -> Level {
+        match g {
+            Group::Newer | Group::Older | Group::Differs if self.target.trash == Some(true) => {
+                Level::Info
+            }
+            _ => g.level(),
+        }
+    }
+
     /// Whether a table is needed: something cannot be done, would lose data, or the
     /// destination cannot take the job. Identical files alone are only said.
     pub fn has_questions(&self) -> bool {
@@ -376,6 +388,9 @@ pub struct Target {
     pub writable: Option<bool>,
     /// Whether two names that differ only in case are one file there.
     pub ignores_case: Option<bool>,
+    /// Whether a file replaced there goes to a trash on its own volume, so undo brings
+    /// it back ([`trash_keeps`]). Not `Some(true)`: replaced for good.
+    pub trash: Option<bool>,
 }
 
 impl Target {
@@ -385,6 +400,7 @@ impl Target {
         free: None,
         writable: None,
         ignores_case: None,
+        trash: None,
     };
 
     /// Whether Windows' rules for names apply there.
@@ -402,7 +418,60 @@ pub fn target(dest: &Path) -> Target {
         free: free_space(dest),
         writable: writable(dest),
         ignores_case: ignores_case(dest, fs),
+        trash: trash_keeps(dest),
     }
+}
+
+/// Whether a file replaced in the directory `dir` goes to a trash on its own volume,
+/// where undo finds it (Round 031). `Some(false)`: there is none, the old file is
+/// replaced for good. `None`: it cannot be told, and is taken as for good.
+///
+/// - Linux: the home trash on the same file system, or one the freedesktop spec allows
+///   at the top of that mount (made on first use).
+/// - macOS: local volumes keep a `.Trashes`; network ones (smbfs, nfs, afpfs, webdav)
+///   do not.
+/// - Windows: only the system drive (the owner's decision 1, Round 031): removable and
+///   network drives have no Recycle Bin, and which a drive is cannot be asked without
+///   the console API.
+pub fn trash_keeps(dir: &Path) -> Option<bool> {
+    // The test build (the render and pty tests' binary): only Linux's trash follows
+    // XDG_DATA_HOME into the test's sandbox; elsewhere a replace there would fill the
+    // real Trash or Recycle Bin of whoever runs the tests.
+    if cfg!(feature = "faults") && !cfg!(target_os = "linux") {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        crate::ops::volume_trash_usable(dir)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let n = mac_fs_name(dir)?;
+        Some(matches!(
+            n.as_slice(),
+            b"apfs" | b"hfs" | b"msdos" | b"exfat"
+        ))
+    }
+    #[cfg(windows)]
+    {
+        on_system_drive(dir, std::env::var_os("SystemDrive")?.to_str()?)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = dir;
+        None
+    }
+}
+
+/// Whether `dir` is on the drive `system` ("C:"): a UNC path never is.
+#[cfg(any(windows, test))]
+fn on_system_drive(dir: &Path, system: &str) -> Option<bool> {
+    let s = dir.to_string_lossy();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    if s.starts_with(r"\\") || s.starts_with("UNC\\") {
+        return Some(false);
+    }
+    Some(s.len() >= 2 && system.len() == 2 && s[..2].eq_ignore_ascii_case(system))
 }
 
 #[cfg(target_os = "linux")]
@@ -421,17 +490,24 @@ fn fs_kind(dest: &Path) -> Fs {
     }
 }
 
+/// The file system's name macOS gives: "apfs", "msdos", "smbfs" …
+#[cfg(target_os = "macos")]
+fn mac_fs_name(dest: &Path) -> Option<Vec<u8>> {
+    let st = rustix::fs::statfs(dest).ok()?;
+    Some(
+        st.f_fstypename
+            .iter()
+            .take_while(|&&c| c != 0)
+            .map(|&c| c as u8)
+            .collect(),
+    )
+}
+
 #[cfg(target_os = "macos")]
 fn fs_kind(dest: &Path) -> Fs {
-    let Ok(st) = rustix::fs::statfs(dest) else {
+    let Some(name) = mac_fs_name(dest) else {
         return Fs::Unknown;
     };
-    let name: Vec<u8> = st
-        .f_fstypename
-        .iter()
-        .take_while(|&&c| c != 0)
-        .map(|&c| c as u8)
-        .collect();
     match name.as_slice() {
         b"msdos" => Fs::Fat,
         b"exfat" => Fs::Exfat,
@@ -1232,7 +1308,43 @@ mod tests {
         free: None,
         writable: Some(true),
         ignores_case: Some(true),
+        trash: None,
     };
+
+    /// Round 031, the owner's decision 1: on Windows only the system drive's Recycle
+    /// Bin is trusted to keep a replaced file; a UNC path never.
+    #[test]
+    fn only_the_system_drive_keeps_a_replaced_file_on_windows() {
+        let on = |p: &str| on_system_drive(Path::new(p), "C:");
+        assert_eq!(on(r"C:\Users\me"), Some(true));
+        assert_eq!(on(r"c:\x"), Some(true));
+        assert_eq!(on(r"\\?\C:\x"), Some(true));
+        assert_eq!(on(r"D:\x"), Some(false));
+        assert_eq!(on(r"\\server\share\x"), Some(false));
+        assert_eq!(on(r"\\?\UNC\server\share"), Some(false));
+    }
+
+    /// A replace is shown as information where the old file goes to the trash, as a
+    /// loss where it does not; it is asked about either way.
+    #[test]
+    fn a_replace_into_the_trash_is_information_not_a_loss() {
+        let d = tmp("level");
+        let (src, to) = (d.join("src"), d.join("to"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        fs::write(src.join("f"), "longer").unwrap();
+        fs::write(to.join("f"), "x").unwrap();
+        let sources = [src.join("f")];
+        let keeps = Target {
+            trash: Some(true),
+            ..Target::UNKNOWN
+        };
+        let p = plan_on(keeps, Kind::Copy, &sources, &to);
+        assert_eq!(p.level(Group::Differs), Level::Info);
+        assert!(p.has_questions());
+        let p = plan_on(Target::UNKNOWN, Kind::Copy, &sources, &to);
+        assert_eq!(p.level(Group::Differs), Level::Loses);
+    }
 
     #[test]
     fn windows_names_are_refused_by_their_rules() {

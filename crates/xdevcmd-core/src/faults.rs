@@ -33,6 +33,8 @@ pub enum Point {
     Rename,
     /// A move across devices removing its source.
     RemoveSource,
+    /// A file about to be replaced put in the trash (Round 031).
+    Trash,
     /// A job's journal begun.
     JournalBegin,
     /// One line written to a journal.
@@ -57,6 +59,7 @@ impl Point {
             Point::SyncDir => "sync-dir",
             Point::Rename => "rename",
             Point::RemoveSource => "remove-source",
+            Point::Trash => "trash",
             Point::JournalBegin => "journal-begin",
             Point::JournalLine => "journal-line",
             Point::JournalSync => "journal-sync",
@@ -323,7 +326,8 @@ mod imp {
 
     /// The rules in an `XDEVCMD_FAULTS` value; what cannot be read is left out.
     pub fn parse(spec: &str) -> Vec<(Point, String, Action)> {
-        const POINTS: [Point; 11] = [
+        const POINTS: [Point; 12] = [
+            Point::Trash,
             Point::Write,
             Point::SyncData,
             Point::SyncDir,

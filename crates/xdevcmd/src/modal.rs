@@ -215,11 +215,24 @@ impl Table {
                 bytes(free)
             ));
         }
+        if self.plan.target.trash == Some(true)
+            && self
+                .groups
+                .iter()
+                .any(|(g, ..)| matches!(g, Group::Newer | Group::Older | Group::Differs))
+        {
+            head.push(match self.plan.kind {
+                ops::Kind::Copy => {
+                    "\u{2139} a file replaced goes to the trash: Ctrl+Z brings it back".into()
+                }
+                _ => "\u{2139} a file replaced goes to the trash".into(),
+            });
+        }
         let groups = self
             .groups
             .iter()
             .map(|(g, n, c)| {
-                let icon = match g.level() {
+                let icon = match self.plan.level(*g) {
                     Level::Cannot => "\u{26d4}",
                     Level::Loses => "\u{26a0}",
                     Level::Info => "\u{2139}",
@@ -921,7 +934,7 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
         if let Some(t) = &c.table {
             if let Some(k) = i.checked_sub(t.first_line).filter(|k| *k < t.groups.len()) {
                 let g = t.groups[k].0;
-                style = match g.level() {
+                style = match t.plan.level(g) {
                     Level::Cannot => Style::new().fg(th.err),
                     Level::Loses => Style::new().fg(th.mark),
                     Level::Info => Style::new().fg(th.fg_dim),

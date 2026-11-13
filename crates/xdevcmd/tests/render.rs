@@ -5345,6 +5345,41 @@ fn a_copy_onto_files_that_are_there_shows_the_plan_once_per_group() {
     }
 }
 
+/// Round 031: where the trash is on the same volume, a replaced file goes there, the
+/// table says so, and Ctrl+Z puts it back. Linux only: there the trash is the
+/// sandbox's own (XDG_DATA_HOME).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_replaced_file_goes_to_the_trash_and_ctrl_z_brings_it_back() {
+    let (a, b) = planned_trees();
+    let s = shot_keys("118x34", "*,F5,Down,Space", &a, &b);
+    assert!(
+        s.contains("a file replaced goes to the trash: Ctrl+Z brings it back"),
+        "{s}"
+    );
+    let s = shot_keys("118x34", "*,F5,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert!(s.contains("1 replaced (the old one in the trash)"), "{s}");
+    // A new run has no undo of the last one: the copy again on fresh trees, then its
+    // undo, in one run.
+    let (a, b) = planned_trees();
+    let s = shot_keys("118x34", "*,F5,Down,Space,Enter,wait,Ctrl+z", &a, &b);
+    assert!(s.contains("remove the 2 items it made"), "{s}");
+    assert!(
+        s.contains("put back from the trash the 1 it replaced"),
+        "{s}"
+    );
+    let (a, b) = planned_trees();
+    let _ = shot_keys(
+        "118x34",
+        "*,F5,Down,Space,Enter,wait,Ctrl+z,Enter,wait",
+        &a,
+        &b,
+    );
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "old");
+    assert!(!b.join("fresh.txt").exists(), "what the copy made went");
+}
+
 #[test]
 fn the_table_changes_a_group_and_the_copy_does_what_it_says() {
     let (a, b) = planned_trees();

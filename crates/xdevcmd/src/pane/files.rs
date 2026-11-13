@@ -116,21 +116,59 @@ enum Select {
     Name(std::ffi::OsString),
 }
 
+/// Directory reads on their threads, still running, across every pane (pillar 2, A06).
+/// A read stuck in a dead mount's system call cannot be stopped; without a bound, going
+/// into such a mount again and again would leave a thread each time.
+static READS_LIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// At most this many at once; past it, a new read is refused with a note.
+const READS_MAX: usize = 16;
+
+/// Takes one place in [`READS_LIVE`]; gives it back when the thread ends.
+struct ReadSlot(&'static std::sync::atomic::AtomicUsize);
+
+impl ReadSlot {
+    fn take() -> Option<Self> {
+        Self::take_from(&READS_LIVE, READS_MAX)
+    }
+
+    fn take_from(live: &'static std::sync::atomic::AtomicUsize, max: usize) -> Option<Self> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut n = live.load(SeqCst);
+        loop {
+            if n >= max {
+                return None;
+            }
+            match live.compare_exchange(n, n + 1, SeqCst, SeqCst) {
+                Ok(_) => return Some(ReadSlot(live)),
+                Err(now) => n = now,
+            }
+        }
+    }
+}
+
+impl Drop for ReadSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Read `path` on a thread: its real path when `resolve`, its time, and its entries
-/// unless `time_only`.
+/// unless `time_only`. `None` when [`READS_MAX`] reads are still running.
 fn read_on_thread(
     path: &Path,
     resolve: bool,
     time_only: bool,
     hidden: bool,
-) -> (
+) -> Option<(
     std::sync::mpsc::Receiver<Read>,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
-) {
+)> {
+    let slot = ReadSlot::take()?;
     let (tx, rx) = std::sync::mpsc::channel();
     let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (path, counter) = (path.to_path_buf(), count.clone());
     std::thread::spawn(move || {
+        let _slot = slot;
         test_delay(&path);
         let dir = if resolve {
             xdevcmd_core::paths::canonical(&path).unwrap_or(path)
@@ -145,7 +183,7 @@ fn read_on_thread(
             entries,
         });
     });
-    (rx, count)
+    Some((rx, count))
 }
 
 /// `XDEVCMD_TEST_SLOW_DIR=<text>`: a directory whose path holds `<text>` is read two
@@ -1109,7 +1147,15 @@ impl FilePane {
         time_only: bool,
         why: ReadFor,
     ) -> Option<Read> {
-        let (rx, count) = read_on_thread(path, resolve, time_only, self.show_hidden);
+        let Some((rx, count)) = read_on_thread(path, resolve, time_only, self.show_hidden) else {
+            // Not for the periodic look: it simply comes again later.
+            if why != ReadFor::Check {
+                self.notice = Some(format!(
+                    "{READS_MAX} directory reads are still waiting on slow drives \u{2014} try again when they end"
+                ));
+            }
+            return None;
+        };
         match rx.recv_timeout(SLOW) {
             Ok(read) => Some(read),
             Err(_) => {
@@ -2022,6 +2068,21 @@ fn digits(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A06: reads stuck in a dead mount are bounded; a place comes back when one ends.
+    #[test]
+    fn stuck_reads_are_bounded_and_a_place_comes_back() {
+        static LIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let mut held: Vec<ReadSlot> = (0..5)
+            .map_while(|_| ReadSlot::take_from(&LIVE, 3))
+            .collect();
+        assert_eq!(held.len(), 3);
+        assert!(ReadSlot::take_from(&LIVE, 3).is_none());
+        held.pop();
+        let again = ReadSlot::take_from(&LIVE, 3);
+        assert!(again.is_some());
+        assert!(ReadSlot::take_from(&LIVE, 3).is_none());
+    }
 
     #[cfg(unix)]
     #[test]

@@ -5,9 +5,9 @@ name: release
 # Publish. A release (v1.2.3) is tagged on main; a pre-release (v1.2.3-beta.N, -rc.N) on
 # dev or main, and its draft is marked pre-release, never "Latest" (the owner,
 # 2026-11-13: pre-releases go to GitHub only). A tag cannot be filtered by branch here,
-# so the first job refuses one that breaks the rules (scripts/release-check.sh), and
-# nothing is built after it. Run by hand with a tag name, only that first job runs: the
-# rules tried before the tag exists.
+# so the first job refuses one that breaks the rules (scripts/release-check.sh) or whose
+# commit has not passed ci (scripts/ci-green.sh), and nothing is built after it. Run by
+# hand with a tag name, only the rules are tried, before the tag exists.
 on:
   push:
     tags: ["v*"]
@@ -30,6 +30,9 @@ jobs:
   check:
     name: tag, version and changelog agree
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
@@ -45,6 +48,14 @@ jobs:
           set -o pipefail
           scripts/release-check.sh "$TAG" "$GITHUB_SHA" | tee out.txt
           tail -n 1 out.txt >> "$GITHUB_OUTPUT"
+      # The tag's commit passed ci: a tag push starts this at once, in parallel with that
+      # commit's CI (Round 032), so it waits for it here (up to an hour) and builds
+      # nothing unless a run passed.
+      - name: ci passed on this commit
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-green.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA" 60
 
   licences:
     name: third-party licences

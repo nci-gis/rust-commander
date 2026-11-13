@@ -125,3 +125,11 @@ the line stays one row) into 0.4.0-beta.2; item 47 "Go to anything" in Later, ma
 [draft]: a direction that may change or be dropped; beta.2's row also names group
 commit for replaces (Round 032's bench finding).
 **Promoted by**: XDevTeam. Written by Claude Code.
+
+## 2026-11-13: ROADMAP, item 22 into 0.4.0-beta.2
+
+**Source**: [Round 033](cycles/Round_033.md), decision 2 (the owner: "Go as recommended").
+**What**: the Later row for item 22 (faster copies through the platform: reflink,
+`copy_file_range`, clonefile, CopyFile2) removed; it is part of item 43 in beta.2, behind
+a fallback to today's copy, the engine named in the plan.
+**Promoted by**: XDevTeam. Written by Claude Code.

@@ -1,6 +1,6 @@
 # Round 033: 0.4.0-beta.2: Smart Planner v2 and pillar 2
 
-**Status**: Planning (kickoff 2026-11-13; the owner: "bro start r032 nhé", meaning the
+**Status**: Do (kickoff 2026-11-13; the owner: "bro start r032 nhé", meaning the
 next round, since 032 is the beta.1 cut and is waiting on the owner's tests)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, the row for **0.4.0-beta.2**: item 43
 (Smart Planner v2, its scope set by beta.1's measurements), pillar 2 (responsive and
@@ -87,9 +87,29 @@ group commit against beta.1's "replace small files" and "copy small files".
 
 ## Plan
 
-Written after the decisions above.
+1. **A**: `scripts/ci-green.sh`, called by `release.yml`'s check job on a tag push. **S.**
+2. **E**: the Help row inside F1 switches the size; a pty test for F1 from F1. **S.**
+3. **D**: `~` on Windows when `HOME` is not an absolute path; the Ctrl+\ render
+   flake. **S.**
+4. **B**: item 45. **S.**
+5. **C**: item 46, the history only. **S.**
+6. **G, first part**: group commit for small files, copies and replaces, measured
+   against the owner's beta.1 baseline (sandbox numbers until then). **M.**
+7. **F**: pillar 2, one finding at a time (A01, A06, A07, B08, A03). **M–L.**
+8. **G, the rest**: item 22's fast copy behind a fallback, the engine named in the plan;
+   then lanes, concurrency and checkpointed resume as the numbers say. **M–L.**
+9. The cut of beta.2, as Round 032's step 6, with CI's wait in place.
 
 ## Do
+
+### 2026-11-13, the owner's decisions ("Go as recommended")
+
+1. Group commit now, the rest of item 43 after beta.1's baseline.
+2. Item 22 (reflink, `copy_file_range`, `clonefile`, `CopyFile2`) in beta.2, behind a
+   fallback to today's copy, with the engine named in the plan. ROADMAP's Later row for
+   22 moves to beta.2 (logged in promotions.md).
+3. Item 46: the history only; the status line stays one row.
+4. The Help row inside F1 switches the size.
 
 ## Check
 

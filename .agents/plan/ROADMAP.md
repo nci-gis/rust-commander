@@ -172,7 +172,6 @@ Steered by launch feedback. Not started before 0.4.0 ships.
 | Settings: the terminal's background detected (OSC 11) to pick light or dark | xdevtheme-light covers it by hand first |
 | 29 One directory history for panes and shells | Alt+J covers the panes; item 30a already records each command's directory |
 | 4c, 5b Settings: built-in and your own themes apart; keymap presets | Not a reason to choose xdevcmd; presets would churn keys right before the promise |
-| 22 Faster copies (reflink, `copy_file_range`, clonefile, CopyFile2) | Changes the copy engine; needs time to soak |
 | 34 Remote | Decided: none in 0.4.0, mounts instead (docs ship). Revisit only with feedback, keeping hard rule 2 |
 | Marking paths in the live panel; a refresh model for lists beyond "run again" | Trimmed from 30a and 30b |
 | F3 on a slow mount off the UI thread; fuzzing in CI; `[terminal] log = "always"` | Trimmed from 36 and 35 |
@@ -207,7 +206,7 @@ Item numbers are referenced from rounds, commits and memory, and never change.
 | 15, 16, 17, 18, 19 | Idle CPU; undo a delete to the trash; watching; replace only if older; fuzzy filter | S–M | [013](cycles/Round_013.md) | Complete (0.2.1) |
 | 20 | Sharp image previews | M | [014](cycles/Round_014.md) | Complete (0.3.0) |
 | 21 | Sort names by Unicode | S | [023](cycles/Round_023.md) | Review (v0.4.0) |
-| 22 | Faster copies | M | — | 0.5 |
+| 22 | Faster copies (the platform's own: reflink, `copy_file_range`, clonefile, CopyFile2), part of 43 | M | [033](cycles/Round_033.md) | 0.4.0-beta.2 |
 | ~~23~~ | ~~Quit from the terminal panel~~ | — | — | dropped by the owner |
 | 24–28 | Session on every way out; safe operations; terminal copy mode and keymap A; shell ↔ pane bridge; 0.3.0 release prep | S–M | [014](cycles/Round_014.md)–[017](cycles/Round_017.md) | Complete (0.3.0) |
 | 29 | One directory history for panes and shells | M | — | 0.5 |

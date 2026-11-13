@@ -151,12 +151,12 @@ so **every `cargo release` before step 5 says `--no-publish`**.
 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
    dated CHANGELOG section agree and that the tag is on `main`
-   (`scripts/release-check.sh`), then builds Linux (x86_64
-   glibc and static musl, ARM64 static musl), macOS (ARM and Intel) and Windows, and opens
-   a **draft** release with the archives (each holding `LICENSE`, `README.md`,
-   `THIRD-PARTY.md`, the example `themes/` and this version's `docs/`),
-   `SHA256SUMS`, and that CHANGELOG section as its notes.
-   Read it, then Publish.
+   (`scripts/release-check.sh`), waits for that commit's `ci` run to pass
+   (`scripts/ci-green.sh`), then builds Linux (x86_64 glibc and static musl, ARM64
+   static musl), macOS (ARM and Intel) and Windows, and opens a **draft** release with
+   the archives (each holding `LICENSE`, `README.md`, `THIRD-PARTY.md`, the example
+   `themes/` and this version's `docs/`), `SHA256SUMS`, and that CHANGELOG section as its
+   notes. Read it, then Publish.
 5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a
    crates.io token kept on the owner's machine, never in a workflow). Check first that
    `cargo package --workspace --exclude xtask` passes (CI does it on Linux):
@@ -203,9 +203,10 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    ```
 
 4. **The `release` workflow** checks the tag (`scripts/release-check.sh`: a pre-release
-   on `dev` or `main`), builds the six archives and opens a **draft marked
-   pre-release**. Read it, then Publish. Help → Documentation in that build links the
-   tag's `docs/`.
+   on `dev` or `main`), waits for the `ci` run of the tag's commit (the one the push to
+   `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
+   six archives and opens a **draft marked pre-release**. Read it, then Publish. Help →
+   Documentation in that build links the tag's `docs/`.
 5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop and winget
    (step 6). Every `cargo release` here says `--no-publish`.
 

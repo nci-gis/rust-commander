@@ -356,6 +356,29 @@ the rest. One job of 1,000 files, the median of three:
      round if it is already clearly slower (twice the default's time per file). On
      Windows that cuts the cost to a round of each, about 40 ms.
 
+### 2026-11-13, the probe with 5,000 files (run 43462505273)
+
+| Way | Linux | macOS | Windows |
+|---|---|---|---|
+| fixed 1 | 2,136 ms | 4,037 ms | 1,020 ms |
+| fixed default (16 / 8 / 1) | 772 ms | 2,221 ms | 1,099 ms |
+| probe | 240 ms (chose 16) | 1,769 ms (chose 8, 8, 16) | 1,638 ms (chose 1) |
+
+- **The runners are noisy.** Linux's sweep in the same run: 8 threads 312 ms, 16
+  threads 551 ms, 32 threads 320 ms. The probe's 240 ms against the fixed 16's 772 ms,
+  with the same choice, is mostly noise. CI shows a shape, not ±20 %.
+- **macOS**: the probe beat the fixed 8 again (1,769 ms against 2,221 ms, -20 %), as at
+  1,000 files.
+- **Windows changed shape with more files**: 8 threads 827 ms against 1,100 ms on one,
+  while 4, 16 and more lost. The parallel times stay near 1.2 s whether 1,000 or 5,000
+  files, like a fixed cost. So the probe's small samples (32 files on 8 threads)
+  measure mostly that cost, chose 1, and paid about 600 ms for trying (+50 % at
+  5,000, 2.7× at 1,000). On a laptop's real disk this may differ entirely: the
+  runner's 0.1–0.2 ms a sync suggests its flush does not reach a disk.
+- Revised proposal: probe on Linux and macOS (from the default, as option 3), where it
+  never lost and on macOS won 20 %. Windows syncs one at a time, as today, until the
+  owner's machine is measured (`cargo xtask sync-sweep --probe`).
+
 ## Check
 
 ## Act

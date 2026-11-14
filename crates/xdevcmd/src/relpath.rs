@@ -34,11 +34,20 @@ pub fn relative(paths: &[PathBuf], cwd: &Path) -> (Vec<String>, Base) {
         .iter()
         .map(|p| match p.strip_prefix(from) {
             Ok(r) if r.as_os_str().is_empty() => ".".to_string(),
-            Ok(r) => r.display().to_string(),
+            Ok(r) => written(r),
             Err(_) => p.display().to_string(),
         })
         .collect();
     (out, base)
+}
+
+/// `r` with the platform's separator between its names: a path built with `/` on
+/// Windows (`C:\proj\src/app`) would otherwise be pasted with both.
+fn written(r: &Path) -> String {
+    r.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(std::path::MAIN_SEPARATOR_STR)
 }
 
 /// The status line after copying: what, and relative to what.
@@ -75,7 +84,8 @@ mod tests {
         let here = repo.join("src/app");
         let (t, b) = relative(&[here.join("main.rs")], &here);
         assert_eq!(b, Base::Repository(repo.clone()));
-        assert_eq!(t, [Path::new("src/app/main.rs").display().to_string()]);
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(t, [format!("src{sep}app{sep}main.rs")]);
         assert_eq!(
             said(&t, &b),
             format!("copied {}, relative to the repository proj", t[0])

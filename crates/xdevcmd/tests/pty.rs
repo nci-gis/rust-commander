@@ -228,13 +228,19 @@ impl Session {
     }
 
     fn until(&self, what: &str, done: impl Fn(&str) -> bool) {
+        self.until_within(PATIENCE, what, done);
+    }
+
+    /// [`until`](Self::until), waiting at most `patience`: for work that is slow on a
+    /// busy runner by its size, not by a fault.
+    fn until_within(&self, patience: Duration, what: &str, done: impl Fn(&str) -> bool) {
         let start = Instant::now();
         loop {
             let s = self.screen();
             if done(&s) {
                 return;
             }
-            if start.elapsed() > PATIENCE {
+            if start.elapsed() > patience {
                 panic!("timed out waiting for {what}. Screen:\n{s}");
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -310,7 +316,9 @@ impl Session {
     }
 
     /// Press F10 and require a clean exit. A test that left a program running in a
-    /// shell is asked "Quit?" about it: yes.
+    /// shell is asked "Quit?" about it: yes. A job's box takes every key but Esc and b
+    /// while it runs: a test that started one waits for its end first (" copied" on
+    /// the status line), not for its file, which is there before the job has ended.
     fn quit(self) {
         self.quit_by(F10);
     }
@@ -466,6 +474,8 @@ fn the_debug_log_is_said_at_start_and_holds_no_names() {
         assert!(start.elapsed() < PATIENCE, "not copied:\n{}", x.screen());
         std::thread::sleep(Duration::from_millis(25));
     }
+    // The file is there before the job has ended; its box takes F10 until then.
+    x.wait_for(" copied");
     x.quit();
     let log = std::fs::read_dir(&s.0)
         .unwrap()
@@ -571,8 +581,17 @@ fn the_shell_pane_runs_commands() {
 #[test]
 fn copying_over_a_file_asks_first_then_overwrites() {
     let s = Scratch::new("overwrite");
-    s.file("left/report.txt", "NEW");
+    let source = s.file("left/report.txt", "NEW");
     let target = s.file("right/report.txt", "OLDER");
+    // The same time on both, so only the size differs: written apart, the target is
+    // newer by a few milliseconds, which the plan now tells.
+    let when = std::fs::metadata(&source).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&target)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
     let mut xdevcmd = Session::start(&s, None);
 
     xdevcmd.send(DOWN);
@@ -1014,7 +1033,12 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
     let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
     big.set_len(2 << 30).unwrap();
     drop(big);
-    let cfg = s.file("eio.toml", "[general]\nautosave_secs = 0\n");
+    // The copy's own loop: the platform's fast copy (a clone on APFS) copies 2 GiB of
+    // nothing at once, and there would be no copy left to cancel.
+    let cfg = s.file(
+        "eio.toml",
+        "[general]\nautosave_secs = 0\nfast_copy = false\n",
+    );
     let cfg = cfg.to_string_lossy().into_owned();
     let mut x = Session::start_env(
         &s,
@@ -1056,18 +1080,26 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
 fn quitting_with_a_copy_running_cancels_it_cleans_up_and_ends() {
     let s = Scratch::new("quit-jobs");
     std::fs::create_dir(s.left().join("sub")).unwrap();
-    // Sparse, as in the lost-terminal test: still copying when q comes, at most 2 GiB.
+    // Sparse, as in the lost-terminal test: still copying when F10 comes, at most
+    // 2 GiB, and through the copy's own loop for the same reason.
     let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
     big.set_len(2 << 30).unwrap();
     drop(big);
-    let mut x = Session::start(&s, None);
+    let cfg = s.file("quit-jobs.toml", "[general]\nfast_copy = false\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", cfg.as_str())],
+    );
     x.send(DOWN);
     x.send(ENTER); // into sub
     x.wait_for("/left/sub");
     x.send(DOWN);
     x.send(F5);
     x.wait_for("[Enter] go");
-    // Go, to the background (b), and quit (q) in one write: a fast disk copies 2 GiB of
+    // Go, to the background (b), and quit (F10) at once: a fast disk copies 2 GiB of
     // nothing in a second or two.
     x.send(b"\rb");
     x.send(F10);
@@ -2011,7 +2043,11 @@ fn click_into_program(tag: &str, setup: &str, reset: &str) -> String {
     xdevcmd.mouse(32, 11, bar_y + 4, false);
     xdevcmd.mouse(0, 11, bar_y + 4, true);
     xdevcmd.send(b"\r");
-    xdevcmd.wait_for("got:");
+    // The typed command holds "got:" too: wait for the line that starts with it.
+    xdevcmd.until("the program's answer", |scr| {
+        scr.lines()
+            .any(|l| l.trim_start_matches('\u{2502}').starts_with("got:"))
+    });
     let screen = xdevcmd.screen();
     xdevcmd.send(F12);
     xdevcmd.quit();
@@ -2061,7 +2097,11 @@ fn a_drag_out_of_the_shell_still_ends_in_its_program() {
     xdevcmd.mouse(0, 10, 3, true);
     xdevcmd.click(12, bar_y + 3, 16); // Ctrl+click
     xdevcmd.send(b"\r");
-    xdevcmd.wait_for("got:");
+    // The typed command holds "got:" too: wait for the line that starts with it.
+    xdevcmd.until("the program's answer", |scr| {
+        scr.lines()
+            .any(|l| l.trim_start_matches('\u{2502}').starts_with("got:"))
+    });
     let screen = xdevcmd.screen();
     let got = screen
         .lines()
@@ -2709,7 +2749,10 @@ fn everything_at_once_stays_bounded_and_keys_still_answer() {
     x.wait_for("stopped at 100000 found");
     // The copy keeps what it made for its undo (up to 200,000 entries, its own cap):
     // memory is level only once it has ended.
-    x.until("the copy to end", |screen| screen.contains(" copied"));
+    // 120,000 files: slow on a busy runner by their number alone.
+    x.until_within(Duration::from_secs(120), "the copy to end", |screen| {
+        screen.contains(" copied")
+    });
 
     // F3 on a big file in the other pane: the last row, after the copy's directory.
     x.send(b"\t");

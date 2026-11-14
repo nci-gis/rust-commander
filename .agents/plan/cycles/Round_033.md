@@ -774,6 +774,29 @@ Decided:
   - the bench numbers on Windows and macOS, which decide lanes;
   - CI on the branch, then the cut.
 
+### 2026-11-14, the branch's first CI run, and its fixes (the owner: "chạy Ci và check kết quả")
+
+- **Run 43632177290 at b40552e**: deny and the cross-check passed; every test job
+  failed. It was the first CI on this branch: all of Round 033 had run only here.
+- **What failed, and why** (none of it a fault in the program):
+  - **F10 after a copy did nothing (Linux, here under load)**: the tests sent the quit
+    key once the copied file was on disk, but the job had not ended yet, and its box
+    takes every key but Esc and b. Proved here: under load the first F10 and the first
+    Ctrl+q alike were taken, and the second ended it. The debug-log test now waits for
+    " copied" first; the helper's comment says so.
+  - **The 120,000-file copy in B08 timed out on the runner**: it gets 120 s, by its size.
+  - **macOS, the 2 GiB copies ended at once**: item 22's fast copy clones on APFS, so
+    the lost-terminal and quit-with-a-copy tests had no copy left to cancel. Both now
+    run with `fast_copy = false`, as the fallback test already did.
+  - **macOS, "would replace a newer file"**: written a few ms apart, the target is
+    newer since the mtime precision change. The test gives both files one time.
+  - **macOS, the drag test**: it waited for "got:", which the typed command line also
+    holds. It now waits for a line that starts with it (two tests).
+  - **Windows, relpath**: the test built `src/app` with `/` and got `src/app\main.rs`.
+    `relative()` now writes each path with the platform's separator.
+- **Checked here**: the pty suite twice under load (48 busy processes, 32 test
+  threads): 119 passed each time; before, 3 failed.
+
 ## Check
 
 ## Act

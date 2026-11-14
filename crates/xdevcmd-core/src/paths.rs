@@ -29,6 +29,80 @@ const RESERVED: &[&str] = &[
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// Whether `a` and `b` name one directory entry on disk, whatever the text of each: a
+/// link to a parent, `..`, or another case on a case-insensitive drive. Neither path's
+/// last part is followed if it is a link (a link and its target are two entries).
+/// False when either is missing.
+pub fn same_entry(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // std has no stable file index here. The final path names the entry with the
+        // case on disk, so two files in a case-sensitive folder stay two. A link is
+        // its own entry: its parent's final path and its name, as written.
+        let entry = |p: &Path| {
+            if std::fs::symlink_metadata(p).ok()?.file_type().is_symlink() {
+                let parent = p.parent().filter(|q| !q.as_os_str().is_empty());
+                Some(
+                    canonical(parent.unwrap_or(Path::new(".")))
+                        .ok()?
+                        .join(p.file_name()?),
+                )
+            } else {
+                canonical(p).ok()
+            }
+        };
+        match (entry(a), entry(b)) {
+            (Some(x), Some(y)) => x == y,
+            _ => false,
+        }
+    }
+}
+
+/// Whether the directory `dir` is `src_dir` or below it on disk, following links: what
+/// a copy or move of `src_dir` into `dir` must refuse, as it would recurse into its own
+/// copy. The text of the paths does not matter (a link into `src_dir`, `..`, another
+/// case). False when `dir` cannot be resolved.
+pub fn within(dir: &Path, src_dir: &Path) -> bool {
+    let Ok(mut at) = canonical(dir) else {
+        return false;
+    };
+    #[cfg(unix)]
+    let target = {
+        use std::os::unix::fs::MetadataExt;
+        match std::fs::metadata(src_dir) {
+            Ok(m) => (m.dev(), m.ino()),
+            Err(_) => return false,
+        }
+    };
+    #[cfg(not(unix))]
+    let Ok(target) = canonical(src_dir) else {
+        return false;
+    };
+    loop {
+        #[cfg(unix)]
+        let hit = {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&at).is_ok_and(|m| (m.dev(), m.ino()) == target)
+        };
+        #[cfg(not(unix))]
+        let hit = at == target;
+        if hit {
+            return true;
+        }
+        if !at.pop() {
+            return false;
+        }
+    }
+}
+
 /// `p` without a `\\?\` prefix when the plain form means the same file; otherwise
 /// `p` as it is. No disk access: for paths xdevcmd kept from before, such as a session
 /// or bookmarks saved by a version that did not strip it.
@@ -125,6 +199,67 @@ mod tests {
             "nothing to strip"
         );
         assert_eq!(strip_verbatim("/home/me"), None);
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("xdevcmd-paths-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("d").join("inner")).unwrap();
+        canonical(&d).unwrap()
+    }
+
+    #[test]
+    fn within_sees_a_folder_below_itself_whatever_the_text() {
+        let root = scratch("within");
+        let d = root.join("d");
+        assert!(within(&d, &d), "itself");
+        assert!(within(&d.join("inner"), &d));
+        assert!(within(&d.join("inner").join("..").join("inner"), &d));
+        assert!(!within(&root, &d), "its parent is not inside it");
+        assert!(
+            !within(&root.join("missing"), &d),
+            "a missing folder is not"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(d.join("inner"), root.join("link")).unwrap();
+            assert!(within(&root.join("link"), &d), "through a link");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn same_entry_sees_one_entry_by_two_texts() {
+        let root = scratch("same");
+        let d = root.join("d");
+        assert!(same_entry(&d, &d.join("inner").join("..")));
+        assert!(!same_entry(&d, &d.join("inner")));
+        assert!(!same_entry(&d, &root.join("missing")));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&root, root.join("d").join("up")).unwrap();
+            assert!(same_entry(&d, &d.join("up").join("d")), "through a link");
+            assert!(
+                !same_entry(&root, &d.join("up")),
+                "a link is not its target"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Another case names the same folder where the drive ignores case: Windows always,
+    /// macOS when the volume is case-insensitive (the default), checked here first.
+    #[test]
+    fn another_case_is_the_same_folder_where_case_is_ignored() {
+        let root = scratch("case");
+        let d = root.join("d");
+        if !root.join("D").exists() {
+            let _ = std::fs::remove_dir_all(&root);
+            return; // a case-sensitive file system: two names, two folders
+        }
+        assert!(within(&root.join("D").join("INNER"), &d));
+        assert!(same_entry(&root.join("D"), &d));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]

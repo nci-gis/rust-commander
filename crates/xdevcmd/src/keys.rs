@@ -131,7 +131,9 @@ pub const BINDINGS: &[Binding] = &[
         title: "Quit",
         group: "General",
         about: "Quit xdevcmd",
-        keys: &["F10", "q", "Ctrl+q"],
+        // No plain `q`: one stray key in a file pane ended every shell (review,
+        // 2026-11-14). `quit = ["F10", "q", "Ctrl+q"]` under [keys] brings it back.
+        keys: &["F10", "Ctrl+q"],
     },
     Binding {
         action: Action::Help,

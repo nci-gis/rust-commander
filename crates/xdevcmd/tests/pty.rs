@@ -309,11 +309,22 @@ impl Session {
         self.master = None;
     }
 
-    /// Press q and require a clean exit.
-    fn quit(mut self) {
-        self.send(b"q");
+    /// Press F10 and require a clean exit. A test that left a program running in a
+    /// shell is asked "Quit?" about it: yes.
+    fn quit(self) {
+        self.quit_by(F10);
+    }
+
+    /// Press `key` and require a clean exit.
+    fn quit_by(mut self, key: &[u8]) {
+        self.send(key);
         let start = Instant::now();
+        let mut answered = false;
         loop {
+            if !answered && self.screen().contains("Running in the terminal") {
+                self.send(ENTER);
+                answered = true;
+            }
             match self.child.try_wait() {
                 Ok(Some(status)) => {
                     assert!(status.success(), "xdevcmd exited with {status:?}");
@@ -321,7 +332,7 @@ impl Session {
                 }
                 Ok(None) if start.elapsed() > PATIENCE => {
                     let _ = self.child.kill();
-                    panic!("xdevcmd did not exit on q. Screen:\n{}", self.screen());
+                    panic!("xdevcmd did not exit. Screen:\n{}", self.screen());
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(25)),
                 Err(e) => panic!("waiting for xdevcmd: {e}"),
@@ -351,6 +362,7 @@ fn wait_file(path: &Path, what: &str, ok: impl Fn(Option<String>) -> bool) {
 const DOWN: &[u8] = b"\x1b[B";
 const INSERT: &[u8] = b"\x1b[2~";
 const ENTER: &[u8] = b"\r";
+const F10: &[u8] = b"\x1b[21~";
 const F4: &[u8] = b"\x1bOS";
 const F5: &[u8] = b"\x1b[15~";
 const F6: &[u8] = b"\x1b[17~";
@@ -407,7 +419,7 @@ fn a_config_with_a_mistake_is_asked_about_at_start() {
         &[("XDEVCMD_CONFIG", &cfg)],
     );
     x.wait_for("Config not loaded");
-    x.quit();
+    x.quit_by(b"q");
 }
 
 /// E on that dialog opens the file in the editor; mended there, xdevcmd says so.
@@ -1057,7 +1069,8 @@ fn quitting_with_a_copy_running_cancels_it_cleans_up_and_ends() {
     x.wait_for("[Enter] go");
     // Go, to the background (b), and quit (q) in one write: a fast disk copies 2 GiB of
     // nothing in a second or two.
-    x.send(b"\rbq");
+    x.send(b"\rb");
+    x.send(F10);
     x.wait_for("cancel them and quit");
     x.send(ENTER);
     let start = Instant::now();
@@ -2547,8 +2560,8 @@ fn everything_at_once_stays_bounded_and_keys_still_answer() {
     // Level: the shell goes on printing, nothing else is added.
     assert!(rss2 <= rss1 + 16 * 1024, "growing: {rss1} → {rss2} KiB");
 
-    // Keys answer: Esc closes the viewer, F10 ends (a job still running would be asked
-    // about first). Esc's time includes `send`'s own 310 ms after a lone Esc.
+    // Keys answer: Esc closes the viewer, F10 ends (a job, or the program still printing
+    // in the shell, is asked about first). Esc's time includes `send`'s own 310 ms after a lone Esc.
     let t = Instant::now();
     x.send(b"\x1b");
     x.wait_gone("1000000 lines");
@@ -2556,7 +2569,7 @@ fn everything_at_once_stays_bounded_and_keys_still_answer() {
     let t = Instant::now();
     x.send(b"\x1b[21~"); // F10
     let asked = loop {
-        if x.screen().contains("cancel them and quit") {
+        if x.screen().contains("Quit?") {
             break true;
         }
         if x.child.try_wait().unwrap().is_some() {

@@ -125,22 +125,60 @@ impl App {
 
     /// Jobs still running: ask first. True when the question is now on screen.
     pub(super) fn ask_before_quitting(&mut self) -> bool {
-        if self.jobs.is_empty() {
+        let programs = self
+            .panel_ref()
+            .map(|p| p.busy_programs())
+            .unwrap_or_default();
+        self.ask_before_quitting_with(programs)
+    }
+
+    /// [`ask_before_quitting`](Self::ask_before_quitting), given the programs running
+    /// in the shells: asks when jobs run or a program does, as quitting ends both. An
+    /// idle shell does not ask.
+    pub(super) fn ask_before_quitting_with(&mut self, programs: Vec<String>) -> bool {
+        let n = self.jobs.len();
+        if n == 0 && programs.is_empty() {
             return false;
         }
-        let n = self.jobs.len();
-        self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Quit?".into(),
-            body: vec![
-                format!(
-                    "{n} job{} still running in the background.",
-                    if n == 1 { " is" } else { "s are" }
-                ),
+        let mut body = Vec::new();
+        if n > 0 {
+            body.push(format!(
+                "{n} job{} still running in the background.",
+                if n == 1 { " is" } else { "s are" }
+            ));
+            body.push(
                 "Quitting cancels them; a file being written is removed, not left half done."
                     .into(),
-            ],
+            );
+        }
+        if !programs.is_empty() {
+            let shown = programs
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = programs.len().saturating_sub(3);
+            body.push(format!(
+                "Running in the terminal: {shown}{}. Quitting ends {}.",
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                },
+                if programs.len() == 1 { "it" } else { "them" }
+            ));
+        }
+        let yes = if n > 0 {
+            "cancel them and quit"
+        } else {
+            "quit anyway"
+        };
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Quit?".into(),
+            body,
             danger: true,
-            yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
+            yes: Some((yes.into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             also: None,
             more: None,

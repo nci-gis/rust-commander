@@ -1515,12 +1515,12 @@ impl Worker {
             return;
         };
         let dst = dest_dir.join(name);
-        if dst == src {
+        if crate::plan::onto_itself(src, &dst) {
             self.sum.skipped += 1;
             return;
         }
         // Copying a directory into itself would recurse until the disk filled.
-        if src.is_dir() && dst.starts_with(src) {
+        if crate::plan::into_itself(src, &dst, dest_dir) {
             let e = io::Error::other("cannot copy a directory into itself");
             self.note_error(src, &e);
             return;
@@ -2315,11 +2315,11 @@ impl Worker {
             return;
         };
         let dst = dest_dir.join(name);
-        if dst == src {
+        if crate::plan::onto_itself(src, &dst) {
             self.sum.skipped += 1;
             return;
         }
-        if src.is_dir() && dst.starts_with(src) {
+        if crate::plan::into_itself(src, &dst, dest_dir) {
             let e = io::Error::other("cannot move a directory into itself");
             self.note_error(src, &e);
             return;
@@ -5083,6 +5083,35 @@ mod tests {
         run(req);
         assert_eq!(fs::read_to_string(root.join("tree2/sub/x")).unwrap(), "X");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Reproduced in review: through `link -> d/inner` a copy of `d` into `link`
+    /// recursed about 500 levels and aborted on a stack overflow.
+    #[cfg(unix)]
+    #[test]
+    fn copying_or_moving_a_directory_into_itself_through_a_link_is_refused() {
+        let root = tmp("self-link");
+        let d = root.join("d");
+        fs::create_dir_all(d.join("inner")).unwrap();
+        fs::write(d.join("f"), b"f").unwrap();
+        std::os::unix::fs::symlink(d.join("inner"), root.join("link")).unwrap();
+        for req in [
+            Request::copy(vec![d.clone()], root.join("link")),
+            Request::mv(vec![d.clone()], root.join("link")),
+            Request::copy(vec![d.clone()], d.join("inner").join("..").join("inner")),
+        ] {
+            let s = run(req);
+            assert_eq!(s.failed, 1, "refused");
+            assert_eq!(s.done, 0);
+            assert!(!d.join("inner").join("d").exists(), "nothing made inside");
+            assert!(d.join("f").is_file(), "the source is untouched");
+        }
+        // Onto itself: the destination is a link to d's parent.
+        std::os::unix::fs::symlink(&root, root.join("up")).unwrap();
+        let s = run(Request::copy(vec![d.clone()], root.join("up")));
+        assert_eq!((s.failed, s.done, s.skipped), (0, 0, 1));
+        assert_eq!(fs::read(d.join("f")).unwrap(), b"f");
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

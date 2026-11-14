@@ -7,7 +7,7 @@ the shell where you were, and a small function can `cd` there.
 
 Add one of these to your shell's startup file. Then run `xc` instead of `xdevcmd`. The
 name is yours to choose; `rc` would hide the Plan 9 shell of that name.
-Quit with **q** to go to that directory, or **Q** to stay where you started.
+Quit with **F10** to go to that directory, or **Q** to stay where you started.
 
 **bash / zsh** (`~/.bashrc` or `~/.zshrc`):
 

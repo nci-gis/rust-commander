@@ -481,6 +481,21 @@ impl TermPanel {
     }
 
     /// Every running shell, across all tabs and splits — what the limit counts.
+    /// The programs running in any shell of any tab (a `Busy` or `Remote` state), for
+    /// asking before quitting ends them. An idle shell, or one whose state this system
+    /// cannot tell, is not listed.
+    pub fn busy_programs(&self) -> Vec<String> {
+        use crate::pane::term::ShellState;
+        self.tabs
+            .iter()
+            .flat_map(|t| t.terms.values())
+            .filter_map(|t| match t.state() {
+                ShellState::Busy(p) | ShellState::Remote(p) => Some(p),
+                ShellState::Idle | ShellState::Unknown => None,
+            })
+            .collect()
+    }
+
     pub fn shell_count(&self) -> usize {
         self.tabs.iter().map(|t| t.terms.len()).sum()
     }

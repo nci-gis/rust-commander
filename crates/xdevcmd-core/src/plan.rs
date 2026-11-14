@@ -888,11 +888,11 @@ fn plan_capped(
             continue;
         };
         let dst = dest.join(name);
-        if dst == *src {
+        if onto_itself(src, &dst) {
             s.blocked(src, &dst, false, Blocked::SameFile);
             continue;
         }
-        if src.is_dir() && dst.starts_with(src) {
+        if into_itself(src, &dst, dest) {
             s.blocked(src, &dst, true, Blocked::IntoItself);
             continue;
         }
@@ -1217,6 +1217,26 @@ impl Scan<'_> {
     }
 }
 
+/// Whether `dst` is `src` itself, by its text or on disk (a link to a parent, `..`,
+/// another case of a folder): copying or moving it there has nothing to do. Only under
+/// its own name: a move to a new name differing in case is a rename, and another name
+/// on the same file (a hard link) is another entry.
+pub(crate) fn onto_itself(src: &Path, dst: &Path) -> bool {
+    dst == src || (dst.file_name() == src.file_name() && crate::paths::same_entry(src, dst))
+}
+
+/// Whether putting the directory `src` at `dst`, in `dest_dir`, puts it inside itself,
+/// which would recurse into its own copy until the disk or the stack ran out. By the
+/// text, and on disk: `dest_dir` reached through a link into `src` is still inside it.
+/// A link to a directory is copied as a link, so only a real directory is checked on
+/// disk.
+pub(crate) fn into_itself(src: &Path, dst: &Path, dest_dir: &Path) -> bool {
+    if src.is_dir() && dst.starts_with(src) {
+        return true;
+    }
+    fs::symlink_metadata(src).is_ok_and(|m| m.is_dir()) && crate::paths::within(dest_dir, src)
+}
+
 /// Two files (or links), source and destination, compared as a copy would leave them.
 fn compare_files(src: &Path, s: &fs::Metadata, dst: &Path, d: &fs::Metadata) -> Class {
     use std::cmp::Ordering::*;
@@ -1454,6 +1474,31 @@ mod tests {
         assert_eq!(row(&p, "a").blocked, Some(Blocked::IntoItself));
         let p = plan(Kind::Copy, &[d.join("f")], &d);
         assert_eq!(row(&p, "f").blocked, Some(Blocked::SameFile));
+    }
+
+    /// The text of the destination says nothing: a link into the source, or to its
+    /// parent, is the same place on disk.
+    #[cfg(unix)]
+    #[test]
+    fn into_itself_and_onto_itself_through_a_link_are_blocked() {
+        let d = tmp("itself-link");
+        fs::create_dir_all(d.join("a").join("inner")).unwrap();
+        std::os::unix::fs::symlink(d.join("a").join("inner"), d.join("down")).unwrap();
+        std::os::unix::fs::symlink(&d, d.join("a").join("up")).unwrap();
+        let p = plan(Kind::Copy, &[d.join("a")], &d.join("down"));
+        assert_eq!(row(&p, "a").blocked, Some(Blocked::IntoItself));
+        let p = plan(
+            Kind::Move,
+            &[d.join("a")],
+            &d.join("a").join("inner").join(".."),
+        );
+        assert_eq!(row(&p, "a").blocked, Some(Blocked::IntoItself));
+        let p = plan(Kind::Copy, &[d.join("a")], &d.join("a").join("up"));
+        assert_eq!(row(&p, "a").blocked, Some(Blocked::SameFile));
+        // A link to a folder is copied as a link: into its own target is fine.
+        let p = plan(Kind::Copy, &[d.join("down")], &d.join("a").join("inner"));
+        assert_eq!(row(&p, "down").blocked, None);
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

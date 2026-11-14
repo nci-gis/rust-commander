@@ -120,21 +120,7 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, RenameError> {
 
 /// Whether two paths name the same file on disk (not merely equal contents).
 fn same_file(a: &Path, b: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        match (fs::symlink_metadata(a), fs::symlink_metadata(b)) {
-            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
-            _ => false,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        match (fs::canonicalize(a), fs::canonicalize(b)) {
-            (Ok(x), Ok(y)) => x == y,
-            _ => false,
-        }
-    }
+    crate::paths::same_entry(a, b)
 }
 
 impl From<io::Error> for RenameError {

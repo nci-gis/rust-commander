@@ -32,8 +32,8 @@ fn started_from_a_panel_yes_starts_it() {
     let mut run = Run::start("yes", "", Some(std::process::id()));
     run.wait_for_text(QUESTION);
     run.send(b"y\r");
-    // The menu bar, drawn: it started. q quits, as in tests/pty.rs.
+    // The menu bar, drawn: it started. F10 quits, as in tests/pty.rs.
     run.wait_for("Help");
-    run.send(b"q");
+    run.send(b"\x1b[21~");
     assert_eq!(run.exit_code(), 0, "{:?}", run.text());
 }

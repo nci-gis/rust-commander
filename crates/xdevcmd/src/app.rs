@@ -1149,6 +1149,25 @@ mod tests {
     }
 
     #[test]
+    fn quitting_with_a_program_in_a_shell_asks_first() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-bgp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        assert!(
+            !app.ask_before_quitting_with(Vec::new()),
+            "an idle shell: straight out"
+        );
+        assert!(app.ask_before_quitting_with(vec!["vim".into()]));
+        assert!(
+            matches!(&app.modal, Some(Modal::Ask(a)) if a.title == "Quit?"
+                && a.body.iter().any(|l| l.contains("vim"))),
+            "it names the program"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn base64_matches_the_rfc_vectors() {
         for (input, want) in [
             ("", ""),

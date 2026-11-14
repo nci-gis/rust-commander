@@ -33,6 +33,10 @@ that heading and starts a new, empty one here. -->
   the editor closes) or quit (Q).
 
 ### Changed
+- **`q` no longer quits**: one stray key in a file pane ended every shell. F10 and
+  Ctrl+q quit; `quit = ["F10", "q", "Ctrl+q"]` under `[keys]` brings `q` back. Quitting
+  while a program runs in a terminal (an editor, a build, ssh) now asks first, as it
+  does with jobs running; an idle shell does not.
 - **F1's own row, chosen inside F1, switches between the small and the large window**
   instead of closing and opening F1 again.
 - **Replacing many small files is many times faster**: replaced files of up to 1 MiB
@@ -55,6 +59,11 @@ that heading and starts a new, empty one here. -->
   frame: a search of a whole disk no longer grows memory without end or slows every key.
 
 ### Fixed
+- **A copy or move of a folder into its own subfolder is refused however the
+  destination is written**: through a link into the folder, `..`, or another case on a
+  drive that ignores case. Before, only the text of the path was compared, and such a
+  copy recursed until the disk filled or xdevcmd crashed. A copy onto itself through a
+  link to its parent is skipped the same way.
 - **F5 and F6 check faster on Windows the first time**: inside a folder, what a file is
   (size, times) is taken from the folder's listing instead of opening each file, which
   Windows Defender scanned on first open (1,500 documents of 500 MB took 1–1.5 s; as

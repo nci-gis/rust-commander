@@ -172,8 +172,9 @@ Write the notes as you go: every change that a user would notice gets a line und
 newest heading of `CHANGELOG.md`, in the same commit. A release then takes six steps.
 `cargo release` needs installing once: `cargo install --locked cargo-release`.
 Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it with
-`=x.y.z`; cargo-release rewrites the pin); `release.toml` says so with `publish = true`,
-so **every `cargo release` before step 5 says `--no-publish`**.
+`=x.y.z`; cargo-release rewrites the pin), by hand in step 5 only. `release.toml` has
+`publish = false`, so no `cargo release` publishes, even one that forgets
+`--no-publish` (the commands below still say it).
 
 1. **On `dev`**, date the notes and commit (add `minor`, `patch` or a version number to
    also raise the version; leave it out to release the version `Cargo.toml` has):
@@ -206,8 +207,10 @@ so **every `cargo release` before step 5 says `--no-publish`**.
    `cargo package --workspace --exclude xtask` passes (CI does it on Linux):
 
    ```bash
-   cargo release publish                 # look: xdevcmd-core, then xdevcmd
-   cargo release publish --execute
+   cargo publish -p xdevcmd-core --locked --dry-run   # look
+   cargo publish -p xdevcmd-core --locked
+   cargo publish -p xdevcmd --locked --dry-run        # once the index has the core
+   cargo publish -p xdevcmd --locked
    ```
 
    A version on crates.io cannot be replaced, only yanked; publish after the GitHub
@@ -252,7 +255,7 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    six archives and opens a **draft marked pre-release**. Read it, then Publish. Help →
    Documentation in that build links the tag's `docs/`.
 5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop and winget
-   (step 6). Every `cargo release` here says `--no-publish`.
+   (step 6). `release.toml` (`publish = false`) keeps every `cargo release` off crates.io.
 
 A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1`,
 `git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.

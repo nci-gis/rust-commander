@@ -621,6 +621,46 @@ recommended"):
   files took 15 ms and the large one 56 ms, so lanes could save at most about 15 ms
   here. The owner's Windows and macOS numbers decide.
 
+### 2026-11-14, an independent review: three P0 fixes before beta.2 (the owner)
+
+An outside review of this branch (4 agents) was checked claim by claim against
+`69324a2` before acting on it.
+
+- **Held**:
+  - **a copy into itself through a link** (`plan.rs`, `ops.rs` copy and move compared
+    the text with `starts_with`). Reproduced: `link -> d/inner`, copy `d` into `link`
+    went about 500 levels deep and aborted on a stack overflow;
+  - **`q` quit at once** (no question without jobs);
+  - **`publish = true`** in `release.toml`;
+  - the 2 s mtime slack for every file system (in fact up to 2.999 s: `as_secs`);
+  - identical rows never dropped from a plan (`conflicts()` counts them);
+  - no xattr, ACL or hard links kept, and nothing says so;
+  - `p` needing OSC 133.
+- **Wrong**:
+  - journals have a version line (`v 3`);
+  - security.md already says a new file can be short after a power cut;
+  - pre-releases going to crates.io was never the plan (ROADMAP, 2026-11-13);
+  - README marks Scoop and winget as planned (the commands under it still read as
+    usable: for rc.1).
+- **Fixed now** (plan approved by the owner):
+  - `paths::within` and `paths::same_entry` (dev+ino on Unix, final paths on Windows);
+  - `plan::into_itself` and `plan::onto_itself`, the one rule for the plan, copy and
+    move. A link to a folder is still copied as a link, and a move to a name differing
+    only in case is still a rename;
+  - `q` dropped from Quit's defaults; quitting asks when a program runs in any shell
+    (`TermPanel::busy_programs`);
+  - `publish = false`, with crates.io by hand (`cargo publish -p`) in development.md.
+- **For rc.1** (the owner):
+  - the mtime slack only on FAT, exFAT and network drives;
+  - bounded identical rows;
+  - docs/compatibility.md, a platform table, "What xdevcmd doesn't do — and what to
+    use" (rsync, robocopy, rclone);
+  - Transparency in the README, saying most code is agent-written;
+  - docs for running the bench.
+- **Channels** (the owner, agreed): GitHub releases with build provenance first,
+  crates.io from 0.4.0, a Scoop bucket of our own with checkver, winget after signing
+  (SignPath Foundation after 0.4.0).
+
 ## Check
 
 ## Act

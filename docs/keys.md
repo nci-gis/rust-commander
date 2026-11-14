@@ -9,7 +9,7 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 
 | Keys | Does |
 |---|---|
-| `Ctrl+q` `F10` `q` | Quit xdevcmd |
+| `Ctrl+q` `F10` | Quit xdevcmd |
 | `F1` `Alt+x F1` | Every command, found by typing, with its key; Enter runs it |
 | `Ctrl+r` | Re-read the active pane |
 | `Ctrl+h` | Show or hide hidden files |

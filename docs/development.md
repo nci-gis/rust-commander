@@ -198,7 +198,10 @@ Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it
    dated CHANGELOG section agree and that the tag is on `main`
    (`scripts/release-check.sh`), waits for that commit's `ci` run to pass
    (`scripts/ci-green.sh`), then builds Linux (x86_64 glibc and static musl, ARM64
-   static musl), macOS (ARM and Intel) and Windows, and opens a **draft** release with
+   static musl), macOS (ARM and Intel) and Windows, smoke-tests each archive as a
+   user gets it (`scripts/smoke.sh`: unpacked, its files, at most 7 MiB, run where the
+   runner's CPU can, its version the tag's), attests their build provenance, and opens
+   a **draft** release with
    the archives (each holding `LICENSE`, `README.md`, `THIRD-PARTY.md`, the example
    `themes/` and this version's `docs/`), `SHA256SUMS`, and that CHANGELOG section as its
    notes. Read it, then Publish.

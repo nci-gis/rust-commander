@@ -122,6 +122,12 @@ jobs:
             cp "target/${{ matrix.target }}/release/xdevcmd" "$name/"
             tar czf "$name.tar.gz" "$name"
           fi
+      # The archive itself, as a user gets it: unpacked elsewhere, its files there, the
+      # binary under 7 MiB, and run (where this runner's CPU can): its version is the
+      # tag's, and the --print commands work.
+      - name: smoke test
+        shell: bash
+        run: scripts/smoke.sh xdevcmd-*.* "$GITHUB_REF_NAME"
       - uses: actions/upload-artifact@v4
         with:
           name: xdevcmd-${{ matrix.target }}
@@ -136,6 +142,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance: a signed statement, kept by GitHub, that each archive was
+      # built here from this tag's commit. `gh attestation verify <archive> -R
+      # nci-gis/rust-commander` checks it (docs/security.md, "Checking a download").
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -145,6 +156,10 @@ jobs:
           path: dist
       - name: checksums
         run: cd dist && sha256sum xdevcmd-* > SHA256SUMS && cat SHA256SUMS
+      - name: provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/xdevcmd-*
       # Notes: this version's section of CHANGELOG.md. A release page, unlike a file,
       # keeps every line break, so each wrapped list item is joined back into one line.
       - name: notes

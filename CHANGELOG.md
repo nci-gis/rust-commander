@@ -11,6 +11,10 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Release archives can be checked**: each one comes with build provenance
+  (`gh attestation verify <archive> -R nci-gis/rust-commander`) besides `SHA256SUMS`, and
+  is unpacked and run by the release workflow before the draft is made (its files, its
+  size, its version). See docs/security.md, "Checking a download".
 - **A big copy goes on from where it stopped.** With safe operations on, a file larger
   than 256 MiB is synced every 256 MiB as it is copied. If xdevcmd is killed or the
   power goes, the next start keeps what was on disk ("kept part way"), and Continue goes

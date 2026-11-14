@@ -340,6 +340,25 @@ or `XDEVCMD_CONFIG` at a file someone else can change.
 `[files] git_status = true` runs `git` in each directory you open. A repository's own
 git config can make git run other programs. Turn it on only for repositories you trust.
 
+## Checking a download
+
+Each release on GitHub has a `SHA256SUMS` file and, from 0.4.0-beta.2 on, build
+provenance: a statement signed through GitHub that the archive was built by this
+repository's release workflow, from the tag's commit. To check an archive you
+downloaded, with the [GitHub CLI](https://cli.github.com):
+
+```bash
+gh attestation verify xdevcmd-v0.4.0-x86_64-unknown-linux-gnu.tar.gz -R nci-gis/rust-commander
+```
+
+Without it, compare the archive's SHA-256 with its line in `SHA256SUMS` (`sha256sum`,
+`shasum -a 256` on macOS, `Get-FileHash` in PowerShell).
+
+The binaries are **not code-signed** yet. Windows SmartScreen and macOS Gatekeeper warn
+the first time; [troubleshooting](troubleshooting.md#macos) says what to do. Before each
+release, every archive is unpacked and run by the release workflow (`scripts/smoke.sh`):
+its files, its size (at most 7 MiB), its version and its `--print` commands.
+
 ## Reporting a problem
 
 A security problem: report it privately, as [SECURITY.md](../SECURITY.md) explains —

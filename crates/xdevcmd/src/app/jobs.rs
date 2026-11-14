@@ -364,6 +364,8 @@ impl App {
         // Big files cut short after a checkpoint go on from there (Round 033).
         req.partial = it.partial.clone();
         req.resumed = it.journal.clone();
+        // Folders it finished are not walked again (Round 033).
+        req.done_dirs = it.done.iter().cloned().collect();
         let kind = req.kind;
         self.remember_job(&req);
         self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));

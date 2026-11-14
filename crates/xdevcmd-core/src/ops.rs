@@ -139,6 +139,10 @@ pub struct Request {
     pub partial: Vec<crate::journal::Partial>,
     /// Resume: the interrupted run's journal, which this job's own replaces.
     pub resumed: Option<PathBuf>,
+    /// Resume: source folders the interrupted run finished
+    /// ([`crate::journal::Interrupted::done`]): neither counted nor walked again while
+    /// their copy is still there.
+    pub done_dirs: std::collections::HashSet<PathBuf>,
 }
 
 /// The owner's decision 2, Round 031: five tries more, about 30 s in all, then the
@@ -249,6 +253,7 @@ impl Request {
             checkpoint: CHECKPOINT,
             partial: Vec::new(),
             resumed: None,
+            done_dirs: Default::default(),
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -272,6 +277,7 @@ impl Request {
             checkpoint: CHECKPOINT,
             partial: Vec::new(),
             resumed: None,
+            done_dirs: Default::default(),
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -295,6 +301,7 @@ impl Request {
             checkpoint: CHECKPOINT,
             partial: Vec::new(),
             resumed: None,
+            done_dirs: Default::default(),
         }
     }
 }
@@ -659,6 +666,7 @@ pub fn start(req: Request) -> Handle {
             moved_file: None,
             safe: req.safe,
             recording: req.kind == Kind::Copy,
+            copying: req.kind == Kind::Copy,
             trash_root: req.trash_root.clone(),
             backoff: req.backoff.clone(),
             retry: false,
@@ -675,6 +683,8 @@ pub fn start(req: Request) -> Handle {
                 .map(|p| (p.dst.clone(), p.clone()))
                 .collect(),
             ckpt: None,
+            done_dirs: req.done_dirs.clone(),
+            finished: Vec::new(),
             dbg: crate::debuglog::on(crate::debuglog::Topic::Jobs).then(|| {
                 Box::new(Dbg {
                     job: crate::debuglog::next_job(),
@@ -688,6 +698,8 @@ pub fn start(req: Request) -> Handle {
                     checkpoints: 0,
                     checkpoint_time: Default::default(),
                     resumed_bytes: 0,
+                    dirs_done: 0,
+                    dirs_skipped: 0,
                 })
             }),
             phase: "start",
@@ -756,6 +768,8 @@ struct Worker {
     safe: bool,
     /// A copy: what it makes is kept in [`Summary::made`], for its undo.
     recording: bool,
+    /// A copy (the kind, whatever the undo cap did to `recording`).
+    copying: bool,
     /// [`Request::trash_root`]: tests' trash, for a replaced file too.
     trash_root: Option<PathBuf>,
     /// [`Request::backoff`].
@@ -786,6 +800,11 @@ struct Worker {
     partials: std::collections::HashMap<PathBuf, crate::journal::Partial>,
     /// The big file being written, while it has checkpoints.
     ckpt: Option<Ckpt>,
+    /// Resume: source folders finished before, skipped while their copy is there.
+    done_dirs: std::collections::HashSet<PathBuf>,
+    /// Folders copied without a failure whose last files wait in the group batch: told
+    /// to the journal once that batch is through without one.
+    finished: Vec<PathBuf>,
     /// The debug log's record of this job ([`crate::debuglog`]), when it logs jobs.
     dbg: Option<Box<Dbg>>,
     /// The step under way, for the debug log's error lines.
@@ -833,6 +852,9 @@ struct Dbg {
     checkpoint_time: std::time::Duration,
     /// Bytes not copied again: big files taken over from their checkpoint.
     resumed_bytes: u64,
+    /// Folders told to the journal as finished, and folders a resume skipped.
+    dirs_done: u64,
+    dirs_skipped: u64,
 }
 
 /// The big file being written now, while it has checkpoints: see [`CHECKPOINT`].
@@ -1038,6 +1060,15 @@ impl Worker {
         // and on disk, before the old journal goes, so a kill in between still keeps
         // them. Without a journal of its own, there are no checkpoints to keep them by:
         // they are copied again from the start.
+        // The folders finished before stay finished if this run dies too. A line that
+        // fails only breaks the journal, asked about before a step that needs it.
+        if let Some(j) = self.journal.as_mut() {
+            for d in &self.done_dirs {
+                if j.done(d).is_err() {
+                    break;
+                }
+            }
+        }
         if let Some(old) = &req.resumed {
             let kept = match self.journal.as_mut() {
                 Some(j) => self
@@ -1095,7 +1126,9 @@ impl Worker {
             return;
         }
         let t = self.dbg.as_ref().map(|_| std::time::Instant::now());
-        let (files, bytes) = req.planned.unwrap_or_else(|| scan(&req.sources));
+        let (files, bytes) = req
+            .planned
+            .unwrap_or_else(|| scan_skipping(&req.sources, &self.done_dirs));
         if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
             d.scan = t.elapsed();
         }
@@ -1297,6 +1330,8 @@ impl Worker {
             .num("checkpoints", d.checkpoints)
             .ms("checkpoint_ms", d.checkpoint_time)
             .num("resumed_bytes", d.resumed_bytes)
+            .num("dirs_done", d.dirs_done)
+            .num("dirs_skipped", d.dirs_skipped)
             .num("group_threads", self.group.threads as u64)
             .write();
     }
@@ -1636,6 +1671,15 @@ impl Worker {
             }
             self.moved(src, dst, before);
         } else if meta.is_dir() {
+            // Resume: finished by the run before, and its copy still there.
+            if self.done_dirs.contains(src) && dst.is_dir() {
+                self.sum.skipped += 1;
+                if let Some(d) = self.dbg.as_mut() {
+                    d.dirs_skipped += 1;
+                }
+                return;
+            }
+            let failed_before = self.sum.failed;
             let made = dst.symlink_metadata().is_err();
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
@@ -1671,6 +1715,9 @@ impl Worker {
             }
             let _ = fs::set_permissions(dst, meta.permissions());
             self.sum.done += 1;
+            if self.sum.failed == failed_before && !self.stopped() {
+                self.folder_finished(src);
+            }
             // Moving: the directory goes only once empty, that is when everything in
             // it was copied and removed; anything skipped keeps it.
             if self.moving {
@@ -2250,6 +2297,7 @@ impl Worker {
             return;
         }
         self.group.flushing = true;
+        let failed_before = self.sum.failed;
         let batch = std::mem::take(&mut self.group.pending);
         self.group.bytes = 0;
         self.group.since = None;
@@ -2258,6 +2306,7 @@ impl Worker {
                 drop(p.file);
                 let _ = fs::remove_file(&p.tmp);
             }
+            self.finished.clear();
             self.group.flushing = false;
             return;
         }
@@ -2368,6 +2417,40 @@ impl Worker {
         }
         self.lap(Phase::Finish, &mut t);
         self.group.flushing = false;
+        // The folders whose last files were in this batch: finished, if it went through
+        // without a failure. Otherwise a resume walks them again, which is only slower.
+        let waiting = std::mem::take(&mut self.finished);
+        if self.sum.failed == failed_before && !self.stopped() {
+            for d in waiting {
+                self.tell_finished(&d);
+            }
+        }
+    }
+
+    /// A folder of a copy finished without a failure: a resume need not walk it again.
+    /// Told now, or once the batch holding its last files is through. Copies only: a
+    /// move removes what it finished, and a resume finds nothing there to walk.
+    fn folder_finished(&mut self, src: &Path) {
+        if !self.copying || self.moving || self.journal.is_none() {
+            return;
+        }
+        if self.group.pending.is_empty() {
+            self.tell_finished(src);
+        } else {
+            self.finished.push(src.to_path_buf());
+        }
+    }
+
+    fn tell_finished(&mut self, src: &Path) {
+        #[cfg(test)]
+        TOLD.lock().unwrap().push(src.to_path_buf());
+        if let Some(j) = self.journal.as_mut() {
+            if j.done(src).is_ok() {
+                if let Some(d) = self.dbg.as_mut() {
+                    d.dirs_done += 1;
+                }
+            }
+        }
     }
 
     /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
@@ -2726,13 +2809,33 @@ fn identical(src: Option<&Path>, dst: &Path) -> Same {
 
 /// Count what the job is about to touch, so a progress bar means something.
 pub fn scan(sources: &[PathBuf]) -> (u64, u64) {
-    scan_until(sources, &AtomicBool::new(false)).unwrap_or((0, 0))
+    scan_skipping(sources, &Default::default())
+}
+
+/// As [`scan`], leaving out the folders in `skip` (a resume's finished ones).
+fn scan_skipping(sources: &[PathBuf], skip: &std::collections::HashSet<PathBuf>) -> (u64, u64) {
+    scan_in(sources, &AtomicBool::new(false), skip).unwrap_or((0, 0))
 }
 
 /// As [`scan`], stopping when `stop` is set: `None` then. A count of a large tree on a
 /// slow disk takes seconds, and the dialog asking about it must not wait for it.
 pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> {
-    fn walk(p: &Path, files: &mut u64, bytes: &mut u64, stop: &AtomicBool) -> bool {
+    scan_in(sources, stop, &Default::default())
+}
+
+fn scan_in(
+    sources: &[PathBuf],
+    stop: &AtomicBool,
+    skip: &std::collections::HashSet<PathBuf>,
+) -> Option<(u64, u64)> {
+    let walk_skip = skip;
+    fn walk(
+        p: &Path,
+        files: &mut u64,
+        bytes: &mut u64,
+        stop: &AtomicBool,
+        skip: &std::collections::HashSet<PathBuf>,
+    ) -> bool {
         if stop.load(Ordering::Relaxed) {
             return false;
         }
@@ -2742,9 +2845,12 @@ pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> 
         if meta.file_type().is_symlink() {
             *files += 1;
         } else if meta.is_dir() {
+            if !skip.is_empty() && skip.contains(p) {
+                return true;
+            }
             if let Ok(it) = fs::read_dir(p) {
                 for e in it.flatten() {
-                    if !walk(&e.path(), files, bytes, stop) {
+                    if !walk(&e.path(), files, bytes, stop, skip) {
                         return false;
                     }
                 }
@@ -2757,7 +2863,7 @@ pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> 
     }
     let (mut f, mut b) = (0, 0);
     for s in sources {
-        if !walk(s, &mut f, &mut b, stop) {
+        if !walk(s, &mut f, &mut b, stop, walk_skip) {
             return None;
         }
     }
@@ -2907,6 +3013,10 @@ pub(crate) fn part_name(dst: &Path) -> PathBuf {
         crate::journal::run_tag()
     ))
 }
+
+/// The folders a job told its journal it finished, for tests.
+#[cfg(test)]
+static TOLD: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Tests put a path here to have a file appear at it between the check that found the
 /// name free and the write: the moment no test could otherwise reach.
@@ -3883,6 +3993,91 @@ mod tests {
         let (s, _) = run_answering(req, |_| Answer::Skip);
         assert_eq!(s.done, 0, "the checkpoint's sync failed: {s:?}");
         assert!(!dst.join("ck-big.bin").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A folder is told to the journal as finished only when nothing in it failed: a
+    /// file's error, or a failed sync in the batch its last files were in.
+    #[test]
+    fn only_a_folder_without_a_failure_is_told_finished() {
+        journals();
+        let root = tmp("told");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        for d in ["good", "bad", "batch"] {
+            fs::create_dir_all(src.join(d)).unwrap();
+            fs::create_dir_all(dst.join("src").join(d)).unwrap();
+        }
+        fs::write(src.join("good/g.txt"), "g").unwrap();
+        fs::write(src.join("bad/told-bad.txt"), "b").unwrap();
+        // A replacement: batched, and its batch's sync fails.
+        fs::write(src.join("batch/told-batch.txt"), "new").unwrap();
+        fs::write(dst.join("src/batch/told-batch.txt"), "old").unwrap();
+        let _w = crate::faults::fail(
+            crate::faults::Point::Write,
+            ".told-bad.txt",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let _s = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            ".told-batch.txt",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Replace;
+        req.backoff = Vec::new();
+        let (s, _) = run_answering(req, |_| Answer::Skip);
+        assert!(s.failed >= 2, "{s:?}");
+        let told: Vec<PathBuf> = TOLD
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.starts_with(&root))
+            .cloned()
+            .collect();
+        assert!(told.contains(&src.join("good")), "{told:?}");
+        assert!(!told.contains(&src.join("bad")), "a file failed: {told:?}");
+        assert!(
+            !told.contains(&src.join("batch")),
+            "its batch failed: {told:?}"
+        );
+        assert!(!told.contains(&src), "something under it failed: {told:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Resume does not walk a folder the run before finished while its copy is there
+    /// (a file added to it since is not copied, as the job's own snapshot); one whose
+    /// copy is gone is copied again.
+    #[test]
+    fn resume_does_not_walk_a_folder_finished_before() {
+        journals();
+        let root = tmp("done-dirs");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(src.join("finished")).unwrap();
+        fs::create_dir_all(src.join("open")).unwrap();
+        fs::write(src.join("finished").join("added-since.txt"), "new").unwrap();
+        fs::write(src.join("open").join("o.txt"), "o").unwrap();
+        fs::create_dir_all(dst.join("src").join("finished")).unwrap();
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.done_dirs = [src.join("finished")].into_iter().collect();
+        let s = run(req.clone());
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            !dst.join("src/finished/added-since.txt").exists(),
+            "not walked"
+        );
+        assert_eq!(fs::read_to_string(dst.join("src/open/o.txt")).unwrap(), "o");
+        fs::remove_dir_all(dst.join("src").join("finished")).unwrap();
+        let s = run(req);
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            dst.join("src/finished/added-since.txt").exists(),
+            "its copy was gone: copied again"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

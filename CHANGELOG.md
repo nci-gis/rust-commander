@@ -17,6 +17,9 @@ that heading and starts a new, empty one here. -->
   on from there, if the source has not changed, instead of copying the whole file
   again. "Discard them" removes the kept parts. The cost is one sync per 256 MiB of a
   big file.
+- **Continuing an interrupted copy skips the folders it finished** without looking
+  inside them again, as long as their copy is still there: on a slow or network drive
+  with many files, it no longer checks every file the first run already copied.
 - **`o` and Open with… say what happened**: "opening …" on the status line if the
   system's opener has not answered after 300 ms (a quick open shows nothing in between),
   then "opened …" when it hands the file over, or its error. An opener that waits for the

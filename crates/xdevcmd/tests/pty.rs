@@ -1503,6 +1503,10 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
             f.write_all(b"MARK").unwrap();
         }
     }
+    // A folder copied first (folders come before files): its folders are told to the
+    // journal as finished.
+    std::fs::create_dir_all(s.left().join("a-tree/sub")).unwrap();
+    s.file("left/a-tree/sub/f.txt", "f");
     let cfg = s.file("fast-off.toml", "[general]\nfast_copy = false\n");
     let cfg = cfg.to_string_lossy().into_owned();
     let mut x = Session::start_env(
@@ -1515,6 +1519,8 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         ],
     );
     x.send(DOWN);
+    x.send(INSERT);
+    x.send(INSERT);
     x.send(F5);
     x.wait_for("[Enter] go");
     x.send(ENTER);
@@ -1534,6 +1540,15 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
+    let lines: String = std::fs::read_dir(&journal)
+        .unwrap()
+        .flatten()
+        .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+        .collect();
+    assert!(
+        lines.contains(&format!("\ndone {}\n", hex(&s.left().join("a-tree/sub")))),
+        "a finished folder is in the journal:\n{lines}"
+    );
     let pid = x.child.process_id().expect("a pid");
     let killed = std::process::Command::new("kill")
         .args(["-9", &pid.to_string()])
@@ -1561,6 +1576,10 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
     x.wait_for("kept part way");
     x.send(ENTER); // continue
     x.wait_for("1 copied");
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("a-tree/sub/f.txt")).unwrap(),
+        "f"
+    );
     let mut got = std::fs::File::open(s.right().join("big.bin")).unwrap();
     assert_eq!(got.metadata().unwrap().len(), size);
     for at in [0, 300 << 20, size - 4] {
@@ -1570,7 +1589,7 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         assert_eq!(&b, b"MARK", "at {at}");
     }
     assert!(
-        std::fs::read_dir(s.right()).unwrap().count() == 1,
+        std::fs::read_dir(s.right()).unwrap().count() == 2,
         "no temporary file left"
     );
     x.quit();
@@ -1597,6 +1616,42 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         resumed >= 256 << 20,
         "taken over from the checkpoint: {resumed}"
     );
+}
+
+/// Continue does not walk a folder the interrupted copy finished (its `done` line), as
+/// long as its copy is there; the rest of the source is copied.
+#[cfg(unix)]
+#[test]
+fn resume_does_not_walk_a_folder_the_run_before_finished() {
+    let s = Scratch::new("resume-dirs");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::create_dir_all(src.join("tree/finished")).unwrap();
+    s.file("left/tree/finished/added-since.txt", "not walked");
+    s.file("left/tree/rest.txt", "rest");
+    std::fs::create_dir_all(dst.join("tree/finished")).unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}v 3\nkind copy\nsrc {}\ndest {}\ndone {}\n",
+            host_line(),
+            hex(&src.join("tree")),
+            hex(&dst),
+            hex(&src.join("tree/finished")),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.send(ENTER); // continue
+    x.wait_for("1 skipped");
+    assert_eq!(
+        std::fs::read_to_string(dst.join("tree/rest.txt")).unwrap(),
+        "rest"
+    );
+    assert!(!dst.join("tree/finished/added-since.txt").exists());
+    x.quit();
 }
 
 /// Continuing an interrupted copy never replaces a file the user kept in the first run:

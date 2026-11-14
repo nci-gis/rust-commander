@@ -691,12 +691,27 @@ An outside review of this branch (4 agents) was checked claim by claim against
     journal go;
   - pty (Linux): a real `kill -9` after the first checkpoint of a 384 MiB copy, then
     Continue: the file is whole and `resumed_bytes` ≥ 256 MiB.
-- **Not done, and why**: finished folders as journal lines, so that a resume skips them
-  without a stat. A folder is "done" only after its group batch is synced, so this
-  needs a flush (a sync) per folder, which is a cost for trees of small folders. And a
-  resume already checks each file with two stats. It pays only on slow (network)
-  sources with very many files. Left until the owner's numbers show resume's check
-  is slow there.
+- **Finished folders** (the owner, after hearing why it was held back: "Build it"):
+  built without the extra sync per folder. A folder copied with no failure under it
+  (`sum.failed` unchanged, not stopped) gets a `done` line, the tag top-level sources
+  already used, so older readers take it the same way.
+  - If its last files are still in the group batch, the line waits for that batch
+    (`Worker::finished`) and is written only if the batch goes through without a
+    failure. Otherwise it is dropped: a resume walks the folder again, which is only
+    slower.
+  - Copies only: a move removes what it finished.
+  - Resume passes `Request::done_dirs`. The scan (`scan_skipping`) and `copy_node`
+    skip such a folder while its copy is a folder, counted once as skipped. The new
+    journal carries the lines on, for a second kill.
+  - Cost: one journal line (a write, no sync) per folder.
+  - Power cut: a line can reach the disk before new files' data, the caveat
+    security.md already gives for new files.
+  - Tests:
+    - core: a folder is told only without a failure, whether a file fails or its
+      batch's sync fails (each guard broken on purpose fails the test);
+    - core: resume skips a finished folder and walks it again once its copy is gone;
+    - pty: the kill test finds a nested `done` line;
+    - pty: a hand-written journal resumes without walking a finished folder.
 - **Not measured yet**: the checkpoint sync's cost. One sync per 256 MiB should be
   small on an SSD; a USB stick is where it shows. The owner's run of a big file with
   `XDEVCMD_DEBUG=jobs` gives `checkpoint_ms` against `ms`.

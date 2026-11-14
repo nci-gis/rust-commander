@@ -83,8 +83,10 @@ the complete new one. A power cut is different, and is below ("What survives a p
 cut"). The next start finds the journal of the run that ended, removes
 its temporary files, puts rename many's files back under their names, and offers to
 continue the job. Continuing skips what is already there and identical (same size and
-date: what the first run finished), goes on with a big file from its last checkpoint
-(below), starts again a smaller file that was cut short, and asks
+date: what the first run finished), skips without looking inside a folder the first
+run finished, as long as its copy is still there (a file added to that folder since is
+not copied: the job is the one you started), goes on with a big file from its last
+checkpoint (below), starts again a smaller file that was cut short, and asks
 about any other file already there, never deciding for you: a file you chose to keep
 the first time is asked about again, not replaced because its source is newer. A move
 continues with the sources still there; a source whose identical copy is already at the

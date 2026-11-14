@@ -12,6 +12,7 @@ pub mod attrs;
 pub mod batch_rename;
 pub mod color;
 pub mod compare;
+pub mod debuglog;
 pub mod document;
 pub mod entry;
 pub mod fastcopy;

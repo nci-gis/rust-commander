@@ -23,6 +23,11 @@ that heading and starts a new, empty one here. -->
   selected paths from the repository's root when the folder is in one (a `.git` above
   it), else from the folder itself; the status line says which ("copied src/main.rs,
   relative to the repository proj").
+- **A debug log to attach to a report**: `XDEVCMD_DEBUG=all` writes what each job did
+  and how long each part took, and each error's system code and retry, to a
+  `debug-….jsonl` file in the state directory (or `XDEVCMD_DEBUG_DIR`). It holds no file,
+  folder, user or host name; the status line says where it is. A crash log ends with its
+  last lines. See Troubleshooting.
 - **A config file with a mistake is asked about at start** instead of only named on
   the status line: continue with the defaults (Enter), edit it (E; checked again when
   the editor closes) or quit (Q).

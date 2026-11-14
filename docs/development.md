@@ -72,6 +72,50 @@ budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
 (everything but the terminal check under 1 s, a debug build: an order of magnitude over
 the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
+**On another machine or drive.** `--only CASE` runs just the cases whose name holds
+`CASE`, with no build and no start-up cases, so the `xtask` program from the bench
+workflow's artifacts runs on a machine without Rust. `--dir PATH` makes the trees on the
+drive being measured (a USB stick, a network share) instead of the temporary directory.
+Name the host after the drive (`--host win11-usb`): numbers from two drives are not
+comparable. Away from the source, results go to `bench/results/` where it was started.
+
+```bash
+xtask bench --only mixed --dir E:\bench --host win11-usb
+XDEVCMD_DEBUG=jobs xtask bench --only mixed --host my-laptop   # with each run's debug log
+```
+
+With `XDEVCMD_DEBUG`, each run's jobs are logged as xdevcmd logs them, in
+`bench/results/debug-<host>-<date>/<case>/`.
+
+## Reading a debug log
+
+`XDEVCMD_DEBUG` ([Troubleshooting](troubleshooting.md#sending-a-log-with-a-report);
+`xdevcmd-core/src/debuglog.rs`) writes one JSON object a line, each with `t_ms` (since
+the log started) and `ev`:
+
+| `ev` | Topic | Fields |
+|---|---|---|
+| `start` | — | `version`, `os`, `arch`, `topics`, `unix_time`, `cpus` |
+| `job_start` | jobs | `job`, `kind`, `sources`, `files`, `bytes`, `existing`, `planned`, `safe`, `fast`, `group_threads`, `src_fs`, `dst_fs`, `dst_network` |
+| `resume` | jobs | `job`, `sources_left`, `decisions_kept` |
+| `batch` | jobs | group commit: `files`, `bytes`, `threads`, `sync_ms`, `sync_failed`, `probing` |
+| `probe` | jobs | `chose`, and `ms_per_file_<threads>` for each count tried |
+| `job_end` | jobs | `ms`, `scan_ms`, `journal_ms`, the counts (`done`, `skipped`, `failed`, `cloned`, `by_kernel` …); the time per phase (`check_ms`, `open_ms`, `create_ms`, `write_ms`, `attrs_ms`, `sync_ms`, `finish_ms`); files up to 1 MiB and larger apart (`small_files`, `small_bytes`, `small_ms`, `large_…`) |
+| `retry` | errors | `file`, `phase`, `kind`, `os`, `attempt`, `of`, `wait_ms` |
+| `failed` | errors | a file that failed for good: `file`, `phase`, `kind`, `os`, `tries`, `network` |
+| `ask` | errors | a question: `q`, `phase`, `answer`, `waited_ms`, `file` |
+| `error` | errors | an error counted in the summary: `file`, `phase`, `kind`, `os` |
+| `journal_failed` | errors | the journal could not be written: `phase` |
+
+`file` is a number for a path, the same within one run (a keyed hash; the key is never
+written). `kind` is Rust's `io::ErrorKind`, `os` the system's code (`errno`, or Windows'
+`GetLastError`). Nothing in a line is a name: words are kept to letters, digits and
+`_ . -`.
+
+Where a job's time went: the phases add up to the time spent on files; `ms` minus them
+is the walk, directories, the journal and waiting for answers. `small_ms` against
+`large_ms` is what item 43's lanes would overlap.
+
 ## Docs that are generated
 
 - `docs/keys.md`: `xdevcmd --print-keys > docs/keys.md`. A test fails if it is out of date.

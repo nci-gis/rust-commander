@@ -199,7 +199,8 @@ in use shows the settings in effect.\n");
     }
     s.push_str(".SH FILES\n.TP\n\\fI~/.config/xdevcmd/config.toml\\fR\nThe configuration (or \\fB$XDEVCMD_CONFIG\\fR, \\fB$XDG_CONFIG_HOME/xdevcmd/config.toml\\fR).\n");
     s.push_str(".TP\n\\fI~/.config/xdevcmd/themes/\\fR\nYour own themes; see \\fB\\-\\-print\\-theme\\fR.\n");
-    s.push_str(".TP\n\\fI~/.local/state/xdevcmd/\\fR\nThe session, safe operations' journal and crash logs (or \\fB$XDEVCMD_STATE\\fR, \\fB$XDG_STATE_HOME/xdevcmd\\fR).\n");
+    s.push_str(".TP\n\\fI~/.local/state/xdevcmd/\\fR\nThe session, safe operations' journal, crash logs and debug logs (or \\fB$XDEVCMD_STATE\\fR, \\fB$XDG_STATE_HOME/xdevcmd\\fR).\n");
+    s.push_str(".SH ENVIRONMENT\n.TP\n\\fBXDEVCMD_DEBUG\\fR=\\fIjobs\\fR|\\fIerrors\\fR|\\fIall\\fR\nWrite a debug log of what jobs did, with no file, user or host names, to attach to a report.\n.TP\n\\fBXDEVCMD_DEBUG_DIR\\fR\nWhere the debug log goes, in place of the state directory.\n");
     s.push_str(".SH SEE ALSO\nhttps://github.com/nci\\-gis/rust\\-commander\n");
     s
 }

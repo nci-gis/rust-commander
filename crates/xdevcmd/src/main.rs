@@ -348,6 +348,7 @@ fn main() -> Result<()> {
     {
         xdevcmd_core::journal::init(dir.join("journal"));
     }
+    let debug_note = debug_log();
     look::init(look::Look {
         ls: files
             .ls_colors
@@ -398,6 +399,7 @@ fn main() -> Result<()> {
     app.cwd_file = cli.cwd_file.clone();
     clock.mark("panes");
     app.timings = startup::wanted(cli.timings, std::env::var("XDEVCMD_TIMINGS").ok());
+    app.debug_note = debug_note;
 
     if let Some((w, h)) = cli.screenshot {
         return screenshot(app, w, h, &cli.keys);
@@ -721,6 +723,45 @@ fn said_yes(answer: &str) -> bool {
 /// Write to stdout. A reader that stops early (`xdevcmd --screenshot | head`) ends xdevcmd
 /// quietly with success, as it ends `cat`; `println!` panics there instead, once the
 /// output is larger than the pipe holds.
+/// `XDEVCMD_DEBUG`: start the debug log ([`xdevcmd_core::debuglog`]) in
+/// `XDEVCMD_DEBUG_DIR`, else the state directory. What the status line says about it:
+/// that it is on and where, or why not. `None`: not asked for.
+fn debug_log() -> Option<String> {
+    let value = std::env::var("XDEVCMD_DEBUG").ok()?;
+    let (bits, unknown) = xdevcmd_core::debuglog::parse(&value);
+    let unknown = if unknown.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " (not a topic: {}; the topics are jobs, errors, all)",
+            unknown.join(", ")
+        )
+    };
+    if bits == 0 {
+        return (!unknown.is_empty()).then(|| format!("debug log off{unknown}"));
+    }
+    let dir = std::env::var_os("XDEVCMD_DEBUG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            session::default_path()
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf)
+        });
+    let Some(dir) = dir else {
+        return Some("debug log not started: no state directory (set XDEVCMD_DEBUG_DIR)".into());
+    };
+    Some(match xdevcmd_core::debuglog::start(bits, &dir) {
+        Ok(p) => format!(
+            "debug log on ({}): {}{unknown}",
+            xdevcmd_core::debuglog::topic_names(bits),
+            p.display()
+        ),
+        Err(e) => format!("debug log not started in {}: {e}", dir.display()),
+    })
+}
+
 fn emit(text: &str) {
     use std::io::Write;
     let mut out = stdout().lock();

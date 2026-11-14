@@ -619,6 +619,42 @@ pub fn is_network(dir: &Path) -> bool {
     fs_kind(dir) == Fs::Network
 }
 
+/// The file system at `dir`, as a word for the debug log ([`crate::debuglog`]): the
+/// system's own name where it gives one ("apfs", "ext4"), else the kind.
+pub fn fs_word(dir: &Path) -> String {
+    #[cfg(target_os = "linux")]
+    if let Ok(st) = rustix::fs::statfs(dir) {
+        #[allow(clippy::unnecessary_cast)]
+        let name = match st.f_type as i64 {
+            0xef53 => Some("ext4"),
+            0x9123_683e => Some("btrfs"),
+            0x5846_5342 => Some("xfs"),
+            0x0102_1994 => Some("tmpfs"),
+            0x2fc1_2fc1 => Some("zfs"),
+            0xcafe_4a11 => Some("bcachefs"),
+            0x794c_7630 => Some("overlay"),
+            0xf2f5_2010 => Some("f2fs"),
+            _ => None,
+        };
+        if let Some(n) = name {
+            return n.to_string();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(n) = mac_fs_name(dir) {
+        return String::from_utf8_lossy(&n).into_owned();
+    }
+    match fs_kind(dir) {
+        Fs::Fat => "fat",
+        Fs::Exfat => "exfat",
+        Fs::Ntfs => "ntfs",
+        Fs::Network => "network",
+        Fs::Other => "other",
+        Fs::Unknown => "unknown",
+    }
+    .to_string()
+}
+
 /// Bytes free at `dest` for this user; `None` where it cannot be asked (Windows).
 pub fn free_space(dest: &Path) -> Option<u64> {
     #[cfg(unix)]

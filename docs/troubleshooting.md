@@ -136,10 +136,47 @@ example a terminal viewer), or use F3.
 [Open an issue](https://github.com/nci-gis/rust-commander/issues) with your system,
 terminal and the `xdevcmd --show-keys` output.
 
+## Sending a log with a report
+
+When a copy, move or delete is slow or fails and you want to report it, start xdevcmd
+with the debug log on, do the same thing again, quit, and attach the log:
+
+```bash
+XDEVCMD_DEBUG=all xdevcmd          # macOS, Linux
+```
+
+```bat
+set XDEVCMD_DEBUG=all
+xdevcmd
+```
+
+The status line says `debug log on (jobs, errors): <path>` at start; Messages (Alt+M)
+keeps it. If it does not, this version has no debug log (it came in 0.4.0-beta.2).
+
+- **What it holds**: for each job, its kind and size, the kind of drive at each end
+  (`ntfs`, `apfs`, `network` …), how long each part took (checking, opening, creating,
+  writing, syncing, finishing), which way the bytes were copied, the batches small files
+  were synced in, and, with errors, each error's system code, retry and your answer.
+- **What it never holds**: no file or folder name, no user name, no host name. A file is
+  a number, the same within one run, so "this file failed three times" can be seen
+  without its name. You can attach it as it is.
+- **Topics**: `XDEVCMD_DEBUG=jobs` (times), `errors` (errors and questions), `all` or `1`
+  (both).
+- **Where**: `debug-<time>-<process>.jsonl` in the state directory
+  (`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows), or
+  in `XDEVCMD_DEBUG_DIR`. Each stops at 16 MiB; the five newest are kept.
+- **For longer than one session**: `setx XDEVCMD_DEBUG all` on Windows, or the `export`
+  in your shell's profile. There is no setting in the config: a line there is easily
+  forgotten, and a config shared between machines would turn it on everywhere.
+
+Written on your machine only; nothing is sent anywhere.
+
 ## xdevcmd crashed
 
 It writes what happened to a `crash-….log` file in its state directory
 (`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows) and
 says where, after the terminal is restored; it keeps the five newest. Please
 [open an issue](https://github.com/nci-gis/rust-commander/issues) and attach it — read it
-first: it may hold file names. Nothing is ever sent by xdevcmd itself.
+first: it may hold file names. With the [debug log](#sending-a-log-with-a-report) on, the
+crash log also ends with the debug log's last lines. Nothing is ever sent by xdevcmd
+itself.

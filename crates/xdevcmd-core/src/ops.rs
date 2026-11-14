@@ -647,6 +647,19 @@ pub fn start(req: Request) -> Handle {
             group: Group::new(),
             fast: req.fast,
             engine: crate::fastcopy::Engine::Own,
+            dbg: crate::debuglog::on(crate::debuglog::Topic::Jobs).then(|| {
+                Box::new(Dbg {
+                    job: crate::debuglog::next_job(),
+                    started: std::time::Instant::now(),
+                    phases: Default::default(),
+                    small: Default::default(),
+                    large: Default::default(),
+                    batches: 0,
+                    scan: Default::default(),
+                    journal: Default::default(),
+                })
+            }),
+            phase: "start",
         };
         w.run(req);
     });
@@ -735,6 +748,48 @@ struct Worker {
     fast: bool,
     /// The engine that moved the last file's bytes.
     engine: crate::fastcopy::Engine,
+    /// The debug log's record of this job ([`crate::debuglog`]), when it logs jobs.
+    dbg: Option<Box<Dbg>>,
+    /// The step under way, for the debug log's error lines.
+    phase: &'static str,
+}
+
+/// The phases a file goes through, as the debug log names them.
+#[derive(Clone, Copy)]
+enum Phase {
+    /// Is a file there, and is it to be replaced.
+    Check,
+    /// The source's details, and the source opened.
+    Open,
+    /// The new file made (or cloned, on macOS).
+    Create,
+    /// The bytes moved.
+    Write,
+    /// Permissions and the date.
+    Attrs,
+    /// Data synced, on its own or in a batch.
+    Sync,
+    /// The journal, the old file to the trash, the rename.
+    Finish,
+}
+
+const PHASES: [&str; 7] = [
+    "check", "open", "create", "write", "attrs", "sync", "finish",
+];
+
+/// What the debug log is told at a job's end. Added up as the job goes: one line a
+/// job, not one a file.
+struct Dbg {
+    job: u64,
+    started: std::time::Instant,
+    phases: [std::time::Duration; 7],
+    /// Files of up to [`GROUP_FILE_MAX`] and larger: count, bytes, time in `copy_bytes`.
+    small: (u64, u64, std::time::Duration),
+    large: (u64, u64, std::time::Duration),
+    batches: u64,
+    scan: std::time::Duration,
+    /// The journal begun and synced, before the first step.
+    journal: std::time::Duration,
 }
 
 /// A replacement written under its temporary name, its handle open, waiting for the
@@ -775,6 +830,8 @@ struct Group {
     off: bool,
     /// Set by `copy_bytes` when the file just written joined the batch.
     deferred: bool,
+    /// What the probe measured, once it chose (for the debug log).
+    tried: Vec<(usize, f64)>,
 }
 
 impl Group {
@@ -790,6 +847,7 @@ impl Group {
             flushing: false,
             off: false,
             deferred: false,
+            tried: Vec::new(),
         }
     }
 
@@ -829,6 +887,7 @@ impl Group {
                 if let Some(best) = got.iter().min_by(|a, b| a.1.total_cmp(&b.1)) {
                     self.threads = best.0;
                 }
+                self.tried = std::mem::take(got);
                 self.probe = None;
                 self.probed = true;
             }
@@ -893,22 +952,27 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
+        let kind = match req.kind {
+            Kind::Copy if !req.pairs.is_empty() => "sync",
+            Kind::Copy => "copy",
+            Kind::Move => "move",
+            Kind::Delete => "delete",
+            Kind::Extract => "extract",
+            Kind::Pack => "pack",
+        };
         if self.safe {
-            let kind = match req.kind {
-                Kind::Copy if !req.pairs.is_empty() => "sync",
-                Kind::Copy => "copy",
-                Kind::Move => "move",
-                Kind::Delete => "delete",
-                Kind::Extract => "extract",
-                Kind::Pack => "pack",
-            };
             let sources: Vec<PathBuf> = if req.pairs.is_empty() {
                 req.sources.clone()
             } else {
                 req.pairs.iter().map(|(s, _)| s.clone()).collect()
             };
-            match crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash)
-            {
+            let t = self.clock();
+            let begun =
+                crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash);
+            if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
+                d.journal = t.elapsed();
+            }
+            match begun {
                 Some(Ok(j)) => self.journal = Some(j),
                 // Asked before anything is done (the owner's decision, Round 029): go on
                 // as with safe operations off, said in the summary, or stop now.
@@ -946,6 +1010,7 @@ impl Worker {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
             let _ = self.tx.send(Event::Scanned { files, bytes });
+            self.log_start(&req, kind, files, bytes);
             for (src, into) in &req.pairs {
                 if self.stopped() {
                     break;
@@ -960,8 +1025,13 @@ impl Worker {
             self.finish();
             return;
         }
+        let t = self.dbg.as_ref().map(|_| std::time::Instant::now());
         let (files, bytes) = req.planned.unwrap_or_else(|| scan(&req.sources));
+        if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
+            d.scan = t.elapsed();
+        }
         let _ = self.tx.send(Event::Scanned { files, bytes });
+        self.log_start(&req, kind, files, bytes);
 
         for src in &req.sources {
             if self.stopped() {
@@ -1079,7 +1149,95 @@ impl Worker {
         if let Some(why) = self.journal.as_ref().and_then(|j| j.broken()) {
             self.sum.journal_off = Some(format!("its journal failed: {why}"));
         }
+        self.log_end();
         let _ = self.tx.send(Event::Done(self.sum.clone()));
+    }
+
+    /// The debug log's first line for this job: its shape, no names.
+    fn log_start(&mut self, req: &Request, kind: &str, files: u64, bytes: u64) {
+        let Some(job) = self.dbg.as_ref().map(|d| d.job) else {
+            return;
+        };
+        let existing = match req.existing {
+            Existing::Ask => "ask",
+            Existing::Update => "update",
+            Existing::Skip => "skip",
+            Existing::Replace => "replace",
+            Existing::Resume => "resume",
+        };
+        let mut e = crate::debuglog::Event::new("job_start")
+            .num("job", job)
+            .word("kind", kind)
+            .num("sources", req.sources.len().max(req.pairs.len()) as u64)
+            .num("files", files)
+            .num("bytes", bytes)
+            .word("existing", existing)
+            .flag("planned", req.planned.is_some())
+            .flag("safe", self.safe)
+            .flag("fast", req.fast)
+            .num("group_threads", self.group.threads as u64);
+        if let Some(src) = req.sources.first().and_then(|p| p.parent()) {
+            e = e.word("src_fs", &crate::plan::fs_word(src));
+        }
+        if let Some(d) = req.dest.as_deref() {
+            e = e
+                .word("dst_fs", &crate::plan::fs_word(d))
+                .flag("dst_network", self.on_network(d));
+        }
+        e.write();
+        if req.existing == Existing::Resume {
+            crate::debuglog::Event::new("resume")
+                .num("job", job)
+                .num("sources_left", req.sources.len() as u64)
+                .num("decisions_kept", req.expect.len() as u64)
+                .write();
+        }
+    }
+
+    /// The debug log's last line for this job: what it did and where the time went.
+    fn log_end(&mut self) {
+        let Some(d) = self.dbg.take() else { return };
+        let s = &self.sum;
+        let mut e = crate::debuglog::Event::new("job_end")
+            .num("job", d.job)
+            .ms("ms", d.started.elapsed())
+            .ms("scan_ms", d.scan)
+            .ms("journal_ms", d.journal)
+            .num("done", s.done)
+            .num("skipped", s.skipped)
+            .num("failed", s.failed)
+            .flag("cancelled", s.cancelled)
+            .num("bytes", self.bytes_done)
+            .num("cloned", s.cloned)
+            .num("by_kernel", s.by_kernel)
+            .num("replaced_to_trash", s.replaced_to_trash)
+            .flag("journal_off", s.journal_off.is_some());
+        for (name, t) in PHASES.iter().zip(d.phases) {
+            e = e.ms(&format!("{name}_ms"), t);
+        }
+        e.num("small_files", d.small.0)
+            .num("small_bytes", d.small.1)
+            .ms("small_ms", d.small.2)
+            .num("large_files", d.large.0)
+            .num("large_bytes", d.large.1)
+            .ms("large_ms", d.large.2)
+            .num("batches", d.batches)
+            .num("group_threads", self.group.threads as u64)
+            .write();
+    }
+
+    /// The time now, when the debug log keeps time.
+    fn clock(&self) -> Option<std::time::Instant> {
+        self.dbg.as_ref().map(|_| std::time::Instant::now())
+    }
+
+    /// The time since `t` added to `p`, and `t` moved on to now.
+    fn lap(&mut self, p: Phase, t: &mut Option<std::time::Instant>) {
+        if let (Some(d), Some(start)) = (self.dbg.as_mut(), t.as_mut()) {
+            let now = std::time::Instant::now();
+            d.phases[p as usize] += now - *start;
+            *start = now;
+        }
     }
 
     /// Before a step that cannot be undone, about `about`: the journal's lines are on
@@ -1103,6 +1261,12 @@ impl Worker {
     /// Ask whether to go on without the journal, which cannot be written (`why`). Its
     /// file goes either way: half a journal is not one.
     fn go_without_journal(&mut self, why: String) -> bool {
+        if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+            crate::debuglog::Event::new("journal_failed")
+                .num("job", self.dbg_job())
+                .word("phase", self.phase)
+                .write();
+        }
         self.journal = None;
         match self.ask(Question::NoJournal { error: why.clone() }) {
             Answer::Yes | Answer::YesToAll => {
@@ -1162,15 +1326,56 @@ impl Worker {
         // What is waiting in a batch is finished first: a question can stay open for
         // minutes, and what was done before it should be done.
         self.flush_group();
+        let logged = crate::debuglog::on(crate::debuglog::Topic::Errors).then(|| {
+            let (q_word, path) = match &q {
+                Question::Conflict { path, changed, .. } if *changed => ("changed", Some(path)),
+                Question::Conflict { path, .. } => ("conflict", Some(path)),
+                Question::CrossDevice { path } => ("cross_device", Some(path)),
+                Question::TrashUnavailable { path, .. } => ("no_trash", Some(path)),
+                Question::Failed { path, .. } => ("failed", Some(path)),
+                Question::NoJournal { .. } => ("no_journal", None),
+            };
+            (
+                q_word,
+                path.map(|p| crate::debuglog::file_id(p)),
+                std::time::Instant::now(),
+            )
+        });
         if self.tx.send(Event::Ask(q)).is_err() {
             return Answer::Abort;
         }
         // The UI has gone away if this fails, and continuing to touch the filesystem
         // without anyone able to stop us is the one thing we must not do.
-        self.answers.recv().unwrap_or(Answer::Abort)
+        let a = self.answers.recv().unwrap_or(Answer::Abort);
+        if let Some((q_word, file, t)) = logged {
+            let mut e = crate::debuglog::Event::new("ask")
+                .num("job", self.dbg_job())
+                .word("q", q_word)
+                .word("phase", self.phase)
+                .word("answer", &format!("{a:?}"))
+                .ms("waited_ms", t.elapsed());
+            if let Some(f) = file {
+                e = e.num("file", f);
+            }
+            e.write();
+        }
+        a
+    }
+
+    /// This job's number in the debug log; 0 when it logs only errors.
+    fn dbg_job(&self) -> u64 {
+        self.dbg.as_ref().map_or(0, |d| d.job)
     }
 
     fn note_error(&mut self, path: &Path, e: &io::Error) {
+        if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+            crate::debuglog::Event::new("error")
+                .num("job", self.dbg_job())
+                .file(path)
+                .word("phase", self.phase)
+                .error(e)
+                .write();
+        }
         self.sum.failed += 1;
         if self.sum.errors.len() < 20 {
             self.sum.errors.push(format!("{}: {e}", path.display()));
@@ -1324,6 +1529,7 @@ impl Worker {
     }
 
     fn copy_node(&mut self, src: &Path, dst: &Path) {
+        self.phase = "walk";
         if self.stopped() {
             return;
         }
@@ -1561,8 +1767,12 @@ impl Worker {
             }
             // Free now: written only if it is still free when opened, so a file that
             // appears meanwhile is asked about, not overwritten.
+            self.phase = "check";
+            let mut t = self.clock();
             let free = dst.symlink_metadata().is_err();
-            match self.resolve_conflict(Some(src), dst, size) {
+            let decided = self.resolve_conflict(Some(src), dst, size);
+            self.lap(Phase::Check, &mut t);
+            match decided {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
@@ -1575,7 +1785,18 @@ impl Worker {
                 None => return,
             }
             appear_in_test(dst);
-            match self.copy_bytes(src, dst, free) {
+            let copied = self.copy_bytes(src, dst, free);
+            if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
+                let lane = if size <= GROUP_FILE_MAX {
+                    &mut d.small
+                } else {
+                    &mut d.large
+                };
+                lane.0 += 1;
+                lane.1 += size;
+                lane.2 += t.elapsed();
+            }
+            match copied {
                 // Waiting for its batch: counted when the batch finishes it.
                 Ok(true) if std::mem::take(&mut self.group.deferred) => {
                     if self.group.full() {
@@ -1608,6 +1829,17 @@ impl Worker {
                     if transient(&e, network) && tries < self.backoff.len() {
                         let wait = self.backoff[tries];
                         tries += 1;
+                        if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+                            crate::debuglog::Event::new("retry")
+                                .num("job", self.dbg_job())
+                                .file(dst)
+                                .word("phase", self.phase)
+                                .error(&e)
+                                .num("attempt", tries as u64)
+                                .num("of", self.backoff.len() as u64)
+                                .ms("wait_ms", wait)
+                                .write();
+                        }
                         let _ = self.tx.send(Event::Retrying {
                             path: dst.to_path_buf(),
                             error: e.to_string(),
@@ -1619,6 +1851,16 @@ impl Worker {
                             continue;
                         }
                         return;
+                    }
+                    if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+                        crate::debuglog::Event::new("failed")
+                            .num("job", self.dbg_job())
+                            .file(dst)
+                            .word("phase", self.phase)
+                            .error(&e)
+                            .num("tries", tries as u64 + 1)
+                            .flag("network", network)
+                            .write();
                     }
                     let error = if tries > 0 {
                         format!("{e} (a network error: tried {} times)", tries + 1)
@@ -1665,8 +1907,12 @@ impl Worker {
     /// same way, so not even a killed run leaves a short file under a real name.
     /// Whatever was written and not kept is removed here.
     fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
+        self.phase = "open";
+        let mut t = self.clock();
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
+        self.lap(Phase::Open, &mut t);
+        self.phase = "create";
         let in_place = new_only && !self.safe;
         let target = if in_place {
             dst.to_path_buf()
@@ -1704,6 +1950,8 @@ impl Worker {
                 return Err(e);
             }
         };
+        self.lap(Phase::Create, &mut t);
+        self.phase = "write";
         let written = if cloned {
             crate::faults::at(crate::faults::Point::Write, &target).map(|()| {
                 self.advance(meta.len());
@@ -1713,6 +1961,7 @@ impl Worker {
         } else {
             self.write_all_from(&mut r, &mut w, &target)
         };
+        self.lap(Phase::Write, &mut t);
         if matches!(written, Ok(true)) {
             match self.engine {
                 crate::fastcopy::Engine::Clone => self.sum.cloned += 1,
@@ -1726,7 +1975,10 @@ impl Worker {
         // synced anyway; a move's copies are synced with their batch.
         let written = match written {
             Ok(true) if new_only && !self.moving && self.on_network(dst) => {
-                crate::faults::sync_data(&w, &target).map(|()| true)
+                self.phase = "sync";
+                let r = crate::faults::sync_data(&w, &target).map(|()| true);
+                self.lap(Phase::Sync, &mut t);
+                r
             }
             other => other,
         };
@@ -1738,6 +1990,8 @@ impl Worker {
                 if let Ok(mtime) = meta.modified() {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
+                self.lap(Phase::Attrs, &mut t);
+                self.phase = "finish";
                 // A new file is not synced here (the owner's call: new files stay
                 // fast). One whose source is to be removed (a move across devices) is
                 // synced with its batch, before any source goes (`remove_moved`).
@@ -1756,6 +2010,7 @@ impl Worker {
                     let r = crate::faults::at(crate::faults::Point::Rename, dst)
                         .and_then(|()| crate::noreplace::rename_noreplace(&target, dst))
                         .map(|()| true);
+                    self.lap(Phase::Finish, &mut t);
                     if r.is_ok() {
                         keep(self, w);
                     }
@@ -1778,13 +2033,18 @@ impl Worker {
                     return Ok(true);
                 } else {
                     // Removes the temporary file itself on any failure.
+                    self.phase = "sync";
                     let synced = crate::faults::sync_data(&w, &target);
                     drop(w);
+                    self.lap(Phase::Sync, &mut t);
                     if let Err(e) = synced {
                         let _ = fs::remove_file(&target);
                         return Err(e);
                     }
-                    return self.finish_replace(src, &target, dst);
+                    self.phase = "finish";
+                    let r = self.finish_replace(src, &target, dst);
+                    self.lap(Phase::Finish, &mut t);
+                    return r;
                 }
             }
             other => other,
@@ -1881,10 +2141,40 @@ impl Worker {
             return;
         }
         let threads = self.group.threads_now();
+        let probing = self.group.probe.is_some();
+        self.phase = "sync";
         let started = std::time::Instant::now();
         let synced = sync_all(&batch, threads);
-        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        let took = started.elapsed();
+        let ms = took.as_secs_f64() * 1000.0;
         self.group.measured(batch.len(), ms);
+        if let Some(d) = self.dbg.as_mut() {
+            d.batches += 1;
+            d.phases[Phase::Sync as usize] += took;
+            crate::debuglog::Event::new("batch")
+                .num("job", d.job)
+                .num("files", batch.len() as u64)
+                .num("bytes", batch.iter().map(|p| p.size).sum())
+                .num("threads", threads as u64)
+                .ms("sync_ms", took)
+                .num(
+                    "sync_failed",
+                    synced.iter().filter(|e| e.is_some()).count() as u64,
+                )
+                .flag("probing", probing)
+                .write();
+            if probing && self.group.probe.is_none() {
+                let mut e = crate::debuglog::Event::new("probe")
+                    .num("job", d.job)
+                    .num("chose", self.group.threads as u64);
+                for (n, per) in &self.group.tried {
+                    e = e.float(&format!("ms_per_file_{n}"), *per);
+                }
+                e.write();
+            }
+        }
+        let mut t = self.clock();
+        self.phase = "finish";
         // The journal's lines for the whole batch (a `swap` where the old file goes to
         // the trash), then one commit for them all, before any old file goes or any
         // rename: each file's order is Round 029's, the journal's sync is shared.
@@ -1948,11 +2238,14 @@ impl Worker {
             if again && !self.stopped() {
                 // Its bytes are counted again as it is written again.
                 self.bytes_done = self.bytes_done.saturating_sub(size);
+                self.lap(Phase::Finish, &mut t);
                 self.group.off = true;
                 self.copy_file(&src, &dst, size);
                 self.group.off = false;
+                t = self.clock();
             }
         }
+        self.lap(Phase::Finish, &mut t);
         self.group.flushing = false;
     }
 
@@ -2016,6 +2309,7 @@ impl Worker {
     // ── move ───────────────────────────────────────────────────────────────────────
 
     fn move_into(&mut self, src: &Path, dest_dir: &Path, rename: Option<&std::ffi::OsStr>) {
+        self.phase = "move";
         self.approved = None;
         let Some(name) = rename.or(src.file_name()) else {
             return;
@@ -2116,6 +2410,7 @@ impl Worker {
     // ── delete ─────────────────────────────────────────────────────────────────────
 
     fn delete(&mut self, target: &Path, to_trash: bool, trash_root: Option<&Path>) {
+        self.phase = "delete";
         if self.stopped() {
             return;
         }

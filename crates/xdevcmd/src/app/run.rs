@@ -58,6 +58,16 @@ impl App {
         self.startup.mark("shell");
         // Said once, unless start-up had something to say: where xdevcmd is running. It
         // gives way at the first key or click to the line it covers (the pane's own).
+        // The debug log first: it is why the user started xdevcmd this way.
+        if let Some(note) = self.debug_note.take() {
+            if self.status.is_empty() && self.modal.is_none() {
+                self.status = note;
+                self.boot_note = Some(self.status.clone());
+            } else {
+                self.messages
+                    .push_back((std::time::SystemTime::now(), note));
+            }
+        }
         if self.status.is_empty() && self.modal.is_none() {
             self.status = format!("running in {}", self.usage.terminal);
             self.boot_note = Some(self.status.clone());

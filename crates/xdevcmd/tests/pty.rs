@@ -432,6 +432,47 @@ fn a_config_mended_from_the_dialog_is_checked_again() {
     x.quit();
 }
 
+/// XDEVCMD_DEBUG: the status line says the log is on and where; a copy is written to
+/// it by its numbers, and no name of what was copied is in it.
+#[test]
+fn the_debug_log_is_said_at_start_and_holds_no_names() {
+    let s = Scratch::new("debuglog");
+    s.file("left/Private-notes.txt", "customer data");
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_DEBUG", "all")],
+    );
+    x.wait_for("debug log on (jobs, errors)");
+    x.send(DOWN);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    let start = Instant::now();
+    while !s.right().join("Private-notes.txt").exists() {
+        assert!(start.elapsed() < PATIENCE, "not copied:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    x.quit();
+    let log = std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().ends_with(".jsonl"))
+        .expect("a debug log in the state directory");
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        text.lines().next().unwrap().contains("\"ev\":\"start\""),
+        "{text}"
+    );
+    assert!(text.contains("\"ev\":\"job_start\""), "{text}");
+    assert!(text.contains("\"ev\":\"job_end\""), "{text}");
+    for name in ["Private", "notes", "debuglog", "left", "right"] {
+        assert!(!text.contains(name), "{name} in the log:\n{text}");
+    }
+}
+
 /// How long start-up took: on the status line with XDEVCMD_TIMINGS, step by step up to
 /// the first frame; in Help → Usage (Shift+F1) always.
 #[test]

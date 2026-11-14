@@ -100,7 +100,19 @@ fn report(info: &std::panic::PanicHookInfo<'_>, main: bool) -> String {
     );
     let _ = writeln!(s, "\n{info}\n");
     let _ = writeln!(s, "{}", std::backtrace::Backtrace::force_capture());
+    debug_tail(&mut s, xdevcmd_core::debuglog::tail());
     s
+}
+
+/// With the debug log on: where it is and its last lines, so the report says what
+/// xdevcmd was doing (they hold no names).
+fn debug_tail(s: &mut String, tail: Option<(PathBuf, Vec<String>)>) {
+    let Some((path, lines)) = tail else { return };
+    let _ = writeln!(s, "\ndebug log: {}", path.display());
+    let _ = writeln!(s, "its last {} lines:", lines.len());
+    for l in lines {
+        let _ = writeln!(s, "{l}");
+    }
 }
 
 /// Seconds since the epoch: no date crate here, and it only orders the files.
@@ -203,6 +215,23 @@ mod tests {
                 tell: false,
                 note: true
             }
+        );
+    }
+
+    #[test]
+    fn a_crash_log_ends_with_the_debug_logs_last_lines() {
+        let mut s = String::from("crashed\n");
+        debug_tail(&mut s, None);
+        assert_eq!(s, "crashed\n");
+        debug_tail(
+            &mut s,
+            Some((
+                PathBuf::from("/s/debug-1-2.jsonl"),
+                vec!["{\"ev\":\"batch\"}".into()],
+            )),
+        );
+        assert!(
+            s.contains("debug log: /s/debug-1-2.jsonl\nits last 1 lines:\n{\"ev\":\"batch\"}\n")
         );
     }
 

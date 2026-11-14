@@ -586,6 +586,41 @@ the rest. One job of 1,000 files, the median of three:
 
 Peak memory level in every case. Windows and macOS: the owner, on the beta.2 build.
 
+### 2026-11-14, the rest of item 43 before the cut, and a debug log (the owner)
+
+The owner: item 43's rest (lanes, checkpointed resume) before beta.2, and a way to
+measure on their Windows and macOS machines and send the results back. Decided ("Go as
+recommended"):
+
+- **`XDEVCMD_DEBUG`**, in every build from 0.4.0-beta.2 on (betas and stable): topics
+  `jobs` (phase times, engines, group batches, the probe, where a resume starts),
+  `errors` (each error, retry and question: the OS code, kind, phase, attempt, answer),
+  `all` or `1` for both. **No names**: no file, folder, user or host name; a file is a
+  number, the same within a run. One `debug-<time>.jsonl` in the state directory (or
+  `XDEVCMD_DEBUG_DIR`), flushed line by line, stops at 16 MiB, the newest few kept. The
+  status line says it is on and where; the status history keeps it.
+- **No `[debug]` section in the config**: a config line is forgotten and synced to other
+  machines; the variable lasts a session (`setx` or a profile for longer).
+- **Crash logs** (every build, unchanged) gain the debug log's path and last lines when
+  it is on.
+- **Docs**: troubleshooting.md "Sending a log with a report", the man page, the
+  CHANGELOG; development.md "Reading a debug log".
+- **Order**: the log and the xtask `mixed` case first; the owner measures today's code
+  on Windows and macOS; meanwhile checkpointed resume (a big file goes on from its last
+  synced checkpoint; finished folders are skipped); lanes if the numbers show creating
+  small files is a large share; then the cut.
+- **Built** (2026-11-14): `xdevcmd-core/src/debuglog.rs` (one atomic load a call site
+  when off; a line a job, a batch, an error, never a file); hooks in `ops.rs` (job
+  start and end, phases, batches, the probe, retries, failures, questions, the journal);
+  `plan::fs_word`; start-up note and Messages; crash log tail. xtask: the `mixed` case
+  (one large file, named to come first, and small files), `--only` (no build, so the
+  workflow's xtask runs without Rust) and `--dir` (the drive measured), each run's debug
+  log in `bench/results/debug-<host>-<date>/<case>/`. Tests: no names in a copy's log
+  (core and pty), the topics, a word cannot carry a path, the crash tail, pruning.
+- Linux, quick `mixed` (1,000 × 4 KiB and 200 MiB): 92 ms; the log says the small
+  files took 15 ms and the large one 56 ms, so lanes could save at most about 15 ms
+  here. The owner's Windows and macOS numbers decide.
+
 ## Check
 
 ## Act

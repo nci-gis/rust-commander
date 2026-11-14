@@ -4,8 +4,12 @@
 //!
 //! ```text
 //! cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
+//!                   [--only CASE] [--dir PATH]
 //! ```
 //!
+//! - `--only` runs the in-process cases whose name holds CASE, with no build (a copy of
+//!   this program runs it on a machine without Rust); `--dir` makes the trees on the
+//!   drive being measured. With `XDEVCMD_DEBUG`, each run's jobs go to a debug log.
 //! - Builds the release binary, then runs each case `--runs` times (5 by default) after
 //!   one warm-up run, and prints the median, p95 and best, with the change from this
 //!   host's baseline (marked past ±15 %).
@@ -45,6 +49,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
+                         [--only CASE] [--dir PATH]
        cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]";
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
@@ -57,6 +62,7 @@ fn main() {
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);
+            debug_log(Path::new(&args[3]));
             match run_case(&args[1], size, Path::new(&args[3])) {
                 Ok(ms) => {
                     println!("{}", json!({ "ms": ms, "rss_kib": peak_rss_kib() }));
@@ -81,6 +87,10 @@ struct Opts {
     runs: usize,
     host: String,
     save_baseline: bool,
+    /// Only the cases whose name holds this (`--only mixed`); no build, no start-up.
+    only: Option<String>,
+    /// Where the cases make their trees: the drive being measured (`--dir E:\\bench`).
+    dir: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Result<Opts, String> {
@@ -89,6 +99,8 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         runs: 5,
         host: "unnamed".into(),
         save_baseline: false,
+        only: None,
+        dir: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -113,6 +125,8 @@ fn parse(args: &[String]) -> Result<Opts, String> {
                 }
                 o.host = h.clone();
             }
+            "--only" => o.only = Some(it.next().ok_or("--only needs a case")?.clone()),
+            "--dir" => o.dir = Some(PathBuf::from(it.next().ok_or("--dir needs a path")?)),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
     }
@@ -392,15 +406,26 @@ fn bench(args: &[String]) -> i32 {
         }
     };
     let root = root();
+    let root = if root.join("Cargo.toml").is_file() {
+        root
+    } else {
+        // A copy of this program away from the source: results beside where it started.
+        std::env::current_dir().unwrap_or_default()
+    };
+    // With --only, the in-process cases alone: no build, so a copy of this program
+    // runs them on a machine without Rust (the bench workflow's artifact).
+    let whole = o.only.is_none();
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    eprintln!("building the release binary…");
-    let built = Command::new(&cargo)
-        .args(["build", "--release", "--locked", "-p", "xdevcmd"])
-        .current_dir(&root)
-        .status();
-    if !built.is_ok_and(|s| s.success()) {
-        eprintln!("cargo build --release failed");
-        return 1;
+    if whole {
+        eprintln!("building the release binary…");
+        let built = Command::new(&cargo)
+            .args(["build", "--release", "--locked", "-p", "xdevcmd"])
+            .current_dir(&root)
+            .status();
+        if !built.is_ok_and(|s| s.success()) {
+            eprintln!("cargo build --release failed");
+            return 1;
+        }
     }
     let bin = root.join("target/release").join(if cfg!(windows) {
         "xdevcmd.exe"
@@ -420,13 +445,17 @@ fn bench(args: &[String]) -> i32 {
         println!("load average {load} (numbers from a busy machine are not comparable)");
     }
 
-    let scratch = std::env::temp_dir().join(format!("xdevcmd-bench-{}", std::process::id()));
+    let scratch = o
+        .dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(format!("xdevcmd-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).expect("a scratch directory");
 
     let mut results: BTreeMap<String, Result_> = BTreeMap::new();
     // Package: measured once.
-    if let Ok(m) = std::fs::metadata(&bin) {
+    if let Some(m) = whole.then(|| std::fs::metadata(&bin).ok()).flatten() {
         results.insert(
             "package: binary".into(),
             Result_ {
@@ -436,7 +465,10 @@ fn bench(args: &[String]) -> i32 {
             },
         );
     }
-    if let Ok(lock) = std::fs::read_to_string(root.join("Cargo.lock")) {
+    if let Some(lock) = whole
+        .then(|| std::fs::read_to_string(root.join("Cargo.lock")).ok())
+        .flatten()
+    {
         results.insert(
             "package: crates in Cargo.lock".into(),
             Result_ {
@@ -465,12 +497,25 @@ fn bench(args: &[String]) -> i32 {
             5_000,
         ),
         ("undo a copy", "undo", 2_000, 10_000),
+        // One large file among many small ones (item 43's lanes): a small file waits for
+        // the large one before it. Size: the small files; the large one is a MiB per 5.
+        (
+            "mixed: one large file and small files",
+            "mixed",
+            1_000,
+            5_000,
+        ),
     ];
     let me = std::env::current_exe().expect("this program's path");
     for (shown, case, quick, full) in cases {
         let size = if o.quick { *quick } else { *full };
         if size == 0 {
             continue;
+        }
+        if let Some(only) = &o.only {
+            if !case.contains(only.as_str()) && !shown.contains(only.as_str()) {
+                continue;
+            }
         }
         let name = shown.to_string();
         let mut r = Result_ {
@@ -481,10 +526,22 @@ fn bench(args: &[String]) -> i32 {
         eprint!("{name}: ");
         for run in 0..=o.runs {
             let dir = scratch.join(format!("{case}-{run}"));
-            let out = Command::new(&me)
+            let mut child = Command::new(&me);
+            child
                 .args(["bench-case", case, &size.to_string()])
-                .arg(&dir)
-                .output();
+                .arg(&dir);
+            // XDEVCMD_DEBUG: each case's logs kept with the results, a folder a case.
+            if std::env::var_os("XDEVCMD_DEBUG").is_some()
+                && std::env::var_os("XDEVCMD_DEBUG_DIR").is_none()
+            {
+                child.env(
+                    "XDEVCMD_DEBUG_DIR",
+                    root.join("bench/results")
+                        .join(format!("debug-{}-{date}", o.host))
+                        .join(case),
+                );
+            }
+            let out = child.output();
             let _ = std::fs::remove_dir_all(&dir);
             let Some(v) = out
                 .ok()
@@ -513,6 +570,9 @@ fn bench(args: &[String]) -> i32 {
     // Start-up and idle CPU: the real program in a pseudo-terminal.
     #[cfg(unix)]
     for (answering, label) in [(true, "answering"), (false, "silent")] {
+        if !whole {
+            break;
+        }
         let mut total = Result_ {
             unit: "ms",
             values: Vec::new(),
@@ -676,6 +736,33 @@ fn make_tree(dir: &Path, n: u64, bytes: usize) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A file of `mib` MiB.
+fn big_file(p: &Path, mib: u64) -> std::io::Result<()> {
+    let mb = vec![b'x'; 1 << 20];
+    let mut f = std::fs::File::create(p)?;
+    for _ in 0..mib {
+        std::io::Write::write_all(&mut f, &mb)?;
+    }
+    Ok(())
+}
+
+/// `XDEVCMD_DEBUG` in a case's child: its jobs written to a debug log, as xdevcmd
+/// writes them, in `XDEVCMD_DEBUG_DIR`, else beside the case's scratch directory.
+fn debug_log(case_dir: &Path) {
+    let Ok(v) = std::env::var("XDEVCMD_DEBUG") else {
+        return;
+    };
+    let (bits, _) = xdevcmd_core::debuglog::parse(&v);
+    if bits == 0 {
+        return;
+    }
+    let dir = std::env::var_os("XDEVCMD_DEBUG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| case_dir.with_file_name("debug"));
+    let _ = xdevcmd_core::debuglog::start(bits, &dir);
+}
+
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
@@ -732,8 +819,12 @@ fn run_case(case: &str, size: u64, dir: &Path) -> Result<f64, String> {
                 }
             }
         }
-        "copy-small" | "copy-big" | "undo" => {
-            if case == "copy-big" {
+        "copy-small" | "copy-big" | "undo" | "mixed" => {
+            if case == "mixed" {
+                // Named to come first, so the small files wait behind it.
+                big_file(&src.join("0-large.bin"), (size / 5).max(1)).map_err(e)?;
+                make_tree(&src, size, 4096).map_err(e)?;
+            } else if case == "copy-big" {
                 let mb = vec![b'x'; 1 << 20];
                 let mut f = std::fs::File::create(src.join("large.bin")).map_err(e)?;
                 for _ in 0..size {

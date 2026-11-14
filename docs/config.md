@@ -315,10 +315,12 @@ you name with `--cwd-file`, written on quit, it writes these and nothing more:
 |---|---|---|
 | `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit, every `autosave_secs`, and when the terminal closes. Readable by you only. |
 | `journal/` | beside `session.toml` | Safe operations: one small file per running job, removed when it ends; what a killed run leaves is cleaned up at the next start. |
+| `crash-….log` | beside `session.toml` | Written only if xdevcmd crashes: what happened, for a report. The five newest are kept. |
+| `debug-….jsonl` | beside `session.toml`, or `XDEVCMD_DEBUG_DIR` | Only with `XDEVCMD_DEBUG` set: what jobs did and how long each part took, with no names ([Troubleshooting](troubleshooting.md#sending-a-log-with-a-report)). The five newest are kept. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside xdevcmd (Ctrl+D). Bookmarks in this config are not copied there. |
 | `xdevcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when xdevcmd ends; one left by a crash is removed at the next start, an hour on. |
 
-No logs, no cache, nothing sent anywhere. F8 moves files to your system's own trash.
+No logs unless you ask for one, no cache, nothing sent anywhere. F8 moves files to your system's own trash.
 
 - `$XDG_STATE_HOME/xdevcmd/` replaces the state directory, and `XDEVCMD_STATE` names the
   session file itself (bookmarks go beside it).

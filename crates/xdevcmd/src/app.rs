@@ -563,6 +563,9 @@ pub struct App {
     /// the status line too (`--timings`).
     pub startup: crate::startup::Clock,
     pub timings: bool,
+    /// What start-up says about the debug log (`XDEVCMD_DEBUG`): shown first, and kept
+    /// in Messages either way.
+    pub debug_note: Option<String>,
     /// Quitting with jobs running: they were cancelled, and until this moment xdevcmd
     /// waits for them to clean up, drawing as usual and taking no keys ([`App::stop_step`]).
     stopping: Option<Instant>,
@@ -711,6 +714,7 @@ impl App {
             boot_note: None,
             startup: Default::default(),
             timings: false,
+            debug_note: None,
             stopping: None,
             graphic_want: None,
             graphic_shown: None,

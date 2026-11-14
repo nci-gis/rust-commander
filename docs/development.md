@@ -100,7 +100,7 @@ the log started) and `ev`:
 | `resume` | jobs | `job`, `sources_left`, `decisions_kept` |
 | `batch` | jobs | group commit: `files`, `bytes`, `threads`, `sync_ms`, `sync_failed`, `probing` |
 | `probe` | jobs | `chose`, and `ms_per_file_<threads>` for each count tried |
-| `job_end` | jobs | `ms`, `scan_ms`, `journal_ms`, the counts (`done`, `skipped`, `failed`, `cloned`, `by_kernel` …); the time per phase (`check_ms`, `open_ms`, `create_ms`, `write_ms`, `attrs_ms`, `sync_ms`, `finish_ms`); files up to 1 MiB and larger apart (`small_files`, `small_bytes`, `small_ms`, `large_…`) |
+| `job_end` | jobs | `ms`, `scan_ms`, `journal_ms`, the counts (`done`, `skipped`, `failed`, `cloned`, `by_kernel` …); the time per phase (`check_ms`, `open_ms`, `create_ms`, `write_ms`, `attrs_ms`, `sync_ms`, `finish_ms`); files up to 1 MiB and larger apart (`small_files`, `small_bytes`, `small_ms`, `large_…`); big files' checkpoints (`checkpoints`, `checkpoint_ms`) and bytes taken over from one on a resume (`resumed_bytes`) |
 | `retry` | errors | `file`, `phase`, `kind`, `os`, `attempt`, `of`, `wait_ms` |
 | `failed` | errors | a file that failed for good: `file`, `phase`, `kind`, `os`, `tries`, `network` |
 | `ask` | errors | a question: `q`, `phase`, `answer`, `waited_ms`, `file` |

@@ -661,6 +661,46 @@ An outside review of this branch (4 agents) was checked claim by claim against
   crates.io from 0.4.0, a Scoop bucket of our own with checkver, winget after signing
   (SignPath Foundation after 0.4.0).
 
+### 2026-11-14, checkpointed resume (item 43's rest, part one) (the owner: "làm checkpointed resume đi")
+
+- **Built**: with safe operations on, a file larger than `ops::CHECKPOINT` (256 MiB),
+  written under its temporary name, is synced every 256 MiB and then a journal line
+  `ckpt <part> <src> <dst> <ident> <bytes>` follows. Data first, then the line, so a
+  line never claims bytes that are not on disk.
+  - **The tidy-up** keeps such a part, if it is xdevcmd's own name, holds at least
+    `bytes`, and its job is a copy or move with sources. Its journal is kept too
+    (`Interrupted::partial`, `::journal`), so a start that neither resumes nor discards
+    offers it again.
+  - **Continue** passes them in `Request::partial`. The new job writes them into its
+    own journal and commits, then the old journal goes (`journal::forget`).
+  - **Taking over** (`Worker::take_over`): only while the source's `Ident` (size,
+    mtime, dev+ino or creation time) is unchanged. The part is renamed to this run's
+    name, and a `ckpt` line for it is written at once. Then it is cut to the
+    checkpoint and both files seek there; the clone is skipped and copy_file_range
+    goes on from the offsets. A kept part that no file of the job reaches is removed
+    at the end.
+  - **The dialog** says "N big file(s) kept part way (size)". `d` "discard them"
+    removes the parts and the journal; Esc leaves them for the next start.
+  - **The debug log**: `checkpoints`, `checkpoint_ms`, `resumed_bytes` in `job_end`.
+- **Tests**:
+  - journal: a part is kept, the last line wins, a short part goes, a delete keeps
+    nothing, discard removes both;
+  - ops: a big file syncs at its checkpoint and a small one does not; resume goes on
+    from the kept bytes (marked X, so a copy from the start would show) and cuts what
+    is past the checkpoint; a changed source starts again; unused parts and the old
+    journal go;
+  - pty (Linux): a real `kill -9` after the first checkpoint of a 384 MiB copy, then
+    Continue: the file is whole and `resumed_bytes` ≥ 256 MiB.
+- **Not done, and why**: finished folders as journal lines, so that a resume skips them
+  without a stat. A folder is "done" only after its group batch is synced, so this
+  needs a flush (a sync) per folder, which is a cost for trees of small folders. And a
+  resume already checks each file with two stats. It pays only on slow (network)
+  sources with very many files. Left until the owner's numbers show resume's check
+  is slow there.
+- **Not measured yet**: the checkpoint sync's cost. One sync per 256 MiB should be
+  small on an SSD; a USB stick is where it shows. The owner's run of a big file with
+  `XDEVCMD_DEBUG=jobs` gives `checkpoint_ms` against `ms`.
+
 ## Check
 
 ## Act

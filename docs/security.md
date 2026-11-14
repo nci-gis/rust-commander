@@ -83,7 +83,8 @@ the complete new one. A power cut is different, and is below ("What survives a p
 cut"). The next start finds the journal of the run that ended, removes
 its temporary files, puts rename many's files back under their names, and offers to
 continue the job. Continuing skips what is already there and identical (same size and
-date: what the first run finished), starts again the file that was cut short, and asks
+date: what the first run finished), goes on with a big file from its last checkpoint
+(below), starts again a smaller file that was cut short, and asks
 about any other file already there, never deciding for you: a file you chose to keep
 the first time is asked about again, not replaced because its source is newer. A move
 continues with the sources still there; a source whose identical copy is already at the
@@ -158,7 +159,8 @@ system's cloning is in doubt (OpenZFS 2.2.0 and 2.2.1 had a block-cloning bug, f
   just before the cut (not synced, by the rule above) can be short or empty under its
   real name, and continuing the job takes a file of the right size and date for done
   without reading it. If the power went during a big copy of new files, check them (or
-  copy again with "replace all"). A later version will copy again what a run that died
+  copy again with "replace all"). A big file's kept part is only what was synced at a
+  checkpoint, so it survives a power cut too. A later version will copy again what a run that died
   in a power cut had made itself.
 
 **Replaced only if it is still the file you agreed to.** The answer to "Already exists"
@@ -209,8 +211,19 @@ temporary files (up to two seconds), save the session and end; a second signal e
 at once. F10 with jobs running asks first, cancels them and waits until they have
 cleaned up; if one is stuck after five seconds (a hung network drive) it asks again.
 
+**A big file goes on from its last checkpoint.** With safe operations on, a file
+larger than 256 MiB is synced to the disk every 256 MiB while it is copied, and the
+journal then says how much of it is there. If the run dies, the next start keeps that
+part (the dialog says "kept part way") instead of removing it, and Continue goes on
+from there, at most 256 MiB back. That is only done while the source is still the same
+file (size, date and identity, as the journal noted them); otherwise the file is copied
+again from the start. "Discard them" in that dialog removes the kept parts; Esc leaves
+them, and the next start asks again. The checkpoint's sync is the one cost: about one
+sync per 256 MiB of a big file, none for smaller files.
+
 **Limits.**
-- Nothing is resumed from the middle of a file: a file cut short starts again.
+- A file of up to 256 MiB that was cut short starts again, as does a big file copied
+  with safe operations off or by a clone (a clone is whole or nothing anyway).
   Extracting and packing are not resumed; they are started again.
 - A replacement needs room for the new file until it is renamed over the old one.
 - Some network and FUSE file systems do not allow a rename into place, or do not make it

@@ -33,6 +33,10 @@ const GROUP_BATCH_AGE: std::time::Duration = std::time::Duration::from_secs(1);
 const GROUP_PROBE_AFTER: u64 = 1000;
 /// The thread counts the probe tries (the owner: 2 rather than 1, at most 32).
 const GROUP_PROBE: [usize; 4] = [2, 8, 16, 32];
+/// A big file copied under a temporary name is synced every this many bytes and the
+/// journal told how far it got, so a run that dies goes on from there (Round 033): at
+/// most this much is copied again. A file no bigger has no checkpoint.
+pub const CHECKPOINT: u64 = 256 << 20;
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
 /// Bytes a `copy_file_range` step asks the kernel for: progress and Esc are seen
@@ -127,6 +131,14 @@ pub struct Request {
     /// The waits between tries of a file that failed with an error that passes (a
     /// network one): [`BACKOFF_SECS`]; then the user is asked. Tests shorten them.
     pub backoff: Vec<std::time::Duration>,
+    /// Bytes between a big file's checkpoints ([`CHECKPOINT`]; 0: none). Tests make it
+    /// small.
+    pub checkpoint: u64,
+    /// Resume: big files an interrupted run had copied part of
+    /// ([`crate::journal::Interrupted::partial`]), each taken over where it stopped.
+    pub partial: Vec<crate::journal::Partial>,
+    /// Resume: the interrupted run's journal, which this job's own replaces.
+    pub resumed: Option<PathBuf>,
 }
 
 /// The owner's decision 2, Round 031: five tries more, about 30 s in all, then the
@@ -234,6 +246,9 @@ impl Request {
             safe: safe(),
             fast: crate::fastcopy::enabled(),
             backoff: backoff(),
+            checkpoint: CHECKPOINT,
+            partial: Vec::new(),
+            resumed: None,
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -254,6 +269,9 @@ impl Request {
             safe: safe(),
             fast: crate::fastcopy::enabled(),
             backoff: backoff(),
+            checkpoint: CHECKPOINT,
+            partial: Vec::new(),
+            resumed: None,
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -274,6 +292,9 @@ impl Request {
             safe: safe(),
             fast: crate::fastcopy::enabled(),
             backoff: backoff(),
+            checkpoint: CHECKPOINT,
+            partial: Vec::new(),
+            resumed: None,
         }
     }
 }
@@ -647,6 +668,13 @@ pub fn start(req: Request) -> Handle {
             group: Group::new(),
             fast: req.fast,
             engine: crate::fastcopy::Engine::Own,
+            checkpoint: req.checkpoint,
+            partials: req
+                .partial
+                .iter()
+                .map(|p| (p.dst.clone(), p.clone()))
+                .collect(),
+            ckpt: None,
             dbg: crate::debuglog::on(crate::debuglog::Topic::Jobs).then(|| {
                 Box::new(Dbg {
                     job: crate::debuglog::next_job(),
@@ -657,6 +685,9 @@ pub fn start(req: Request) -> Handle {
                     batches: 0,
                     scan: Default::default(),
                     journal: Default::default(),
+                    checkpoints: 0,
+                    checkpoint_time: Default::default(),
+                    resumed_bytes: 0,
                 })
             }),
             phase: "start",
@@ -748,6 +779,13 @@ struct Worker {
     fast: bool,
     /// The engine that moved the last file's bytes.
     engine: crate::fastcopy::Engine,
+    /// Bytes between a big file's checkpoints (0: none).
+    checkpoint: u64,
+    /// Resume: big files cut short after a checkpoint, by destination, not yet taken
+    /// over. Whatever is left at the end goes.
+    partials: std::collections::HashMap<PathBuf, crate::journal::Partial>,
+    /// The big file being written, while it has checkpoints.
+    ckpt: Option<Ckpt>,
     /// The debug log's record of this job ([`crate::debuglog`]), when it logs jobs.
     dbg: Option<Box<Dbg>>,
     /// The step under way, for the debug log's error lines.
@@ -790,6 +828,18 @@ struct Dbg {
     scan: std::time::Duration,
     /// The journal begun and synced, before the first step.
     journal: std::time::Duration,
+    /// Big files' checkpoints taken, and the time their syncs took.
+    checkpoints: u64,
+    checkpoint_time: std::time::Duration,
+    /// Bytes not copied again: big files taken over from their checkpoint.
+    resumed_bytes: u64,
+}
+
+/// The big file being written now, while it has checkpoints: see [`CHECKPOINT`].
+struct Ckpt {
+    part: crate::journal::Partial,
+    /// Where the next checkpoint is due.
+    next: u64,
 }
 
 /// A replacement written under its temporary name, its handle open, waiting for the
@@ -984,6 +1034,25 @@ impl Worker {
                 None => {}
             }
         }
+        // Resume: the big files cut short are this job's now. Written into its journal,
+        // and on disk, before the old journal goes, so a kill in between still keeps
+        // them. Without a journal of its own, there are no checkpoints to keep them by:
+        // they are copied again from the start.
+        if let Some(old) = &req.resumed {
+            let kept = match self.journal.as_mut() {
+                Some(j) => self
+                    .partials
+                    .values()
+                    .try_for_each(|p| j.part(&p.part).and_then(|()| j.checkpoint(p)))
+                    .and_then(|()| j.commit(old))
+                    .is_ok(),
+                None => false,
+            };
+            if !kept {
+                self.drop_partials();
+            }
+            crate::journal::forget(old);
+        }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
             self.finish();
@@ -1143,6 +1212,9 @@ impl Worker {
     /// The job is over: say how it went. A journal that broke on a line no step needed
     /// synced (a new file's) is said here, since nobody was asked about it.
     fn finish(&mut self) {
+        // Taken over by no file of this job (skipped, changed, or the job stopped
+        // first): they would never be finished.
+        self.drop_partials();
         self.flush_group();
         self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
         self.sum.bytes = self.bytes_done;
@@ -1222,6 +1294,9 @@ impl Worker {
             .num("large_bytes", d.large.1)
             .ms("large_ms", d.large.2)
             .num("batches", d.batches)
+            .num("checkpoints", d.checkpoints)
+            .ms("checkpoint_ms", d.checkpoint_time)
+            .num("resumed_bytes", d.resumed_bytes)
             .num("group_threads", self.group.threads as u64)
             .write();
     }
@@ -1928,12 +2003,56 @@ impl Worker {
                 let _ = j.part(&target);
             }
         }
+        let resumed = if in_place {
+            None
+        } else {
+            self.take_over(src, dst, &target)
+        };
+        // Checkpoints: a big file under a temporary name, with a journal to keep them.
+        self.ckpt = (!in_place
+            && self.checkpoint > 0
+            && self.journal.is_some()
+            && (meta.len() > self.checkpoint || resumed.is_some()))
+        .then(|| Ckpt {
+            part: crate::journal::Partial {
+                part: target.clone(),
+                src: src.to_path_buf(),
+                dst: dst.to_path_buf(),
+                ident: Ident::of(&meta),
+                bytes: resumed.unwrap_or(0),
+            },
+            next: resumed.unwrap_or(0) + self.checkpoint,
+        });
+        // Taken over under this run's name: said at once, or a kill before the next
+        // checkpoint would take it for an unfinished file and remove it.
+        if let (Some(c), Some(j), Some(_)) = (&self.ckpt, self.journal.as_mut(), resumed) {
+            let _ = j.checkpoint(&c.part);
+        }
         // macOS clones by making the file itself, so before it is created (item 22).
         #[cfg(target_vendor = "apple")]
-        let cloned = self.fast && crate::fastcopy::clone_at(&r, &target);
+        let cloned = resumed.is_none() && self.fast && crate::fastcopy::clone_at(&r, &target);
         #[cfg(not(target_vendor = "apple"))]
         let cloned = false;
-        let opened = if cloned {
+        let opened = if let Some(at) = resumed {
+            // Taken over: what is past the checkpoint may not be on disk whole, so it
+            // is cut off, and both files go on from there.
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&target)
+                .and_then(|mut w| {
+                    use std::io::Seek;
+                    w.set_len(at)?;
+                    w.seek(io::SeekFrom::Start(at))?;
+                    r.seek(io::SeekFrom::Start(at))?;
+                    Ok(w)
+                })
+                .inspect(|_| {
+                    self.advance(at);
+                    if let Some(d) = self.dbg.as_mut() {
+                        d.resumed_bytes += at;
+                    }
+                })
+        } else if cloned {
             fs::OpenOptions::new().write(true).open(&target)
         } else {
             fs::OpenOptions::new()
@@ -1944,9 +2063,10 @@ impl Worker {
         let mut w = match opened {
             Ok(w) => w,
             Err(e) => {
-                if cloned {
+                if cloned || resumed.is_some() {
                     let _ = fs::remove_file(&target);
                 }
+                self.ckpt = None;
                 return Err(e);
             }
         };
@@ -1961,6 +2081,7 @@ impl Worker {
         } else {
             self.write_all_from(&mut r, &mut w, &target)
         };
+        self.ckpt = None;
         self.lap(Phase::Write, &mut t);
         if matches!(written, Ok(true)) {
             match self.engine {
@@ -2250,6 +2371,60 @@ impl Worker {
     }
 
     /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
+    /// The kept temporary files no file of this job took over: removed.
+    fn drop_partials(&mut self) {
+        for (_, p) in self.partials.drain() {
+            if p.part
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().contains(".xdevcmd-part-"))
+            {
+                let _ = fs::remove_file(&p.part);
+            }
+        }
+    }
+
+    /// Resume: the kept start of `dst`'s copy, renamed to `target` (this run's name for
+    /// it), and how many bytes of it count. Only while the source is the same file it
+    /// was (its size, date and identity) and the kept file holds what its checkpoint
+    /// says. Otherwise the kept file goes, and the copy starts again.
+    fn take_over(&mut self, src: &Path, dst: &Path, target: &Path) -> Option<u64> {
+        let p = self.partials.remove(dst)?;
+        let same = p.src == src
+            && Ident::at(src) == Some(p.ident)
+            && p.bytes <= fs::metadata(src).map(|m| m.len()).unwrap_or(0)
+            && fs::symlink_metadata(&p.part).is_ok_and(|m| m.is_file() && m.len() >= p.bytes);
+        if same && fs::rename(&p.part, target).is_ok() {
+            return Some(p.bytes);
+        }
+        let _ = fs::remove_file(&p.part);
+        None
+    }
+
+    /// `n` more bytes are in the big file being written (`w`): at a checkpoint, its data
+    /// is synced and then the journal says how far it is. A failed sync fails the copy,
+    /// which goes round as any write error; a failed line only breaks the journal,
+    /// which is asked about before the next step that needs it.
+    fn tick(&mut self, w: &File, n: u64) -> io::Result<()> {
+        let Some(c) = self.ckpt.as_mut() else {
+            return Ok(());
+        };
+        c.part.bytes += n;
+        if c.part.bytes < c.next {
+            return Ok(());
+        }
+        let t = std::time::Instant::now();
+        crate::faults::sync_data(w, &c.part.part)?;
+        c.next = c.part.bytes + self.checkpoint;
+        if let Some(j) = self.journal.as_mut() {
+            let _ = j.checkpoint(&c.part);
+        }
+        if let Some(d) = self.dbg.as_mut() {
+            d.checkpoints += 1;
+            d.checkpoint_time += t.elapsed();
+        }
+        Ok(())
+    }
+
     fn write_all_from(&mut self, r: &mut File, w: &mut File, path: &Path) -> io::Result<bool> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if self.fast {
@@ -2269,6 +2444,7 @@ impl Worker {
             crate::faults::at(crate::faults::Point::Write, path)?;
             w.write_all(&buf[..n])?;
             self.advance(n as u64);
+            self.tick(w, n as u64)?;
         }
         w.flush()?;
         Ok(true)
@@ -2280,7 +2456,9 @@ impl Worker {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     fn kernel_copy(&mut self, r: &File, w: &File, path: &Path) -> io::Result<Option<bool>> {
         use crate::fastcopy::{Engine, Step};
-        if crate::fastcopy::clone_into(r, w) {
+        // A clone is the whole file: not for one taken over part way.
+        let from_start = self.ckpt.as_ref().is_none_or(|c| c.part.bytes == 0);
+        if from_start && crate::fastcopy::clone_into(r, w) {
             crate::faults::at(crate::faults::Point::Write, path)?;
             self.advance(r.metadata()?.len());
             self.engine = Engine::Clone;
@@ -2295,6 +2473,7 @@ impl Worker {
                 Step::Copied(n) => {
                     crate::faults::at(crate::faults::Point::Write, path)?;
                     self.advance(n as u64);
+                    self.tick(w, n as u64)?;
                     first = false;
                 }
                 Step::End => {
@@ -3676,6 +3855,103 @@ mod tests {
         crate::journal::init(
             std::env::temp_dir().join(format!("xdevcmd-test-journals-{}", std::process::id())),
         );
+    }
+
+    /// A big file is synced at each checkpoint while it is copied (Round 033); one no
+    /// bigger than a checkpoint is not (new files stay fast).
+    #[test]
+    fn a_big_file_is_synced_at_its_checkpoints_and_a_small_one_is_not() {
+        journals();
+        let root = tmp("ckpt-sync");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("ck-big.bin"), vec![1u8; 300 << 10]).unwrap();
+        fs::write(root.join("ck-small.bin"), vec![1u8; 100 << 10]).unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            ".ck-",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![root.join("ck-small.bin")], dst.clone());
+        req.safe = true;
+        req.checkpoint = 128 << 10;
+        let s = run(req.clone());
+        assert_eq!((s.done, s.failed), (1, 0), "no checkpoint, no sync: {s:?}");
+        req.sources = vec![root.join("ck-big.bin")];
+        req.backoff = Vec::new();
+        let (s, _) = run_answering(req, |_| Answer::Skip);
+        assert_eq!(s.done, 0, "the checkpoint's sync failed: {s:?}");
+        assert!(!dst.join("ck-big.bin").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Resume takes over a big file kept after a checkpoint: what it holds is not
+    /// copied again (marked here with X, so a copy from the start would show), and the
+    /// rest follows. A source changed since starts again; a kept file no file of the
+    /// job reaches goes at the end, and so does the old journal.
+    #[test]
+    fn resume_goes_on_from_a_kept_checkpoint_while_the_source_is_unchanged() {
+        journals();
+        let root = tmp("ckpt-resume");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(200u32 << 10)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        let kept = 64 << 10;
+        // More than the checkpoint said: what is past it is cut off.
+        fs::write(&part, vec![b'X'; kept + 100]).unwrap();
+        let stray = dst.join(".other.bin.xdevcmd-part-2147483646-1");
+        fs::write(&stray, "x").unwrap();
+        let old_journal = root.join("old.journal");
+        fs::write(&old_journal, "kind copy\n").unwrap();
+        let partial = |part: &Path, dst_name: &str| crate::journal::Partial {
+            part: part.to_path_buf(),
+            src: src.clone(),
+            dst: dst.join(dst_name),
+            ident: Ident::at(&src).unwrap(),
+            bytes: kept as u64,
+        };
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.checkpoint = 32 << 10;
+        req.partial = vec![partial(&part, "big.bin"), partial(&stray, "other.bin")];
+        req.resumed = Some(old_journal.clone());
+        let s = run(req.clone());
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        let got = fs::read(dst.join("big.bin")).unwrap();
+        assert_eq!(got.len(), body.len());
+        assert!(
+            got[..kept].iter().all(|b| *b == b'X'),
+            "taken over, not copied again"
+        );
+        assert_eq!(got[kept..], body[kept..], "the rest follows");
+        assert!(!part.exists() && !stray.exists(), "nothing kept is left");
+        assert!(!old_journal.exists(), "the old journal went");
+        let names: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+
+        // The source changed since: copied from the start.
+        fs::remove_file(dst.join("big.bin")).unwrap();
+        fs::write(&part, vec![b'X'; kept]).unwrap();
+        req.partial = vec![partial(&part, "big.bin")];
+        req.resumed = None;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut changed = body.clone();
+        changed[0] = 0xEE;
+        fs::write(&src, &changed).unwrap();
+        let s = run(req);
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert_eq!(fs::read(dst.join("big.bin")).unwrap(), changed);
+        assert!(!part.exists());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     /// The journal's line for a replacement cannot be written (disk full, say): the

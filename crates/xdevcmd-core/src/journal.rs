@@ -37,6 +37,13 @@
 //! journal with a hole in it look whole. The job is told (the error comes back) and asks
 //! the user before its next step that cannot be undone.
 //!
+//! **A big file goes on from its last checkpoint** (Round 033). A file copied under a
+//! temporary name is synced every [`crate::ops::CHECKPOINT`] bytes, and then a `ckpt`
+//! line says how much of it is on disk, with the identity of its source. The tidy-up
+//! keeps such a temporary file (and this journal, for the next start too) instead of
+//! removing it, and Resume takes it over: the copy goes on from there if the source is
+//! still the same file. Declined, both go ([`discard`]).
+//!
 //! `v 3` names this layout. `moved` lines came with `v 2` (Round 029); `skip`, `replace`
 //! (the confirmed plan's decisions) and `done` (a source finished) with `v 3` (Round
 //! 030), for Resume to carry out exactly what is left. All are unknown tags to 0.3.0's
@@ -372,6 +379,23 @@ impl Journal {
         self.line(&format!("swap {} {}", enc(tmp), enc(dst)), dst)
     }
 
+    /// `p.bytes` of `p.part`, the copy of `p.src` that is to become `p.dst`, are on
+    /// disk (synced just before): kept for a resume. Not synced on its own: lost, the
+    /// copy goes on from the checkpoint before, or from the start.
+    pub fn checkpoint(&mut self, p: &Partial) -> std::io::Result<()> {
+        self.line(
+            &format!(
+                "ckpt {} {} {} {} {}",
+                enc(&p.part),
+                enc(&p.src),
+                enc(&p.dst),
+                p.ident.encode(),
+                p.bytes
+            ),
+            &p.part,
+        )
+    }
+
     /// The job has finished with `src`, one of its sources: a resume leaves it.
     pub fn done(&mut self, src: &Path) -> std::io::Result<()> {
         self.line(&format!("done {}", enc(src)), src)
@@ -385,6 +409,17 @@ impl Drop for Journal {
         // still there. One that opened it just before is told by its link count.
         let _ = fs::remove_file(&self.path);
     }
+}
+
+/// A big file cut short after a checkpoint: `bytes` of `part` are the start of `src`,
+/// whose identity was `ident`, being copied to `dst`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Partial {
+    pub part: PathBuf,
+    pub src: PathBuf,
+    pub dst: PathBuf,
+    pub ident: crate::ops::Ident,
+    pub bytes: u64,
 }
 
 /// What an interrupted run was doing, found at start-up, after its leftovers were
@@ -413,6 +448,37 @@ pub struct Interrupted {
     pub swapped: Vec<PathBuf>,
     /// Sources the job finished with.
     pub done: Vec<PathBuf>,
+    /// Big files cut short after a checkpoint, kept for Resume (Round 033).
+    pub partial: Vec<Partial>,
+    /// The dead run's journal, kept while `partial` is not empty: a later start finds
+    /// it again if this one neither resumes nor discards it.
+    pub journal: Option<PathBuf>,
+}
+
+/// Declined: the kept temporary files of `it` and its journal go.
+pub fn discard(it: &Interrupted) {
+    if crate::policy::guard_write().is_err() {
+        return;
+    }
+    for p in &it.partial {
+        if ours(&p.part) {
+            let _ = fs::remove_file(&p.part);
+        }
+    }
+    if let Some(j) = &it.journal {
+        let _ = fs::remove_file(j);
+    }
+}
+
+/// A resumed job has its own journal, with the kept files in it: the old one goes.
+pub(crate) fn forget(journal: &Path) {
+    let _ = fs::remove_file(journal);
+}
+
+/// Only xdevcmd's own temporary names, whatever a damaged journal says.
+fn ours(p: &Path) -> bool {
+    p.file_name()
+        .is_some_and(|n| n.to_string_lossy().contains(".xdevcmd-part-"))
 }
 
 /// Tidy up after runs that ended without warning, and say what they were doing.
@@ -473,10 +539,15 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         if !may_tidy(&text, crate::policy::get()) {
             continue;
         }
-        out.push(tidy(&text, &run));
+        let mut it = tidy(&text, &run);
         #[cfg(test)]
         while_held_in_test();
-        let _ = fs::remove_file(&path);
+        if it.partial.is_empty() {
+            let _ = fs::remove_file(&path);
+        } else {
+            it.journal = Some(path.clone());
+        }
+        out.push(it);
     }
     out
 }
@@ -604,12 +675,38 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         decided: Vec::new(),
         done: Vec::new(),
         swapped: Vec::new(),
+        partial: Vec::new(),
+        journal: None,
     };
+    let mut ckpts: Vec<Partial> = Vec::new();
     let mut swaps: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut parts: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut renames: Vec<(PathBuf, PathBuf)> = Vec::new();
     for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("ckpt ") {
+            let w: Vec<&str> = rest.split(' ').collect();
+            if let [part, src, dst, id, bytes] = w[..] {
+                if let (Some(part), Some(src), Some(dst), Some(ident), Ok(bytes)) = (
+                    dec(part),
+                    dec(src),
+                    dec(dst),
+                    crate::ops::Ident::decode(id),
+                    bytes.parse(),
+                ) {
+                    // The last word on a file wins.
+                    ckpts.retain(|c| c.part != part);
+                    ckpts.push(Partial {
+                        part,
+                        src,
+                        dst,
+                        ident,
+                        bytes,
+                    });
+                }
+            }
+            continue;
+        }
         let mut w = line.split(' ');
         let tag = w.next().unwrap_or_default();
         let a = w.next().and_then(dec);
@@ -652,6 +749,20 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             it.swapped.push(dst);
         }
     }
+    // Checkpointed files are kept for Resume, while there is a job to resume and the
+    // file holds at least what its line says. Anything else goes with the rest.
+    let resumable = matches!(it.kind.as_str(), "copy" | "move") && !it.sources.is_empty();
+    for c in ckpts {
+        let holds = fs::symlink_metadata(&c.part).is_ok_and(|m| m.is_file() && m.len() >= c.bytes);
+        if !ours(&c.part) || !holds {
+            continue;
+        }
+        if resumable && c.bytes > 0 {
+            it.partial.push(c);
+        } else {
+            parts.push(c.part);
+        }
+    }
     // The temporary files that run made: `.name.xdevcmd-part-<run>-<n>`. The whole
     // run, with the dash after it: a pid alone would match another run given it later.
     let mark = format!(".xdevcmd-part-{run}-");
@@ -666,11 +777,10 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         }
     }
     for p in parts {
-        // Only xdevcmd's own temporary names, whatever a damaged journal says.
-        let ours = p
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().contains(".xdevcmd-part-"));
-        if ours
+        if it.partial.iter().any(|k| k.part == p) {
+            continue;
+        }
+        if ours(&p)
             && fs::symlink_metadata(&p).is_ok_and(|m| m.is_file())
             && fs::remove_file(&p).is_ok()
         {
@@ -1090,6 +1200,71 @@ mod tests {
             0,
             "the journal is gone"
         );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A big file cut short after a checkpoint (Round 033): its temporary file and the
+    /// journal stay, for Resume, also at the next start; one shorter than its line says,
+    /// or of a job that cannot be resumed, goes as before. Declined, both go.
+    #[test]
+    fn a_checkpointed_part_is_kept_with_its_journal_until_discarded() {
+        let d = dir("ckpt");
+        let jdir = d.join("journal");
+        fs::create_dir_all(&jdir).unwrap();
+        let src = d.join("big.iso");
+        fs::write(&src, vec![7u8; 4096]).unwrap();
+        let id = crate::ops::Ident::at(&src).unwrap();
+        let kept = d.join(".big.iso.xdevcmd-part-2147483646-0");
+        fs::write(&kept, vec![7u8; 3000]).unwrap();
+        let short = d.join(".short.iso.xdevcmd-part-2147483646-1");
+        fs::write(&short, vec![7u8; 10]).unwrap();
+        let plain = d.join(".small.txt.xdevcmd-part-2147483646-2");
+        fs::write(&plain, "half").unwrap();
+        let line = |part: &Path, bytes: u64| {
+            format!(
+                "ckpt {} {} {} {} {bytes}\n",
+                enc(part),
+                enc(&src),
+                enc(&d.join("out").join("big.iso")),
+                id.encode()
+            )
+        };
+        let text = format!(
+            "host {}\nv 3\nkind copy\nsrc {}\ndest {}\ndir {}\n{}{}{}",
+            enc(Path::new(&hostname())),
+            enc(&src),
+            enc(&d.join("out")),
+            enc(&d),
+            line(&kept, 1024),
+            line(&kept, 2048),
+            line(&short, 2048),
+        );
+        orphan(&jdir, &text);
+        let got = recover_in(&jdir);
+        assert_eq!(got.len(), 1);
+        let it = &got[0];
+        assert_eq!(it.partial.len(), 1, "{:?}", it.partial);
+        assert_eq!(it.partial[0].part, kept);
+        assert_eq!(it.partial[0].bytes, 2048, "the last checkpoint counts");
+        assert_eq!(it.partial[0].ident, id);
+        assert!(kept.exists(), "kept for Resume");
+        assert!(!short.exists(), "shorter than its checkpoint: removed");
+        assert!(!plain.exists(), "no checkpoint: removed as before");
+        let journal = it.journal.clone().expect("kept");
+        assert!(journal.exists());
+        // Neither resumed nor declined: the next start offers it again.
+        let again = recover_in(&jdir);
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0].partial, it.partial);
+        discard(&again[0]);
+        assert!(!kept.exists() && !journal.exists(), "declined: both go");
+        // A delete keeps nothing: there is no copy to go on with.
+        fs::write(&kept, vec![7u8; 3000]).unwrap();
+        orphan(&jdir, &text.replace("kind copy", "kind delete"));
+        let got = recover_in(&jdir);
+        assert!(got[0].partial.is_empty() && got[0].journal.is_none());
+        assert!(!kept.exists());
+        assert_eq!(fs::read_dir(&jdir).unwrap().count(), 0);
         let _ = fs::remove_dir_all(&d);
     }
 

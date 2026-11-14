@@ -1483,6 +1483,122 @@ fn a_move_killed_before_removing_its_source_says_both_are_there() {
     let _ = std::fs::remove_dir_all(&other);
 }
 
+/// A big copy killed (SIGKILL) after a checkpoint (Round 033): the next start keeps
+/// what was on disk and Continue goes on from there; the debug log says how much was
+/// not copied again. Read and write (fast copy off), slowed per chunk, so the kill
+/// lands after the first checkpoint (256 MiB) and before the end.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let s = Scratch::new("ckpt-kill");
+    let src = s.left().join("big.bin");
+    let size: u64 = 384 << 20;
+    {
+        // Sparse, with marks at both ends and in the middle.
+        let mut f = std::fs::File::create(&src).unwrap();
+        f.set_len(size).unwrap();
+        for at in [0, 300 << 20, size - 4] {
+            f.seek(SeekFrom::Start(at)).unwrap();
+            f.write_all(b"MARK").unwrap();
+        }
+    }
+    let cfg = s.file("fast-off.toml", "[general]\nfast_copy = false\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[
+            ("XDEVCMD_CONFIG", cfg.as_str()),
+            ("XDEVCMD_FAULTS", "delay|write|.big.bin.xdevcmd-part|2"),
+        ],
+    );
+    x.send(DOWN);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    let journal = s.0.join("journal");
+    let start = Instant::now();
+    let has_ckpt = || {
+        std::fs::read_dir(&journal).ok().is_some_and(|d| {
+            d.flatten()
+                .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("\nckpt ")))
+        })
+    };
+    while !has_ckpt() {
+        assert!(
+            start.elapsed() < PATIENCE * 4,
+            "no checkpoint:\n{}",
+            x.screen()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let pid = x.child.process_id().expect("a pid");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let start = Instant::now();
+    while !matches!(x.child.try_wait(), Ok(Some(_))) {
+        assert!(start.elapsed() < PATIENCE, "xdevcmd did not die");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    drop(x);
+    assert!(
+        !s.right().join("big.bin").exists(),
+        "killed before the end: no big.bin under its name"
+    );
+
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", cfg.as_str()), ("XDEVCMD_DEBUG", "jobs")],
+    );
+    x.wait_for("Interrupted");
+    x.wait_for("kept part way");
+    x.send(ENTER); // continue
+    x.wait_for("1 copied");
+    let mut got = std::fs::File::open(s.right().join("big.bin")).unwrap();
+    assert_eq!(got.metadata().unwrap().len(), size);
+    for at in [0, 300 << 20, size - 4] {
+        let mut b = [0u8; 4];
+        got.seek(SeekFrom::Start(at)).unwrap();
+        got.read_exact(&mut b).unwrap();
+        assert_eq!(&b, b"MARK", "at {at}");
+    }
+    assert!(
+        std::fs::read_dir(s.right()).unwrap().count() == 1,
+        "no temporary file left"
+    );
+    x.quit();
+    let log = std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().ends_with(".jsonl"))
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
+        .expect("a debug log");
+    let resumed: u64 = log
+        .lines()
+        .filter(|l| l.contains("\"job_end\""))
+        .filter_map(|l| {
+            let at = l.find("\"resumed_bytes\":")? + "\"resumed_bytes\":".len();
+            l[at..]
+                .split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()
+        })
+        .max()
+        .unwrap_or(0);
+    assert!(
+        resumed >= 256 << 20,
+        "taken over from the checkpoint: {resumed}"
+    );
+}
+
 /// Continuing an interrupted copy never replaces a file the user kept in the first run:
 /// a destination that differs from its (newer) source is asked about, and Skip keeps
 /// it. With the old rule (update) the newer source replaced it unasked.

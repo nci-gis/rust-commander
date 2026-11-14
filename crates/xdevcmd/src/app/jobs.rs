@@ -284,6 +284,7 @@ impl App {
             };
             kind_ok && !i.sources.is_empty()
         });
+        let mut discard = None;
         let yes = resumable.map(|it| {
             let what = match it.kind.as_str() {
                 "copy" => "a copy",
@@ -302,8 +303,25 @@ impl App {
             ));
             body.push("Continue it? What was done is skipped; a file cut short starts".into());
             body.push("again; you are asked about any other file already there.".into());
+            let n = it.partial.len();
+            if n > 0 {
+                let kept: u64 = it.partial.iter().map(|p| p.bytes).sum();
+                body.push(format!(
+                    "{n} big file{} kept part way ({}): continued from there, unless the source changed.",
+                    plural(n),
+                    xdevcmd_core::format::human_size(kept),
+                ));
+                discard = Some((
+                    'd',
+                    "discard them".to_string(),
+                    Cmd::Discard(Box::new(it.clone())),
+                ));
+            }
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
+        let footnote = discard
+            .is_some()
+            .then(|| "Esc: asked again at the next start, the kept parts left as they are.".into());
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Interrupted".into(),
             body,
@@ -311,8 +329,8 @@ impl App {
             yes,
             buttons: Vec::new(),
             also: None,
-            more: None,
-            footnote: None,
+            more: discard,
+            footnote,
             pictures: Vec::new(),
         }));
     }
@@ -329,6 +347,7 @@ impl App {
             .cloned()
             .collect();
         if still.is_empty() {
+            xdevcmd_core::journal::discard(&it);
             self.status = "nothing left to do: every source has gone".into();
             return;
         }
@@ -342,6 +361,9 @@ impl App {
         // The plan's decisions stand (Round 030): what the user chose to leave is left,
         // what they chose to replace is replaced while it is still that file.
         req.expect = it.decided.iter().cloned().collect();
+        // Big files cut short after a checkpoint go on from there (Round 033).
+        req.partial = it.partial.clone();
+        req.resumed = it.journal.clone();
         let kind = req.kind;
         self.remember_job(&req);
         self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));

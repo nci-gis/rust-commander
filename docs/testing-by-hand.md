@@ -26,11 +26,17 @@ bug; write down the system, the terminal and what happened.
    - The job reports an error, not success. Files that were complete are whole;
      the one being written is not there under its real name.
    - ✗ the job says done; a file under its real name with the wrong size.
-3. **Move across drives, killed.** Move a folder from your disk to a USB stick and kill
+3. **A big copy, killed past a checkpoint.** Copy a file of 1 GB or more, kill
+   xdevcmd (`kill -9`, or close the terminal window) once the bar is past 30 %. Start
+   again.
+   - The dialog says "kept part way"; Continue's bar starts near where it stopped, and
+     the copy is the same as the source (`cmp`, or `fc /b` on Windows).
+   - ✗ the bar starts at 0 %, or the copy differs.
+4. **Move across drives, killed.** Move a folder from your disk to a USB stick and kill
    xdevcmd mid-way. Start again.
    - Every file is on one side or the other, or on both ("copied completely … both are
      kept"). Never on neither.
-4. **A network share pulled mid-copy** (SMB or NFS: unplug the cable or stop the
+5. **A network share pulled mid-copy** (SMB or NFS: unplug the cable or stop the
    server; sshfs: kill the ssh connection). Copy a large file onto it.
    - The job box shows "network error — trying again in 1 s (1 of 5)", counting down.
      Bring the share back within about 30 s: the copy finishes by itself. Leave it
@@ -38,7 +44,7 @@ bug; write down the system, the terminal and what happened.
      during a wait stops at once.
    - ✗ the job fails at once without trying again; it never asks; Esc waits for the
      countdown.
-5. **A hard NFS mount whose server is gone**: the job may hang inside the system;
+6. **A hard NFS mount whose server is gone**: the job may hang inside the system;
    Esc stops it once that call returns. Note how long it took.
 
 ## 2. Undo, and the trash

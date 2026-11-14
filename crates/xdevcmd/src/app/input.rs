@@ -738,6 +738,15 @@ impl App {
                 self.quit_cd = true;
             }
             Cmd::Resume(it) => self.resume(*it),
+            Cmd::Discard(it) => {
+                xdevcmd_core::journal::discard(&it);
+                let n = it.partial.len();
+                self.status = format!(
+                    "the part{} of the interrupted job's big file{} removed",
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "" } else { "s" },
+                );
+            }
             Cmd::EditConfig(p) => {
                 self.recheck_config = Some(p.clone());
                 self.pending_edit = Some(p);

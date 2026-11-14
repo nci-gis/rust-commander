@@ -11,6 +11,12 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **A big copy goes on from where it stopped.** With safe operations on, a file larger
+  than 256 MiB is synced every 256 MiB as it is copied. If xdevcmd is killed or the
+  power goes, the next start keeps what was on disk ("kept part way"), and Continue goes
+  on from there, if the source has not changed, instead of copying the whole file
+  again. "Discard them" removes the kept parts. The cost is one sync per 256 MiB of a
+  big file.
 - **`o` and Open with… say what happened**: "opening …" on the status line if the
   system's opener has not answered after 300 ms (a quick open shows nothing in between),
   then "opened …" when it hands the file over, or its error. An opener that waits for the

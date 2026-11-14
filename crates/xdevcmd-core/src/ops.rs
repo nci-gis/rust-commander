@@ -3994,6 +3994,8 @@ mod tests {
         let mut req = Request::copy(vec![root.join("ck-small.bin")], dst.clone());
         req.safe = true;
         req.checkpoint = 128 << 10;
+        // The copy's own loop: a clone (APFS) brings the file whole, with no checkpoint.
+        req.fast = false;
         let s = run(req.clone());
         assert_eq!((s.done, s.failed), (1, 0), "no checkpoint, no sync: {s:?}");
         req.sources = vec![root.join("ck-big.bin")];
@@ -4032,7 +4034,10 @@ mod tests {
             1,
             crate::faults::Fault::Os(5),
         );
-        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        // `good` first, on its own: copied inside `src`, it may finish while the failing
+        // batch is pending (the order of a listing is the file system's), and waits for
+        // it, and is rightly not told. Then all of `src`, `good` again among the rest.
+        let mut req = Request::copy(vec![src.join("good"), src.clone()], dst.clone());
         req.safe = true;
         req.existing = Existing::Replace;
         req.backoff = Vec::new();
@@ -5332,6 +5337,8 @@ mod tests {
         drop(big);
         let mut req = Request::copy(vec![root.join("big")], dst.clone());
         req.safe = true;
+        // The copy's own loop: a clone (APFS) is whole at once, nothing left to cancel.
+        req.fast = false;
         let h = start(req);
         loop {
             match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
@@ -5644,7 +5651,10 @@ mod tests {
         // Sparse and large, so the cancel lands mid-copy even on a loaded machine.
         File::create(&big).unwrap().set_len(1 << 30).unwrap();
 
-        let h = start(Request::copy(vec![big], dst.clone()));
+        let mut req = Request::copy(vec![big], dst.clone());
+        // The copy's own loop: a clone (APFS) is whole at once, nothing left to cancel.
+        req.fast = false;
+        let h = start(req);
         let mut cancelled_at_progress = false;
         let summary = loop {
             match h.events.recv_timeout(Duration::from_secs(20)) {

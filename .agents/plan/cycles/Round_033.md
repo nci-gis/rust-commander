@@ -796,6 +796,16 @@ Decided:
     `relative()` now writes each path with the platform's separator.
 - **Checked here**: the pty suite twice under load (48 busy processes, 32 test
   threads): 119 passed each time; before, 3 failed.
+- **Run 43633633488 at 7388b0d**: ubuntu x64, deny and the cross-check passed. The
+  others failed in xdevcmd-core's own tests, which stopped `cargo test --all` before
+  the pty tests on those runners:
+  - **macOS, three tests of a 1 GiB copy** (two cancels, the checkpoint's sync): the
+    same APFS clone, whole at once. They set `fast = false`.
+  - **Windows, "1 ns newer"**: Windows' own clock keeps 100 ns, so the two times are
+    one. That line is for the other systems only.
+  - **Windows and Linux arm, the finished-folder test**: in `src`, `good` can finish
+    while the failing batch is pending (a listing's order is the file system's), and
+    waits for it, and is rightly not told. The test copies `good` first on its own.
 
 ## Check
 

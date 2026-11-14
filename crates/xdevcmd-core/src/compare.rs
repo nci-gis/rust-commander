@@ -406,6 +406,8 @@ mod tests {
         // Both to the nanosecond: exact.
         assert_eq!(newer(at(1000, 123_456_789), at(1000, 123_456_789)), Equal);
         assert_eq!(newer(at(1001, 123_456_789), at(1000, 123_456_789)), Greater);
+        // Windows' own clock keeps 100 ns: there, both are the same time.
+        #[cfg(not(windows))]
         assert_eq!(
             newer(at(1000, 123_456_790), at(1000, 123_456_789)),
             Greater,

@@ -822,20 +822,33 @@ fn going_quickly_past_pictures_sends_only_the_one_stopped_on() {
     x.send(DOWN);
     x.send(b"\x1bq"); // quick view on a.png
     wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
-    // Five Downs a key-repeat apart (`send` waits 60 ms after each, under the 120 ms a
-    // picture must be stayed on): past b, c, d, e to f. Without the wait each was
-    // decoded and sent.
+    // Five Downs a key-repeat apart (60 ms, under the 120 ms a picture must be stayed
+    // on): past b, c, d, e to f. Without the wait each was decoded and sent. Each gap is
+    // timed: on a busy runner (macOS CI) the test's own sleep grew past 120 ms, and a
+    // picture stayed on that long is rightly sent. Such a gap allows one more, and only
+    // then; at 20 ms the decode is still running and the test proves nothing.
+    let mut slow_gaps = 0;
+    let mut last: Option<Instant> = None;
     for _ in 0..5 {
-        x.send(DOWN);
+        let mut w = x.writer.lock().unwrap();
+        w.write_all(DOWN).unwrap();
+        w.flush().unwrap();
+        drop(w);
+        let now = Instant::now();
+        if last.is_some_and(|t| now - t >= Duration::from_millis(115)) {
+            slow_gaps += 1;
+        }
+        last = Some(now);
+        std::thread::sleep(Duration::from_millis(60));
     }
     x.wait_for("f.png");
     wait_bytes(&x, "\x1b_Ga=T,f=100,", 2);
     std::thread::sleep(Duration::from_millis(500));
     let raw = String::from_utf8_lossy(&x.raw.lock().unwrap()).into_owned();
-    assert_eq!(
-        raw.matches("\x1b_Ga=T,").count(),
-        2,
-        "a.png, then only f.png"
+    let sent = raw.matches("\x1b_Ga=T,").count();
+    assert!(
+        (2..=2 + slow_gaps).contains(&sent),
+        "a.png, then only f.png: {sent} sent, {slow_gaps} gap(s) of 115 ms or more"
     );
     x.quit();
 }

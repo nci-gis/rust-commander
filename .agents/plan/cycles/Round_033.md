@@ -806,6 +806,14 @@ Decided:
   - **Windows and Linux arm, the finished-folder test**: in `src`, `good` can finish
     while the failing batch is pending (a listing's order is the file system's), and
     waits for it, and is rightly not told. The test copies `good` first on its own.
+- **Run 43634839479 at 8bff432**: all green but macOS, with one failure in the pty
+  tests, which ran there for the first time: going past pictures sent 4, not 2. The
+  test (from 943d6b9, on main) relies on 60 ms between keys against the 120 ms
+  settle; the busy runner stretched its own sleeps past that. Each gap is now timed,
+  and a gap of 115 ms or more allows one more picture, and only then. Checked:
+  - with the settle at 0 it still fails (6 sent, no slow gap);
+  - one write, or 20 ms apart, would not catch that (the decode is still running),
+    so the 60 ms stays.
 
 ## Check
 

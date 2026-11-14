@@ -667,6 +667,7 @@ pub fn start(req: Request) -> Handle {
             safe: req.safe,
             recording: req.kind == Kind::Copy,
             copying: req.kind == Kind::Copy,
+            plan_confirmed: req.planned.is_some(),
             trash_root: req.trash_root.clone(),
             backoff: req.backoff.clone(),
             retry: false,
@@ -770,6 +771,8 @@ struct Worker {
     recording: bool,
     /// A copy (the kind, whatever the undo cap did to `recording`).
     copying: bool,
+    /// The job comes from a confirmed plan ([`Request::planned`]).
+    plan_confirmed: bool,
     /// [`Request::trash_root`]: tests' trash, for a replaced file too.
     trash_root: Option<PathBuf>,
     /// [`Request::backoff`].
@@ -1541,6 +1544,11 @@ impl Worker {
         if self.skip_all {
             return Some(false);
         }
+        // A confirmed plan leaves what is identical (its Identical group has no other
+        // choice), also the files past its cap that it kept no row for.
+        if self.plan_confirmed && identical(src, dst) == Same::Yes {
+            return Some(false);
+        }
         if self.update {
             return Some(self.is_older(src, dst));
         }
@@ -1603,8 +1611,8 @@ impl Worker {
         ok
     }
 
-    /// The update rule: `dst` is replaced only when `src` is newer (beyond a FAT drive's
-    /// two seconds). Two directories merge. Without a source (an archive) it is kept.
+    /// The update rule: `dst` is replaced only when `src` is newer (beyond the precision
+    /// the coarser of the two times was kept to: 2 s on FAT). Two directories merge. Without a source (an archive) it is kept.
     fn is_older(&self, src: Option<&Path>, dst: &Path) -> bool {
         let (Some(s), Ok(d)) = (
             src.and_then(|s| fs::symlink_metadata(s).ok()),
@@ -4044,6 +4052,34 @@ mod tests {
             "its batch failed: {told:?}"
         );
         assert!(!told.contains(&src), "something under it failed: {told:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A job from a confirmed plan leaves an identical file it has no row for (past the
+    /// plan's cap) without asking; one that differs is still asked about.
+    #[test]
+    fn a_planned_job_leaves_identical_files_without_a_row() {
+        let root = tmp("planned-same");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        let when = std::time::SystemTime::now();
+        for dir in [&src, &dst] {
+            let p = dir.join("same.txt");
+            fs::write(&p, "same").unwrap();
+            let f = File::options().write(true).open(&p).unwrap();
+            f.set_times(FileTimes::new().set_modified(when)).unwrap();
+        }
+        fs::write(src.join("differs.txt"), "new").unwrap();
+        fs::write(dst.join("differs.txt"), "old!").unwrap();
+        let mut req = Request::copy(
+            vec![src.join("same.txt"), src.join("differs.txt")],
+            dst.clone(),
+        );
+        req.planned = Some((2, 7));
+        let (s, asked) = run_answering(req, |_| Answer::Skip);
+        assert_eq!(asked.len(), 1, "only the one that differs: {asked:?}");
+        assert_eq!(s.skipped, 2);
         fs::remove_dir_all(&root).unwrap();
     }
 

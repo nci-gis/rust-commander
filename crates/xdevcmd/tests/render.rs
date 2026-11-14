@@ -4443,7 +4443,13 @@ fn aged(p: &std::path::Path, body: &str, age_secs: u64) {
         fs::create_dir_all(d).unwrap();
     }
     fs::write(p, body).unwrap();
-    let t = std::time::SystemTime::now() - std::time::Duration::from_secs(age_secs);
+    // To the second: two files of the same age have the same time, however far apart
+    // they were made (times to the nanosecond must match exactly to be the same).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now - age_secs);
     let f = fs::File::options().write(true).open(p).unwrap();
     f.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
 }

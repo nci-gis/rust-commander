@@ -69,10 +69,13 @@ pub struct Diff {
     pub right: Option<crate::ops::Ident>,
 }
 
-const SLACK_SECS: u64 = 2;
-
-/// Whether `a` was modified later than `b`, beyond the two seconds a FAT drive can
-/// round a time by: `Greater` when `a` is newer, `Equal` when they count as the same.
+/// Whether `a` was modified later than `b`: `Greater` when `a` is newer, `Equal` when
+/// they count as the same. Two times are the same when equal to the precision of the
+/// coarser of the two ([`precision`]): a copy keeps its source's time only as finely
+/// as the drive it is on can (FAT: 2 s, a second on HFS+ and ext3, 10 ms on exFAT).
+/// Times kept to the nanosecond (ext4, APFS, NTFS, btrfs) must match exactly: an edit
+/// that keeps the size a second later is not taken for the same file (the review,
+/// 2026-11-14: 2 s for every drive before).
 pub(crate) fn newer_than(a: &fs::Metadata, b: &fs::Metadata) -> std::cmp::Ordering {
     newer(stamp(a), stamp(b))
 }
@@ -81,18 +84,45 @@ fn stamp(m: &fs::Metadata) -> Option<SystemTime> {
     m.modified().ok()
 }
 
+/// How finely a time was kept, told by the time itself: the largest of 2 s, 1 s,
+/// 10 ms, 1 ms, 1 µs and 100 ns it is a whole multiple of; a time to the nanosecond
+/// has none. A fine time that is round by chance (one in a hundred is a multiple of
+/// 100 ns) only gets a slack it did not need, never one larger than its roundness.
+fn precision(t: SystemTime) -> std::time::Duration {
+    use std::time::Duration;
+    let Ok(d) = t.duration_since(SystemTime::UNIX_EPOCH) else {
+        return Duration::ZERO;
+    };
+    let ns = d.subsec_nanos();
+    if ns == 0 {
+        return Duration::from_secs(if d.as_secs() % 2 == 0 { 2 } else { 1 });
+    }
+    for unit in [10_000_000, 1_000_000, 1_000, 100] {
+        if ns % unit == 0 {
+            return Duration::from_nanos(u64::from(unit));
+        }
+    }
+    Duration::ZERO
+}
+
 fn newer(a: Option<SystemTime>, b: Option<SystemTime>) -> std::cmp::Ordering {
     use std::cmp::Ordering::*;
     match (a, b) {
         (Some(a), Some(b)) => {
-            let d = match a.duration_since(b) {
-                Ok(d) => (d.as_secs(), Greater),
-                Err(e) => (e.duration().as_secs(), Less),
+            let (d, way) = match a.duration_since(b) {
+                Ok(d) => (d, Greater),
+                Err(e) => (e.duration(), Less),
             };
-            if d.0 <= SLACK_SECS {
+            // The coarser time was cut (or, on FAT, rounded) from the finer one: they
+            // differ by less than its precision, or by up to 2 s on FAT.
+            let slack = precision(a).max(precision(b));
+            let same = d.is_zero()
+                || d < slack
+                || (slack == std::time::Duration::from_secs(2) && d <= slack);
+            if same {
                 Equal
             } else {
-                d.1
+                way
             }
         }
         _ => Equal,
@@ -366,6 +396,39 @@ pub fn plan(
 
 #[cfg(test)]
 mod tests {
+
+    /// Times count as the same only to the precision of the coarser one.
+    #[test]
+    fn times_are_the_same_only_as_finely_as_the_coarser_keeps_them() {
+        use std::cmp::Ordering::*;
+        use std::time::{Duration, UNIX_EPOCH};
+        let at = |s: u64, ns: u32| Some(UNIX_EPOCH + Duration::new(s, ns));
+        // Both to the nanosecond: exact.
+        assert_eq!(newer(at(1000, 123_456_789), at(1000, 123_456_789)), Equal);
+        assert_eq!(newer(at(1001, 123_456_789), at(1000, 123_456_789)), Greater);
+        assert_eq!(
+            newer(at(1000, 123_456_790), at(1000, 123_456_789)),
+            Greater,
+            "1 ns"
+        );
+        assert_eq!(newer(at(1000, 123_456_789), at(1002, 123_456_789)), Less);
+        // A copy on a drive keeping seconds (HFS+, ext3): cut, less than a second.
+        assert_eq!(newer(at(1001, 999_999_999), at(1001, 0)), Equal);
+        assert_eq!(newer(at(1002, 500_000_000), at(1001, 0)), Greater);
+        // FAT: even seconds, rounded, up to 2 s.
+        assert_eq!(newer(at(1001, 300_000_000), at(1002, 0)), Equal);
+        assert_eq!(newer(at(999, 900_000_000), at(1000, 0)), Equal);
+        assert_eq!(newer(at(1003, 1), at(1000, 0)), Greater);
+        // exFAT: 10 ms.
+        assert_eq!(newer(at(1000, 123_456_789), at(1000, 120_000_000)), Equal);
+        assert_eq!(newer(at(1000, 133_456_789), at(1000, 120_000_000)), Greater);
+        // NTFS keeps 100 ns: a copy from ext4 is cut to it.
+        assert_eq!(newer(at(1000, 123_456_789), at(1000, 123_456_700)), Equal);
+        assert_eq!(newer(at(1000, 123_457_789), at(1000, 123_456_700)), Greater);
+        // An edit a second later that kept the size was the same before.
+        assert_eq!(newer(at(1001, 223_456_789), at(1000, 123_456_789)), Greater);
+    }
+
     use super::*;
     use std::time::Duration;
 
@@ -388,10 +451,26 @@ mod tests {
         touch(&r.join("only-right"), "x", 100);
         touch(&l.join("newer"), "new", 10);
         touch(&r.join("newer"), "old", 1000);
-        touch(&l.join("same"), "s", 500);
-        touch(&r.join("same"), "s", 501);
-        touch(&l.join("clash"), "aaa", 500);
-        touch(&r.join("clash"), "b", 500);
+        // The same time, and the same time kept to whole seconds (a copy on HFS+);
+        // a second apart with both to the nanosecond is not the same any more.
+        let t = SystemTime::now() - Duration::from_secs(500);
+        let whole = SystemTime::UNIX_EPOCH
+            + Duration::from_secs(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+        let set = |p: &Path, body: &str, when: SystemTime| {
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, body).unwrap();
+            let f = fs::File::options().write(true).open(p).unwrap();
+            f.set_times(fs::FileTimes::new().set_modified(when))
+                .unwrap();
+        };
+        set(&l.join("same"), "s", t);
+        set(&r.join("same"), "s", t);
+        set(&l.join("same-cut"), "s", t);
+        set(&r.join("same-cut"), "s", whole);
+        set(&l.join("second-apart"), "s", t + Duration::from_secs(1));
+        set(&r.join("second-apart"), "s", t);
+        set(&l.join("clash"), "aaa", t);
+        set(&r.join("clash"), "b", t);
         touch(&l.join("sub/deep"), "d", 5);
         touch(&r.join("sub/deep"), "d", 900);
         fs::create_dir_all(r.join("rdir/inner")).unwrap();
@@ -404,7 +483,13 @@ mod tests {
         assert_eq!(
             state("same"),
             Some(State::Same),
-            "one second apart is the same"
+            "the same time is the same"
+        );
+        assert_eq!(state("same-cut"), Some(State::Same), "cut to seconds");
+        assert_eq!(
+            state("second-apart"),
+            Some(State::LeftNewer),
+            "a second apart, both to the nanosecond, is not the same"
         );
         assert_eq!(state("clash"), Some(State::Conflict));
         assert_eq!(

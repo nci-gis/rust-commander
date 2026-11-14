@@ -68,6 +68,15 @@ that heading and starts a new, empty one here. -->
   frame: a search of a whole disk no longer grows memory without end or slows every key.
 
 ### Fixed
+- **A file edited without changing its size is no longer taken for the same file**
+  when its date differs by less than 2 seconds. Dates now have to agree to the
+  precision of the less precise drive: exactly on ext4, APFS, NTFS and btrfs, to the
+  second on HFS+ and ext3, 10 ms on exFAT, 2 seconds on FAT. This applies to compare,
+  sync, "update" and continuing an interrupted job.
+- **A plan for millions of files already the same no longer holds a row for each**:
+  past the plan's 200,000 rows, identical files are counted, not kept, and the job
+  leaves them as the table says. Before, syncing 5 million files onto an identical
+  copy could take gigabytes of memory.
 - **A copy or move of a folder into its own subfolder is refused however the
   destination is written**: through a link into the folder, `..`, or another case on a
   drive that ignores case. Before, only the text of the path was compared, and such a

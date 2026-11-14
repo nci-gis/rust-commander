@@ -187,8 +187,14 @@ the table writes its decisions to the journal before its first step (which files
 leave, which to replace and what each one was), and marks each source as it finishes
 it. Continuing it after a kill leaves the finished sources and carries out the same
 decisions without asking again; a file to be replaced that has changed since is asked
-about, as above. Files are "identical" when size and date agree (within a FAT drive's
-two seconds), as rsync's and robocopy's quick check: the content is not read. "Overwrite all" and "Update" are rules, applied to whatever is there. What no
+about, as above. Files are "identical" when size and date agree, as rsync's and
+robocopy's quick check: the content is not read. The dates must agree to the precision
+the less precise of the two drives keeps: exactly on ext4, APFS, NTFS and btrfs; to
+the second where a drive keeps seconds (HFS+, ext3); to 10 ms on exFAT; within 2
+seconds on FAT, which rounds. The precision is read from the dates themselves, so it
+works where the drive's kind cannot be told. An edit that keeps a file's size on a
+precise drive is never taken for the same file. To compare contents, use
+`rclone check` or `rsync -c`. "Overwrite all" and "Update" are rules, applied to whatever is there. What no
 program can close without a rename that compares first: another program replacing the
 file in the microseconds between that last look and the rename.
 

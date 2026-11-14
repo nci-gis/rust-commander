@@ -261,6 +261,9 @@ pub struct Totals {
     pub warned: u64,
     /// New rows counted but not kept, past [`CAP`].
     pub dropped: u64,
+    /// Identical rows counted but not kept, past [`CAP`]: the job leaves an identical
+    /// file without a row for it (a confirmed plan's rule), so they need no memory.
+    pub identical_dropped: u64,
     /// Bytes the job writes at the destination (what is identical is not copied).
     pub writes: u64,
     /// Files and links, as the F5 dialog has always counted them.
@@ -307,6 +310,9 @@ impl Plan {
         let mut n: std::collections::BTreeMap<Group, u64> = Default::default();
         for g in self.rows.iter().filter_map(Row::group) {
             *n.entry(g).or_default() += 1;
+        }
+        if self.totals.identical_dropped > 0 {
+            *n.entry(Group::Identical).or_default() += self.totals.identical_dropped;
         }
         n.into_iter().collect()
     }
@@ -1209,9 +1215,17 @@ impl Scan<'_> {
         } else if row.class == Class::New {
             self.totals.new += 1;
         }
-        if self.rows.len() >= self.cap && !row.needs_deciding() {
-            self.totals.dropped += 1;
-            return;
+        if self.rows.len() >= self.cap {
+            if !row.needs_deciding() {
+                self.totals.dropped += 1;
+                return;
+            }
+            // A resync onto a copy already the same is all identical rows: 5 million
+            // files would have held 5 million rows (the review, 2026-11-14).
+            if row.group() == Some(Group::Identical) {
+                self.totals.identical_dropped += 1;
+                return;
+            }
         }
         self.rows.push(row);
     }
@@ -1562,6 +1576,45 @@ mod tests {
         assert_eq!(p.totals.dropped, 6);
         assert_eq!(p.totals.items, 10);
         assert!(p.rows.iter().any(|r| r.src.ends_with("f9")));
+    }
+
+    /// Past the cap, identical rows are counted, not kept: a resync onto a copy that is
+    /// already the same holds no row per file. The table still says how many.
+    #[test]
+    fn past_the_cap_identical_rows_are_counted_not_kept() {
+        let d = tmp("cap-same");
+        let (src, to) = (d.join("src"), d.join("to"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        let when = SystemTime::now();
+        for i in 0..10 {
+            for dir in [&src, &to] {
+                let p = dir.join(format!("f{i}"));
+                fs::write(&p, "same").unwrap();
+                let f = fs::File::options().write(true).open(&p).unwrap();
+                f.set_times(fs::FileTimes::new().set_modified(when))
+                    .unwrap();
+            }
+        }
+        fs::write(to.join("f9"), "different").unwrap();
+        let sources: Vec<PathBuf> = (0..10).map(|i| src.join(format!("f{i}"))).collect();
+        let stop = AtomicBool::new(false);
+        let p = plan_capped(
+            Kind::Copy,
+            &sources,
+            &to,
+            None,
+            &stop,
+            &mut |_, _| {},
+            Target::UNKNOWN,
+            3,
+        )
+        .unwrap();
+        assert_eq!(p.totals.identical_dropped, 6, "{:?}", p.rows);
+        assert_eq!(p.rows.len(), 4, "the cap, and the one to decide");
+        assert!(p.rows.iter().any(|r| r.src.ends_with("f9")));
+        let identical = p.groups().into_iter().find(|(g, _)| *g == Group::Identical);
+        assert_eq!(identical, Some((Group::Identical, 9)), "all counted");
     }
 
     #[test]

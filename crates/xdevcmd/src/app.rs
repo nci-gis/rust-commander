@@ -1167,6 +1167,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// MkDir refuses a control character, as Rename does, and keeps the box open with
+    /// the reason (the release bar, item 1); a plain nested name is made.
+    #[test]
+    fn mkdir_refuses_a_control_character() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-mkdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.begin_mkdir();
+        let Some(Modal::Input(mut i)) = app.modal.take() else {
+            panic!("no MkDir box");
+        };
+        i.edit = crate::line_edit::LineEdit::new("bad\nname");
+        app.apply_input(i);
+        let Some(Modal::Input(mut i)) = app.modal.take() else {
+            panic!("the box closed");
+        };
+        assert_eq!(
+            i.error.as_deref(),
+            Some("a name cannot contain a control character (U+000A)"),
+            "kept open with the reason"
+        );
+        assert!(!root.join("bad\nname").exists());
+        i.edit = crate::line_edit::LineEdit::new("a/b");
+        app.apply_input(i);
+        assert!(root.join("a/b").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn base64_matches_the_rfc_vectors() {
         for (input, want) in [

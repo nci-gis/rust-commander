@@ -284,6 +284,20 @@ command = "git log --oneline -- %f"
 key = "z"
 label = "zip the selection into the other pane"
 command = "zip -r %D/selection.zip %s"
+
+# A copy that keeps what xdevcmd's does not (owner, ACLs, extended attributes, hard
+# links, sparse files): see guide.md, "What xdevcmd doesn't do".
+[[menu]]
+key = "r"
+label = "rsync the selection to the other pane, keeping everything"
+command = "rsync -aHAXS --info=progress2 %S %D/"
+
+# The same on Windows, for files: robocopy takes the folder, the target and the file
+# names (a folder is copied with `robocopy <folder> <target>\<name> /E /COPYALL`).
+[[menu]]
+key = "R"
+label = "robocopy the selected files to the other pane, keeping everything"
+command = "robocopy %d %D %s /COPYALL /SL"
 ```
 
 | | |

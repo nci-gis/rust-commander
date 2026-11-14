@@ -217,6 +217,57 @@ lower, UPPER or Title Case. The counter follows the order the pane shows.
 close the editor; xdevcmd asks before it renames. The editor must wait until you close
 it: on Windows use `code --wait` or `notepad++ -multiInst -nosession`, not plain `code`.
 
+### What a copy keeps
+
+A copy (F5, and F6 to another drive, which copies and then removes) makes new files
+with your source's contents. What else comes along:
+
+| | Kept | Not kept |
+|---|---|---|
+| Contents | always | |
+| Modification date | files | folders (they change as files go in) |
+| Permissions | Unix mode bits (the executable bit too); the read-only flag on Windows | Windows' hidden, system and archive attributes |
+| Owner and group | | the copy is yours, as with `cp` |
+| Access and creation dates | | set to now |
+| Extended attributes, ACLs, macOS tags and resource forks, NTFS streams | | not copied (a clone on APFS may carry extended attributes with it) |
+| Symbolic links | copied as links (Linux, macOS) | on Windows they are not copied; the job says so |
+| Hard links | | each name becomes a file of its own |
+| Sparse files | | written out to their full size |
+
+A move on the same drive (F6) is a rename: everything stays as it was.
+
+### What xdevcmd doesn't do, and what to use
+
+xdevcmd copies what you can see and check in two panes. For the rest, use a tool built
+for it: the user menu (Shift+F9, `[[menu]]` in the [config](config.md)) can hold such a
+command, typed into the terminal for you.
+
+| You need | Use |
+|---|---|
+| A copy that keeps everything: owner, ACLs, extended attributes, hard links, sparse files | `rsync -aHAXS` (Linux, macOS), `robocopy /COPYALL /SL` (Windows) |
+| To copy to or from another machine, or a cloud | `rclone`, `rsync` over ssh |
+| To know two trees hold the same contents, not only the same sizes and dates | `rclone check`, `rsync -c --dry-run`, `diff -r` |
+| A backup with versions | restic, borg, Time Machine, File History |
+| To mirror a tree, deleting what the source lacks | `rsync --delete`, `robocopy /MIR` |
+
+### File names
+
+- **Kept exactly.** A name is used as the file system stored it: any bytes on Linux (also
+  ones that are not UTF-8), UTF-16 on Windows. Copying, renaming and deleting act on the
+  very file listed, whatever its name looks like.
+- **Shown safely.** A name that is not valid UTF-8 is shown with `�` where it cannot be
+  read; control characters in a name (possible on Linux) are left out when drawn, so a
+  name can never send the terminal a command.
+- **Sorted as you read them.** `file2` before `file10`; case, accents, Japanese kana and
+  full-width letters do not split names apart; a name macOS stored decomposed sorts with
+  the same name composed.
+- **Compared as stored.** Compare and sync match names by their exact bytes. Two names
+  a drive that ignores case would take for one (`Read.me`, `read.me`) are shown as a case
+  clash. An accented name stored composed on one side and decomposed on the other (a
+  folder copied from macOS) may show as two different names.
+- **New names** (Rename, MkDir, new file, copy as) may not hold `/` or a control
+  character; on Windows not `< > : " | ? * \` either, nor end with a dot or a space.
+
 ## Find, filter, compare
 
 - **Alt+F7** finds files by name, and by text inside if you like. Results open in a new

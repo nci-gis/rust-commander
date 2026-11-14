@@ -40,6 +40,17 @@
 //!
 //! Not a CI gate: shared runners vary by tens of per cent. CI keeps hard budgets only
 //! (`crates/xdevcmd/tests/budgets.rs`).
+//!
+//! ```text
+//! cargo xtask fuzz [--secs N] [TARGET…]
+//! ```
+//!
+//! Fuzz the parsers of untrusted input (the release bar, item 5): each target in
+//! `fuzz/` (all of them by default) for N seconds (60), one after another, with
+//! `cargo +nightly fuzz run`. Needs the nightly toolchain and cargo-fuzz
+//! (`rustup toolchain install nightly`, `cargo install cargo-fuzz`). A crash stops that
+//! target and is kept in `fuzz/artifacts/<target>/`; the summary names it, and
+//! `cargo +nightly fuzz run <target> <file>` runs it again. By hand, not in CI.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -50,7 +61,8 @@ use serde_json::{json, Value};
 
 const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
                          [--only CASE] [--dir PATH]
-       cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]";
+       cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
+       cargo xtask fuzz [--secs N] [TARGET...]";
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -59,6 +71,7 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("bench") => bench(&args[1..]),
         Some("sync-sweep") => sync_sweep(&args[1..]),
+        Some("fuzz") => fuzz(&args[1..]),
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);
@@ -388,6 +401,85 @@ fn probe_table(dir: &Path, files: usize) -> i32 {
         println!("{label:>22} {ms:>10.0} {:>10}", chose.join("/"));
     }
     code
+}
+
+/// The fuzz targets, as `fuzz/Cargo.toml` names them.
+const FUZZ_TARGETS: [&str; 6] = [
+    "osc",
+    "paths",
+    "config",
+    "theme",
+    "archive_name",
+    "archive_list",
+];
+
+fn fuzz(args: &[String]) -> i32 {
+    let mut secs: u64 = 60;
+    let mut targets: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--secs" => match it.next().and_then(|n| n.parse().ok()) {
+                Some(n) if n > 0 => secs = n,
+                _ => {
+                    eprintln!("--secs takes a number above 0");
+                    return 2;
+                }
+            },
+            t if FUZZ_TARGETS.contains(&t) => targets.push(t.to_string()),
+            _ => {
+                eprintln!("{USAGE}\nfuzz targets: {}", FUZZ_TARGETS.join(", "));
+                return 2;
+            }
+        }
+    }
+    if targets.is_empty() {
+        targets = FUZZ_TARGETS.iter().map(|t| t.to_string()).collect();
+    }
+    let ready = Command::new("cargo")
+        .args(["+nightly", "fuzz", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !ready {
+        eprintln!(
+            "cargo fuzz needs the nightly toolchain and cargo-fuzz:\n  \
+             rustup toolchain install nightly\n  cargo install cargo-fuzz"
+        );
+        return 2;
+    }
+    let dir = root().join("fuzz");
+    let mut failed = Vec::new();
+    for t in &targets {
+        println!("== {t}: {secs} s");
+        let ok = Command::new("cargo")
+            .current_dir(&dir)
+            .args([
+                "+nightly",
+                "fuzz",
+                "run",
+                t,
+                "--",
+                &format!("-max_total_time={secs}"),
+            ])
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            failed.push(t.clone());
+        }
+    }
+    println!();
+    if failed.is_empty() {
+        println!("fuzz: {} target(s), {secs} s each, no crash", targets.len());
+        0
+    } else {
+        for t in &failed {
+            println!(
+                "fuzz: {t} failed; its input is in fuzz/artifacts/{t}/ \
+                 (cargo +nightly fuzz run {t} <file> runs it again)"
+            );
+        }
+        1
+    }
 }
 
 fn root() -> PathBuf {

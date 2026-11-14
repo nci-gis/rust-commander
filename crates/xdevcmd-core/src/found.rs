@@ -70,7 +70,12 @@ pub fn paths_in(line: &str) -> Vec<Found> {
             };
             let end = start + len;
             let inner = &line[start..end];
-            if inner.contains(' ') && !taken.iter().any(|r| r.start < end && start < r.end) {
+            // A tab only separates words: inside quotes it is a control character, which
+            // no candidate holds (found by `cargo xtask fuzz`, 2026-11-14).
+            if inner.contains(' ')
+                && !inner.contains('\t')
+                && !taken.iter().any(|r| r.start < end && start < r.end)
+            {
                 if let Some(mut f) = candidate(inner, start) {
                     locate_after(line, end + close.len_utf8(), &mut f);
                     taken.push(start..end);
@@ -203,6 +208,23 @@ fn candidate(word: &str, at: usize) -> Option<Found> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A quoted name holding a tab is not a path: a tab is a control character there
+    /// (`cargo xtask fuzz` found `'G++\t/ '` taken whole).
+    #[test]
+    fn a_quoted_name_with_a_tab_is_not_taken() {
+        let got = paths_in("$'G++\t/ :r:4G'%l+4{\"");
+        assert!(
+            got.iter().all(|f| !f.path.chars().any(char::is_control)),
+            "{got:?}"
+        );
+        assert_eq!(
+            paths_in("'a b.txt'")[0].path,
+            "a b.txt",
+            "a space still holds"
+        );
+    }
+
     use super::*;
 
     /// A path found: its text, line and column.

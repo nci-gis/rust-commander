@@ -189,7 +189,19 @@ disk):
   named on the status line ("1 gone since: y.txt") and dropped.
 
 A list holds at most 10,000 rows, and none outside the root xdevcmd is confined to; the
-title says when either left rows out. While `ssh` (or mosh, telnet) runs in the shell,
+title says when either left rows out.
+
+**What a list cannot read.** Paths are found in text, and text cannot say everything a
+name can hold:
+
+- A line that is a whole existing path is taken whole first, so `a b.txt` and
+  `report:2026.txt` work. Inside longer lines, a name with spaces is found only when
+  quoted (`'a b.txt'`, as GNU `ls` prints it).
+- A name with a newline in it cannot be read from lines; nor can NUL-separated output
+  (`find -print0`): use `find -print` or `rg -l`.
+- A line holding a control character (other than a tab) gives no path, and neither does
+  a quoted name with a tab in it.
+- Only paths that exist when the list is made are kept. While `ssh` (or mosh, telnet) runs in the shell,
 its output names the other machine's files, so no list is made of it, and a path
 chosen there says it is looked up on this machine.
 

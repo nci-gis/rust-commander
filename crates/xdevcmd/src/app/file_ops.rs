@@ -240,6 +240,15 @@ impl App {
                     self.status = "no name given".into();
                     return;
                 }
+                // Folders may be nested (`a/b`); each name is checked as Rename checks one.
+                if let Some(c) = name.chars().find(|c| c.is_control()) {
+                    let e = xdevcmd_core::rename::RenameError::BadChar(c);
+                    self.modal = Some(Modal::Input(Input {
+                        error: Some(e.to_string()),
+                        ..i
+                    }));
+                    return;
+                }
                 let target = i.dir.join(name);
                 if let Err(e) = xdevcmd_core::policy::guard_write() {
                     self.status = e.to_string();

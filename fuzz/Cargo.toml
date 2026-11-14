@@ -1,0 +1,66 @@
+# Fuzzing xdevcmd's parsers of untrusted input (the release bar, item 5): run by hand
+# with `cargo xtask fuzz` (nightly and cargo-fuzz; see docs/development.md, "Fuzzing").
+# Not a member of the workspace: it needs nightly, and nothing here ships.
+[package]
+name = "xdevcmd-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+xdevcmd-core = { path = "../crates/xdevcmd-core" }
+# The app's parsers are its own files, compiled here as they are (src/lib.rs): the same
+# crates, at the versions the app asks for.
+ratatui = "0.30"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.0"
+vt100 = "0.18.1"
+
+[[bin]]
+name = "osc"
+path = "fuzz_targets/osc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "paths"
+path = "fuzz_targets/paths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "theme"
+path = "fuzz_targets/theme.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_name"
+path = "fuzz_targets/archive_name.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_list"
+path = "fuzz_targets/archive_list.rs"
+test = false
+doc = false
+bench = false

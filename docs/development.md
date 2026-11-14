@@ -87,6 +87,70 @@ XDEVCMD_DEBUG=jobs xtask bench --only mixed --host my-laptop   # with each run's
 With `XDEVCMD_DEBUG`, each run's jobs are logged as xdevcmd logs them, in
 `bench/results/debug-<host>-<date>/<case>/`.
 
+### The protocol: numbers worth comparing
+
+A number means something only next to the one it is compared with, measured the same
+way. For each run you send or keep:
+
+1. **Name the machine and the drive** in `--host`: `win11-ssd`, `mbp-m2-apfs`,
+   `ubuntu-usb-exfat`. Nothing is read from the system, so the name is the only record
+   of what was measured. Note the OS version and the file system beside the results.
+2. **A quiet machine**: plugged in (a laptop on battery slows down), no build, sync or
+   indexing running (the load is printed first; above 1 per core, run again later).
+3. **The same drive, the same format**: `--dir` on the drive itself. A USB stick in
+   exFAT and the same stick in NTFS are two drives.
+4. **Five runs or more** (the default), after the warm-up; the median is the number,
+   p95 says how steady it was. The cache is warm after the first run: the numbers are
+   for a warm cache, and are compared only with warm ones.
+5. **Before and after on one machine**: `--save-baseline` once on the older build, then
+   the newer one prints its change against it.
+
+### On your machines, to send the numbers back
+
+With Rust and the repository (Linux, macOS, or Windows):
+
+```bash
+cargo build --release
+XDEVCMD_DEBUG=jobs cargo xtask bench --only mixed --host mbp-m2-apfs
+XDEVCMD_DEBUG=jobs cargo xtask bench --only mixed --dir /Volumes/USB/bench --host mbp-m2-usb-exfat
+```
+
+Without Rust: the `xtask` program from the bench workflow's artifacts (Actions → bench
+→ the run → `xtask-Windows`, `xtask-macOS`, `xtask-Linux`), in PowerShell:
+
+```powershell
+$env:XDEVCMD_DEBUG = "jobs"
+.\xtask.exe bench --only mixed --host win11-ssd
+.\xtask.exe bench --only mixed --dir E:\bench --host win11-usb-exfat
+```
+
+Without `--quick`, the mixed case's large file is 1 GiB, past a big file's 256 MiB
+checkpoint, so the debug log also says what checkpoints cost (`checkpoints`,
+`checkpoint_ms` against `ms` in `job_end`). Send the `bench/results/*.json` files and
+the `bench/results/debug-*/` folders: they hold numbers only, no file or user names.
+
+## Fuzzing
+
+The parsers of input xdevcmd does not control are fuzzed by hand before a release
+(the release bar): what a shell prints (OSC 7, 9;9, 133), paths in a line of output,
+the config and theme files, names inside an archive, and archives themselves. The
+targets are in `fuzz/` (a crate of its own, outside the workspace: it needs nightly);
+the app's parsers are compiled there from their own source files.
+
+```bash
+rustup toolchain install nightly       # once
+cargo install cargo-fuzz               # once
+cargo xtask fuzz                       # every target, 60 s each
+cargo xtask fuzz --secs 600 paths osc  # longer, chosen targets
+```
+
+A crash stops its target and is kept in `fuzz/artifacts/<target>/`; the summary names
+it. Fix it with a regression test that fails without the fix (as `found.rs`'s
+`a_quoted_name_with_a_tab_is_not_taken`), then `cargo +nightly fuzz run <target>
+<file>` must pass. Each target also checks a property, not only "no panic": a path's
+span lies in its line, an archive name never climbs out of its folder. The corpus and
+artifacts stay local (`fuzz/.gitignore`). Not run in CI.
+
 ## Reading a debug log
 
 `XDEVCMD_DEBUG` ([Troubleshooting](troubleshooting.md#sending-a-log-with-a-report);

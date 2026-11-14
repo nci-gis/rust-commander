@@ -29,6 +29,13 @@ impl std::fmt::Display for RenameError {
                     "a name cannot contain a path separator \u{2014} F6 moves files"
                 )
             }
+            RenameError::BadChar(c) if c.is_control() => {
+                write!(
+                    f,
+                    "a name cannot contain a control character (U+{:04X})",
+                    *c as u32
+                )
+            }
             RenameError::BadChar(c) => write!(f, "a name cannot contain {c:?}"),
             RenameError::Exists(n) => {
                 write!(
@@ -57,7 +64,9 @@ pub fn validate_name(name: &str) -> Result<(), RenameError> {
     if name == "." || name == ".." {
         return Err(RenameError::Reserved(name.to_string()));
     }
-    if let Some(c) = name.chars().find(|c| *c == '/' || *c == '\0') {
+    // A control character (a newline, ESC, DEL, C1) is legal in a Unix name and breaks
+    // whatever later lists or pastes it: refused everywhere (the release bar, item 1).
+    if let Some(c) = name.chars().find(|c| *c == '/' || c.is_control()) {
         return Err(RenameError::BadChar(c));
     }
     #[cfg(windows)]
@@ -219,6 +228,18 @@ mod tests {
         assert_eq!(validate_name("   "), Err(RenameError::Empty));
         assert_eq!(validate_name(".."), Err(RenameError::Reserved("..".into())));
         assert_eq!(validate_name("a/b"), Err(RenameError::BadChar('/')));
+        for c in ['\0', '\n', '\t', '\x1b', '\x7f', '\u{9b}'] {
+            let name = format!("a{c}b");
+            assert_eq!(
+                validate_name(&name),
+                Err(RenameError::BadChar(c)),
+                "{name:?}"
+            );
+        }
+        assert_eq!(
+            RenameError::BadChar('\n').to_string(),
+            "a name cannot contain a control character (U+000A)"
+        );
         assert!(
             validate_name("báo cáo tuần.docx").is_ok(),
             "non-ASCII is a normal name"

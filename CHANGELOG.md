@@ -11,6 +11,15 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **docs/compatibility.md**: what stays the same from 0.4.0 (config keys, command-line
+  flags, action names in `[keys]`, theme files, journals, environment variables) and
+  what is not promised. The guide says what a copy keeps and what it does not
+  (owner, extended attributes, hard links …), what to use instead (rsync, robocopy,
+  rclone), and how names are kept, shown, sorted and compared. The README has a table
+  of what is tested on each platform.
+- **`cargo xtask fuzz`** runs the fuzz targets in `fuzz/` (shell reports, paths in
+  output, config and theme files, archive names and archives), by hand before a
+  release.
 - **Release archives can be checked**: each one comes with build provenance
   (`gh attestation verify <archive> -R nci-gis/rust-commander`) besides `SHA256SUMS`, and
   is unpacked and run by the release workflow before the draft is made (its files, its
@@ -72,6 +81,11 @@ that heading and starts a new, empty one here. -->
   frame: a search of a whole disk no longer grows memory without end or slows every key.
 
 ### Fixed
+- **A new name may no longer hold a control character** (a newline, ESC, DEL) on Linux
+  and macOS either: Rename, MkDir, new file and copy-as refuse it and say which one
+  (U+000A). Such a name breaks scripts and listings that later read it.
+- **A quoted name with a tab in it is no longer offered as a path** in the shell's
+  output (found by fuzzing).
 - **A file edited without changing its size is no longer taken for the same file**
   when its date differs by less than 2 seconds. Dates now have to agree to the
   precision of the less precise drive: exactly on ext4, APFS, NTFS and btrfs, to the

@@ -716,6 +716,64 @@ An outside review of this branch (4 agents) was checked claim by claim against
   small on an SSD; a USB stick is where it shows. The owner's run of a big file with
   `XDEVCMD_DEBUG=jobs` gives `checkpoint_ms` against `ms`.
 
+### 2026-11-14, rc.1's planned work moved into beta.2 (the owner)
+
+The owner: everything planned for rc.1 is done before beta.2, so that rc.1 is
+fixes only ("cần làm xong trước beta.2, để rc.1 chỉ tập trung fix bug").
+Decided:
+- fuzzing with cargo-fuzz, by hand, with an xtask command;
+- docs/compatibility.md covers config keys, CLI flags, `[keys]` action names, theme
+  files and old journals.
+
+- **Review fixes** (`8ebacb4`):
+  - "identical" dates agree to the coarser time's precision, read from the times
+    themselves (`compare::precision`: 2 s, 1 s, 10 ms, 1 ms, 1 µs, 100 ns, or exact).
+    It needs no file-system detection, which matters because Windows' `fs_kind` cannot
+    tell a FAT stick. Two tests had encoded the old 2 s rule (times made µs apart taken
+    for the same) and now set equal times;
+  - past the plan's cap, identical rows are counted (`identical_dropped`), and a job
+    from a confirmed plan leaves identical files without a row.
+- **Pillar 4** (`4f3af94`):
+  - `scripts/smoke.sh` on every archive in release.yml: its files, ≤ 7 MiB, and run
+    where the runner's CPU can (version = tag, the `--print` commands);
+  - `actions/attest-build-provenance` in the release job;
+  - security.md "Checking a download".
+  - The smoke step first runs at the beta.2 tag. A failure there stops the draft, so
+    it is safe.
+- **Fuzzing**:
+  - `fuzz/` (outside the workspace, nightly) has six targets: osc, paths, config,
+    theme, archive_name, archive_list. The app's parsers are compiled there with
+    `#[path]` (config, theme, decor and keys depend only on each other);
+  - `cargo xtask fuzz [--secs N] [TARGET…]`.
+  - The first 30 s run found a real violation. The quoted-name form in `found.rs`
+    let a tab through (`'G++\t/ '`), against the module's "anything with a control
+    character" rule. Fixed, with a regression test.
+- **Release bar item 1**:
+  - `validate_name` now refuses every control character on every OS (it refused
+    only `/` and NUL on Unix), with the message "a control character (U+000A)";
+  - MkDir (which allows `a/b`) checks the same and keeps its box open with the reason.
+  - The Ctrl+\ render flake was already fixed in part D.
+- **Pillar 3 docs**:
+  - docs/compatibility.md;
+  - guide.md: "What a copy keeps", "What xdevcmd doesn't do, and what to use", "File
+    names". It was checked first that ESC and BEL in a name are not drawn (a render
+    probe, removed);
+  - rsync and robocopy examples in config.md's `[[menu]]`;
+  - shell.md: what a list cannot read;
+  - development.md: the bench protocol, running the bench on the owner's machines,
+    fuzzing.
+- **README**:
+  - Transparency, in the owner's words, made accurate ("most of the code is
+    agent-written");
+  - a Platforms table of what is checked where: macOS not used by hand yet; the
+    shell reports of zsh, fish, PowerShell and cmd not run; ConPTY's pass-through not
+    checked;
+  - Scoop and winget moved to "Planned".
+- **Left for the owner before beta.2**:
+  - the hand-test matrix (testing-by-hand.md), macOS first;
+  - the bench numbers on Windows and macOS, which decide lanes;
+  - CI on the branch, then the cut.
+
 ## Check
 
 ## Act

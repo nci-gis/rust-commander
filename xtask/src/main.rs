@@ -524,7 +524,7 @@ fn bench(args: &[String]) -> i32 {
     } else {
         "xdevcmd"
     });
-    let version = workspace_version(&root).unwrap_or_else(|| "unknown".into());
+    let version = built_from().unwrap_or("unknown");
     let date = today();
     println!(
         "xdevcmd {version} · host {} · {date} · {} · {} runs{}",
@@ -1133,13 +1133,20 @@ mod pty {
 
 // ── small things ─────────────────────────────────────────────────────────────────────
 
-fn workspace_version(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(root.join("Cargo.toml")).ok()?;
+/// The version of the code this program was built from, taken from the workspace's
+/// Cargo.toml when it was compiled: `cargo xtask` rebuilds it each time, and a copy from
+/// the bench workflow, run anywhere, still says which code it measures (read at run
+/// time, it said "unknown" there, or another project's version in that one's folder).
+fn built_from() -> Option<&'static str> {
+    workspace_version(include_str!("../../Cargo.toml"))
+}
+
+fn workspace_version(text: &str) -> Option<&str> {
     let section = &text[text.find("[workspace.package]")?..];
     let line = section
         .lines()
         .find(|l| l.trim_start().starts_with("version"))?;
-    Some(line.split('"').nth(1)?.to_string())
+    line.split('"').nth(1)
 }
 
 /// The machine's load, where the system says it cheaply.
@@ -1182,6 +1189,20 @@ fn civil(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The version is the workspace's, built in: a copy run outside the source says it.
+    #[test]
+    fn the_version_is_built_in_from_the_workspace() {
+        let v = built_from().expect("a version in the workspace's Cargo.toml");
+        assert!(v.split('.').count() >= 3, "{v}");
+        assert_eq!(
+            workspace_version(
+                "[workspace.package]\nedition = \"2021\"\nversion = \"1.2.3-rc.1\"\n"
+            ),
+            Some("1.2.3-rc.1")
+        );
+        assert_eq!(workspace_version("[package]\nversion = \"9.9.9\"\n"), None);
+    }
 
     #[test]
     fn median_p95_and_best() {

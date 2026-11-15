@@ -834,6 +834,12 @@ Decided:
   - the load is printed on Linux only.
 - **development.md** keeps the developer's reference and links there; its protocol and
   per-machine steps moved, so each is said once.
+- **The bench run** `bench/beta2-mixed` built the three `xtask` downloads. Run as the
+  doc says (Linux), it worked, but named its results `unknown-…`: the version was read
+  from a Cargo.toml found at run time. It is now built in from the workspace's; the
+  doc asks for the run's link, since the version stays the last release's until a cut.
+- **CHANGELOG Unreleased** cut from 7.1 KB to 2.9 KB (the owner), nothing dropped; the
+  style it follows is `memory/2026-11-15-docs-style.md`, a candidate for `reference/`.
 
 ## Check
 

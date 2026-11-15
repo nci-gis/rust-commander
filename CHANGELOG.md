@@ -11,103 +11,50 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
-- **docs/compatibility.md**: what stays the same from 0.4.0 (config keys, command-line
-  flags, action names in `[keys]`, theme files, journals, environment variables) and
-  what is not promised. The guide says what a copy keeps and what it does not
-  (owner, extended attributes, hard links …), what to use instead (rsync, robocopy,
-  rclone), and how names are kept, shown, sorted and compared. The README has a table
-  of what is tested on each platform.
-- **docs/benchmark.md**: measuring copies on macOS, Windows and Linux, with or without
-  Rust, so the numbers can be compared, and what to send back (numbers only, no names).
-- **`cargo xtask fuzz`** runs the fuzz targets in `fuzz/` (shell reports, paths in
-  output, config and theme files, archive names and archives), by hand before a
-  release.
-- **Release archives can be checked**: each one comes with build provenance
-  (`gh attestation verify <archive> -R nci-gis/rust-commander`) besides `SHA256SUMS`, and
-  is unpacked and run by the release workflow before the draft is made (its files, its
-  size, its version). See docs/security.md, "Checking a download".
-- **A big copy goes on from where it stopped.** With safe operations on, a file larger
-  than 256 MiB is synced every 256 MiB as it is copied. If xdevcmd is killed or the
-  power goes, the next start keeps what was on disk ("kept part way"), and Continue goes
-  on from there, if the source has not changed, instead of copying the whole file
-  again. "Discard them" removes the kept parts. The cost is one sync per 256 MiB of a
-  big file.
-- **Continuing an interrupted copy skips the folders it finished** without looking
-  inside them again, as long as their copy is still there: on a slow or network drive
-  with many files, it no longer checks every file the first run already copied.
-- **`o` and Open with… say what happened**: "opening …" on the status line if the
-  system's opener has not answered after 300 ms (a quick open shows nothing in between),
-  then "opened …" when it hands the file over, or its error. An opener that waits for the
-  program it started (some desktops' xdg-open) counts as handed over after 5 s; a failure
-  after that is still said.
-- **Messages (Alt+M, Help → Messages, and in F1)**: the status line's last 50 messages,
-  each whole and with its time, in the viewer. The status line stays one row.
-
-- **Copy relative path** (the right-click menu, and Copy path too, now in F1): the
-  selected paths from the repository's root when the folder is in one (a `.git` above
-  it), else from the folder itself; the status line says which ("copied src/main.rs,
-  relative to the repository proj").
-- **A debug log to attach to a report**: `XDEVCMD_DEBUG=all` writes what each job did
-  and how long each part took, and each error's system code and retry, to a
-  `debug-….jsonl` file in the state directory (or `XDEVCMD_DEBUG_DIR`). It holds no file,
-  folder, user or host name; the status line says where it is. A crash log ends with its
-  last lines. See Troubleshooting.
-- **A config file with a mistake is asked about at start** instead of only named on
-  the status line: continue with the defaults (Enter), edit it (E; checked again when
-  the editor closes) or quit (Q).
+- **A big copy goes on from where it stopped**: with safe operations on, a file over
+  256 MiB is synced every 256 MiB, and Continue after a crash or power cut resumes from
+  there. Continue also skips the folders the first run finished.
+- **Messages** (Alt+M): the status line's last 50 messages, whole and with their times.
+- **Copy relative path** (right-click, F1): from the repository's root, else the folder.
+- **`o` and Open with… say what happened**: "opening …", then "opened …" or the error.
+- **A config file with a mistake is asked about at start**: continue with the defaults,
+  edit it, or quit.
+- **A debug log for bug reports**: `XDEVCMD_DEBUG=all`. It holds no file, folder, user
+  or host name. See Troubleshooting.
+- **Release archives can be checked** with build provenance (`gh attestation verify`),
+  and each is unpacked and run before the release. See Security, "Checking a download".
+- **Docs**: Compatibility (what stays the same from 0.4.0) and Benchmarks (measuring on
+  your machine); the guide says what a copy keeps, and what to use instead (rsync,
+  robocopy, rclone).
+- **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
 
 ### Changed
-- **`q` no longer quits**: one stray key in a file pane ended every shell. F10 and
-  Ctrl+q quit; `quit = ["F10", "q", "Ctrl+q"]` under `[keys]` brings `q` back. Quitting
-  while a program runs in a terminal (an editor, a build, ssh) now asks first, as it
-  does with jobs running; an idle shell does not.
-- **F1's own row, chosen inside F1, switches between the small and the large window**
-  instead of closing and opening F1 again.
-- **Replacing many small files is many times faster**: replaced files of up to 1 MiB
-  on a local drive are synced together, in batches, on several threads, with one
-  journal sync a batch. Each is still renamed only once its data and its journal line
-  are on disk. 5,000 files: 2.9 s instead of 59.7 s (Linux). A job past 1,000 files
-  tries 2, 8, 16 and 32 threads on its next batches and keeps the fastest.
-  `cargo xtask sync-sweep` measures a drive.
-- **Copies use the system's fast copy where the drive allows it** (Linux and macOS): a
-  clone on Btrfs, XFS and APFS (instant, no space used until a file changes), else on
-  Linux the kernel's `copy_file_range` (server-side on NFS 4.2 and SMB; on ext4 about
-  10–15% faster). Anything refused falls back to xdevcmd's own read and write. The
-  status line says which ran ("5 copied (by the kernel)"). `[general] fast_copy = false`
+- **`q` no longer quits**: F10 and Ctrl+q do (`q` can be added back under `[keys]`).
+  Quitting while a program runs in a terminal asks first.
+- **Replacing many small files is many times faster**: they are synced in batches, on
+  several threads (5,000 files: 2.9 s instead of 59.7 s on Linux).
+- **Copies use the system's fast copy**: a clone on APFS, Btrfs and XFS,
+  `copy_file_range` on Linux, xdevcmd's own copy otherwise. `[general] fast_copy = false`
   turns it off.
-- **F3 opens a big file at once**: the first 4 MiB are indexed before the first frame
-  and the rest in the background, the title counting ("… lines so far, indexing 40%");
-  Esc closes it at any point. A 1 GiB log: 1.5 ms to open instead of the 120 ms its
-  whole index takes (warm cache; from a cold disk or a share the wait was far longer).
-- **Find stops at 100,000 results** and says so, and takes them in a bounded share per
-  frame: a search of a whole disk no longer grows memory without end or slows every key.
+- **F3 opens a big file at once** and indexes the rest in the background (a 1 GiB log:
+  1.5 ms instead of 120 ms).
+- **Find stops at 100,000 results** and says so.
+- **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
-- **A new name may no longer hold a control character** (a newline, ESC, DEL) on Linux
-  and macOS either: Rename, MkDir, new file and copy-as refuse it and say which one
-  (U+000A). Such a name breaks scripts and listings that later read it.
-- **A quoted name with a tab in it is no longer offered as a path** in the shell's
-  output (found by fuzzing).
-- **A file edited without changing its size is no longer taken for the same file**
-  when its date differs by less than 2 seconds. Dates now have to agree to the
-  precision of the less precise drive: exactly on ext4, APFS, NTFS and btrfs, to the
-  second on HFS+ and ext3, 10 ms on exFAT, 2 seconds on FAT. This applies to compare,
-  sync, "update" and continuing an interrupted job.
-- **A plan for millions of files already the same no longer holds a row for each**:
-  past the plan's 200,000 rows, identical files are counted, not kept, and the job
-  leaves them as the table says. Before, syncing 5 million files onto an identical
-  copy could take gigabytes of memory.
-- **A copy or move of a folder into its own subfolder is refused however the
-  destination is written**: through a link into the folder, `..`, or another case on a
-  drive that ignores case. Before, only the text of the path was compared, and such a
-  copy recursed until the disk filled or xdevcmd crashed. A copy onto itself through a
-  link to its parent is skipped the same way.
-- **F5 and F6 check faster on Windows the first time**: inside a folder, what a file is
-  (size, times) is taken from the folder's listing instead of opening each file, which
-  Windows Defender scanned on first open (1,500 documents of 500 MB took 1–1.5 s; as
-  many small files a few ms). Links and other reparse points are still opened.
-- **`~` on Windows when `HOME` is not a Windows path** (left by Cygwin or an old MSYS,
-  `/home/ann`): it goes to `USERPROFILE` instead of saying there is no home directory.
+- **A copy or move of a folder into its own subfolder is refused** however the
+  destination is written (a link, `..`, another case). Before, it recursed until the
+  disk filled or xdevcmd crashed.
+- **A file edited without a change of size is no longer taken for the same file** when
+  its time differs by less than 2 s: times are compared to the precision of the coarser
+  drive (exact on ext4, APFS, NTFS).
+- **A plan over millions of identical files** counts them instead of keeping a row for
+  each, which could take gigabytes.
+- **A new name with a control character** (a newline, ESC) is refused on every system.
+- **F5 and F6 check faster on Windows the first time**: no file is opened for each entry
+  (Defender scanned each one).
+- **`~` on Windows** when `HOME` is a Unix path (Cygwin, an old MSYS): `USERPROFILE`.
+- **A quoted name with a tab** is no longer offered as a path in a shell's output.
 
 ## [0.4.0-beta.1] - 2026-11-13
 

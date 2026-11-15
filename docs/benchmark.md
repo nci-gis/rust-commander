@@ -52,7 +52,7 @@ the run → Artifacts: `xtask-macOS` (Apple silicon only), `xtask-Windows`, `xta
 (x86-64).
 
 - The program must be built from the code being measured, and a run's artifacts last
-  14 days. Runs older than 14 November 2026 have no `mixed` case and no `--only`.
+  14 days. Take the newest run: an older one may not have the `mixed` case.
 - To make a new run (a maintainer, with push access): push a branch whose name starts
   with `bench/` and does **not** end in `-<digits>`, which the workflow reads as a
   number of files:
@@ -178,8 +178,11 @@ From the folder you ran it in, after all your runs:
 
 - `bench/results/*.json`: one file per run;
 - `bench/results/debug-*/`: the debug logs, one folder per run;
-- a short note: the machine, the OS version, each drive and its file system, plugged in
-  or not, the power mode, the antivirus, and anything you changed (`--runs 3`).
+- a short note: the link of the bench run you downloaded from (or the commit you built),
+  the machine, the OS version, each drive and its file system, plugged in or not, the
+  power mode, the antivirus, and anything you changed (`--runs 3`). Between releases
+  the version in the results stays the last one released, so the link says which code
+  was measured.
 
 They are small text files holding numbers only: times, memory, counts, the OS name,
 xdevcmd's version, the date and the `--host` name you gave. The debug logs hold no file,

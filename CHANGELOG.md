@@ -17,6 +17,8 @@ that heading and starts a new, empty one here. -->
   (owner, extended attributes, hard links …), what to use instead (rsync, robocopy,
   rclone), and how names are kept, shown, sorted and compared. The README has a table
   of what is tested on each platform.
+- **docs/benchmark.md**: measuring copies on macOS, Windows and Linux, with or without
+  Rust, so the numbers can be compared, and what to send back (numbers only, no names).
 - **`cargo xtask fuzz`** runs the fuzz targets in `fuzz/` (shell reports, paths in
   output, config and theme files, archive names and archives), by hand before a
   release.

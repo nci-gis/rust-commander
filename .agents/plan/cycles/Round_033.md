@@ -814,6 +814,26 @@ Decided:
   - with the settle at 0 it still fails (6 sent, no slow gap);
   - one write, or 20 ms apart, would not catch that (the decode is still running),
     so the 60 ms stays.
+- **CI**: `cargo test --all --no-fail-fast` (the owner), so one run shows every failure.
+
+### 2026-11-15, docs/benchmark.md (the owner: "viết docs chạy benchmark cho macOS và Windows")
+
+- **docs/benchmark.md**, for whoever measures: what the `mixed` case does and never
+  touches; before starting (names, a quiet machine, antivirus left on, a drive at a
+  time); getting `xtask` with or without Rust; macOS, Windows and Linux step by step;
+  slow drives; reading the output; what to send.
+- **Found while writing it**, now in the doc:
+  - a second run with the same `--host` on the same day replaces the first (the file
+    is `<version>-<host>-<date>.json`), so a second run on one drive needs a second
+    name;
+  - on APFS (and Btrfs, XFS) the default fast copy is a clone, so the internal drive
+    is measured twice, the second with `XDEVCMD_BENCH_FAST=0`;
+  - the bench workflow's artifacts from 13 November predate `mixed` and `--only`, and
+    a `bench/` branch ending in `-<digits>` sets that many files: the doc gives
+    `bench/beta2-mixed`;
+  - the load is printed on Linux only.
+- **development.md** keeps the developer's reference and links there; its protocol and
+  per-machine steps moved, so each is said once.
 
 ## Check
 

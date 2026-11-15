@@ -75,59 +75,13 @@ the 150 ms budget, which is for `cargo xtask bench` on a release build).
 **On another machine or drive.** `--only CASE` runs just the cases whose name holds
 `CASE`, with no build and no start-up cases, so the `xtask` program from the bench
 workflow's artifacts runs on a machine without Rust. `--dir PATH` makes the trees on the
-drive being measured (a USB stick, a network share) instead of the temporary directory.
-Name the host after the drive (`--host win11-usb`): numbers from two drives are not
-comparable. Away from the source, results go to `bench/results/` where it was started.
+drive being measured instead of the temporary directory. Away from the source, results
+go to `bench/results/` where it was started; with `XDEVCMD_DEBUG`, each run's jobs are
+logged in `bench/results/debug-<host>-<date>/<case>/`. `XDEVCMD_BENCH_FAST=0` turns the
+platform's fast copy off, to measure xdevcmd's own loop where the fast copy is a clone.
 
-```bash
-xtask bench --only mixed --dir E:\bench --host win11-usb
-XDEVCMD_DEBUG=jobs xtask bench --only mixed --host my-laptop   # with each run's debug log
-```
-
-With `XDEVCMD_DEBUG`, each run's jobs are logged as xdevcmd logs them, in
-`bench/results/debug-<host>-<date>/<case>/`.
-
-### The protocol: numbers worth comparing
-
-A number means something only next to the one it is compared with, measured the same
-way. For each run you send or keep:
-
-1. **Name the machine and the drive** in `--host`: `win11-ssd`, `mbp-m2-apfs`,
-   `ubuntu-usb-exfat`. Nothing is read from the system, so the name is the only record
-   of what was measured. Note the OS version and the file system beside the results.
-2. **A quiet machine**: plugged in (a laptop on battery slows down), no build, sync or
-   indexing running (the load is printed first; above 1 per core, run again later).
-3. **The same drive, the same format**: `--dir` on the drive itself. A USB stick in
-   exFAT and the same stick in NTFS are two drives.
-4. **Five runs or more** (the default), after the warm-up; the median is the number,
-   p95 says how steady it was. The cache is warm after the first run: the numbers are
-   for a warm cache, and are compared only with warm ones.
-5. **Before and after on one machine**: `--save-baseline` once on the older build, then
-   the newer one prints its change against it.
-
-### On your machines, to send the numbers back
-
-With Rust and the repository (Linux, macOS, or Windows):
-
-```bash
-cargo build --release
-XDEVCMD_DEBUG=jobs cargo xtask bench --only mixed --host mbp-m2-apfs
-XDEVCMD_DEBUG=jobs cargo xtask bench --only mixed --dir /Volumes/USB/bench --host mbp-m2-usb-exfat
-```
-
-Without Rust: the `xtask` program from the bench workflow's artifacts (Actions → bench
-→ the run → `xtask-Windows`, `xtask-macOS`, `xtask-Linux`), in PowerShell:
-
-```powershell
-$env:XDEVCMD_DEBUG = "jobs"
-.\xtask.exe bench --only mixed --host win11-ssd
-.\xtask.exe bench --only mixed --dir E:\bench --host win11-usb-exfat
-```
-
-Without `--quick`, the mixed case's large file is 1 GiB, past a big file's 256 MiB
-checkpoint, so the debug log also says what checkpoints cost (`checkpoints`,
-`checkpoint_ms` against `ms` in `job_end`). Send the `bench/results/*.json` files and
-the `bench/results/debug-*/` folders: they hold numbers only, no file or user names.
+How to measure on macOS, Windows and Linux so the numbers can be compared, and what to
+send back: [Running the benchmarks](benchmark.md).
 
 ## Fuzzing
 

@@ -3297,13 +3297,16 @@ fn a_menu_row_in_f1_asks_before_typing_into_a_busy_shell() {
 }
 
 /// Keymap A keeps F1 for the program in the shell; xdevcmd's F1 there is Alt+X F1.
+///
+/// The `dd` tests here type `echo GOT''_X`: the shell shows the typed line, so a plain
+/// `GOT_X` in it matched `wait_for` before `dd` had read anything (run 43703634147).
 #[test]
 fn from_the_shell_f1_is_the_programs_and_alt_x_f1_opens_commands() {
     let s = Scratch::new("f1-shell");
     let mut x = Session::start(&s, None);
     x.send(F12);
     x.wait_for("$ ");
-    x.send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT_F1\r");
+    x.send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT''_F1\r");
     std::thread::sleep(Duration::from_millis(300));
     x.send(F1);
     x.wait_for("GOT_F1");
@@ -3574,7 +3577,7 @@ fn inside_the_shell_only_f12s_family_is_xdevcmds() {
     }
     let expected: Vec<u8> = keys.concat();
     let cmd = format!(
-        "stty raw -echo; dd bs=1 count={} of=keys.bin 2>/dev/null; stty sane; echo GOT_ALL\r",
+        "stty raw -echo; dd bs=1 count={} of=keys.bin 2>/dev/null; stty sane; echo GOT''_ALL\r",
         expected.len()
     );
     xdevcmd.send(cmd.as_bytes());
@@ -3614,8 +3617,9 @@ fn alt_x_is_the_prefix_inside_the_shell_and_gives_back_what_it_does_not_use() {
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
-    xdevcmd
-        .send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT_IT\r");
+    xdevcmd.send(
+        b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT''_IT\r",
+    );
     std::thread::sleep(Duration::from_millis(300));
     xdevcmd.send(ALT_X);
     xdevcmd.wait_for("ALT+X");
@@ -3638,8 +3642,9 @@ fn alt_x_then_enter_in_the_shell_reaches_the_program() {
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
-    xdevcmd
-        .send(b"stty raw -echo; dd bs=1 count=4 of=keys.bin 2>/dev/null; stty sane; echo GOT_IT\r");
+    xdevcmd.send(
+        b"stty raw -echo; dd bs=1 count=4 of=keys.bin 2>/dev/null; stty sane; echo GOT''_IT\r",
+    );
     std::thread::sleep(Duration::from_millis(300));
     // Alt+X, Esc: cancelled, nothing sent.
     xdevcmd.send(ALT_X);

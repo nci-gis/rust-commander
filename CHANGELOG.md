@@ -12,8 +12,13 @@ that heading and starts a new, empty one here. -->
 
 ### Added
 - **A big copy goes on from where it stopped**: with safe operations on, a file over
-  256 MiB is synced every 256 MiB, and Continue after a crash or power cut resumes from
-  there. Continue also skips the folders the first run finished.
+  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`,
+  the terminal closed) resumes from there. Continue also skips the folders the first run
+  finished. A power cut is best effort: see Security, "What survives a power cut".
+- **C, a checked continue**: after a power cut, C at the Interrupted dialog reads every
+  file already copied again with its source, finished folders included, and copies
+  again any that differ (a file can keep its size and date with no data in it). Slow;
+  Enter still trusts what was copied.
 - **Messages** (Alt+M): the status line's last 50 messages, whole and with their times.
 - **Copy relative path** (right-click, F1): from the repository's root, else the folder.
 - **`o` and Open with… say what happened**: "opening …", then "opened …" or the error.
@@ -29,10 +34,14 @@ that heading and starts a new, empty one here. -->
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
 
 ### Changed
+- **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not
+  build 0.4.0-beta.1 or 0.3.0 with `--locked` either, whatever `rust-version` said. CI
+  now builds on 1.90 itself. 0.3.0 on crates.io keeps the old value; it is not yanked.
 - **winget is no longer planned for 0.4.0**: Windows gets Scoop and the release zip.
   winget needs a signed build first.
 - **`q` no longer quits**: F10 and Ctrl+q do (`q` can be added back under `[keys]`).
-  Quitting while a program runs in a terminal asks first.
+  Quitting while a program runs in a terminal asks first. **Quit without cd** moved
+  from `Q` to `Alt+x q`, so a stray Shift+q no longer quits either.
 - **Replacing many small files is many times faster**: they are synced in batches, on
   several threads (5,000 files: 2.9 s instead of 59.7 s on Linux).
 - **Copies use the system's fast copy**: a clone on APFS, Btrfs and XFS,

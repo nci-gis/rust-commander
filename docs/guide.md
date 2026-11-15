@@ -186,7 +186,9 @@ tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shi
   default) a new file is written the same way, and if xdevcmd is killed in the middle of
   a job, the next start cleans up and offers to continue it (what it finished is left;
   what you chose in the table still holds, without asking again; what is identical is
-  skipped; you are asked about anything else already there). Closing the terminal stops
+  skipped; you are asked about anything else already there). After a power cut, **C**
+  in that dialog checks first: it reads every file already copied again with its source
+  (slow) and copies again what differs. Closing the terminal stops
   jobs tidily and saves the session. Details in [security.md](security.md#safe-operations).
 - Long jobs show progress. **Esc** cancels. **B** sends a job to the background.
 - **Alt+Q** previews the file under the cursor in the other pane, pictures included.

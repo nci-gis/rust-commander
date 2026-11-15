@@ -737,7 +737,8 @@ impl App {
                 self.quit = true;
                 self.quit_cd = true;
             }
-            Cmd::Resume(it) => self.resume(*it),
+            Cmd::Resume(it) => self.resume(*it, false),
+            Cmd::ResumeChecked(it) => self.resume(*it, true),
             Cmd::Discard(it) => {
                 xdevcmd_core::journal::discard(&it);
                 let n = it.partial.len();

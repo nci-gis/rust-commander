@@ -580,7 +580,8 @@ pub const BINDINGS: &[Binding] = &[
         title: "Quit without cd",
         group: "General",
         about: "Quit, leaving the shell where it was (with --cwd-file)",
-        keys: &["Q"],
+        // Two keys, never one: a stray Shift+q quit at once (B4), as q did before.
+        keys: &["Alt+x q"],
     },
     Binding {
         action: Action::QuickSearch,
@@ -1949,11 +1950,11 @@ mod tests {
             .apply(&km.to_table())
             .expect("what we print must parse");
         for b in BINDINGS {
-            let chord = parse_key(b.keys[0]).unwrap();
-            assert_eq!(
-                fresh.action_for(KeyEvent::new(chord.0, chord.1)),
-                Some(b.action)
-            );
+            let got = match parse_binding(b.keys[0]).unwrap() {
+                Keys::One(c) => fresh.action_for(KeyEvent::new(c.0, c.1)),
+                Keys::Two(first, c) => fresh.in_group(first, KeyEvent::new(c.0, c.1)),
+            };
+            assert_eq!(got, Some(b.action), "{}", b.keys[0]);
         }
     }
 }

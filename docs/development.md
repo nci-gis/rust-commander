@@ -8,7 +8,7 @@ cargo run -p xdevcmd -- /etc /var     # start with two directories
 cargo install --path crates/xdevcmd --locked   # install your build as `xdevcmd`
 ```
 
-Needs Rust 1.88 or newer (`rustup`). Nothing needs root.
+Needs Rust 1.90 or newer (`rustup`). Nothing needs root.
 
 ## Check before you push
 
@@ -171,8 +171,9 @@ without the icon, unless `XDEVCMD_REQUIRE_ICON=1`, which CI and releases set.
 - **`dev`** is where finished work collects. Every push to it runs CI, except one that
   touches only `.agents/` or `CHANGELOG.md`, which no test reads.
 - **`feat/<topic>`** holds anything bigger than a commit or two, such as a round of the
-  plan. Pushing it runs nothing, so commit as often as you like. When it is ready, open
-  a pull request into `dev`: CI runs on it, then merge.
+  plan. Every push to it runs CI too (except `.agents/` or `CHANGELOG.md` only), so a
+  broken build shows before the pull request. When it is ready, open a pull request
+  into `dev`: CI runs on it, then merge.
 
 A build to try on another system, from any branch: **Actions → ci → Run workflow**
 and pick the branch, or
@@ -281,7 +282,8 @@ A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1
 `git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.
 A published pre-release is not deleted: the next one supersedes it.
 
-CI runs on pushes to `dev` and `main` and on pull requests into them; the `release`
+CI runs on pushes to `dev`, `main` and `feat/**` and on pull requests into `dev` and
+`main`, and builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
 workflow runs only for a `v*` tag (a release on `main`, a pre-release on `dev` or
 `main`), or by hand to check a tag's rules. A change to the packaging
 (`release.yml`, `about.toml`, `about.hbs`) is therefore first exercised by the next

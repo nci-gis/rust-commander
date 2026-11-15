@@ -159,11 +159,13 @@ system's cloning is in doubt (OpenZFS 2.2.0 and 2.2.1 had a block-cloning bug, f
 - A **power cut**: a file replaced is the old one or the complete new one; a source moved
   across drives is never gone before its copy is on disk. But a **new** file copied
   just before the cut (not synced, by the rule above) can be short or empty under its
-  real name, and continuing the job takes a file of the right size and date for done
-  without reading it. If the power went during a big copy of new files, check them (or
-  copy again with "replace all"). A big file's kept part is only what was synced at a
-  checkpoint, so it survives a power cut too. A later version will copy again what a run that died
-  in a power cut had made itself.
+  real name. **Continue** (Enter) takes a file of the right size and date for done
+  without reading it, and skips a folder the run had finished without looking inside:
+  right after a kill, fast and safe. After a power cut, press **C** (check, slow)
+  instead: every file already copied is read again with its source, finished folders
+  included, and one that differs is copied again (the old one to the trash). A big
+  file's kept part is only what was synced at a checkpoint, so it survives a power cut
+  too. A later version will also sync new files before a job ends.
 
 **Replaced only if it is still the file you agreed to.** The answer to "Already exists"
 is about the file it showed: right before replacing it, xdevcmd looks again (size,

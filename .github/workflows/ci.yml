@@ -76,8 +76,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/xdev-other"
           echo "XDEVCMD_TEST_OTHER_DEV=$RUNNER_TEMP\\xdev-other" >> "$GITHUB_ENV"
       # The suite starts a real pty and renders real frames, so this is the step that
-      # actually says whether xdevcmd works on this platform.
-      - run: cargo test --all
+      # actually says whether xdevcmd works on this platform. --no-fail-fast: every test
+      # binary runs even when an earlier one fails, so one run shows every failure.
+      - run: cargo test --all --no-fail-fast
       # The cost of the sync rules on a move across devices (Round 029, decision 4):
       # from the second file system onto the runner's own disk, with and without the
       # syncs. A measurement, read in the log; it never fails the run. Only when a run

@@ -1,15 +1,45 @@
 # Testing by hand
 
 What the automated tests cannot reach: real USB sticks, real network shares, a pulled
-cable, a real power cut, the look of a screen. Run this list on each pre-release
-(beta, release candidate) before it is called good, on as many systems as you have, and
-note what you saw. It is ordered by what would hurt most if wrong: data first.
+cable, a real power cut, the look of a screen, and people other than the author using it
+for real work. Two ways to help, on each pre-release (beta, release candidate):
 
-Use scratch copies, never your only copy of anything. A run with `--timings` also
-records how long each start took (Help → Usage shows it too).
+- **A week of real use** (anyone): the next section. No extra time beyond your normal
+  file work, plus two checks of 15 minutes.
+- **The full list** (the maintainer, before a pre-release is called good): sections 1–5,
+  ordered by what would hurt most if wrong: data first.
+
+Use scratch copies, never your only copy of anything. A pre-release is not yet promised
+safe for your only copy.
 
 Each check says how to set it up and what you should see. "✗" marks what would be a
 bug; write down the system, the terminal and what happened.
+
+## A week of real use
+
+1. **Get it.** Pre-releases are on
+   [Releases](https://github.com/nci-gis/rust-commander/releases), marked Pre-release:
+   one program to unpack, nothing to install. The builds are not signed: macOS and
+   Windows warn the first time, see [troubleshooting](troubleshooting.md#macos)
+   ([Windows](troubleshooting.md#windows)). To check a download is the real one:
+   [security.md, "Checking a download"](security.md#checking-a-download).
+2. **Use it** for your normal file work, where you would use Explorer, Finder, mc or
+   Total Commander. **F1** lists every command and its key, found by typing; **F10**
+   quits. Worth doing in the week, in any order:
+   - copy and move folders between the panes (F5, F6), one of them onto a folder that
+     already has some of the same files: read the table before Enter;
+   - delete to the trash (F8), then undo (Ctrl+Z);
+   - view a large log (F3), edit a file (F4);
+   - the shell panel: F12 in and out, Alt+T shows or hides it, Alt+C sends the pane's
+     folder to the shell, Alt+G brings the shell's folder to the pane;
+   - compare (Alt+K) or synchronise (Alt+Y) two folders; find by name and content
+     (Alt+F7);
+   - a USB stick or a network share, if you have one;
+   - note anything you looked for and did not find, or a key you expected to work.
+3. **Two data checks** (15 minutes, scratch folders): 1.1 (kill a copy) and 1.4 (a
+   checked continue) below.
+4. **Tell us**, as [What to send](#what-to-send) says, including "nothing went wrong in a
+   week": a comment on the release is enough.
 
 ## 1. Data survives what goes wrong
 
@@ -113,6 +143,23 @@ bug; write down the system, the terminal and what happened.
 
 ## What to send
 
-For anything marked ✗, or anything that surprised you: the system and version, the
-terminal, what you did, what you saw, and Help → Usage's lines (start-up, terminal).
-Never send files you would not share; names can be described instead.
+One [issue](https://github.com/nci-gis/rust-commander/issues) per problem: anything
+marked ✗, or anything that surprised you. Say the system and version
+(`xdevcmd --version`), the terminal and shell, what you did and what you saw, and Help →
+Usage's lines (start-up, terminal). For a copy, a move or a crash, attach a debug log:
+[troubleshooting, "Sending a log with a report"](troubleshooting.md#sending-a-log-with-a-report).
+It holds no file, folder, user or host name.
+
+Never paste file names, paths or contents you would not share in public; describe them
+("a folder of 3,000 small files on a network share").
+
+Put the level in the title:
+
+| Level | When |
+|---|---|
+| **P0** | Data lost, the wrong file touched, a file short or empty under its real name |
+| **P1** | A crash or hang, cannot quit, the terminal left broken |
+| **P2** | A wrong or misleading screen or doc |
+| **P3** | Cosmetic |
+
+A P0 or P1 holds the release until it is fixed, so send it even when unsure.

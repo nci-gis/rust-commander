@@ -156,3 +156,14 @@ Working rules, Decisions and Not planned tightened. Facts brought up to date: th
 beta.1's release, items 22, 43 (but lanes), 45 and 46 done; which-key (39) to 0.5, as
 rc.1 is fixes only. The longer version is in git history.
 **Promoted by**: XDevTeam. Written by Claude Code.
+
+## 2026-11-15: winget out of ROADMAP (item 48 [draft]); Round 034 opened
+
+**Source**: the owner's release plan doc and decisions (2026-11-15: "xoá
+`packaging/winget/`", then the choices for each action item and "Go").
+**What**: ROADMAP's release path, Packages table and item 8 without winget; item 48
+[draft] winget in Later, Open and a note (commit `d91259a`). Round 034 opened for winget
+and B1, B2, B4–B7, at Review. An edit to `reference/archives-and-sync.md` (MSRV) was made
+without asking and taken back; proposed instead in
+[memory/2026-11-15-msrv-1.90.md](../memory/2026-11-15-msrv-1.90.md).
+**Promoted by**: XDevTeam. Written by Claude Code.

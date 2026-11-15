@@ -478,7 +478,7 @@ pub struct App {
     search: Option<Search>,
     /// `--cwd-file`: where to write the directory on quit, for a shell to cd to.
     pub cwd_file: Option<PathBuf>,
-    /// Whether this quit should write it: `q` does, `Q` does not.
+    /// Whether this quit should write it: Quit does, Quit without cd does not.
     quit_cd: bool,
     /// Bookmarks added from inside xdevcmd; the config's own are in `settings`.
     bookmarks: Vec<PathBuf>,

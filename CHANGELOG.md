@@ -32,7 +32,8 @@ that heading and starts a new, empty one here. -->
 - **winget is no longer planned for 0.4.0**: Windows gets Scoop and the release zip.
   winget needs a signed build first.
 - **`q` no longer quits**: F10 and Ctrl+q do (`q` can be added back under `[keys]`).
-  Quitting while a program runs in a terminal asks first.
+  Quitting while a program runs in a terminal asks first. **Quit without cd** moved
+  from `Q` to `Alt+x q`, so a stray Shift+q no longer quits either.
 - **Replacing many small files is many times faster**: they are synced in batches, on
   several threads (5,000 files: 2.9 s instead of 59.7 s on Linux).
 - **Copies use the system's fast copy**: a clone on APFS, Btrfs and XFS,

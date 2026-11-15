@@ -2960,7 +2960,7 @@ fn restricted_mode_never_starts_a_shell() {
 // ── group A: cd on exit, and a directory that changes underneath ──────────────────
 
 #[test]
-fn q_writes_the_directory_for_the_shell_and_shift_q_does_not() {
+fn quit_writes_the_directory_for_the_shell_and_quit_without_cd_does_not() {
     let s = Scratch::new("cwd-file");
     std::fs::create_dir_all(s.left().join("deeper")).unwrap();
     let out = s.0.join("cwd");
@@ -2980,13 +2980,21 @@ fn q_writes_the_directory_for_the_shell_and_shift_q_does_not() {
 
     std::fs::remove_file(&out).unwrap();
     let mut xdevcmd = Session::start_flags(&s, &[&flag]);
+    // A lone Q is a stray key now, not a quit (B4).
     xdevcmd.send(b"Q");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        xdevcmd.child.try_wait().ok().flatten().is_none(),
+        "Q alone must not quit"
+    );
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(b"q");
     let start = Instant::now();
     while xdevcmd.child.try_wait().ok().flatten().is_none() {
-        assert!(start.elapsed() < PATIENCE, "Q should quit");
+        assert!(start.elapsed() < PATIENCE, "Alt+x q should quit");
         std::thread::sleep(Duration::from_millis(25));
     }
-    assert!(!out.exists(), "Q leaves the shell where it was");
+    assert!(!out.exists(), "Alt+x q leaves the shell where it was");
 }
 
 #[test]

@@ -13,7 +13,7 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `F1` `Alt+x F1` | Every command, found by typing, with its key; Enter runs it |
 | `Ctrl+r` | Re-read the active pane |
 | `Ctrl+h` | Show or hide hidden files |
-| `Q` | Quit, leaving the shell where it was (with --cwd-file) |
+| `Alt+x q` | Quit, leaving the shell where it was (with --cwd-file) |
 | `Shift+F9` `Alt+x F9` | Your commands from [[menu]], run in the terminal |
 | `F9` | The menu bar: File, View, Help |
 | `Menu` `Shift+F10` `Alt+x F10` | The right-click menu, for the row under the cursor |

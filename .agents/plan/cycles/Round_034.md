@@ -51,6 +51,9 @@ Owner's decisions, 2026-11-15:
   differs (old one to the trash where there is one). `Summary::repaired`. The dialog's
   `also` button: `C check (slow)`, copy and move only. Content, not size+mtime: XFS can
   leave a right-size file of zeros.
+- CI fixes after the push: `688eb7b` (B1 tests' `mut` unused on Windows/macOS, clippy
+  `-D warnings`); `49f0c52` (the dialog's C line said "copied", which an older pty test
+  waits for as the job's end: on the slower ARM runner F10 reached the running job).
 
 ## Check
 
@@ -58,10 +61,10 @@ Owner's decisions, 2026-11-15:
       `File name too long`), B2 (trusted run keeps the zeros, checked run repairs),
       B4 (pty: `Q` alone does not quit).
 - [x] Locally (Linux, Rust 1.97): fmt, clippy `-D warnings`, full suite, cargo-deny.
-- [ ] CI on the four runners and the new `msrv` job: after the push.
-- [ ] Not verified here: building on 1.90 (toolchain download blocked in the agent's
-      environment); Windows and macOS; the checked continue on a real power cut (the
-      tests fake one by writing zeros with the source's date).
+- [x] CI green on `49f0c52`: ubuntu, ubuntu ARM, Windows, macOS, msrv (1.90),
+      cross-check, cargo-deny (run 43691227720).
+- [ ] Not verified: the checked continue on a real power cut (the tests fake one by
+      writing zeros with the source's date).
 - [ ] Owner: hand test 1.4 in testing-by-hand.md (the new checked-continue step).
 
 ## Act

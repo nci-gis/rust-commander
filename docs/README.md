@@ -9,7 +9,8 @@ Read in this order; each page stands on its own.
 5. [Security](security.md): what xdevcmd guards against, read-only and restricted modes
 6. [Troubleshooting](troubleshooting.md): known problems on each system, and fixes
 7. [Development](development.md): build, test, release, contribute
-8. [Testing by hand](testing-by-hand.md): what to try on each pre-release, data first
+8. [Testing by hand](testing-by-hand.md): helping test a pre-release, a week of real use
+   or the full list, data first
 9. [Compatibility](compatibility.md): what stays the same from 0.4.0, and what is not promised
 10. [Benchmarks](benchmark.md): measuring copies on your machine, and sending the numbers
 

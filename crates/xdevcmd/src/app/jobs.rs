@@ -308,7 +308,7 @@ impl App {
             // hold no data under its real name. Trusting is the default (Enter).
             if it.kind != "delete" {
                 body.push(
-                    "C checks first: every file already copied is read again with its source (slow)."
+                    "C checks first: each file it wrote is read again with its source (slow)."
                         .into(),
                 );
                 check = Some((

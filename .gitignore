@@ -3,3 +3,4 @@
 *.pdb
 /_logs
 __pycache__/
+/bench/results/

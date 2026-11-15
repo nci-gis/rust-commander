@@ -143,3 +143,16 @@ steps were told twice. The style the docs already follow, with its trigger; one 
 `context/project.md`'s Reference table so it is found.
 **Promoted by**: XDevTeam ("promote docs style note lên reference/docs.md đi", then "Yes,
 all three" to the warning, 2026-11-15). Written by Claude Code through the shell.
+
+## 2026-11-15: ROADMAP shortened (31 KB to 12 KB)
+
+**Source**: the owner ("giờ rút gọn ROADMAP đi", then "Yes, rewrite it" to the warning and
+plan, 2026-11-15).
+**What**: one v0.4.0 table (beta.1 released, beta.2 left: hand tests, lanes by the bench
+numbers, the cut; rc.1 fixes only); the release bar with a status for each point; the
+item index with finished items one line per release and every number kept; notes on open
+items only (43 lanes, 44, 47), finished designs pointing to their rounds; Direction,
+Working rules, Decisions and Not planned tightened. Facts brought up to date: the branch,
+beta.1's release, items 22, 43 (but lanes), 45 and 46 done; which-key (39) to 0.5, as
+rc.1 is fixes only. The longer version is in git history.
+**Promoted by**: XDevTeam. Written by Claude Code.

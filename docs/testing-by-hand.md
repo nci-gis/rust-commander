@@ -6,7 +6,7 @@ for real work. Two ways to help, on each pre-release (beta, release candidate):
 
 - **A week of real use** (anyone): the next section. No extra time beyond your normal
   file work, plus two checks of 15 minutes.
-- **The full list** (the maintainer, before a pre-release is called good): sections 1–5,
+- **The full list** (the maintainer, before a pre-release is called good): sections 1–6,
   ordered by what would hurt most if wrong: data first.
 
 Use scratch copies, never your only copy of anything. A pre-release is not yet promised
@@ -140,6 +140,48 @@ bug; write down the system, the terminal and what happened.
 2. **The look**: the table, the undo question, the job box with its countdown and time
    left, in Windows Terminal (cmd, PowerShell), Terminal.app, iTerm2, GNOME Terminal,
    kitty, tmux and over SSH. Vietnamese and CJK names in each.
+
+3. **Numbers**: the copy benchmark on your own machine, as
+   [Benchmarks](benchmark.md) says, once on each system you have.
+
+## 6. Each system and terminal
+
+What the automated tests run only on Linux, or only as a screenshot.
+
+1. **xdevcmd inside its own panel** (Windows, cmd and PowerShell): `xdevcmd` typed in
+   the panel asks first, Enter ends it; `start cmd` from the panel, then `xdevcmd`, asks
+   and `y` starts it; a terminal opened from the Start menu does not ask. The menu bar
+   shows the process number.
+   - ✗ a second xdevcmd starts inside the first without asking.
+2. **Paths in the output** ([Shell](shell.md#paths-in-the-output)): in bash with the
+   prompt-mark snippet and without it, and in Windows cmd and PowerShell (a build's
+   MSBuild errors, `C:\` paths). Shift+F12, Tab to a path, Enter: the pane goes there.
+3. **A list from the output** ([Shell](shell.md#a-list-from-the-output)): `rg -l` and
+   `git status --porcelain` in bash; `dir /b /s` in cmd; `Get-ChildItem -Name -Recurse`
+   in PowerShell; then `p`. On macOS: Terminal.app with and without Option as Meta, and
+   iTerm2: Alt+J, Alt+L, and F9 → View → Last list.
+4. **A slow mount**: sshfs with its server stopped, or an SMB share with the network
+   off, on Linux and Windows. Go into it, then Esc.
+   - ✗ the screen stops answering, or Esc does nothing.
+5. **Japanese names**: a folder of them on Windows, and the same folder copied from a
+   Mac (macOS writes some names decomposed). Both sort the same and copy back intact.
+6. **F1 Commands** in macOS Terminal.app (Alt+1 without Option as Meta), Windows
+   Terminal and a Linux terminal: it opens, finds by typing, runs with Enter.
+7. **The light theme** in Terminal.app (256 colours, a light profile) and a light Linux
+   terminal: readable, the focused frame clear. With 16 colours, on a real light palette,
+   the two cursor rows are the same grey and marked, archive and error files are all
+   red (a known limit; the `ansi` theme suits 16 colours better).
+8. **Syntax colours in the viewer** (F3 on source code) on a real terminal, with 256 and
+   16 colours, on Windows and macOS. A jump (End, a search) draws plain first, then in
+   colour.
+9. **Logging a tab** ([Shell](shell.md#logging-a-tab-to-a-file)) on Windows and macOS:
+   right-click a terminal tab → Log to file…, run a command, Stop logging (also from
+   F1). The tab shows ● while logged. On a full USB stick the tab shows `!` and the
+   shell goes on.
+10. **Help → Documentation** in a build from a release archive: it names the `docs/`
+    beside the program and the link at this version's tag. The link opens on GitHub;
+    copying it works in a real terminal (it goes through the terminal, OSC 52), and
+    through a symlinked program (as Homebrew installs it).
 
 ## What to send
 

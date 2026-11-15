@@ -269,7 +269,9 @@ fn f8_goes_to_the_trash_and_shift_f8_says_it_cannot_be_undone() {
 fn ctrl_z_puts_back_what_went_to_the_trash() {
     let (a, b) = fixture();
     // F8, Enter: to the trash (the sandbox's own); then Ctrl+Z asks, Enter puts it back.
-    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z", &a, &b);
+    // `wait` lets the delete job end first: a job's box takes every key but Esc and b,
+    // so on a slow runner Ctrl+Z was swallowed (run 43700546209, ubuntu-latest).
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,wait,Ctrl+z", &a, &b);
     assert!(!a.join("victim.txt").exists(), "{s}");
     assert!(
         s.contains("Undo the delete of victim.txt to the trash?"),
@@ -283,7 +285,7 @@ fn ctrl_z_puts_back_what_went_to_the_trash() {
     );
     // Run again in one go, with Enter at the question.
     let (a, b) = fixture();
-    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z,Enter", &a, &b);
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,wait,Ctrl+z,Enter", &a, &b);
     assert!(a.join("victim.txt").exists(), "put back\n{s}");
     assert!(s.contains("undone"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());

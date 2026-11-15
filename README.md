@@ -73,8 +73,7 @@ cargo install --git https://github.com/nci-gis/rust-commander xdevcmd --locked
 Each way installs the `xdevcmd` command. Each release's archives can be checked:
 [security.md, "Checking a download"](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md#checking-a-download).
 
-**Planned, not available yet:** a Scoop bucket for Windows, then winget once the
-Windows build is signed.
+**Planned, not available yet:** a Scoop bucket for Windows.
 
 ## Quick start
 

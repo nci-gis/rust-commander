@@ -29,6 +29,8 @@ that heading and starts a new, empty one here. -->
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
 
 ### Changed
+- **winget is no longer planned for 0.4.0**: Windows gets Scoop and the release zip.
+  winget needs a signed build first.
 - **`q` no longer quits**: F10 and Ctrl+q do (`q` can be added back under `[keys]`).
   Quitting while a program runs in a terminal asks first.
 - **Replacing many small files is many times faster**: they are synced in batches, on

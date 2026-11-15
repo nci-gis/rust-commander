@@ -1,10 +1,11 @@
 # Round 022: Stable quality, first part (v0.4 entry Q)
 
-**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, entry Q of `.agents/memory/2026-11-11-v0.4.0-scope-proposal.md`
 (§3, the bar the release must clear)
 **Date started**: 2026-11-11
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

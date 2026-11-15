@@ -1,10 +1,11 @@
 # Round 023: Names sorted as people read them, in any script (v0.4 Q, item 21)
 
-**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, entry Q (scope proposal §2, Should: "item 21 … correctness for the
 owner's own Japanese names; part of Q"); ROADMAP item 21
 **Date started**: 2026-11-11
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

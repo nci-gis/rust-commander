@@ -167,3 +167,15 @@ and B1, B2, B4–B7, at Review. An edit to `reference/archives-and-sync.md` (MSR
 without asking and taken back; proposed instead in
 [memory/2026-11-15-msrv-1.90.md](../memory/2026-11-15-msrv-1.90.md).
 **Promoted by**: XDevTeam. Written by Claude Code.
+
+## 2026-11-15: Rounds 018–028, 032 and 034 closed; their hand checks in one doc
+
+**Source**: the owner, 2026-11-15: option A ("okay, A nhé"), then "mình cấp quyền sửa
+status cho các round đã xong nhé. R033 giữ đến khi cut beta.2 sẽ complete."
+**What**: 13 rounds set to Complete, dated 2026-11-15. What each still asked of the
+owner's hands moved to `docs/testing-by-hand.md` (PR #23): §5.3 the benchmark baseline
+(032); §6 each system and terminal (018, 020–028); 034's check 1.4 was already there.
+Left out on purpose: clippy on other targets and `cargo deny` (CI runs both now);
+019's binstall dry run, possible only at 0.4.0 (release step). Round 033 stays at Do
+until beta.2 is cut (its step 9). 029–031 were already Complete (2026-11-13).
+**Promoted by**: XDevTeam. Written by Claude Code.

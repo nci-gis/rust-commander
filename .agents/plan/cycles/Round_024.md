@@ -1,10 +1,11 @@
 # Round 024: F1 Commands, the command palette (v0.4.0, step 1, item 38)
 
-**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, step 1 of `ROADMAP.md` ("Next"); item 38, design C as decided by
 the owner on 2026-11-12 (ROADMAP, "Notes on the items → 38 F1 Commands")
 **Date started**: 2026-11-12
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

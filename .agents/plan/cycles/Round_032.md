@@ -1,14 +1,14 @@
 # Round 032: Pre-release plumbing and 0.4.0-beta.1 (v0.4.0-beta.1, part 4 of 4)
 
-**Status**: Do (started 2026-11-13; the owner: "close r30 trước, xong go as
-recommended")
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`; Decisions "Release path" and "Where
 pre-releases go" (owner, 2026-11-13: GitHub only, marked pre-release, never "Latest";
 crates.io, Scoop, winget and binstall start at 0.4.0); the benchmark harness (owner,
 2026-11-13: "Thêm harness benchmark vào Round 032"), so that beta.1's numbers, which set
 beta.2's scope (item 43), are measured the same way each time
 **Date started**: 2026-11-13
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

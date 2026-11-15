@@ -268,8 +268,11 @@ impl Session {
         self.until(&format!("{text:?} to go away"), |s| !s.contains(text));
     }
 
-    /// Where `text` is drawn, as (column, row).
+    /// Where `text` is drawn, as (column, row), once it is: a menu opened by the click
+    /// just before is drawn a moment later, and on a slow runner the lookup came first
+    /// (`read_only_mode_refuses_logging_a_tab`, run 43706043911).
     fn locate(&self, text: &str) -> (u16, u16) {
+        self.wait_for(text);
         let s = self.screen();
         s.lines()
             .enumerate()

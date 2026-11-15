@@ -133,3 +133,13 @@ commit for replaces (Round 032's bench finding).
 `copy_file_range`, clonefile, CopyFile2) removed; it is part of item 43 in beta.2, behind
 a fallback to today's copy, the engine named in the plan.
 **Promoted by**: XDevTeam. Written by Claude Code.
+
+## 2026-11-15: How docs are written → `reference/docs.md`
+
+**Source**: [memory/2026-11-15-docs-style.md](../memory/2026-11-15-docs-style.md), from
+[Round 033](cycles/Round_033.md) (Unreleased cut from 7.1 KB to 2.9 KB, docs/benchmark.md).
+**Rationale**: No written rule for `docs/`, README and CHANGELOG, so entries grew long and
+steps were told twice. The style the docs already follow, with its trigger; one row in
+`context/project.md`'s Reference table so it is found.
+**Promoted by**: XDevTeam ("promote docs style note lên reference/docs.md đi", then "Yes,
+all three" to the warning, 2026-11-15). Written by Claude Code through the shell.

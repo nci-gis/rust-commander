@@ -3,7 +3,7 @@
 **Date**: 2026-11-15
 **Agent**: Claude Code
 **Confidence**: High
-**Status**: New
+**Status**: Promoted (to `reference/docs.md`, 2026-11-15)
 **Source**: The owner asked for it (2026-11-15) after Unreleased in CHANGELOG was cut
 from 7 KB to 3 KB and docs/benchmark.md was written; drawn from the existing docs.
 **Review-by**: n/a

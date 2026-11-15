@@ -160,7 +160,7 @@ system's cloning is in doubt (OpenZFS 2.2.0 and 2.2.1 had a block-cloning bug, f
   across drives is never gone before its copy is on disk. But a **new** file copied
   just before the cut (not synced, by the rule above) can be short or empty under its
   real name, and continuing the job takes a file of the right size and date for done
-  without reading it. If the power went during a big copy of new files, check them (or
+  without reading it, and skips a folder the run had finished without looking inside. If the power went during a big copy of new files, check them (or
   copy again with "replace all"). A big file's kept part is only what was synced at a
   checkpoint, so it survives a power cut too. A later version will copy again what a run that died
   in a power cut had made itself.

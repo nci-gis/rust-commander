@@ -12,8 +12,9 @@ that heading and starts a new, empty one here. -->
 
 ### Added
 - **A big copy goes on from where it stopped**: with safe operations on, a file over
-  256 MiB is synced every 256 MiB, and Continue after a crash or power cut resumes from
-  there. Continue also skips the folders the first run finished.
+  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`,
+  the terminal closed) resumes from there. Continue also skips the folders the first run
+  finished. A power cut is best effort: see Security, "What survives a power cut".
 - **Messages** (Alt+M): the status line's last 50 messages, whole and with their times.
 - **Copy relative path** (right-click, F1): from the repository's root, else the folder.
 - **`o` and Open with… say what happened**: "opening …", then "opened …" or the error.

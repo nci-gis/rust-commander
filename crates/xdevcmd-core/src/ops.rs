@@ -143,6 +143,12 @@ pub struct Request {
     /// ([`crate::journal::Interrupted::done`]): neither counted nor walked again while
     /// their copy is still there.
     pub done_dirs: std::collections::HashSet<PathBuf>,
+    /// Resume, checked (B2, owner 2026-11-15): trust nothing the interrupted run made.
+    /// Finished folders are walked again, and a file at the destination that looks
+    /// identical (size and date) is read with its source and copied again if the two
+    /// differ: after a power cut, a new file can have the right size and no data.
+    /// Slow (it reads both sides of everything copied), so off unless asked for.
+    pub verify: bool,
 }
 
 /// The owner's decision 2, Round 031: five tries more, about 30 s in all, then the
@@ -254,6 +260,7 @@ impl Request {
             partial: Vec::new(),
             resumed: None,
             done_dirs: Default::default(),
+            verify: false,
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -278,6 +285,7 @@ impl Request {
             partial: Vec::new(),
             resumed: None,
             done_dirs: Default::default(),
+            verify: false,
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -302,6 +310,7 @@ impl Request {
             partial: Vec::new(),
             resumed: None,
             done_dirs: Default::default(),
+            verify: false,
         }
     }
 }
@@ -471,6 +480,9 @@ pub enum Answer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Summary {
     pub done: u64,
+    /// A checked resume ([`Request::verify`]): files that looked identical but held
+    /// other bytes than their source, so were copied again. Also counted in `done`.
+    pub repaired: u64,
     pub skipped: u64,
     pub failed: u64,
     pub bytes: u64,
@@ -524,6 +536,13 @@ impl Summary {
         };
         if let Some(f) = fast {
             s.push_str(&format!(" ({f})"));
+        }
+        if self.repaired > 0 {
+            s.push_str(&format!(
+                " ({} found different from {} source and copied again)",
+                self.repaired,
+                if self.repaired == 1 { "its" } else { "their" }
+            ));
         }
         if self.skipped > 0 {
             s.push_str(&format!(", {} skipped", self.skipped));
@@ -684,7 +703,13 @@ pub fn start(req: Request) -> Handle {
                 .map(|p| (p.dst.clone(), p.clone()))
                 .collect(),
             ckpt: None,
-            done_dirs: req.done_dirs.clone(),
+            // Checked: nothing is taken as finished, so every folder is walked.
+            done_dirs: if req.verify {
+                Default::default()
+            } else {
+                req.done_dirs.clone()
+            },
+            verify: req.verify && req.existing == Existing::Resume,
             finished: Vec::new(),
             dbg: crate::debuglog::on(crate::debuglog::Topic::Jobs).then(|| {
                 Box::new(Dbg {
@@ -805,6 +830,8 @@ struct Worker {
     ckpt: Option<Ckpt>,
     /// Resume: source folders finished before, skipped while their copy is there.
     done_dirs: std::collections::HashSet<PathBuf>,
+    /// [`Request::verify`]: an identical-looking destination is compared byte by byte.
+    verify: bool,
     /// Folders copied without a failure whose last files wait in the group batch: told
     /// to the journal once that batch is through without one.
     finished: Vec<PathBuf>,
@@ -1512,6 +1539,48 @@ impl Worker {
         }
     }
 
+    /// Whether regular files `a` and `b` hold the same bytes, read side by side; a read
+    /// that fails counts as different (copying again then reports the error). Stops
+    /// early, as different, when the job is cancelled.
+    fn same_bytes(&mut self, a: &Path, b: &Path) -> bool {
+        use std::io::Read;
+        self.phase = "verify";
+        let (Ok(mut fa), Ok(mut fb)) = (File::open(a), File::open(b)) else {
+            return false;
+        };
+        let mut ba = vec![0u8; 1 << 20];
+        let mut bb = vec![0u8; 1 << 20];
+        loop {
+            if self.stopped() {
+                return false;
+            }
+            let Ok(n) = read_full(&mut fa, &mut ba) else {
+                return false;
+            };
+            let Ok(m) = read_full(&mut fb, &mut bb) else {
+                return false;
+            };
+            if n != m || ba[..n] != bb[..m] {
+                return false;
+            }
+            if n == 0 {
+                return true;
+            }
+        }
+        fn read_full(f: &mut File, buf: &mut [u8]) -> io::Result<usize> {
+            let mut got = 0;
+            while got < buf.len() {
+                match f.read(&mut buf[got..]) {
+                    Ok(0) => break,
+                    Ok(k) => got += k,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(got)
+        }
+    }
+
     /// Decide what to do about an existing destination. `Some(true)` means go ahead.
     /// `src`: the file that would replace it, for the update rule; none for an archive.
     fn resolve_conflict(&mut self, src: Option<&Path>, dst: &Path, incoming: u64) -> Option<bool> {
@@ -1555,7 +1624,18 @@ impl Worker {
         if self.resuming {
             match identical(src, dst) {
                 Same::Dirs => return Some(true),
-                Same::Yes => return Some(false),
+                Same::Yes => {
+                    let differs = self.verify && src.is_some_and(|s| !self.same_bytes(s, dst));
+                    if !differs {
+                        return Some(false);
+                    }
+                    // Short or empty under its real name (B2): the source's copy is
+                    // what the job was asked for, so it replaces it without a question,
+                    // while it is still this file.
+                    self.sum.repaired += 1;
+                    self.agreed = Some((dst.to_path_buf(), now));
+                    return Some(true);
+                }
                 Same::No => {}
             }
         }
@@ -4132,6 +4212,117 @@ mod tests {
             dst.join("src/finished/added-since.txt").exists(),
             "its copy was gone: copied again"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// B2: after a power cut a new file can keep its size and date with no data in it
+    /// (zeros, as XFS leaves it). A plain resume trusts it, in a finished folder and
+    /// out of one; a checked resume reads both sides and copies again only what differs.
+    #[test]
+    fn a_checked_resume_copies_again_a_file_with_the_right_size_and_wrong_bytes() {
+        journals();
+        let root = tmp("verify");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(src.join("finished")).unwrap();
+        fs::write(src.join("finished/torn.txt"), "hello world").unwrap();
+        fs::write(src.join("finished/good.txt"), "fine").unwrap();
+        fs::write(src.join("loose.txt"), "abc").unwrap();
+        let out = dst.join("src");
+        fs::create_dir_all(out.join("finished")).unwrap();
+        // The copies as a power cut left them: same size and date as the source.
+        let lay = |rel: &str, body: &[u8]| {
+            let to = out.join(rel);
+            fs::write(&to, body).unwrap();
+            let mtime = fs::metadata(src.join(rel)).unwrap().modified().unwrap();
+            File::options()
+                .write(true)
+                .open(&to)
+                .unwrap()
+                .set_modified(mtime)
+                .unwrap();
+        };
+        lay("finished/torn.txt", &[0; 11]);
+        lay("finished/good.txt", b"fine");
+        lay("loose.txt", &[0; 3]);
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.done_dirs = [src.join("finished")].into_iter().collect();
+
+        // Trusted (Enter): nothing read, the zeros stay.
+        let s = run(req.clone());
+        assert_eq!((s.failed, s.repaired), (0, 0), "{s:?}");
+        assert_eq!(fs::read(out.join("finished/torn.txt")).unwrap(), [0; 11]);
+        assert_eq!(fs::read(out.join("loose.txt")).unwrap(), [0; 3]);
+
+        // Checked: the two with other bytes are copied again; the good one is left.
+        req.verify = true;
+        let s = run(req);
+        assert_eq!((s.failed, s.repaired), (0, 2), "{s:?}");
+        assert_eq!(
+            fs::read_to_string(out.join("finished/torn.txt")).unwrap(),
+            "hello world"
+        );
+        assert_eq!(fs::read_to_string(out.join("loose.txt")).unwrap(), "abc");
+        assert_eq!(
+            fs::read_to_string(out.join("finished/good.txt")).unwrap(),
+            "fine"
+        );
+        assert!(
+            s.describe(Kind::Copy).contains("2 found different"),
+            "{}",
+            s.describe(Kind::Copy)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A checked resume of a move: a copy with other bytes is replaced by its source,
+    /// which then goes, as the move asked; a trusted one leaves both.
+    #[test]
+    fn a_checked_resume_of_a_move_replaces_a_torn_copy_with_its_source() {
+        journals();
+        let root = tmp("verify-move");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("m.txt");
+        fs::write(&src, "moved").unwrap();
+        let to = dst.join("m.txt");
+        fs::write(&to, [0; 5]).unwrap();
+        let mtime = fs::metadata(&src).unwrap().modified().unwrap();
+        File::options()
+            .write(true)
+            .open(&to)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        let mut req = Request::mv(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        let s = run(req.clone());
+        assert_eq!((s.failed, s.repaired), (0, 0), "{s:?}");
+        assert!(src.exists(), "trusted: both kept");
+        req.verify = true;
+        let s = run(req);
+        assert_eq!((s.failed, s.repaired), (0, 1), "{s:?}");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "moved");
+        assert!(!src.exists(), "the source went, as the move asked");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Checked is only for a resume: on any other job the flag changes nothing (a
+    /// file already there is asked about as always).
+    #[test]
+    fn verify_outside_a_resume_asks_as_before() {
+        let root = tmp("verify-ask");
+        let (src, dst) = (root.join("a.txt"), root.join("dst"));
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(&src, "new").unwrap();
+        fs::write(dst.join("a.txt"), "old").unwrap();
+        let mut req = Request::copy(vec![src], dst.clone());
+        req.verify = true;
+        let (s, asked) = run_with(req, Answer::Skip);
+        assert_eq!((asked, s.repaired), (1, 0), "{s:?}");
+        assert_eq!(fs::read_to_string(dst.join("a.txt")).unwrap(), "old");
         fs::remove_dir_all(&root).unwrap();
     }
 

@@ -32,11 +32,17 @@ bug; write down the system, the terminal and what happened.
    - The dialog says "kept part way"; Continue's bar starts near where it stopped, and
      the copy is the same as the source (`cmp`, or `fc /b` on Windows).
    - ✗ the bar starts at 0 %, or the copy differs.
-4. **Move across drives, killed.** Move a folder from your disk to a USB stick and kill
+4. **A checked continue (C).** As in 3 but with a folder of small files: kill
+   xdevcmd mid-way, then overwrite one finished copy with zeros of the same size and
+   give it the source's date (`truncate -s0 f && truncate -s <size> f && touch -r src f`).
+   Start again and press **C**.
+   - The summary says "1 found different … copied again"; the file equals its source.
+   - ✗ the zeroed file is kept, or Enter (not C) reads every file.
+5. **Move across drives, killed.** Move a folder from your disk to a USB stick and kill
    xdevcmd mid-way. Start again.
    - Every file is on one side or the other, or on both ("copied completely … both are
      kept"). Never on neither.
-5. **A network share pulled mid-copy** (SMB or NFS: unplug the cable or stop the
+6. **A network share pulled mid-copy** (SMB or NFS: unplug the cable or stop the
    server; sshfs: kill the ssh connection). Copy a large file onto it.
    - The job box shows "network error — trying again in 1 s (1 of 5)", counting down.
      Bring the share back within about 30 s: the copy finishes by itself. Leave it
@@ -44,7 +50,7 @@ bug; write down the system, the terminal and what happened.
      during a wait stops at once.
    - ✗ the job fails at once without trying again; it never asks; Esc waits for the
      countdown.
-6. **A hard NFS mount whose server is gone**: the job may hang inside the system;
+7. **A hard NFS mount whose server is gone**: the job may hang inside the system;
    Esc stops it once that call returns. Note how long it took.
 
 ## 2. Undo, and the trash

@@ -15,6 +15,10 @@ that heading and starts a new, empty one here. -->
   256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`,
   the terminal closed) resumes from there. Continue also skips the folders the first run
   finished. A power cut is best effort: see Security, "What survives a power cut".
+- **C, a checked continue**: after a power cut, C at the Interrupted dialog reads every
+  file already copied again with its source, finished folders included, and copies
+  again any that differ (a file can keep its size and date with no data in it). Slow;
+  Enter still trusts what was copied.
 - **Messages** (Alt+M): the status line's last 50 messages, whole and with their times.
 - **Copy relative path** (right-click, F1): from the repository's root, else the folder.
 - **`o` and Open with… say what happened**: "opening …", then "opened …" or the error.

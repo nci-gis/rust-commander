@@ -1264,6 +1264,46 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.quit();
 }
 
+/// B2: the Interrupted dialog offers C, a checked continue. A copy left with the right
+/// size and date and no data (a power cut) is read with its source and copied again.
+#[cfg(unix)]
+#[test]
+fn c_at_the_interrupted_dialog_checks_what_was_copied_and_copies_again_what_differs() {
+    let s = Scratch::new("resume-check");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "data").unwrap();
+    std::fs::write(dst.join("a.txt"), [0u8; 4]).unwrap();
+    let date = std::fs::metadata(src.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\ndest {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&dst),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("check (slow)");
+    x.send(b"c");
+    x.wait_for("found different");
+    assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "data");
+    x.quit();
+}
+
 /// A directory on another file system than the temporary directory, for a move across
 /// devices: `XDEVCMD_TEST_OTHER_DEV` (CI mounts one), else /dev/shm. None, and said,
 /// where there is none.

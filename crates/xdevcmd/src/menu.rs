@@ -87,6 +87,9 @@ pub enum Cmd {
     Note(String),
     /// Run an interrupted job again (safe operations' journal), "replace only if older".
     Resume(Box<xdevcmd_core::journal::Interrupted>),
+    /// As [`Cmd::Resume`], trusting nothing the interrupted run made (B2): finished
+    /// folders walked again, every file already there read with its source.
+    ResumeChecked(Box<xdevcmd_core::journal::Interrupted>),
     /// Not to be resumed: the big files it kept part of, and its journal, go.
     Discard(Box<xdevcmd_core::journal::Interrupted>),
     /// Help → About.

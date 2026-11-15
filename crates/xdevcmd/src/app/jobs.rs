@@ -285,6 +285,7 @@ impl App {
             kind_ok && !i.sources.is_empty()
         });
         let mut discard = None;
+        let mut check = None;
         let yes = resumable.map(|it| {
             let what = match it.kind.as_str() {
                 "copy" => "a copy",
@@ -303,6 +304,19 @@ impl App {
             ));
             body.push("Continue it? What was done is skipped; a file cut short starts".into());
             body.push("again; you are asked about any other file already there.".into());
+            // B2 (owner, 2026-11-15): after a power cut a copied file can be short or
+            // hold no data under its real name. Trusting is the default (Enter).
+            if it.kind != "delete" {
+                body.push(
+                    "C checks first: every file already copied is read again with its source (slow)."
+                        .into(),
+                );
+                check = Some((
+                    'c',
+                    "check (slow)".to_string(),
+                    Cmd::ResumeChecked(Box::new(it.clone())),
+                ));
+            }
             let n = it.partial.len();
             if n > 0 {
                 let kept: u64 = it.partial.iter().map(|p| p.bytes).sum();
@@ -328,7 +342,7 @@ impl App {
             danger: false,
             yes,
             buttons: Vec::new(),
-            also: None,
+            also: check,
             more: discard,
             footnote,
             pictures: Vec::new(),
@@ -338,7 +352,8 @@ impl App {
     /// Run an interrupted job again: what it finished (identical at the destination) is
     /// skipped and anything else already there is asked about, never decided; a move or
     /// delete on the sources still there.
-    pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted) {
+    /// `verify`: trust nothing the run made ([`ops::Request::verify`]).
+    pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted, verify: bool) {
         // What it finished is left; what is gone cannot be done again.
         let still: Vec<PathBuf> = it
             .sources
@@ -366,6 +381,7 @@ impl App {
         req.resumed = it.journal.clone();
         // Folders it finished are not walked again (Round 033).
         req.done_dirs = it.done.iter().cloned().collect();
+        req.verify = verify;
         let kind = req.kind;
         self.remember_job(&req);
         self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));

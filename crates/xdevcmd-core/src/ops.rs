@@ -5570,6 +5570,7 @@ mod tests {
     #[test]
     fn the_temporary_name_fits_the_name_limit_and_keeps_the_runs_mark() {
         let mark = format!(".xdevcmd-part-{}-", crate::journal::run_tag());
+        #[cfg_attr(not(unix), allow(unused_mut))] // a non-UTF-8 name is added on Unix
         let mut names: Vec<std::ffi::OsString> = vec![
             "a".into(),
             "x".repeat(255).into(),
@@ -5604,6 +5605,7 @@ mod tests {
         let (src, dst) = (root.join("src"), root.join("dst"));
         fs::create_dir_all(&src).unwrap();
         fs::create_dir_all(&dst).unwrap();
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))] // non-UTF-8 on Linux only
         let mut names: Vec<std::ffi::OsString> = vec!["n".repeat(250).into()];
         #[cfg(target_os = "linux")]
         {

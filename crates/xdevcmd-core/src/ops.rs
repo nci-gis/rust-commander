@@ -3009,18 +3009,31 @@ fn remove_file_anyway(p: &Path) -> io::Result<()> {
 /// this run (pid and start time, [`crate::journal::run_tag`]) and call, so two jobs
 /// never share one and a later process given the same pid never takes it for its own.
 pub(crate) fn part_name(dst: &Path) -> PathBuf {
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = N.fetch_add(1, Ordering::Relaxed);
+    let n = PART_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tail = format!(".xdevcmd-part-{}-{n}", crate::journal::run_tag());
     let name = dst
         .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
+        .map(|s| s.to_string_lossy())
         .unwrap_or_default();
+    // The run and counter make the name unique; the original name is only there for a
+    // person who finds a leftover. Cut it so the whole name fits the 255-byte limit most
+    // file systems have (a lossy non-UTF-8 name can grow threefold). Bytes are never
+    // fewer than UTF-16 units, so this also keeps Windows' 255 units.
+    let room = NAME_MAX.saturating_sub(1 + tail.len());
+    let mut end = name.len().min(room);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
     let dir = dst.parent().unwrap_or(Path::new("."));
-    dir.join(format!(
-        ".{name}.xdevcmd-part-{}-{n}",
-        crate::journal::run_tag()
-    ))
+    dir.join(format!(".{}{tail}", &name[..end]))
 }
+
+/// The counter in [`part_name`]: unique per call within a run.
+static PART_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The longest file name, in bytes, on the common file systems (ext4, APFS, Btrfs, XFS;
+/// NTFS counts 255 UTF-16 units).
+const NAME_MAX: usize = 255;
 
 /// The folders a job told its journal it finished, for tests.
 #[cfg(test)]
@@ -5357,6 +5370,78 @@ mod tests {
             left.is_empty(),
             "nothing under the real name or a temporary one: {left:?}"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// B1: the temporary name used to add ~40 bytes to the real one, and a non-UTF-8
+    /// name grew threefold through `to_string_lossy`: a long name then failed with
+    /// "File name too long".
+    #[test]
+    fn the_temporary_name_fits_the_name_limit_and_keeps_the_runs_mark() {
+        let mark = format!(".xdevcmd-part-{}-", crate::journal::run_tag());
+        let mut names: Vec<std::ffi::OsString> = vec![
+            "a".into(),
+            "x".repeat(255).into(),
+            "é".repeat(127).into(),
+            "日本".repeat(42).into(),
+        ];
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            names.push(std::ffi::OsString::from_vec(vec![0xff; 90]));
+        }
+        for name in names {
+            let part = part_name(&Path::new("/d").join(&name));
+            let got = part.file_name().unwrap().to_string_lossy();
+            assert!(got.len() <= NAME_MAX, "{} bytes: {got}", got.len());
+            assert!(got.starts_with('.') && got.contains(&mark), "{got}");
+            assert_eq!(part.parent(), Some(Path::new("/d")));
+        }
+        let short = part_name(Path::new("/d/a"));
+        let short = short.file_name().unwrap().to_string_lossy();
+        assert!(
+            short.starts_with(&format!(".a{mark}")),
+            "kept whole: {short}"
+        );
+    }
+
+    /// B1, end to end: with safe operations on, a long name and a non-UTF-8 name are
+    /// copied and then replaced.
+    #[test]
+    fn with_safe_operations_long_and_non_utf8_names_are_copied_and_replaced() {
+        let root = tmp("safe-long");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        let mut names: Vec<std::ffi::OsString> = vec!["n".repeat(250).into()];
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            names.push(std::ffi::OsString::from_vec(vec![0xff; 90]));
+        }
+        for name in &names {
+            fs::write(src.join(name), "one").unwrap();
+        }
+        let files: Vec<PathBuf> = names.iter().map(|n| src.join(n)).collect();
+        for body in ["one", "two"] {
+            for f in &files {
+                fs::write(f, body).unwrap();
+            }
+            let mut req = Request::copy(files.clone(), dst.clone());
+            req.safe = true;
+            let s = run(req);
+            assert_eq!(s.failed, 0, "{body}: {:?}", s.errors);
+            for name in &names {
+                assert_eq!(fs::read_to_string(dst.join(name)).unwrap(), body);
+            }
+        }
+        let left: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .filter(|n| n.to_string_lossy().contains("xdevcmd-part"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
         fs::remove_dir_all(&root).unwrap();
     }
 

@@ -236,13 +236,13 @@ Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it
 
    A version on crates.io cannot be replaced, only yanked; publish after the GitHub
    release is good, not before.
-6. **Scoop and winget**, from the published release's `SHA256SUMS`: see
+6. **Scoop**, from the published release's `SHA256SUMS`: see
    [packaging/README.md](../packaging/README.md).
 
 ## Pre-releases
 
 A beta or release candidate (`0.4.0-beta.1`, `0.4.0-rc.1`) goes to **GitHub only**,
-marked pre-release, never "Latest"; crates.io, Scoop, winget and binstall wait for the
+marked pre-release, never "Latest"; crates.io, Scoop and binstall wait for the
 release itself (a version on crates.io can never be deleted, and package managers have
 no beta channel worth keeping). It is cut from `dev`, without a pull request into
 `main`. Semver orders them `0.4.0-beta.1 < 0.4.0-beta.2 < 0.4.0-rc.1 < 0.4.0`.
@@ -275,8 +275,7 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
    six archives and opens a **draft marked pre-release**. Read it, then Publish. Help →
    Documentation in that build links the tag's `docs/`.
-5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop and winget
-   (step 6). `release.toml` (`publish = false`) keeps every `cargo release` off crates.io.
+5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop (step 6). `release.toml` (`publish = false`) keeps every `cargo release` off crates.io.
 
 A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1`,
 `git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.

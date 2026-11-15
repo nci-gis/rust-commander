@@ -30,7 +30,7 @@ fn each_crate_ships_the_top_level_licence() {
 }
 
 /// The archive name release.yml gives a target for a tag, read from its `package` step,
-/// so a change there that the Scoop and winget files do not follow fails here.
+/// so a change there that the Scoop file does not follow fails here.
 fn released_archive(tag: &str, target: &str) -> Option<String> {
     let yml = fs::read_to_string(top().join(".github/workflows/release.yml")).ok()?;
     assert!(
@@ -94,37 +94,6 @@ fn the_scoop_manifest_points_at_the_archive_release_yml_makes() {
         download(&format!("v{v}"), &format!("{folder_v}.zip"))
     );
     assert_eq!(now["extract_dir"], folder_v.as_str());
-}
-
-#[test]
-fn the_winget_installer_points_at_the_archive_release_yml_makes() {
-    let Some(folder) = released_archive("v<VERSION>", WINDOWS) else {
-        eprintln!("no release.yml here; skipped");
-        return;
-    };
-    let dir = top().join("packaging/winget");
-    // Checked out on Windows, git may give the file CRLF line ends (core.autocrlf, as
-    // on the CI's runner); winget reads either, so compare the lines, not the ends.
-    let installer = fs::read_to_string(dir.join("XDevTeam.xdevcmd.installer.yaml"))
-        .unwrap()
-        .replace("\r\n", "\n");
-    let url = download("v<VERSION>", &format!("{folder}.zip"));
-    assert!(
-        installer.contains(&format!("InstallerUrl: {url}\n")),
-        "want {url}\n{installer}"
-    );
-    let exe = format!("RelativeFilePath: {folder}\\xdevcmd.exe\n");
-    assert!(installer.contains(&exe), "want {exe}\n{installer}");
-    for f in ["", ".installer", ".locale.en-US"] {
-        let text = fs::read_to_string(dir.join(format!("XDevTeam.xdevcmd{f}.yaml")))
-            .unwrap()
-            .replace("\r\n", "\n");
-        assert!(
-            text.contains("PackageIdentifier: XDevTeam.xdevcmd\n"),
-            "{f}"
-        );
-        assert!(text.contains("PackageVersion: <VERSION>\n"), "{f}");
-    }
 }
 
 /// Every target release.yml builds, as its matrix names them.

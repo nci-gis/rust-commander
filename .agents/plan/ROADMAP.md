@@ -46,8 +46,8 @@ Rewritten 2026-11-12 around v0.4.0 as the first stable release; shortened 2026-1
 ## v0.4.0, the first stable release
 
 Release path (owner, 2026-11-13): each pre-release a GitHub pre-release and about a week
-of the owner's real use. Pre-releases go to GitHub only; crates.io, binstall, Scoop and
-winget start at 0.4.0.
+of the owner's real use. Pre-releases go to GitHub only; crates.io, binstall and Scoop
+start at 0.4.0; winget is item 48 [draft] (owner, 2026-11-15).
 
 | Release | Contents | Status |
 |---|---|---|
@@ -84,7 +84,6 @@ Not for 0.4 (the review agrees): mmap, a trie, a custom arena, Tokio, a batch WA
 | crates.io | since 0.3.0; `release.toml` has `publish = false`, publishing is by hand |
 | `cargo binstall` | metadata since Round 019; dry run after publishing 0.4.0 |
 | Scoop | templates in `packaging/`; bucket `nci-gis/scoop-xdevcmd`, to be created by the owner |
-| winget | templates in `packaging/`; after Scoop |
 | Homebrew tap, AUR | the owner's call; suggested: tap `nci-gis/homebrew-xdevcmd`, no AUR without a maintainer |
 
 **Releasing stays the owner's call**; the flow is in `docs/development.md`.
@@ -107,6 +106,7 @@ Steered by launch feedback. Not started before 0.4.0 ships.
 | 34 Remote | Mounts instead; revisit only with feedback, keeping hard rule 2 |
 | 11 File icon sets; 12–13 plugins | Optional extras; plugins not for now |
 | 47 **[draft] Go to anything** | A direction, not a commitment; note below |
+| 48 **[draft] winget** | Needs a signed Windows build; Scoop and the release zip cover Windows until then |
 
 ## Items
 
@@ -128,7 +128,7 @@ day or two, **M** under a week, **L** one to two weeks.
 |---|---|---|---|
 | 4c | Settings → Theme: built-in and your own apart | S | 0.5 |
 | 5b | Keymap presets | M | 0.5 |
-| 8 | Packages: binstall, Scoop, winget, tap | S each | after 0.4.0 |
+| 8 | Packages: binstall, Scoop, tap | S each | after 0.4.0 |
 | 10 | Launch: Show HN with a GIF | S | after 0.4.0 and the packages |
 | 11 | File icon sets | S–M | later |
 | 12, 13 | Plugins v0; plugins over stdin/stdout | S–M, L | not for now |
@@ -140,6 +140,7 @@ day or two, **M** under a week, **L** one to two weeks.
 | 43 | Lanes | S–M | beta.2 if the numbers say so, else 0.5 |
 | 44 | The planner hands work to trusted tools | M | 0.5 |
 | 47 | [draft] Go to anything | L | after 0.4.0 |
+| 48 | [draft] winget | S | not planned |
 | ~~23~~ | ~~Quit from the terminal panel~~ | — | dropped by the owner |
 | ~~—~~ | ~~SFTP, remote panes~~ | — | dropped 2026-11-06 |
 
@@ -169,6 +170,10 @@ The finished items' designs are in their rounds (F1: 024; the planner: 029–031
   what is found; (d) last, MCP over local stdio, off by default, read-only, chosen
   folders only. (a) needs no index; a daemon only if (b) shows it is needed. The index
   never leaves the machine except through (d), which the user turns on.
+- **48 [draft] winget** (owner, 2026-11-15; may change or be dropped): dropped from
+  0.4.0 because an unsigned build meets SmartScreen and Defender warnings. Revisit only
+  with signing (SignPath Foundation is free for OSS) and one public publisher identity.
+  The manifests and their test were removed after commit `3a84988`; restore from there.
 
 ## Decisions
 

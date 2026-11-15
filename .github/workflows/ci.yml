@@ -1,11 +1,11 @@
 name: ci
 
 on:
-  # Only the two long-lived branches: pushes to them, and pull requests into them.
-  # Work on a feat/ branch runs nothing until its pull request, or until someone asks
-  # for a run (below), for instance for a build to try on another system.
+  # The two long-lived branches and feat/ work branches: a feat/ branch is checked
+  # before its pull request exists (B6). A push to a branch with an open pull request
+  # runs twice (push and pull_request): the cost of not missing either.
   push:
-    branches: [main, dev]
+    branches: [main, dev, "feat/**"]
     # Nothing a test reads: the plan and the changelog. (The tests read README.md and
     # files under docs/, so those still run CI.)
     paths-ignore: [".agents/**", "CHANGELOG.md"]
@@ -132,6 +132,22 @@ jobs:
             target/release/xdevcmd.exe
           if-no-files-found: error
           retention-days: 14
+
+  # The oldest Rust that Cargo.toml's rust-version promises, read from there so the
+  # two never drift (B5). Builds every target and runs the engine's tests on it.
+  msrv:
+    name: msrv (rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets --locked
+      - run: cargo test -p xdevcmd-core --lib --locked
 
   cross-check:
     name: cross-check from linux

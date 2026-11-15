@@ -19,7 +19,10 @@ homepage = "https://github.com/nci-gis/rust-commander"
 keywords = ["file-manager", "tui", "terminal", "commander", "two-pane"]
 categories = ["command-line-utilities", "filesystem"]
 edition = "2021"
-rust-version = "1.88"   # zip 9, the first release without RUSTSEC-2026-0367..0369 and -0429
+# The oldest Rust the locked dependencies build on: quantette 0.6 and ordered-float 5.5
+# need 1.90 (zip 9, the floor for RUSTSEC-2026-0367..0369 and -0429, needs 1.88). The
+# `msrv` CI job builds on exactly this version.
+rust-version = "1.90"
 
 [profile.release]
 lto = "thin"

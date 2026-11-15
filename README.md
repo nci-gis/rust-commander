@@ -46,7 +46,7 @@ says how far each is tested.
 
 ## Install
 
-With Rust 1.88 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (from 0.3.0):
+With Rust 1.90 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (from 0.3.0):
 
 ```bash
 cargo install xdevcmd --locked

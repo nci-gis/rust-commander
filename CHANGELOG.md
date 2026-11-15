@@ -29,6 +29,9 @@ that heading and starts a new, empty one here. -->
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
 
 ### Changed
+- **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not
+  build 0.4.0-beta.1 or 0.3.0 with `--locked` either, whatever `rust-version` said. CI
+  now builds on 1.90 itself. 0.3.0 on crates.io keeps the old value; it is not yanked.
 - **winget is no longer planned for 0.4.0**: Windows gets Scoop and the release zip.
   winget needs a signed build first.
 - **`q` no longer quits**: F10 and Ctrl+q do (`q` can be added back under `[keys]`).

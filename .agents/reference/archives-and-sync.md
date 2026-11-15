@@ -34,7 +34,8 @@ code under test:
 | SUID, SGID, sticky | dropped; `rwx` kept |
 | an entry larger than its header says | stopped one byte past, the partial file removed |
 
-**`zip` 9 is the floor**, and why the workspace's `rust-version` is 1.88: `cargo deny`
+**`zip` 9 is the floor**, and why the workspace's `rust-version` was 1.88 (1.90 since
+beta.2: quantette 0.6 and ordered-float 5.5 need it): `cargo deny`
 rejected zip 7 for RUSTSEC-2026-0367, -0368, -0369 (set-id bits and symlinks escaping on
 extraction) and -0429 (abort on a crafted symlink). xdevcmd does not call the crate's
 `extract()` that those are about, but a known-vulnerable version is not shipped either way.

@@ -195,6 +195,13 @@ pub fn state_of(
     }
 }
 
+/// Programs that are shells, for [`TermPane::after_exec`].
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SHELLS: &[&str] = &[
+    "sh", "bash", "dash", "zsh", "fish", "ksh", "mksh", "tcsh", "csh", "nu", "pwsh", "elvish",
+    "xonsh", "ash", "yash", "oksh",
+];
+
 /// Whether the line holds typed text after a key's `bytes`, given whether it did
 /// before (#1). A lone Enter runs it; Ctrl+C clears it on Unix (Windows' consoles do
 /// not all clear it); Ctrl+L only redraws. Anything else — a letter, an arrow that
@@ -809,7 +816,7 @@ impl TermPane {
         // xdevcmd's own: a line it ran (a `cd`, ending in Enter) leaves it clean; names
         // typed for the user to finish leave it typed.
         self.dirty.set(!text.ends_with('\r'));
-        self.send(bytes);
+        self.write(bytes);
     }
 
     /// What the shell last said about itself in its output: the directory (OSC 7 or
@@ -859,7 +866,9 @@ impl TermPane {
                 .unwrap_or_default();
             if !now.is_empty() {
                 let first = self.shell_comm.get_or_init(|| now.clone());
-                if *first != now {
+                // A shell that execs another (`.bashrc` ending in `exec zsh`) is still a
+                // shell at its prompt, not a program (red-team of #1).
+                if *first != now && !SHELLS.contains(&now.as_str()) {
                     return Fg::Program(now);
                 }
             }
@@ -1013,8 +1022,28 @@ impl TermPane {
         }
     }
 
+    /// Bytes to the program that are not xdevcmd's own text (mouse reports, the wheel's
+    /// arrows): they may leave something on the shell's line, so it counts as typed
+    /// (red-team of #1). Keys and xdevcmd's text go through [`Self::write`].
     pub fn send(&self, bytes: Vec<u8>) {
+        self.dirty.set(true);
+        self.write(bytes);
+    }
+
+    fn write(&self, bytes: Vec<u8>) {
         let _ = self.tx.send(bytes);
+    }
+
+    /// The text of the row the cursor is on, as the screen shows it.
+    fn cursor_row(&self) -> String {
+        let Ok(p) = self.parser.read() else {
+            return String::new();
+        };
+        let screen = p.screen();
+        let (row, _) = screen.cursor_position();
+        let (_, cols) = screen.size();
+        let line = screen.rows(0, cols.into()).nth(row as usize);
+        line.unwrap_or_default()
     }
 
     /// Whether the shell's line may hold text typed and not run (#1).
@@ -1030,8 +1059,14 @@ impl TermPane {
         let Some(bytes) = key_bytes(k) else {
             return false;
         };
-        self.dirty.set(typed_after(self.dirty.get(), &bytes));
-        self.send(bytes);
+        let mut dirty = typed_after(self.dirty.get(), &bytes);
+        // Enter after a trailing `\` continues the line (the shell shows `> `): it has
+        // not run, and what is typed next joins it (red-team of #1).
+        if !dirty && bytes == b"\r" && self.cursor_row().trim_end().ends_with('\\') {
+            dirty = true;
+        }
+        self.dirty.set(dirty);
+        self.write(bytes);
         true
     }
 

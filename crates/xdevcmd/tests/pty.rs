@@ -2517,6 +2517,7 @@ fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
         .collect();
     assert!(ran.is_empty(), "the typed line ran: {ran:?}");
     x.wait_for("shell 1 keeps its typed text");
+    x.send(F12); // the new shell has the focus
     x.quit();
 }
 

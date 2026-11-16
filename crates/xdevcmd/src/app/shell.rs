@@ -701,6 +701,12 @@ impl App {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;
         };
+        // A line that ends in Enter (Alt+C's cd, a user-menu command) never goes after
+        // text typed and not run: that text would run with it as more arguments (#1).
+        // Names typed for the user to finish do: adding to the line is what they are for.
+        if self.onto_typed_text(&s) && matches!(state, ShellState::Idle | ShellState::Unknown) {
+            return self.cd_beside_typed_text(s);
+        }
         let long = s.here.len() > crate::pane::term::LONG_LINE;
         let decision = crate::pane::term::decide_for(
             &state,
@@ -785,8 +791,59 @@ impl App {
         }));
     }
 
+    /// Whether `s` runs a line (ends in Enter) and its shell holds text typed and not run.
+    fn onto_typed_text(&self, s: &ShellSend) -> bool {
+        s.here.ends_with('\r')
+            && self
+                .panel_ref()
+                .and_then(|p| p.shell(s.target))
+                .is_some_and(crate::pane::TermPane::dirty)
+    }
+
+    /// A line to run, with text typed in the target shell: done in a new shell in the
+    /// directory (`new_shell`'s text typed there, if any), the typed text left where it
+    /// is; with no room for one, nothing, and the key that clears the line (#1).
+    fn cd_beside_typed_text(&mut self, s: ShellSend) {
+        let (n, before, room) = match self.panel_ref() {
+            Some(p) => (
+                p.tab_number(s.target).unwrap_or(1),
+                p.tab_count(),
+                p.shell_count() < self.settings.config.terminal.max_terminals,
+            ),
+            None => return,
+        };
+        if !room {
+            let r = crate::refusal::Refusal::Busy;
+            r.log();
+            self.status = if cfg!(unix) {
+                format!("Ctrl+C clears shell {n}'s line \u{2014} all shell tabs in use")
+            } else {
+                "close a shell tab \u{2014} all in use".into()
+            };
+            return;
+        }
+        let dir = xdevcmd_core::format::elide_middle(&tidy(&s.dir), 20);
+        let mut s = s;
+        if s.new_shell.is_some() {
+            // Said again when its text is typed there, which replaces this status.
+            s.what = format!("{} \u{2014} shell {n} keeps its typed text", s.what);
+        }
+        self.open_shell_for(s);
+        let after = self.panel_ref().map_or(before, TermPanel::tab_count);
+        if after > before {
+            crate::refusal::Refusal::DirtyLine.log();
+            self.status =
+                format!("new shell {after} in {dir} \u{2014} shell {n} keeps its typed text");
+        }
+    }
+
     /// Type `s` into its shell now, if that shell is still there.
     pub(super) fn send_here(&mut self, s: ShellSend) {
+        // Again here: text may have been typed while a question was open (S, "send to
+        // this shell", comes here too).
+        if self.onto_typed_text(&s) {
+            return self.cd_beside_typed_text(s);
+        }
         let Some(t) = self.panel_ref().and_then(|p| p.shell(s.target)) else {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;

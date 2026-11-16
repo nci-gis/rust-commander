@@ -238,6 +238,12 @@ pub fn make(root: &Path, s: Sizes) -> io::Result<()> {
     write_file(&big, 9_000_000, s.big)?;
     add("src", "big/big.bin".into(), s.big, &big)?;
     fs::create_dir(root.join("copy-to"))?;
+    // Check B on APFS, Btrfs or XFS: there the copy is a clone, whole at once, with no
+    // checkpoint to come back to. `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml`.
+    fs::write(
+        root.join("no-fast-copy.toml"),
+        "# xtask try: for check B where the copy would be a clone\n[general]\nfast_copy = false\n",
+    )?;
 
     let mut m = String::new();
     for l in &lines {

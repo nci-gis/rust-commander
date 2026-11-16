@@ -1,90 +1,127 @@
 # Testing by hand
 
-What the automated tests cannot reach: real USB sticks, network shares, a power cut,
-the look of a screen, and other people's real work. On each pre-release:
+For colleagues testing a pre-release: **Day 0** (about 45 minutes), then **a week** of
+your normal file work, then **what to send**. The maintainer's full list is at the end.
+Never use your only copy of anything: everything below happens in a sandbox folder.
 
-- **Check it yourself first** (anyone, ~30 minutes): the tests and the speed, on your
-  machine.
-- **First 10 minutes** and **a week of real use** (anyone).
-- **The full list** (the maintainer, before a pre-release is called good): sections 1–6,
-  data first.
+## Day 0
 
-Use scratch copies, never your only copy of anything. "✗" marks a bug: write down the
-system, the terminal and what happened.
+**1. Get three downloads** from [Releases](https://github.com/nci-gis/rust-commander/releases),
+for your system: this version's `xdevcmd-…` archive, the previous version's, and this
+version's `xdevcmd-bench-…` (it holds `xtask`, the sandbox and benchmark tool). Unpack
+each into a folder of its own. The builds are not signed: see
+[troubleshooting](troubleshooting.md#macos) ([Windows](troubleshooting.md#windows)) for
+the first start. About 4 GiB free disk.
 
-## Check it yourself first
-
-**The tests** (Rust 1.90+ and git; ~10 minutes). They work only in folders of their own
-under the system's temporary folder, never in yours.
-
-```bash
-git clone --depth 1 --branch v0.4.0-beta.2 https://github.com/nci-gis/rust-commander
-cd rust-commander
-cargo test --workspace --locked --no-fail-fast 2>&1 | tee xdevcmd-tests.log
-```
-
-(PowerShell: `… | Tee-Object xdevcmd-tests.log`.) Every `test result:` line should end
-`0 failed`; if not, send the log. Linux and macOS also drive xdevcmd in a real terminal
-(about 120 scenarios); Windows runs three of them.
-
-**The speed, on your drives** (no Rust; ~25 minutes): [Benchmarks](benchmark.md). The
-release's numbers are a reference; yours are what you will get.
-
-## First 10 minutes
-
-Six tasks on the previous version, then on this one, each scored 1 (no thought) to 5
-(gave up). Inputs, the same for everyone (Windows: Git Bash or WSL):
+**2. Turn the debug log on for the week** (it holds no file, folder, user or host name;
+the five newest sessions' logs are kept):
 
 ```bash
-mkdir -p ~/xdc-try && cd ~/xdc-try
-yes 'a line of a big log, 2026-11-17 12:00:00 INFO something happened' | head -c 1572864000 > big.log   # 1.5 GiB
-mkdir -p many && (cd many && seq -w 1 200000 | xargs touch)
-mkdir -p tree && for d in $(seq 1 100); do mkdir -p tree/d$d; (cd tree/d$d && seq 1 1000 | xargs touch); done
-mkdir -p copy-to
+echo 'export XDEVCMD_DEBUG=all' >> ~/.zshrc     # macOS; ~/.bashrc on Linux
+```
+```powershell
+setx XDEVCMD_DEBUG all                         # Windows: in new windows
 ```
 
-1. **Open the log**: F3 on `big.log`; End; search (`/`) for `INFO`. Esc.
-2. **Open the big folder and leave**: Enter on `many`, then Esc at once (or `..`).
-3. **Read the plan**: `tree` on one side, `copy-to` on the other; F5 and read the dialog.
-   Enter.
-4. **Kill a copy and come back**: F5 `tree` into `copy-to` again (choose replace);
-   while it runs, `kill -9` xdevcmd (Windows: Task Manager → End task). Start it again,
-   Enter to continue, then Ctrl+Z to undo the copy.
-5. **Delete and take it back**: F8 on a file, Enter; Ctrl+Z.
-6. **Find a command**: F1, type `sync`, Enter.
+**3. Make the sandbox** in a folder of your choice (`--small` on a slow disk: 400 MiB):
 
-**Lost or wrong file** (gone, short, empty, or not the one you chose): stop and report it
-the same day as P0. Before starting xdevcmd again, copy the debug log and the state
-folder ([troubleshooting](troubleshooting.md#sending-a-log-with-a-report)); keep the
-trash.
+```bash
+/path/to/xdevcmd-bench-…/xtask try --make         # Windows: …\xtask.exe try --make
+```
+
+It makes `xdevcmd-try/`: `big.log`, `many/` (100,000 names), `tree/`, `replace-src/`
+and `replace-dst/` (the same names, the destination older), `big/big.bin` (1 GiB) and an
+empty `copy-to/`. Start xdevcmd on it: `/path/to/xdevcmd xdevcmd-try xdevcmd-try/copy-to`.
+
+**On a Mac**: F-keys need Fn (or "Use F1, F2, etc. keys as standard function keys" in
+System Settings → Keyboard); End is Fn+→; for Alt+ keys, Terminal → Settings → Profiles
+→ Keyboard → "Use Option as Meta key".
+
+**4. Six tasks, scored**, with the previous version, then with this one: 1 (no thought)
+to 5 (gave up).
+
+1. F3 on `big.log`; End; `/` and search for `INFO`; Esc.
+2. Enter on `many`, then Esc at once.
+3. On `tree`: F5 and read the plan; Esc (nothing copied).
+4. F8 on a file in `replace-dst`, Enter; Ctrl+Z puts it back.
+5. F1, type `sync`, Enter; Esc.
+6. Anything you looked for and did not find: note it.
+
+**5. Three data checks, this version only.** To kill xdevcmd, from another terminal:
+`pkill -9 xdevcmd` (macOS, Linux) or `Stop-Process -Name xdevcmd -Force` (PowerShell).
+After each, `xtask try --check` must end **no file lost or wrong**.
+
+| | Do | You should see |
+|---|---|---|
+| A | In `replace-src`, Ctrl+A, F5 into `replace-dst`; choose **replace**; kill it mid-way. Start again: Enter | "ended in the middle of a job"; it finishes without asking again |
+| B | F5 `big` into `copy-to`; kill it past 30 %. Start again: Enter | "kept part way"; the bar starts near where it stopped |
+
+On a Mac (and Linux on Btrfs or XFS) the copy of B is a clone, done at once: start
+xdevcmd for B with `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml` before its path.
+| C | F5 `tree` into `copy-to`; kill it mid-way. Run `xtask try --tamper`. Start again: **C** | "1 found different … copied again" |
+
+**6. Clean up**: `xtask try --clean`. What the checks sent to the trash stays there.
+
+**Lost or wrong file**, now or in the week (gone, short, empty, or not the one you
+chose): stop and report it the same day as P0. Before starting xdevcmd again, copy the
+debug log and the state folder ([troubleshooting](troubleshooting.md#sending-a-log-with-a-report));
+keep the trash.
+
+**Optional**: the speed on your own drives, unattended, any day: [Benchmarks](benchmark.md).
+With Rust 1.90+, the automated tests at this version's tag:
+`cargo test --workspace --locked --no-fail-fast` ([Development](development.md)).
 
 ## A week of real use
 
-1. **Get it.** Pre-releases are on
-   [Releases](https://github.com/nci-gis/rust-commander/releases), marked Pre-release:
-   one program to unpack, nothing to install. The builds are not signed: macOS and
-   Windows warn the first time, see [troubleshooting](troubleshooting.md#macos)
-   ([Windows](troubleshooting.md#windows)). To check a download is the real one:
-   [security.md, "Checking a download"](security.md#checking-a-download).
-2. **Use it** for your normal file work, where you would use Explorer, Finder, mc or
-   Total Commander. **F1** lists every command and its key, found by typing; **F10**
-   quits. Worth doing in the week, in any order:
-   - copy and move folders between the panes (F5, F6), one of them onto a folder that
-     already has some of the same files: read the table before Enter;
-   - delete to the trash (F8), then undo (Ctrl+Z);
-   - view a large log (F3), edit a file (F4);
-   - the shell panel: F12 in and out, Alt+T shows or hides it, Alt+C sends the pane's
-     folder to the shell, Alt+G brings the shell's folder to the pane;
-   - compare (Alt+K) or synchronise (Alt+Y) two folders; find by name and content
-     (Alt+F7);
-   - a USB stick or a network share, if you have one;
-   - note anything you looked for and did not find, or a key you expected to work.
-3. **Two data checks** (15 minutes, scratch folders): 1.1 (kill a copy) and 1.4 (a
-   checked continue) below.
-4. **Tell us**, as [What to send](#what-to-send) says, including "nothing went wrong in a
-   week": a comment on the release is enough.
+Use it for your normal file work, where you would use Explorer, Finder, mc or Total
+Commander. **F1** finds every command by typing; **F10** quits. Worth doing in the week:
+copy and move folders onto folders that share some names (read the table before
+Enter); F8 and Ctrl+Z; F3 on large logs, F4; the shell (F12, Alt+C, Alt+G); compare
+(Alt+K) and sync (Alt+Y); find (Alt+F7); a USB stick or a share if you have one.
 
-## 1. Data survives what goes wrong
+## What to send
+
+At the end of the week, one comment on the release page (nothing wrong is worth
+sending too):
+
+```text
+version:      xdevcmd --version
+system/shell: e.g. Windows 11, pwsh 7.4, Windows Terminal
+lost data:    no (if yes: what you did, and is it in the trash?)
+friction:     1–5 for each of the six tasks, the previous version / this one
+checks A–C:   the last lines of each `xtask try --check`
+refusals:     any time xdevcmd refused something it should have done, and when
+attached:     the debug logs; bench/results/*.json if you ran the benchmark
+```
+
+And one [issue](https://github.com/nci-gis/rust-commander/issues) per problem, as it
+happens. Say the system and version
+(`xdevcmd --version`), the terminal and shell, what you did and what you saw, and Help →
+Usage's lines (start-up, terminal). For a copy, a move or a crash, attach a debug log:
+[troubleshooting, "Sending a log with a report"](troubleshooting.md#sending-a-log-with-a-report).
+It holds no file, folder, user or host name.
+
+Never paste file names, paths or contents you would not share in public; describe them
+("a folder of 3,000 small files on a network share").
+
+Put the level in the title:
+
+| Level | When |
+|---|---|
+| **P0** | Data lost, the wrong file touched, a file short or empty under its real name |
+| **P1** | A crash or hang, cannot quit, the terminal left broken |
+| **P2** | A wrong or misleading screen or doc |
+| **P3** | Cosmetic |
+
+A P0 or P1 holds the release until it is fixed, so send it even when unsure.
+
+## For the maintainer: the full list
+
+Before a pre-release is called good, on real hardware the CI cannot reach. "✗" marks a
+bug. Most of what is not here runs in CI on every system (render.rs, the engine's
+tests) or, on Linux and macOS, in a real terminal (pty.rs).
+
+### 1. Data survives what goes wrong
 
 1. **Kill a copy that replaces files.** Two folders with the same file names, the
    destination's files older. F5, choose **replace** for the older ones, and while it
@@ -101,9 +138,10 @@ trash.
    - ✗ the job says done; a file under its real name with the wrong size.
 3. **A big copy, killed past a checkpoint.** Copy a file of 1 GB or more, kill
    xdevcmd (`kill -9`, or close the terminal window) once the bar is past 30 %. Start
-   again.
+   again. Copy to another drive, or with `[general] fast_copy = false`: on the same
+   APFS, Btrfs or XFS volume the copy is a clone, instant, with no checkpoint.
    - The dialog says "kept part way"; Continue's bar starts near where it stopped, and
-     the copy is the same as the source (`cmp`, or `fc /b` on Windows).
+     the copy is the same as the source (`cmp`; on Windows `fc.exe /b`).
    - ✗ the bar starts at 0 %, or the copy differs.
 4. **A checked continue (C).** As in 3 but with a folder of small files: kill
    xdevcmd mid-way, then overwrite one finished copy with zeros of the same size and
@@ -119,14 +157,14 @@ trash.
    server; sshfs: kill the ssh connection). Copy a large file onto it.
    - The job box shows "network error — trying again in 1 s (1 of 5)", counting down.
      Bring the share back within about 30 s: the copy finishes by itself. Leave it
-     down: after the fifth try, "Retry / Skip / Stop", saying it tried 6 times. Esc
+     down: after the fifth try, the Failed dialog (R retry, S skip, Esc abort), saying it tried 6 times. Esc
      during a wait stops at once.
    - ✗ the job fails at once without trying again; it never asks; Esc waits for the
      countdown.
 7. **A hard NFS mount whose server is gone**: the job may hang inside the system;
    Esc stops it once that call returns. Note how long it took.
 
-## 2. Undo, and the trash
+### 2. Undo, and the trash
 
 1. **Undo a copy.** F5 a folder of a few files, then Ctrl+Z, Enter.
    - It asks "Undo the copy of …?" and lists what it will remove. After it, the copies
@@ -139,14 +177,14 @@ trash.
      copy said "ℹ a file replaced goes to the trash: Ctrl+Z brings it back".
    - On Linux: any disk, a USB stick too. On macOS: a local disk and a USB stick. On
      Windows: the system drive (C:) only.
-4. **Where there is no trash**: a network share, and on Windows any drive but the
-   system drive. The table marks a replace ⚠ and its default is skip.
+4. **Where there is no trash**: on macOS and Windows a network share, and on Windows
+   any drive but the system drive (Linux makes a `.Trash-<uid>` on any writable mount). The table marks a replace ⚠ and its default is skip.
    - ✗ a replace there that claims to go to the trash.
 5. **F8 on a Windows USB stick.** Delete a file with F8 (to the Recycle Bin).
    - Note what Windows does: asks to delete for good, or deletes. Either is to be
      written down; a silent delete for good would be a bug to report.
 
-## 3. Before a copy: the plan
+### 3. Before a copy: the plan
 
 1. **The table.** Copy a folder onto one that has some of the same files, newer and
    older and of another size.
@@ -166,7 +204,7 @@ trash.
 6. **A big tree** (100,000 files or more): the dialog opens at once, the count grows,
    and the memory in Help → Usage stays reasonable.
 
-## 4. While it runs
+### 4. While it runs
 
 1. **The time left**: a copy of a few GB to a USB stick. After a few seconds the job box
    says "about N min left"; it should be roughly right, not swing wildly.
@@ -174,7 +212,7 @@ trash.
 2. **Lists follow a move**: Alt+F7 a search, F6 one of the results elsewhere. The row
    stays in the list, under its new place.
 
-## 5. Start-up and the screen
+### 5. Start-up and the screen
 
 1. **Start-up time**: `xdevcmd --timings` (or Help → Usage). Note the total and the
    "terminal check" step on each terminal you use: on a local terminal the whole start
@@ -184,10 +222,7 @@ trash.
    left, in Windows Terminal (cmd, PowerShell), Terminal.app, iTerm2, GNOME Terminal,
    kitty, tmux and over SSH. Vietnamese and CJK names in each.
 
-3. **Numbers**: the copy benchmark on your own machine, as
-   [Benchmarks](benchmark.md) says, once on each system you have.
-
-## 6. Each system and terminal
+### 6. Each system and terminal
 
 What the automated tests run only on Linux, or only as a screenshot.
 
@@ -208,8 +243,9 @@ What the automated tests run only on Linux, or only as a screenshot.
    - ✗ the screen stops answering, or Esc does nothing.
 5. **Japanese names**: a folder of them on Windows, and the same folder copied from a
    Mac (macOS writes some names decomposed). Both sort the same and copy back intact.
-6. **F1 Commands** in macOS Terminal.app (Alt+1 without Option as Meta), Windows
-   Terminal and a Linux terminal: it opens, finds by typing, runs with Enter.
+6. **F1 Commands** in macOS Terminal.app, Windows Terminal and a Linux terminal: it
+   opens, finds by typing, runs with Enter; Alt+1…9 run its rows only where Option is
+   Meta (Terminal.app: off by default).
 7. **The light theme** in Terminal.app (256 colours, a light profile) and a light Linux
    terminal: readable, the focused frame clear. With 16 colours, on a real light palette,
    the two cursor rows are the same grey and marked, archive and error files are all
@@ -225,40 +261,3 @@ What the automated tests run only on Linux, or only as a screenshot.
     beside the program and the link at this version's tag. The link opens on GitHub;
     copying it works in a real terminal (it goes through the terminal, OSC 52), and
     through a symlinked program (as Homebrew installs it).
-
-## What to send
-
-At the end of the week, one comment on the release (nothing wrong is worth sending too):
-
-```text
-version:      xdevcmd --version
-system/shell: e.g. Windows 11, pwsh 7.4, Windows Terminal
-lost data:    no (if yes: what you did, and is it in the trash?)
-friction:     1–5 for each of the six tasks above, this version and the previous one
-refusals:     any time xdevcmd refused something it should have done, and when
-debug log:    attached (XDEVCMD_DEBUG=all all week), plus the test log and bench
-              results if you ran "Check it yourself first"
-```
-
-One [issue](https://github.com/nci-gis/rust-commander/issues) per problem: anything
-marked ✗, or anything that surprised you. Say the system and version
-(`xdevcmd --version`), the terminal and shell, what you did and what you saw, and Help →
-Usage's lines (start-up, terminal). For a copy, a move or a crash, attach a debug log:
-[troubleshooting, "Sending a log with a report"](troubleshooting.md#sending-a-log-with-a-report).
-It holds no file, folder, user or host name.
-
-Never paste file names, paths or contents you would not share in public; describe them
-("a folder of 3,000 small files on a network share").
-
-Put the level in the title:
-
-| Level | When |
-|---|---|
-| **P0** | Data lost, the wrong file touched, a file short or empty under its real name |
-| **P1** | A crash or hang, cannot quit, the terminal left broken |
-| **P2** | A wrong or misleading screen or doc |
-| **P3** | Cosmetic |
-
-A P0 or P1 holds the release until it is fixed, so send it even when unsure.
-
-**Next:** the speed on your own drives, [Benchmarks](benchmark.md).

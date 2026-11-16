@@ -32,10 +32,10 @@ that heading and starts a new, empty one here. -->
   your machine); the guide says what a copy keeps, and what to use instead (rsync,
   robocopy, rclone).
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
-- **The benchmark ships with each release** (`xdevcmd-bench-<version>-<target>`, Linux,
-  macOS, Windows): measure on your own drives without Rust. See Benchmarks.
-- **Check it yourself first**: Testing by hand says how to run the tests at a tag and
-  the benchmark on your machine, and adds "First 10 minutes".
+- **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
+  target): `xtask bench` measures your own drives, and `xtask try` makes a sandbox
+  whose copies it then checks file by file (PASS / FAIL). No Rust needed. See Testing
+  by hand ("Day 0") and Benchmarks.
 
 ### Changed
 - **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not

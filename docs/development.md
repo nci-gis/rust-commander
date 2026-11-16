@@ -73,15 +73,41 @@ budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
 the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
 **On another machine or drive.** `--only CASE` runs just the cases whose name holds
-`CASE`, with no build and no start-up cases, so the `xtask` program from the bench
-workflow's artifacts runs on a machine without Rust. `--dir PATH` makes the trees on the
+`CASE`, with no build and no start-up cases, so a copy of `xtask` runs on a machine
+without Rust: a release's `xdevcmd-bench-<tag>-<target>`, or, for code not released
+yet, Actions → bench → Run workflow (or a push to a `bench/<name>` branch) and the run's
+artifacts `xtask-Linux`, `xtask-macOS`, `xtask-Windows` (bare binaries: `chmod +x`;
+kept 14 days). `--dir PATH` makes the trees on the
 drive being measured instead of the temporary directory. Away from the source, results
 go to `bench/results/` where it was started; with `XDEVCMD_DEBUG`, each run's jobs are
 logged in `bench/results/debug-<host>-<date>/<case>/`. `XDEVCMD_BENCH_FAST=0` turns the
 platform's fast copy off, to measure xdevcmd's own loop where the fast copy is a clone.
 
-How to measure on macOS, Windows and Linux so the numbers can be compared, and what to
-send back: [Running the benchmarks](benchmark.md).
+**Two versions on one machine.** Each version's `xtask` in its own folder, the same
+names for both. `--save-baseline` writes `bench/baseline-<host>.json` whole, so one
+`--host` per case:
+
+```bash
+cd old        # the older version's xtask
+./xtask bench --only plan  --host mine-plan  --save-baseline
+./xtask bench --only list  --host mine-list  --save-baseline
+./xtask bench --only mixed --host mine-mixed --save-baseline
+mkdir -p ../new/bench && cp bench/baseline-*.json ../new/bench/
+cd ../new     # each line now says how far it moved (◀ past 15 %)
+./xtask bench --only plan  --host mine-plan
+./xtask bench --only list  --host mine-list
+./xtask bench --only mixed --host mine-mixed
+```
+
+Then the other way round (the newer as the baseline) before believing a small change:
+a busy minute shows as one.
+
+**The tester's sandbox.** `xtask try --make | --check | --tamper | --clean` (in the same
+archive) makes the folder that [Testing by hand](testing-by-hand.md) uses, with a
+SHA-256 manifest, so a tester's copies are checked file by file; `--clean` removes only
+a folder named `xdevcmd-try` holding its marker.
+
+How a tester measures on macOS, Windows and Linux: [Benchmarks](benchmark.md).
 
 ## Fuzzing
 

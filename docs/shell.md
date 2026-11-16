@@ -86,15 +86,8 @@ xdevcmd never types into a running program. Alt+C, Alt+Enter and your own comman
   seconds, the shell stays open and nothing is typed (the status line says so).
 - **"Typed and not run"** means any key since your last Enter or Ctrl+C (Linux, macOS);
   a line ending in `\` counts. After `q` in less, or erased text, press Enter once.
-- **An unfinished line**: at the shell's continuation prompt (`> ` after an open quote,
-  a here-doc or a `for` without its end; zsh's `dquote> `, `heredoc> `), Alt+C and your
-  commands go to a new shell, and names (Alt+Enter) are not typed: a name like `$(…)`
-  would run once the quote or here-doc is closed. A custom `PS2` is not recognised: press
-  Ctrl+C there first.
-- **Not seen**: a program built into the shell that reads a line, such as bash's
-  `read -s` password prompt; the shell looks idle, and Alt+C would be typed as its
-  answer. The prompt marks ([below](#telling-xdevcmd-where-the-shell-is)) show it as
-  busy.
+  Not seen: an open quote or an unfinished `for … end` (the command lands inside it,
+  harmlessly).
 - **With every shell tab in use**, nothing is typed and the status line says to press
   Ctrl+C there.
 - **Refused before any question**: a name with a control character, or one your shell

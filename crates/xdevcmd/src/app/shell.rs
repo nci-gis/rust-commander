@@ -800,14 +800,6 @@ impl App {
                 .is_some_and(crate::pane::TermPane::dirty)
     }
 
-    /// The tab number of `s`'s shell when `s` types without running (names) and that
-    /// shell waits at a continuation prompt.
-    fn into_unfinished_line(&self, s: &ShellSend) -> Option<usize> {
-        let p = self.panel_ref()?;
-        let t = p.shell(s.target)?;
-        (!s.here.ends_with('\r') && t.unfinished()).then(|| p.tab_number(s.target).unwrap_or(1))
-    }
-
     /// A line to run, with text typed in the target shell: done in a new shell in the
     /// directory (`new_shell`'s text typed there, if any), the typed text left where it
     /// is; with no room for one, nothing, and the key that clears the line (#1).
@@ -851,15 +843,6 @@ impl App {
         // this shell", comes here too).
         if self.onto_typed_text(&s) {
             return self.cd_beside_typed_text(s);
-        }
-        // Names typed (no Enter) at a continuation prompt land inside an open quote or
-        // here-doc, where a name like `$(…)` runs once it is closed (QA 2026-11-17).
-        if let Some(n) = self.into_unfinished_line(&s) {
-            crate::refusal::Refusal::DirtyLine.log();
-            self.status = format!(
-                "shell {n}'s line is not finished (> ) \u{2014} nothing typed; Ctrl+C clears it"
-            );
-            return;
         }
         let Some(t) = self.panel_ref().and_then(|p| p.shell(s.target)) else {
             self.status = "that shell is gone \u{2014} nothing typed".into();

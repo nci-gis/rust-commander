@@ -2484,6 +2484,74 @@ fn alt_c_does_not_type_into_a_program_the_shell_execed() {
     x.quit();
 }
 
+/// The user menu types its command and Enter through the same door: onto a line typed
+/// and not run, `touch made` became `touch madeecho GOT …` (red-team of #1).
+#[test]
+fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
+    let s = Scratch::new("menu-dirty");
+    s.file("left/f.txt", "x");
+    s.file(
+        "config.toml",
+        "[[menu]]\nkey = \"e\"\nlabel = \"say it\"\ncommand = \"echo GOT %s DONE\"\n",
+    );
+    let flag = format!("--config={}", s.0.join("config.toml").display());
+    let mut x = Session::start_flags(&s, &[&flag]);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made");
+    x.wait_for("$ touch made");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(b"\x1b[20;2~"); // Shift+F9
+    x.wait_for("say it");
+    x.send(b"e");
+    std::thread::sleep(Duration::from_millis(1200));
+    let ran: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name().is_some_and(|n| {
+                let n = n.to_string_lossy();
+                n.starts_with("made") || n == "GOT" || n == "DONE"
+            })
+        })
+        .collect();
+    assert!(ran.is_empty(), "the typed line ran: {ran:?}");
+    x.wait_for("shell 1 keeps its typed text");
+    x.quit();
+}
+
+/// A line continued with `\` and Enter has not run: the shell waits at `> ` for the
+/// rest, and Alt+C's cd would be the rest (red-team of #1: `rm -rf ~/old \` then Alt+C
+/// removes the pane's directory).
+#[cfg(unix)]
+#[test]
+fn alt_c_after_a_continued_line_opens_a_new_shell() {
+    let s = Scratch::new("ps2");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made \\\r");
+    x.wait_for("> ");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.send(ALT_C);
+    std::thread::sleep(Duration::from_millis(1200));
+    let ran: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name().is_some_and(|n| {
+                let n = n.to_string_lossy();
+                n.starts_with("made") || n == "cd"
+            })
+        })
+        .collect();
+    assert!(ran.is_empty(), "the continued line ran: {ran:?}");
+    x.wait_for("shell 1 keeps its typed text");
+    x.quit();
+}
+
 #[test]
 fn with_sending_without_asking_off_alt_c_asks_and_s_sends() {
     let s = Scratch::new("ask3");

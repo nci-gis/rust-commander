@@ -189,5 +189,5 @@ until beta.2 is cut (its step 9). 029–031 were already Complete (2026-11-13).
 ## 2026-11-17: ROADMAP item 2 points at the renamed test page
 
 **Source**: the owner, 2026-11-17 ("mình approve bro sửa nhé … ROADMAP item 2 thành `how-to-test.md`").
-**What**: `plan/ROADMAP.md` item 2 now names `docs/how-to-test.md` (renamed from `docs/testing-by-hand.md` in PR #32; the maintainer's list moved to `docs/development.md`). One path, nothing else.
+**What**: `plan/ROADMAP.md` item 2 now names `docs/development.md#testing-a-pre-release-by-hand`, where the owner's hand-test list moved in PR #32 (`docs/testing-by-hand.md` became the tester page `docs/how-to-test.md`). First set to `how-to-test.md`, then corrected the same day (owner: "okay, duyệt bro correct lại nhé"). One path, nothing else.
 **Promoted by**: XDevTeam. Written by Claude Code.

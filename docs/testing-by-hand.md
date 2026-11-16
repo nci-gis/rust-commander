@@ -2,9 +2,11 @@
 
 What the automated tests cannot reach: real USB sticks, real network shares, a pulled
 cable, a real power cut, the look of a screen, and people other than the author using it
-for real work. Two ways to help, on each pre-release (beta, release candidate):
+for real work. Three ways to help, on each pre-release (beta, release candidate):
 
-- **A week of real use** (anyone): the next section. No extra time beyond your normal
+- **Check it yourself first** (anyone, about 30 minutes): the automated tests and the
+  speed, on your own machine. What the release notes claim, seen rather than believed.
+- **A week of real use** (anyone): after that. No extra time beyond your normal
   file work, plus two checks of 15 minutes.
 - **The full list** (the maintainer, before a pre-release is called good): sections 1–6,
   ordered by what would hurt most if wrong: data first.
@@ -14,6 +16,43 @@ safe for your only copy.
 
 Each check says how to set it up and what you should see. "✗" marks what would be a
 bug; write down the system, the terminal and what happened.
+
+## Check it yourself first
+
+Two steps, each on a machine of yours, each writing a log you can read and send.
+
+**1. The automated tests, at the release's tag** (needs [Rust](https://rustup.rs) 1.90
+or later and git; about 10 minutes):
+
+```bash
+git clone --depth 1 --branch v0.4.0-beta.2 https://github.com/nci-gis/rust-commander
+cd rust-commander
+cargo test --workspace --locked --no-fail-fast 2>&1 | tee xdevcmd-tests.log
+```
+
+On Windows, in PowerShell, the last line is
+`cargo test --workspace --locked --no-fail-fast 2>&1 | Tee-Object xdevcmd-tests.log`.
+
+- **What runs where.** Everywhere: the engine (copy, move, delete, undo, the journal
+  after a crash) and the screens, driven by keys. Linux and macOS also run xdevcmd itself
+  in a terminal, about 120 scenarios typed as a person would (`tests/pty.rs`): a
+  half-typed command and Alt+C, a copy killed and resumed, F8 and undo. Windows runs
+  three in a real console (start-up, a command in the shell, xdevcmd inside its own
+  panel); the rest is a known gap.
+- **What it touches.** Only folders it makes under the system's temporary folder, each
+  with its own config, session and journal; never your files or your settings. On Linux
+  the trash is the test's own too; the tests that would use the real trash run on Linux
+  only.
+- **Reading it.** Each `test result:` line ends `0 failed`. Anything else: send the log
+  (it holds the test names, the temporary paths and your OS version, nothing else).
+
+**2. The speed, on the drives you use** (no Rust; about 25 minutes, unattended): the
+copy, list and plan benchmarks of [Benchmarks](benchmark.md), run on your machine. The
+numbers in the release notes come from the developers' machines and CI: a reference,
+not yours. Each case makes its own files from a fixed recipe in a folder of its own and
+removes it; it never reads your files. For each drive you care about, add
+`--dir <a folder on it>`; [Benchmarks](benchmark.md) has every system's steps, and how
+to compare this version with the last one on the same machine.
 
 ## A week of real use
 

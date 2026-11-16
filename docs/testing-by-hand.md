@@ -54,6 +54,37 @@ removes it; it never reads your files. For each drive you care about, add
 `--dir <a folder on it>`; [Benchmarks](benchmark.md) has every system's steps, and how
 to compare this version with the last one on the same machine.
 
+## First 10 minutes
+
+Six tasks, first on the previous version, then on this one, each scored for friction
+from 1 (did it without thinking) to 5 (gave up). The same inputs for everyone, made in a
+scratch folder (Linux and macOS; on Windows, Git Bash or WSL):
+
+```bash
+mkdir -p ~/xdc-try && cd ~/xdc-try
+yes 'a line of a big log, 2026-11-17 12:00:00 INFO something happened' | head -c 1572864000 > big.log   # 1.5 GiB
+mkdir -p many && (cd many && seq -w 1 200000 | xargs touch)
+mkdir -p tree && for d in $(seq 1 100); do mkdir -p tree/d$d; (cd tree/d$d && seq 1 1000 | xargs touch); done
+mkdir -p copy-to
+```
+
+1. **Open the log**: F3 on `big.log`; End; search (`/`) for `INFO`. Esc.
+2. **Open the big folder and leave**: Enter on `many`, then Esc at once (or `..`).
+3. **Read the plan**: `tree` on one side, `copy-to` on the other; F5 and read the dialog.
+   Enter.
+4. **Kill a copy and come back**: F5 `tree` into `copy-to` again (choose replace);
+   while it runs, `kill -9` xdevcmd (Windows: Task Manager → End task). Start it again,
+   Enter to continue, then Ctrl+Z to undo the copy.
+5. **Delete and take it back**: F8 on a file, Enter; Ctrl+Z.
+6. **Find a command**: F1, type `sync`, Enter.
+
+Write down, per task, the score and anything that surprised you.
+
+**Lost or wrong file** (a file gone, short, empty, or touched that you did not choose):
+stop, and report it the same day as P0. Before you start xdevcmd again, copy the debug
+log and the state folder ([troubleshooting](troubleshooting.md#sending-a-log-with-a-report)),
+and do not empty the trash.
+
 ## A week of real use
 
 1. **Get it.** Pre-releases are on
@@ -223,6 +254,19 @@ What the automated tests run only on Linux, or only as a screenshot.
     through a symlinked program (as Homebrew installs it).
 
 ## What to send
+
+At the end of the week, one comment on the release with these six lines (a week with
+nothing wrong is worth sending too):
+
+```text
+version:      xdevcmd --version
+system/shell: e.g. Windows 11, pwsh 7.4, Windows Terminal
+lost data:    no (if yes: what you did, and is it in the trash?)
+friction:     1–5 for each of the six tasks above, this version and the previous one
+refusals:     any time xdevcmd refused something it should have done, and when
+debug log:    attached (XDEVCMD_DEBUG=all all week), plus the test log and bench
+              results if you ran "Check it yourself first"
+```
 
 One [issue](https://github.com/nci-gis/rust-commander/issues) per problem: anything
 marked ✗, or anything that surprised you. Say the system and version

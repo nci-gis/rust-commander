@@ -59,8 +59,8 @@ scrollback = 5000         # lines of history each shell keeps (100-9999), for th
                           # and Shift+F12; at most lines × columns × 32 bytes
                           # (Settings shows it); applies to shells started after a change
 send_when_idle = true     # Alt+C, typed names and the user menu go to a shell surely
-                          # at its prompt without asking; false asks every time
-                          # (docs/shell.md)
+                          # at its prompt, with nothing typed since the last Enter,
+                          # without asking; false asks every time (docs/shell.md)
 follow = false            # the file pane used last goes where the shell's cd goes, at
                           # the prompt only; never the other way (docs/shell.md)
 

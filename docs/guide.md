@@ -162,7 +162,8 @@ tool's own documentation says how to mount and unmount; xdevcmd's user menu (Shi
   only on **Y** (or a click on its button), never on Enter.
 - **F5** / **F6** look before they start: the dialog opens at once and checks the
   destination while you read it (files already there, newer or older, a file where a
-  folder is, names that differ only in case where the drive ignores case, names or
+  folder is (skipped: a file never replaces a folder, nor the reverse), names that
+  differ only in case where the drive ignores case, names or
   sizes the drive cannot take, free space, whether you can write there).
   - **Nothing to decide**: the dialog is the plain one, with **U** for what happens to
     a file that turns up during the job: ask about each (the default); replace it only
@@ -334,7 +335,10 @@ command, typed into the terminal for you.
   **!** until you stop it; it never carries on with a gap. F1 has both as rows
   ("log tab"), acting on the active tab. Off in the read-only modes. A log keeps
   everything the shell prints: see [security.md](security.md#the-shell-panel).
-- **Alt+C** sends the current directory to the shell (`cd`).
+- **Alt+C** sends the current directory to the shell (`cd`). With text typed at the
+  prompt and not run, it opens a new shell there instead, and leaves your line alone.
+- **Ctrl+O** (the shell in mc) says the shell is F12. In the shell the F-key bar is
+  hidden: its keys are the shell's there.
 - **Alt+T** hides or shows the terminal. `exit` closes one.
 - The wheel scrolls back through a shell's history. A full-screen program gets the
   wheel instead: as the mouse if it asked for it (Claude Code, vim, htop), otherwise as

@@ -223,6 +223,19 @@ impl App {
             }
         }
         let action = self.settings.keymap.action_for(k);
+        // Ctrl+O is the shell in Midnight Commander: unbound here, it said nothing, a
+        // dead end for the first thing an mc user tries (plan A10, UX).
+        if action.is_none()
+            && !self.focus_is_term()
+            && k.code == KeyCode::Char('o')
+            && k.modifiers == KeyModifiers::CONTROL
+        {
+            let key = self
+                .footer_key(Action::FocusTerminal)
+                .unwrap_or_else(|| "F12".into());
+            self.status = format!("the shell is {key} (Ctrl+O in mc)");
+            return;
+        }
         // Esc in a filtered pane shows everything again: a filter left on is files you
         // cannot see, so taking it off should be the most obvious key there is.
         if action.is_none() && k.code == KeyCode::Esc && !self.focus_is_term() {

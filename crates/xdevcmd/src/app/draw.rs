@@ -530,6 +530,16 @@ impl App {
         if area.height == 0 {
             return;
         }
+        // In the shell the F-keys are the shell's: a bar saying "8 Del" there lies, and
+        // a click on it acted on the files behind (plan A10, UX). The status line above
+        // says how back (F12).
+        if self.focus_is_term() {
+            frame
+                .buffer_mut()
+                .set_style(area, Style::new().bg(theme::t().bg_bar));
+            self.footer_hits.clear();
+            return;
+        }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still
         // says "5 Copy" is lying, and this is the line people look at most.
         // In F-key order, as in every orthodox manager. On a narrow screen the ones that

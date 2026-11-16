@@ -3607,6 +3607,63 @@ mod tests {
     /// Round 031: with a trash on the volume, a replaced file goes there, after the
     /// journal is on disk and before the rename; undo removes the new one and brings
     /// the old one back.
+    /// #5: a file never replaces a folder, nor a folder a file — not with "replace all",
+    /// not with Yes to the question, not in a move. Skipped, and the summary says why.
+    #[test]
+    fn a_file_never_replaces_a_folder_nor_the_reverse() {
+        journals();
+        let d = tmp("file-over-dir");
+        for (existing, answer, mv) in [
+            (Existing::Replace, Answer::Yes, false),
+            (Existing::Ask, Answer::Yes, false),
+            (Existing::Ask, Answer::YesToAll, false),
+            (Existing::Replace, Answer::Yes, true),
+        ] {
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(d.join("src/b")).unwrap();
+            fs::create_dir_all(d.join("to/a")).unwrap();
+            fs::write(d.join("src/a"), "a file").unwrap();
+            fs::write(d.join("src/b/in.txt"), "in").unwrap();
+            fs::write(d.join("to/a/keep.txt"), "kept").unwrap();
+            fs::write(d.join("to/b"), "a file there").unwrap();
+            let sources = vec![d.join("src/a"), d.join("src/b")];
+            let mut req = if mv {
+                Request::mv(sources, d.join("to"))
+            } else {
+                Request::copy(sources, d.join("to"))
+            };
+            req.trash_root = Some(d.join("trash"));
+            req.safe = true;
+            req.existing = existing;
+            let (s, _) = run_with(req, answer);
+            let case = format!("{existing:?} {answer:?} move={mv}: {s:?}");
+            assert_eq!(
+                fs::read_to_string(d.join("to/a/keep.txt")).unwrap(),
+                "kept",
+                "{case}"
+            );
+            assert_eq!(
+                fs::read_to_string(d.join("to/b")).unwrap(),
+                "a file there",
+                "{case}"
+            );
+            assert!(
+                d.join("src/a").is_file() && d.join("src/b/in.txt").is_file(),
+                "{case}"
+            );
+            assert!(s.skipped >= 2, "{case}");
+            assert!(
+                s.errors
+                    .iter()
+                    .filter(|e| e.contains("is a folder") || e.contains("is a file"))
+                    .count()
+                    >= 2,
+                "{case}"
+            );
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_replaced_file_goes_to_the_trash_first_and_undo_brings_it_back() {
         journals();

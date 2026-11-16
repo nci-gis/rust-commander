@@ -2374,6 +2374,94 @@ fn alt_c_does_not_type_into_a_pipeline_whose_first_program_ended() {
     xdevcmd.quit();
 }
 
+/// Text typed into the shell and not run: Alt+C added its `cd` and Enter to it, so the
+/// half-typed command ran with the directory as one more argument (#1, 2026-11-16;
+/// `rm -rf x` became `rm -rf xcd '…'`). It opens a new shell there instead.
+#[test]
+fn alt_c_never_adds_to_a_line_typed_and_not_run() {
+    let s = Scratch::new("dirty");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made");
+    x.wait_for("$ touch made");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(ENTER); // into sub
+    x.send(ALT_C);
+    // The disk first, because that is the harm; the message second.
+    std::thread::sleep(Duration::from_millis(800));
+    let made: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("made"))
+        })
+        .collect();
+    assert!(made.is_empty(), "the typed line ran: {made:?}");
+    x.wait_for("shell 1 keeps its typed text");
+    x.wait_for("\u{2302} 2");
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"pwd > where.txt\r");
+    wait_file(
+        &s.left().join("sub/where.txt"),
+        "the new shell's pwd",
+        |t| t.is_some_and(|t| t.trim_end().ends_with("sub")),
+    );
+    x.send(F12);
+    x.quit();
+}
+
+/// With every shell tab in use the new shell cannot open: nothing is typed, and the
+/// status names the key that frees the line (Ctrl+C), after which Alt+C types its cd.
+#[cfg(unix)]
+#[test]
+fn alt_c_with_a_typed_line_and_no_room_says_how_to_free_it() {
+    let s = Scratch::new("dirty-full");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let cfg = s.file("config.toml", "[terminal]\nmax_terminals = 1\n");
+    let cfg = cfg.to_str().unwrap().to_string();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made");
+    x.wait_for("$ touch made");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.send(ALT_C);
+    std::thread::sleep(Duration::from_millis(800));
+    let made: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("made"))
+        })
+        .collect();
+    assert!(made.is_empty(), "the typed line ran: {made:?}");
+    x.wait_for("Ctrl+C clears shell 1's line");
+    x.send(F12);
+    x.send(b"\x03"); // the refusal's next key
+    x.wait_for("$ ");
+    x.send(F12);
+    x.send(ALT_C);
+    x.wait_for("shell: cd");
+    x.send(F12);
+    x.send(b"pwd > here.txt\r");
+    wait_file(&s.left().join("sub/here.txt"), "pwd in sub", |t| {
+        t.is_some_and(|t| t.trim_end().ends_with("sub"))
+    });
+    x.send(F12);
+    x.quit();
+}
+
 #[test]
 fn with_sending_without_asking_off_alt_c_asks_and_s_sends() {
     let s = Scratch::new("ask3");

@@ -57,10 +57,27 @@ use std::sync::OnceLock;
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// Tests: this run ends for the journals under `dir`, so the next `recover_in` there
-/// is the next start's. (Nothing is held yet: red-team F1.)
+/// Journals this run offered and has not had an answer for, each with the probe that
+/// holds it (red-team F1): another start finds them alive, as it does a running job's,
+/// and does not offer the same job too. Let go by [`discard`] and [`forget`], or when
+/// this run ends.
+static HELD: std::sync::Mutex<Vec<(PathBuf, File)>> = std::sync::Mutex::new(Vec::new());
+
+/// Tests: this run ends for the journals under `dir`, as a quit lets go of them all, so
+/// the next `recover_in` there is the next start's.
 #[cfg(test)]
-fn next_start(_dir: &Path) {}
+fn next_start(dir: &Path) {
+    if let Ok(mut held) = HELD.lock() {
+        held.retain(|(p, _)| !p.starts_with(dir));
+    }
+}
+
+/// Let go of `journal`'s probe, if this run holds it.
+fn let_go(journal: &Path) {
+    if let Ok(mut held) = HELD.lock() {
+        held.retain(|(p, _)| p != journal);
+    }
+}
 
 /// Where journals go: a directory of their own in the state directory. Without it,
 /// there is no journal (nothing is recorded, nothing recovered).
@@ -486,12 +503,14 @@ pub fn discard(it: &Interrupted) {
         }
     }
     if let Some(j) = &it.journal {
+        let_go(j);
         let _ = fs::remove_file(j);
     }
 }
 
 /// A resumed job has its own journal, with the kept files in it: the old one goes.
 pub(crate) fn forget(journal: &Path) {
+    let_go(journal);
     let _ = fs::remove_file(journal);
 }
 
@@ -551,7 +570,7 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         let mut text = String::new();
         // Held until the journal is gone: another start at the same moment finds it
         // locked (alive, to it), or removed, and never offers the same job again.
-        let Some(_held) = claim(&path, &run, Some((&mut text, &host))) else {
+        let Some(held) = claim(&path, &run, Some((&mut text, &host))) else {
             continue;
         };
         // A run confined to a root (`--root`) touches nothing outside it: a journal
@@ -569,6 +588,9 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
             let _ = fs::remove_file(&path);
         } else {
             it.journal = Some(path.clone());
+            if let Ok(mut h) = HELD.lock() {
+                h.push((path.clone(), held));
+            }
         }
         out.push(it);
     }

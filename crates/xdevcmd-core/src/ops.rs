@@ -1639,7 +1639,15 @@ impl Worker {
             match identical(src, dst) {
                 Same::Dirs => return Some(true),
                 Same::Yes => {
-                    let differs = self.verify && src.is_some_and(|s| !self.same_bytes(s, dst));
+                    // Regular files only: a link is checked by its target (identical),
+                    // and opening one to a FIFO or a device blocks or never ends
+                    // (red-team F2). A check that Stop cut short repairs nothing (F4).
+                    let regular = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_file());
+                    let differs = self.verify
+                        && src.is_some_and(|s| {
+                            regular(s) && regular(dst) && !self.same_bytes(s, dst)
+                        })
+                        && !self.stopped();
                     if !differs {
                         return Some(false);
                     }

@@ -1131,6 +1131,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// C after an interruption checks the files the journal calls done as well: after a
+    /// power cut one can hold the wrong bytes with its source's size and date (#3).
+    /// Here on every system; pty.rs has the same through the keys, on Unix.
+    #[test]
+    fn a_checked_resume_repairs_a_file_the_journal_called_done() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-rcheck-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("one.txt"), "AAAA").unwrap();
+        std::fs::write(a.join("two.txt"), "b").unwrap();
+        std::fs::write(b.join("one.txt"), "ZZZZ").unwrap();
+        let date = std::fs::metadata(a.join("one.txt"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(b.join("one.txt"))
+            .unwrap()
+            .set_modified(date)
+            .unwrap();
+        let it = xdevcmd_core::journal::Interrupted {
+            kind: "copy".into(),
+            sources: vec![a.join("one.txt"), a.join("two.txt")],
+            dest: Some(b.clone()),
+            to_trash: false,
+            cleaned: 0,
+            restored: 0,
+            stranded: Vec::new(),
+            moved: Vec::new(),
+            decided: Vec::new(),
+            swapped: Vec::new(),
+            done: vec![a.join("one.txt")],
+            partial: Vec::new(),
+            journal: None,
+        };
+        let mut app = App::new(&a, &b, Settings::default(), Outcome::NoFile);
+        app.resume(it, true);
+        wait_until(&mut app, "two.txt copied", |_| b.join("two.txt").exists());
+        let repaired = || std::fs::read_to_string(b.join("one.txt")).unwrap() == "AAAA";
+        wait_until(&mut app, "one.txt repaired", |_| repaired());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn quitting_with_jobs_running_asks_first() {
         let root = std::env::temp_dir().join(format!("xdevcmd-bgq-{}", std::process::id()));

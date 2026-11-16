@@ -1781,6 +1781,52 @@ fn resume_from_app_does_not_replace_a_kept_newer_source_file() {
     x.quit();
 }
 
+/// After a power cut a file the journal calls done can hold the wrong bytes under its
+/// real name, with the size and date of its source. C checks every file the run wrote,
+/// the done ones too; it skipped them, so the wrong bytes stayed (#3, 2026-11-16).
+#[test]
+fn a_checked_resume_repairs_a_file_the_journal_called_done() {
+    let s = Scratch::new("resume-check");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "AAAA").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    std::fs::write(dst.join("a.txt"), "ZZZZ").unwrap();
+    let date = std::fs::metadata(src.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\ndone {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst),
+            hex(&src.join("a.txt")),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.send(b"c");
+    wait_file(&dst.join("b.txt"), "b copied", |c| {
+        c.as_deref() == Some("b")
+    });
+    wait_file(&dst.join("a.txt"), "a repaired", |c| {
+        c.as_deref() == Some("AAAA")
+    });
+    x.quit();
+}
+
 /// An interrupted permanent delete is cleaned up after but never offered again: one
 /// Enter would go on, where Shift+F8 itself takes only Y.
 #[cfg(unix)]

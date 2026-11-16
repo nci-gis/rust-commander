@@ -1421,6 +1421,37 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// A job the start offers again (a copy, a move, a delete to the trash) keeps its
+    /// journal until it is resumed or declined: Esc leaves it for the next start, as the
+    /// dialog says. Without a kept part it was removed at once, so Esc lost it (#3).
+    #[test]
+    fn a_job_offered_again_keeps_its_journal_until_answered() {
+        let d = dir("offered");
+        let jdir = d.join("j");
+        fs::create_dir_all(&jdir).unwrap();
+        let src = enc(&d.join("a"));
+        let dst = enc(&d.join("out"));
+        for (text, kept) in [
+            (format!("kind copy\nsrc {src}\ndest {dst}\n"), true),
+            (format!("kind move\nsrc {src}\ndest {dst}\n"), true),
+            (format!("kind delete\nsrc {src}\ntrash\n"), true),
+            (format!("kind delete\nsrc {src}\n"), false),
+            ("kind copy\n".to_string(), false),
+        ] {
+            orphan(&jdir, &text);
+            let got = recover_in(&jdir);
+            assert_eq!(got.len(), 1, "{text}");
+            assert_eq!(got[0].journal.is_some(), kept, "{text}");
+            let again = recover_in(&jdir);
+            assert_eq!(again.len(), usize::from(kept), "offered again: {text}");
+            if let Some(it) = again.first() {
+                discard(it);
+            }
+            assert_eq!(fs::read_dir(&jdir).unwrap().count(), 0, "{text}");
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn an_identity_reads_back_as_itself() {
         use crate::ops::Ident;

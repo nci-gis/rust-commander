@@ -438,6 +438,21 @@ mod tests {
         assert_eq!(add(0, vec![], vec![], "x"), None, "no such list");
     }
 
+    /// `find .` and `grep -rl x .` print `./src/main.rs`: a row, with the `.` gone; a
+    /// `..` in a line is still never a row, and a trailing slash goes (red-team of #2).
+    #[test]
+    fn a_dot_slash_line_is_a_row_and_a_dot_dot_one_is_not() {
+        let (rows, _, _) = tidy_rows([
+            PathBuf::from("/tmp/./src/main.rs"),
+            PathBuf::from("/tmp/src/../etc"),
+            PathBuf::from("/tmp/lib/"),
+        ]);
+        assert_eq!(
+            rows,
+            vec![PathBuf::from("/tmp/src/main.rs"), PathBuf::from("/tmp/lib")]
+        );
+    }
+
     #[test]
     fn rows_are_each_path_once_and_capped() {
         let many: Vec<PathBuf> = (0..ROWS + 5)

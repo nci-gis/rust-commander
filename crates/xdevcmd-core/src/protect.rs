@@ -245,6 +245,13 @@ mod tests {
         std::os::unix::fs::symlink(&real, other.join("real-home")).unwrap();
         assert_eq!(protected(&other.join("real-home"), &h), Some(Guarded::Home));
         assert_eq!(protected(&real.join("src"), &h), None);
+        // A trailing slash goes through a link: `link/` is the home, whatever the link
+        // is called (red-team of #2: remove_tree emptied the home through it).
+        let data = top.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::os::unix::fs::symlink(&real, data.join("link")).unwrap();
+        let through = PathBuf::from(format!("{}/", data.join("link").display()));
+        assert!(protected(&through, &h).is_some(), "{through:?}");
         let _ = std::fs::remove_dir_all(&top);
     }
 }

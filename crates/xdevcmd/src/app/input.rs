@@ -364,6 +364,8 @@ impl App {
         let writes = matches!(
             a,
             Action::Copy
+                | Action::UserMenu
+                | Action::SyncDirs
                 | Action::Delete
                 | Action::DeletePermanent
                 | Action::Move
@@ -733,7 +735,13 @@ impl App {
             Cmd::ShellNew(s) => self.open_shell_for(*s),
             Cmd::ShellSendHere(s) => self.send_here(*s),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
-            Cmd::UserCommand(i) => self.run_user_command(i),
+            Cmd::UserCommand(i) => {
+                // `%s` and `%f` would name the old listing's files (red-team of #4).
+                match self.loading_refused(Action::UserMenu) {
+                    Some(why) => self.status = why,
+                    None => self.run_user_command(i),
+                }
+            }
             Cmd::About => {
                 self.modal = Some(Modal::Ask(modal::Ask {
                     title: format!("xdevcmd {}", env!("CARGO_PKG_VERSION")),
@@ -895,10 +903,17 @@ impl App {
             {
                 // A drop while a pane is still opening a folder: what was dragged or
                 // where it lands may be the old listing's (#4).
-                let _ = (kind, sources, dest);
-                crate::refusal::Refusal::Loading("copy").log();
+                let _ = (sources, dest);
+                let action = if kind == ops::Kind::Move {
+                    "move"
+                } else {
+                    "copy"
+                };
+                crate::refusal::Refusal::Loading(action).log();
                 self.status = "drop again when shown \u{2014} a folder is still opening".into();
             }
+            Cmd::Transfer { kind, sources, .. }
+                if kind == ops::Kind::Move && self.guard_refused(&sources) => {}
             Cmd::Transfer {
                 kind,
                 sources,

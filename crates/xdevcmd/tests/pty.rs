@@ -4894,9 +4894,9 @@ fn a_listed_row_naming_a_folder_above_is_never_deleted() {
     x.quit();
 }
 
-/// A list made of `/ . .. ~ src/..`: the lines with `.` or `..` are not rows (they name
-/// a folder by where the shell was); `/` and the home are, and F8 on either is refused
-/// with its reason. Nothing is offered for deleting (#2).
+/// A list made of `/ . .. ~ src/..`: a line with `..` is not a row (it names a folder by
+/// where the shell was); `.` is the shell's folder, `/` and the home are rows, and F8 on
+/// each is refused with its reason. Nothing is offered for deleting (#2).
 #[test]
 fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
     let s = Scratch::new("list-guards");
@@ -4916,10 +4916,15 @@ fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
     x.drag((cx + 2, cy), (cx + 2, cy + 4));
     x.wait_for("5 lines selected");
     x.send(b"p");
-    x.wait_for("list 2"); // `/` and the home; the list's title: its rows are up
+    // `.` is the shell's folder (the list's own root, so no name), `/`, the home; the
+    // title says the rows are up.
+    x.wait_for("list 3");
+    x.send(DOWN);
+    x.send(b"\x1b[19~"); // F8
+    x.wait_for("holds a folder shown or in a shell");
     for _ in 0..2 {
         x.send(DOWN);
-        x.send(b"\x1b[19~"); // F8
+        x.send(b"\x1b[19~");
         x.wait_for("is never deleted or moved");
         x.send(b"\x1b[D"); // anything, so the next status is new
     }

@@ -701,6 +701,9 @@ impl App {
                 return;
             }
             Plan::Move { back, into } => {
+                if self.guard_refused(&back) {
+                    return;
+                }
                 let request = Request::mv(back, into);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
                 self.status = format!("undoing the {}", u.describe());

@@ -4325,6 +4325,47 @@ mod tests {
 
     /// Checked is only for a resume: on any other job the flag changes nothing (a
     /// file already there is asked about as always).
+    /// C compares regular files only. A link is checked by its target alone: opening a
+    /// link to a FIFO blocked the job before its first read, where Stop is looked at
+    /// (red-team F2). A cancelled check repairs nothing, so it counts none (F4).
+    #[cfg(unix)]
+    #[test]
+    fn a_checked_resume_reads_regular_files_only() {
+        journals();
+        let root = tmp("verify-fifo");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let fifo = root.join("pipe");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let src = root.join("l");
+        std::os::unix::fs::symlink(&fifo, &src).unwrap();
+        std::os::unix::fs::symlink(&fifo, dst.join("l")).unwrap();
+        let mut req = Request::copy(vec![src], dst);
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.verify = true;
+        let h = start(req);
+        let mut done = None;
+        let t = std::time::Instant::now();
+        while done.is_none() && t.elapsed() < Duration::from_secs(5) {
+            if let Ok(Event::Done(s)) = h.events.recv_timeout(Duration::from_millis(100)) {
+                done = Some(s);
+            }
+        }
+        if done.is_none() {
+            h.cancel();
+            // A writer frees the blocked open, so the worker can end.
+            let _ = fs::OpenOptions::new().write(true).open(&fifo);
+        }
+        let s = done.expect("the check of a link to a FIFO hung");
+        assert_eq!((s.skipped, s.repaired), (1, 0), "{s:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn verify_outside_a_resume_asks_as_before() {
         let root = tmp("verify-ask");

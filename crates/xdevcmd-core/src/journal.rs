@@ -57,6 +57,11 @@ use std::sync::OnceLock;
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Tests: this run ends for the journals under `dir`, so the next `recover_in` there
+/// is the next start's. (Nothing is held yet: red-team F1.)
+#[cfg(test)]
+fn next_start(_dir: &Path) {}
+
 /// Where journals go: a directory of their own in the state directory. Without it,
 /// there is no journal (nothing is recorded, nothing recovered).
 pub fn init(dir: PathBuf) {
@@ -1276,6 +1281,7 @@ mod tests {
         let journal = it.journal.clone().expect("kept");
         assert!(journal.exists());
         // Neither resumed nor declined: the next start offers it again.
+        next_start(&jdir);
         let again = recover_in(&jdir);
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].partial, it.partial);
@@ -1465,6 +1471,10 @@ mod tests {
             let got = recover_in(&jdir);
             assert_eq!(got.len(), 1, "{text}");
             assert_eq!(got[0].journal.is_some(), kept, "{text}");
+            // While this run has it unanswered, another start does not offer it too
+            // (red-team F1); the next start does.
+            assert!(recover_in(&jdir).is_empty(), "held: {text}");
+            next_start(&jdir);
             let again = recover_in(&jdir);
             assert_eq!(again.len(), usize::from(kept), "offered again: {text}");
             if let Some(it) = again.first() {

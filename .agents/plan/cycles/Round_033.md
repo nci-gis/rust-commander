@@ -889,6 +889,24 @@ real holes the fix's own tests missed.
   the exec test was flaky (1 in 3) until 919ee51 learnt the shell's name at the first look.
 - **Merge order:** #25, #26, #27 any time; #28 before #29; #29 before P4.
 
+### 2026-11-17, Track T: a tester's kit, and How to test (the owner's review of #32)
+
+- **Release**: the build job also builds `xtask` for its six targets and ships it as
+  `xdevcmd-bench-<tag>-<target>` (option C: built together, packed apart), after a
+  smoke run from the unpacked archive; it never holds the release.
+- **`xtask try`** (owner: before the beta.2 cut): `--make`, `--kill-when A|B|C`,
+  `--check`, `--tamper`, `--clean`; walked at full size with the real binaries: A, B
+  and C each killed mid-job, resumed, `--check` PASS. `xtask --help`, `--version`; it
+  never runs or looks for an installed xdevcmd (owner: keep the coupling low).
+- **Docs**: `testing-by-hand.md` → `how-to-test.md`, 11 steps in one line for anyone
+  who wants to check a version, notes at the end; the maintainer's list moved to
+  development.md, "Testing a pre-release by hand".
+- **Reviews**: three doc reviews (a new tester, a QA lead, a technical check) and one
+  red-team of the kit: no P0; five P1 fixed (kill timing, a manifest that passed when
+  emptied, …). A copied xtask wrote its results into the source tree: fixed red-first.
+- **For the owner**: `plan/ROADMAP.md` item 2 and closed rounds still say
+  `docs/testing-by-hand.md` (history; ROADMAP is the owner's to edit).
+
 ## Check
 
 ## Act

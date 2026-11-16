@@ -156,12 +156,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-gnu, x86_64-apple-darwin
+          targets: x86_64-pc-windows-gnu, x86_64-apple-darwin, x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       # Catches a broken #[cfg] on another platform in seconds, without waiting for
       # that platform's runner.
       - run: cargo check --all-targets --target x86_64-pc-windows-gnu
       - run: cargo check --all-targets --target x86_64-apple-darwin
+      # The release builds xtask for its musl targets too (the bench archive): built,
+      # not only checked, so a link error shows before a tag.
+      - run: cargo build --release --locked -p xtask --target x86_64-unknown-linux-musl
 
   dependencies:
     name: dependencies (cargo-deny)

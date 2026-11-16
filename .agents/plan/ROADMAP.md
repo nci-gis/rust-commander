@@ -64,7 +64,7 @@ Not for 0.4 (the review agrees): mmap, a trie, a custom arena, Tokio, a batch WA
 
 1. **No known data-loss or crash bug.** Ongoing: none known open after Round 033's
    review fixes (a copy into itself through a link, `q` quitting at once).
-2. **The hand-test matrix**, run and recorded by the owner (`docs/testing-by-hand.md`):
+2. **The hand-test matrix**, run and recorded by the owner (`docs/development.md#testing-a-pre-release-by-hand`):
    Linux and Windows done 2026-11-12; macOS to come, and again on beta.2.
 3. **Budgets kept by tests**: start-up under 150 ms, 100,000 entries in under 1 s, idle
    CPU under 0.5 %, memory flat in the soak test, **the binary at most 7 MB** checked

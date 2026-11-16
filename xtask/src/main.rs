@@ -59,10 +59,32 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+mod tryout;
+
 const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
                          [--only CASE] [--dir PATH]
        cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
-       cargo xtask fuzz [--secs N] [TARGET...]";
+       cargo xtask fuzz [--secs N] [TARGET...]
+       cargo xtask try --make [--small] | --check | --tamper | --clean [--dir D]";
+/// `xtask --help`: what each task is for. It never runs, looks for or asks an installed
+/// xdevcmd: `bench --only` measures the engine built into this program, of the version
+/// `--version` prints (the release it came with).
+const HELP: &str =
+    "xtask: xdevcmd's tester and developer tasks (docs/how-to-test.md, docs/benchmark.md)
+
+  bench      measure copies, listing and the planner on your own drives
+             (--only CASE: the engine built into this xtask, no Rust needed)
+  try        the tester's sandbox: make it, kill a copy mid-job, check every file
+  sync-sweep how syncing many small files scales with threads (developers)
+  fuzz       the fuzz targets (developers, with Rust)
+  --version  the version this xtask was built from: measure with the same xdevcmd
+
+usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
+       xtask try --make [--small] | --kill-when A|B|C | --check | --tamper | --clean [--dir D]
+       xtask sync-sweep [--files N] [--dir PATH] [--probe]
+       xtask fuzz [--secs N] [TARGET...]
+(From the repository: cargo xtask …)";
+
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -72,6 +94,15 @@ fn main() {
         Some("bench") => bench(&args[1..]),
         Some("sync-sweep") => sync_sweep(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
+        Some("try") => tryout::run(&args[1..], built_from().unwrap_or("unknown")),
+        Some("--help" | "-h" | "help") => {
+            println!("{HELP}");
+            0
+        }
+        Some("--version" | "-V") => {
+            println!("xtask {}", built_from().unwrap_or("unknown"));
+            0
+        }
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);
@@ -489,6 +520,18 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Where `bench/` (results, baselines) goes: the repository's, for `cargo xtask` in it;
+/// otherwise beside where the program was started.
+fn results_root(source: &Path, via_cargo: bool, cwd: PathBuf) -> PathBuf {
+    // `CARGO` is set by `cargo run`/`cargo xtask`, not for a program started by hand.
+    if via_cargo && source.join("Cargo.toml").is_file() {
+        source.to_path_buf()
+    } else {
+        // A copy of this program away from the source: results beside where it started.
+        cwd
+    }
+}
+
 fn bench(args: &[String]) -> i32 {
     let o = match parse(args) {
         Ok(o) => o,
@@ -497,13 +540,11 @@ fn bench(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let root = root();
-    let root = if root.join("Cargo.toml").is_file() {
-        root
-    } else {
-        // A copy of this program away from the source: results beside where it started.
-        std::env::current_dir().unwrap_or_default()
-    };
+    let root = results_root(
+        &root(),
+        std::env::var_os("CARGO").is_some(),
+        std::env::current_dir().unwrap_or_default(),
+    );
     // With --only, the in-process cases alone: no build, so a copy of this program
     // runs them on a machine without Rust (the bench workflow's artifact).
     let whole = o.only.is_none();
@@ -792,10 +833,8 @@ fn bench(args: &[String]) -> i32 {
     let _ = std::fs::create_dir_all(&out_dir);
     let out = out_dir.join(format!("{version}-{}-{date}{suffix}.json", o.host));
     match std::fs::write(&out, &text) {
-        Ok(()) => println!(
-            "results: {}",
-            out.strip_prefix(&root).unwrap_or(&out).display()
-        ),
+        // Whole: where it went is never a guess.
+        Ok(()) => println!("results: {}", out.display()),
         Err(e) => eprintln!("could not write {}: {e}", out.display()),
     }
     if o.save_baseline {
@@ -1225,6 +1264,20 @@ mod tests {
         assert_eq!(civil(0), (1970, 1, 1));
         assert_eq!(civil(20_405), (2025, 11, 13));
         assert_eq!(civil(11_016), (2000, 2, 29));
+    }
+
+    /// A copy unpacked from a release, run by hand on a machine that also has the source
+    /// (a CI runner, a developer's laptop): its results go beside where it started, not
+    /// into the source it was built from (review of 2026-11-17: the release's smoke test
+    /// found none). `cargo xtask` in the repository keeps the repository's.
+    #[test]
+    fn results_go_beside_a_copy_and_into_the_repository_under_cargo() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let cwd = std::env::temp_dir();
+        assert_eq!(results_root(source, false, cwd.clone()), cwd);
+        assert_eq!(results_root(source, true, cwd.clone()), source);
+        let gone = Path::new("/no/such/source");
+        assert_eq!(results_root(gone, true, cwd.clone()), cwd);
     }
 
     #[test]

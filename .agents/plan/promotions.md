@@ -185,3 +185,9 @@ until beta.2 is cut (its step 9). 029–031 were already Complete (2026-11-13).
 **Source**: the owner, 2026-11-16 ("bro có thể đưa Red-team vào instruction (.agents/AGENTS.md)"), after two review series (R1–R10) in which only the final red-team round caught each plan's fatal flaw.
 **What**: new skill `skills/red-team/SKILL.md` (procedure: fixed rubric first, four fresh role agents, varied round questions, mandatory final red-team after subtraction, verify before relaying, blind judging without hints, the human decides); one row in `AGENTS.md` "Where to look for more" (99 lines, under the 100-line budget). Procedure, not prose rule, per reference/mechanisms.md.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-17: ROADMAP item 2 points at the renamed test page
+
+**Source**: the owner, 2026-11-17 ("mình approve bro sửa nhé … ROADMAP item 2 thành `how-to-test.md`").
+**What**: `plan/ROADMAP.md` item 2 now names `docs/development.md#testing-a-pre-release-by-hand`, where the owner's hand-test list moved in PR #32 (`docs/testing-by-hand.md` became the tester page `docs/how-to-test.md`). First set to `how-to-test.md`, then corrected the same day (owner: "okay, duyệt bro correct lại nhé"). One path, nothing else.
+**Promoted by**: XDevTeam. Written by Claude Code.

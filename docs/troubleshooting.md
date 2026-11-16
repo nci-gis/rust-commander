@@ -1,40 +1,45 @@
 # Troubleshooting
 
-Known problems, by system, and what to do about them. Most of them are the terminal,
-not xdevcmd: a key the terminal never sends, a colour it cannot show.
+Find your problem in the table, then the fix below it. Most problems are the terminal,
+not xdevcmd: a key it never sends, a colour it cannot show.
 
-**First, ask xdevcmd what it receives:**
+| Problem | System | Fix |
+|---|---|---|
+| A key does nothing | all | [Every system](#every-system): `--show-keys`, then rebind |
+| Enter views a file instead of opening it; `o` says there is no screen | all | [Every system](#every-system) |
+| Colours look muted over SSH | all | `export XDEVCMD_COLORS=truecolor` |
+| File icons are boxes | all | a [Nerd Font](https://www.nerdfonts.com/) as the terminal's font |
+| Option+key types `ç`, `ƒ` … | macOS | [macOS](#macos): Option as Meta |
+| F1–F12 change brightness or volume | macOS | Fn, or standard function keys |
+| Shift+F keys do nothing | macOS Terminal.app | Alt+X, then the F key |
+| Green or red backgrounds | macOS before 26 | `XDEVCMD_COLORS=256` |
+| The mouse does nothing | macOS | View → Allow Mouse Reporting (⌘R) |
+| "cannot be opened … developer cannot be verified" | macOS | `xattr -d com.apple.quarantine xdevcmd` |
+| "Windows protected your PC" | Windows | More info → Run anyway |
+| `o` says "no DISPLAY" | Linux | set `[commands] opener`, or F3 |
+| A copy fails or is slow, or it crashed | all | [Reporting a problem](#reporting-a-problem) |
 
-```bash
-xdevcmd --show-keys
-```
-
-It prints your terminal's variables and how many colours xdevcmd will use, then one line
-for every key, click and scroll it gets, and what that key would do. Esc twice quits.
-If a key prints nothing, your terminal is not sending it. Please paste this output into
-any bug report.
+**First, ask xdevcmd what it receives:** `xdevcmd --show-keys`. It prints your
+terminal's variables, how many colours it will use, then a line for every key, click and
+scroll, and what it would do (Esc twice quits). A key that prints nothing never reaches
+xdevcmd. Paste this output into any bug report.
 
 ## Every system
 
-**A key does nothing.** Run `xdevcmd --show-keys` and press it. If nothing prints, the
-terminal or the desktop keeps that key; if something else prints, xdevcmd gets a different
-key. Either way, give the action another key under `[keys]` (see
-[config.md](config.md#keys)). Measured so far, on every system:
+**A key does nothing.** Press it in `xdevcmd --show-keys`. Nothing printed: the terminal
+or the desktop keeps it. Something else printed: xdevcmd gets another key. Either way,
+give the action another key under `[keys]` ([config.md](config.md#keys)). Known:
 
 - **Ctrl+PageUp / PageDown** (previous / next tab) lose Ctrl on a laptop, where PageUp
-  is Fn+↑. Use **Alt+1**…**Alt+9** for tab N.
+  is Fn+↑: use **Alt+1**…**Alt+9**.
 - **Ctrl+Tab** belongs to the terminal or the desktop.
-- **F11** is the terminal's full screen. xdevcmd does not use it.
+- **F11** is the terminal's full screen; xdevcmd does not use it.
 
 **Enter views a file instead of opening it.** Over SSH or without a desktop there is no
-screen here to open it on, so xdevcmd views it and says why at the bottom of the viewer.
-An `[[open]]` rule with `terminal = true` opens programs that work in a terminal, and
-`[commands] opener` is used for everything else (see
-[config.md](config.md#opening-files)). In read-only mode nothing is opened in another
+screen to open it on, so xdevcmd views it and says why. An `[[open]]` rule with
+`terminal = true` opens programs that run in a terminal; `[commands] opener` is used for
+the rest ([config.md](config.md#opening-files)). Read-only mode opens nothing in another
 program.
-
-**`o` says "over SSH there is no screen here to open it on".** Set `[commands] opener`,
-or use F3.
 
 **Colours look muted over SSH.** xdevcmd uses 24-bit colour only when it knows the
 terminal takes it, usually from `COLORTERM`, which SSH does not pass on. On the server:
@@ -43,68 +48,51 @@ terminal takes it, usually from `COLORTERM`, which SSH does not pass on. On the 
 export XDEVCMD_COLORS=truecolor   # or 256, or 16
 ```
 
-`[theme] colors` in the config does the same for every machine that reads it.
-
-**File icons show as boxes.** `[files] icons = true` needs a
-[Nerd Font](https://www.nerdfonts.com/) set as your terminal's font.
+`[theme] colors` in the config does the same on every machine that reads it.
 
 ## macOS
 
-**Option+key does nothing** (Option types `ç`, `ƒ`, … instead). Terminal.app:
-Settings → Profiles → your profile → Keyboard → **Use Option as Meta key**. iTerm2:
-Profiles → Keys → Left Option key → **Esc+**. xdevcmd says so the first time Option types
-a character in a file pane.
+**Option+key types a character.** Terminal.app: Settings → Profiles → your profile →
+Keyboard → **Use Option as Meta key**. iTerm2: Profiles → Keys → Left Option key →
+**Esc+**. xdevcmd says so the first time it happens.
 
-**Some Option keys still do nothing with Option as Meta on.** Terminal.app sends
-Option+← / → as word left / right, Option+↑ / ↓ as three separate keys, and drops Shift
-or Ctrl from Option+Shift and Ctrl+Shift arrows. xdevcmd has a key for each that does
-arrive:
+**Some Option keys still do nothing** with Option as Meta on: Terminal.app changes or
+drops them. Use these instead:
 
 | To | Instead of | Press |
 |---|---|---|
-| Go up / into a directory | Alt+← / → | Option+← / → (they arrive as Alt+B / Alt+F) |
+| Go up / into a directory | Alt+← / → | Option+← / → (arrive as Alt+B / Alt+F) |
 | Directory history | Alt+↓ | **Alt+J** |
 | Resize panes | Alt+Shift+arrows | **Alt+R**, then arrows; Enter when done |
 | Previous / next tab | Ctrl+PageUp / PageDown | **Alt+1**…**Alt+9** |
 
-**F1–F12 change the brightness or volume.** Hold **Fn** with them, or System Settings
-→ Keyboard → Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard
-function keys**.
+**F1–F12 change the brightness or volume.** Hold **Fn**, or System Settings → Keyboard →
+Keyboard Shortcuts → Function Keys → **Use F1, F2, etc. keys as standard function keys**.
 
-**Shift+F keys do nothing in Terminal.app** (Shift+F8, Shift+F10, Shift+F2…).
-Terminal.app sends Shift+F5–F12 as other keys (F13–F20) and nothing at all for
-Shift+F1–F4. Use **Alt+X, then the F key** instead: Alt+X F8 is Shift+F8, Alt+X F10 the
-right-click menu, and so on for every Shift+F key (but **Alt+X F1** opens F1, Commands;
-Usage, Shift+F1, is in F1 and the Help menu); a badge shows Alt+X waiting. The one
-exception is **Shift+F12** (the shell's history): xdevcmd takes the key Terminal.app
-sends for it (a bare F17 or F20, depending on how it is counted) as Shift+F12. (Alt
-needs "Use Option as Meta key", above.) iTerm2, Ghostty and kitty send Shift+F keys as
-they are. To make Terminal.app send them itself: Settings → Profiles → Keyboard, **+**,
-the key with Shift, "Send Text": `\033[1;2P` `\033[1;2Q` `\033[1;2R` `\033[1;2S` for
-Shift+F1–F4.
+**Shift+F keys do nothing in Terminal.app.** It sends Shift+F5–F12 as F13–F20 and
+nothing for Shift+F1–F4. Press **Alt+X, then the F key**: Alt+X F8 is Shift+F8, Alt+X F10
+the right-click menu (but Alt+X F1 opens F1, Commands). Shift+F12 (the shell's history)
+works as it is. iTerm2, Ghostty and kitty send Shift+F keys correctly. To make
+Terminal.app send them: Settings → Profiles → Keyboard, **+**, the key with Shift,
+"Send Text": `\033[1;2P` `\033[1;2Q` `\033[1;2R` `\033[1;2S` for Shift+F1–F4.
 
-**Green or red backgrounds, hard-to-read text** in Terminal.app before macOS 26.
-Terminal.app there cannot show 24-bit colour and misreads it, so xdevcmd sends it 256
-colours. If you see this, `[theme] colors` or `XDEVCMD_COLORS` is probably set to
-`truecolor`: set it back to `auto`, or to `256`.
+**Green or red backgrounds, hard-to-read text** (Terminal.app before macOS 26). It
+cannot show 24-bit colour, so xdevcmd sends 256 colours; if you see this, `[theme]
+colors` or `XDEVCMD_COLORS` is set to `truecolor`: set it to `auto` or `256`.
 
-**The mouse does nothing.** Check View → **Allow Mouse Reporting** (⌘R) is ticked; with
-it, clicks, the wheel, drags and double-clicks all reach xdevcmd. The pointer stays the
-text cursor (I-beam) inside xdevcmd: that is Terminal.app's pointer everywhere, and says
-nothing about whether the mouse works.
+**The mouse does nothing.** View → **Allow Mouse Reporting** (⌘R). The pointer stays an
+I-beam inside xdevcmd: that is Terminal.app's pointer, not a sign the mouse is off.
 
-**Dragging the window's scrollbar up shows the shell, with empty space, above xdevcmd.**
-xdevcmd draws on the terminal's second screen, and Terminal.app keeps the first one, with
-your shell's history, reachable above it. xdevcmd cannot hide it, and nothing is wrong:
-drag back down, or use the wheel over xdevcmd, which scrolls xdevcmd. System Settings →
-Appearance → Show scroll bars → **When scrolling** hides the bar.
+**The window's scrollbar shows the shell above xdevcmd.** Terminal.app keeps your
+shell's history above xdevcmd's screen; nothing is wrong. Drag back down, or use the
+wheel over xdevcmd. System Settings → Appearance → Show scroll bars → **When scrolling**
+hides the bar.
 
-**The terminal panel has a different background from the panes.** The panel shows
-what the shell prints, and where the shell sets no colour, your terminal profile's own
-background shows through, as it would outside xdevcmd.
+**The terminal panel has another background than the panes.** Where the shell sets no
+colour, your terminal profile's background shows through, as outside xdevcmd.
 
 **"xdevcmd cannot be opened because the developer cannot be verified."** The downloads
-are not signed. After unpacking, in the `xdevcmd-…-apple-darwin` folder:
+are not signed. In the unpacked `xdevcmd-…-apple-darwin` folder:
 
 ```bash
 xattr -d com.apple.quarantine xdevcmd
@@ -115,31 +103,29 @@ permission.
 
 ## Windows
 
-**"Windows protected your PC" (SmartScreen).** The downloads are not signed. Choose
-**More info** → **Run anyway**, once.
+**"Windows protected your PC" (SmartScreen).** The downloads are not signed: **More
+info** → **Run anyway**, once.
 
-**A config saved by PowerShell (`xdevcmd --print-config > config.toml`) is UTF-16.** xdevcmd
-reads it; other tools may not. `xdevcmd --print-config | Out-File -Encoding utf8
-config.toml` writes UTF-8.
+**A config written by PowerShell's `>` is UTF-16.** xdevcmd reads it; other tools may
+not. `xdevcmd --print-config | Out-File -Encoding utf8 config.toml` writes UTF-8.
 
 ## Linux
 
-**`o` says "no desktop session to open it in (no DISPLAY)".** Without `DISPLAY` or
-`WAYLAND_DISPLAY` there is no desktop to open the file in. Set `[commands] opener` (for
-example a terminal viewer), or use F3.
+**`o` says "no desktop session to open it in (no DISPLAY)".** There is no desktop to
+open the file in: set `[commands] opener` (a terminal viewer, say), or use F3.
 
-**The Linux console (`TERM=linux`) shows only 16 colours.** xdevcmd switches to a
-16-colour theme there by itself.
+**The Linux console (`TERM=linux`)** shows 16 colours; xdevcmd switches to a 16-colour
+theme by itself.
 
-## Still stuck
+## Reporting a problem
 
-[Open an issue](https://github.com/nci-gis/rust-commander/issues) with your system,
-terminal and the `xdevcmd --show-keys` output.
+[Open an issue](https://github.com/nci-gis/rust-commander/issues) with your system, your
+terminal and the `xdevcmd --show-keys` output. For a copy, move or delete that is slow or
+fails, attach a debug log; after a crash, the crash log.
 
-## Sending a log with a report
+### Sending a log with a report
 
-When a copy, move or delete is slow or fails and you want to report it, start xdevcmd
-with the debug log on, do the same thing again, quit, and attach the log:
+Start xdevcmd with the debug log on, do the same thing again, quit, attach the log:
 
 ```bash
 XDEVCMD_DEBUG=all xdevcmd          # macOS, Linux
@@ -150,33 +136,28 @@ set XDEVCMD_DEBUG=all
 xdevcmd
 ```
 
-The status line says `debug log on (jobs, errors): <path>` at start; Messages (Alt+M)
-keeps it. If it does not, this version has no debug log (it came in 0.4.0-beta.2).
+At start the status line says `debug log on (jobs, errors): <path>` (Messages, Alt+M,
+keeps it).
 
-- **What it holds**: for each job, its kind and size, the kind of drive at each end
-  (`ntfs`, `apfs`, `network` …), how long each part took (checking, opening, creating,
-  writing, syncing, finishing), which way the bytes were copied, the batches small files
-  were synced in, and, with errors, each error's system code, retry and your answer.
-- **What it never holds**: no file or folder name, no user name, no host name. A file is
-  a number, the same within one run, so "this file failed three times" can be seen
-  without its name. You can attach it as it is.
-- **Topics**: `XDEVCMD_DEBUG=jobs` (times), `errors` (errors and questions), `all` or `1`
-  (both).
 - **Where**: `debug-<time>-<process>.jsonl` in the state directory
   (`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows), or
   in `XDEVCMD_DEBUG_DIR`. Each stops at 16 MiB; the five newest are kept.
-- **For longer than one session**: `setx XDEVCMD_DEBUG all` on Windows, or the `export`
-  in your shell's profile. There is no setting in the config: a line there is easily
-  forgotten, and a config shared between machines would turn it on everywhere.
+- **What it holds**: per job, its kind and size, the kind of drive at each end (`ntfs`,
+  `apfs`, `network` …), how long each part took (checking, opening, creating, writing,
+  syncing, finishing), how the bytes were copied, the batches small files were synced
+  in, and each error's system code, retry and your answer.
+- **What it never holds**: file or folder names, user or host names. A file is a number,
+  the same within one run. You can attach it as it is.
+- **Topics**: `jobs` (times), `errors` (errors and questions), `all` or `1` (both).
+- **For a week**: `setx XDEVCMD_DEBUG all` on Windows, or the `export` in your shell's
+  profile. There is no config setting, on purpose: a shared config would turn it on
+  everywhere.
 
-Written on your machine only; nothing is sent anywhere.
+Written on your machine only; nothing is sent anywhere. (It came in 0.4.0-beta.2.)
 
-## xdevcmd crashed
+### xdevcmd crashed
 
-It writes what happened to a `crash-….log` file in its state directory
-(`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows) and
-says where, after the terminal is restored; it keeps the five newest. Please
-[open an issue](https://github.com/nci-gis/rust-commander/issues) and attach it — read it
-first: it may hold file names. With the [debug log](#sending-a-log-with-a-report) on, the
-crash log also ends with the debug log's last lines. Nothing is ever sent by xdevcmd
-itself.
+It writes a `crash-….log` in the state directory (above) and says where once the
+terminal is back; the five newest are kept. Attach it to an issue, after reading it: it
+may hold file names. With the debug log on, it ends with the debug log's last lines.
+Nothing is ever sent by xdevcmd itself.

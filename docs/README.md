@@ -8,11 +8,12 @@ Read in this order; each page stands on its own.
 4. [Config](config.md): settings, themes, bookmarks, your own commands
 5. [Security](security.md): what xdevcmd guards against, read-only and restricted modes
 6. [Troubleshooting](troubleshooting.md): known problems on each system, and fixes
-7. [Development](development.md): build, test, release, contribute
-8. [Testing by hand](testing-by-hand.md): helping test a pre-release, a week of real use
-   or the full list, data first
-9. [Compatibility](compatibility.md): what stays the same from 0.4.0, and what is not promised
-10. [Benchmarks](benchmark.md): measuring copies on your machine, and sending the numbers
+7. [Compatibility](compatibility.md): what stays the same from 0.4.0, and what is not promised
+8. [Development](development.md): build, test, release, contribute; the maintainer's
+   hand tests before a pre-release
+9. [How to test](how-to-test.md): see a version work on your machine, in a sandbox,
+   before you trust it
+10. [Benchmarks](benchmark.md): the speed on your own drives
 
 These pages on GitHub's `main` describe the newest code, which may be ahead of yours.
 **For the version you have installed, use Help → Documentation** in xdevcmd (or F1, type

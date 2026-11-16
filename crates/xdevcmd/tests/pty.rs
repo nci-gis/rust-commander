@@ -1781,6 +1781,54 @@ fn resume_from_app_does_not_replace_a_kept_newer_source_file() {
     x.quit();
 }
 
+/// After a power cut a file the journal calls done can hold the wrong bytes under its
+/// real name, with the size and date of its source. C checks every file the run wrote,
+/// the done ones too; it skipped them, so the wrong bytes stayed (#3, 2026-11-16).
+#[test]
+fn a_checked_resume_repairs_a_file_the_journal_called_done() {
+    let s = Scratch::new("resume-check");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "AAAA").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    std::fs::write(dst.join("a.txt"), "ZZZZ").unwrap();
+    let date = std::fs::metadata(src.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\ndone {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst),
+            hex(&src.join("a.txt")),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.send(b"c");
+    wait_file(&dst.join("b.txt"), "b copied", |c| {
+        c.as_deref() == Some("b")
+    });
+    wait_file(&dst.join("a.txt"), "a repaired", |c| {
+        c.as_deref() == Some("AAAA")
+    });
+    // The job box ignores q: wait for its summary on the status line.
+    x.wait_for("copied");
+    x.quit();
+}
+
 /// An interrupted permanent delete is cleaned up after but never offered again: one
 /// Enter would go on, where Shift+F8 itself takes only Y.
 #[cfg(unix)]
@@ -1801,6 +1849,57 @@ fn an_interrupted_permanent_delete_is_not_offered_again() {
     x.send(ENTER);
     std::thread::sleep(Duration::from_millis(300));
     assert!(victim.exists(), "Enter deleted nothing");
+    x.quit();
+}
+
+/// The count in a delete box arrives on its own thread; the box shows it when it
+/// does. It stayed at "counting…" for good when the count was taken before it came
+/// (#6, 2026-11-16).
+#[test]
+fn the_count_in_a_delete_box_arrives_while_it_is_open() {
+    let s = Scratch::new("count-live");
+    std::fs::create_dir_all(s.left().join("many")).unwrap();
+    for i in 0..2000 {
+        s.file(&format!("left/many/f{i:04}.txt"), "x");
+    }
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(SHIFT_F8);
+    x.wait_for("This cannot be undone.");
+    x.wait_for("2000 files");
+    x.send(b"\x1b");
+    x.wait_gone("This cannot be undone.");
+    assert!(s.left().join("many/f0000.txt").exists());
+    x.quit();
+}
+
+/// F3 on an entry of a big archive extracts it on a thread; the viewer opens when it
+/// is done. It never opened when the result was taken before it came (#6).
+#[test]
+fn an_entry_of_a_big_archive_opens_in_the_viewer() {
+    let s = Scratch::new("view-big-tar");
+    let mut body = String::new();
+    for i in 0..400_000 {
+        body.push_str(&format!("LINE-{i:06} of the big entry\n"));
+    }
+    assert!(body.len() > 9 << 20, "past the 8 MiB read at once");
+    let mut b = tar::Builder::new(std::fs::File::create(s.left().join("big.tar")).unwrap());
+    let mut h = tar::Header::new_gnu();
+    h.set_size(body.len() as u64);
+    h.set_mode(0o644);
+    h.set_cksum();
+    b.append_data(&mut h, "inner.txt", body.as_bytes()).unwrap();
+    b.finish().unwrap();
+    drop(b);
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.wait_for("11 M"); // the entry, its name and extension in two columns
+    x.send(DOWN);
+    x.send(b"\x1bOR"); // F3
+    x.wait_for("LINE-000000 of the big entry");
+    x.send(b"\x1b");
+    x.wait_gone("LINE-000000");
     x.quit();
 }
 

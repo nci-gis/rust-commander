@@ -57,6 +57,28 @@ use std::sync::OnceLock;
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Journals this run offered and has not had an answer for, each with the probe that
+/// holds it (red-team F1): another start finds them alive, as it does a running job's,
+/// and does not offer the same job too. Let go by [`discard`] and [`forget`], or when
+/// this run ends.
+static HELD: std::sync::Mutex<Vec<(PathBuf, File)>> = std::sync::Mutex::new(Vec::new());
+
+/// Tests: this run ends for the journals under `dir`, as a quit lets go of them all, so
+/// the next `recover_in` there is the next start's.
+#[cfg(test)]
+fn next_start(dir: &Path) {
+    if let Ok(mut held) = HELD.lock() {
+        held.retain(|(p, _)| !p.starts_with(dir));
+    }
+}
+
+/// Let go of `journal`'s probe, if this run holds it.
+fn let_go(journal: &Path) {
+    if let Ok(mut held) = HELD.lock() {
+        held.retain(|(p, _)| p != journal);
+    }
+}
+
 /// Where journals go: a directory of their own in the state directory. Without it,
 /// there is no journal (nothing is recorded, nothing recovered).
 pub fn init(dir: PathBuf) {
@@ -450,9 +472,24 @@ pub struct Interrupted {
     pub done: Vec<PathBuf>,
     /// Big files cut short after a checkpoint, kept for Resume (Round 033).
     pub partial: Vec<Partial>,
-    /// The dead run's journal, kept while `partial` is not empty: a later start finds
-    /// it again if this one neither resumes nor discards it.
+    /// The dead run's journal, kept while the job is [offered](Self::offered) or
+    /// `partial` is not empty: a later start finds it again if this one neither
+    /// resumes nor discards it.
     pub journal: Option<PathBuf>,
+}
+
+impl Interrupted {
+    /// Whether the start offers this job again: a copy or a move, or a delete to the
+    /// trash, with sources. A permanent delete is not: it would go on with one Enter,
+    /// where Shift+F8 itself takes only Y.
+    pub fn offered(&self) -> bool {
+        let kind = match self.kind.as_str() {
+            "copy" | "move" => true,
+            "delete" => self.to_trash,
+            _ => false,
+        };
+        kind && !self.sources.is_empty()
+    }
 }
 
 /// Declined: the kept temporary files of `it` and its journal go.
@@ -466,12 +503,14 @@ pub fn discard(it: &Interrupted) {
         }
     }
     if let Some(j) = &it.journal {
+        let_go(j);
         let _ = fs::remove_file(j);
     }
 }
 
 /// A resumed job has its own journal, with the kept files in it: the old one goes.
 pub(crate) fn forget(journal: &Path) {
+    let_go(journal);
     let _ = fs::remove_file(journal);
 }
 
@@ -531,7 +570,7 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         let mut text = String::new();
         // Held until the journal is gone: another start at the same moment finds it
         // locked (alive, to it), or removed, and never offers the same job again.
-        let Some(_held) = claim(&path, &run, Some((&mut text, &host))) else {
+        let Some(held) = claim(&path, &run, Some((&mut text, &host))) else {
             continue;
         };
         // A run confined to a root (`--root`) touches nothing outside it: a journal
@@ -542,10 +581,16 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         let mut it = tidy(&text, &run);
         #[cfg(test)]
         while_held_in_test();
-        if it.partial.is_empty() {
+        // Kept while the start may offer the job again, so Esc leaves it for the next
+        // start (#3); resuming or declining removes it. Tidying again is harmless:
+        // each step checks the files are still as the line says.
+        if it.partial.is_empty() && !it.offered() {
             let _ = fs::remove_file(&path);
         } else {
             it.journal = Some(path.clone());
+            if let Ok(mut h) = HELD.lock() {
+                h.push((path.clone(), held));
+            }
         }
         out.push(it);
     }
@@ -956,6 +1001,8 @@ mod tests {
         let got = recover_in(&d);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].kind, "copy");
+        // Kept while the copy is offered again (#3); declining removes it.
+        discard(&got[0]);
         assert!(!other.exists());
         let _ = fs::remove_dir_all(&d);
     }
@@ -1195,10 +1242,13 @@ mod tests {
             "a name that is not xdevcmd's own is never removed"
         );
         assert_eq!(fs::read_to_string(d.join("photo.jpg")).unwrap(), "photo");
+        // Kept while the copy is offered again (#3); declining removes it.
+        assert!(it.journal.is_some());
+        discard(it);
         assert_eq!(
             fs::read_dir(&jdir).unwrap().count(),
             0,
-            "the journal is gone"
+            "the journal is gone once declined"
         );
         let _ = fs::remove_dir_all(&d);
     }
@@ -1253,6 +1303,7 @@ mod tests {
         let journal = it.journal.clone().expect("kept");
         assert!(journal.exists());
         // Neither resumed nor declined: the next start offers it again.
+        next_start(&jdir);
         let again = recover_in(&jdir);
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].partial, it.partial);
@@ -1418,6 +1469,41 @@ mod tests {
         );
         assert_eq!(it.done, vec![d.join("a")]);
         drop(j);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A job the start offers again (a copy, a move, a delete to the trash) keeps its
+    /// journal until it is resumed or declined: Esc leaves it for the next start, as the
+    /// dialog says. Without a kept part it was removed at once, so Esc lost it (#3).
+    #[test]
+    fn a_job_offered_again_keeps_its_journal_until_answered() {
+        let d = dir("offered");
+        let jdir = d.join("j");
+        fs::create_dir_all(&jdir).unwrap();
+        let src = enc(&d.join("a"));
+        let dst = enc(&d.join("out"));
+        for (text, kept) in [
+            (format!("kind copy\nsrc {src}\ndest {dst}\n"), true),
+            (format!("kind move\nsrc {src}\ndest {dst}\n"), true),
+            (format!("kind delete\nsrc {src}\ntrash\n"), true),
+            (format!("kind delete\nsrc {src}\n"), false),
+            ("kind copy\n".to_string(), false),
+        ] {
+            orphan(&jdir, &text);
+            let got = recover_in(&jdir);
+            assert_eq!(got.len(), 1, "{text}");
+            assert_eq!(got[0].journal.is_some(), kept, "{text}");
+            // While this run has it unanswered, another start does not offer it too
+            // (red-team F1); the next start does.
+            assert!(recover_in(&jdir).is_empty(), "held: {text}");
+            next_start(&jdir);
+            let again = recover_in(&jdir);
+            assert_eq!(again.len(), usize::from(kept), "offered again: {text}");
+            if let Some(it) = again.first() {
+                discard(it);
+            }
+            assert_eq!(fs::read_dir(&jdir).unwrap().count(), 0, "{text}");
+        }
         let _ = fs::remove_dir_all(&d);
     }
 

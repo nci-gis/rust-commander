@@ -352,9 +352,13 @@ impl App {
             .pending_view
             .as_ref()
             .and_then(|(rx, ..)| rx.try_recv().ok());
-        if let (Some(out), Some((_, tmp, name, _))) = (viewed, self.pending_view.take()) {
-            self.show_extracted(out, tmp, name);
-            changed = true;
+        // Taken only once its result is in: a tuple would take it on every tick, and a
+        // result that came after the first tick would never be read (#6).
+        if let Some(out) = viewed {
+            if let Some((_, tmp, name, _)) = self.pending_view.take() {
+                self.show_extracted(out, tmp, name);
+                changed = true;
+            }
         }
         // The plan for the open confirmation: how far it has got, or the plan itself.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
@@ -384,11 +388,14 @@ impl App {
         // A count for the open confirmation, if it has come in.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             let got = c.counting.as_ref().and_then(|(n, _)| n.rx.try_recv().ok());
-            if let (Some((files, bytes)), Some((_, line))) = (got, c.counting.take()) {
-                if let Some(l) = c.body.get_mut(line) {
-                    *l = Self::count_label(files, bytes);
+            // Taken only once the count is in, as the view above (#6).
+            if let Some((files, bytes)) = got {
+                if let Some((_, line)) = c.counting.take() {
+                    if let Some(l) = c.body.get_mut(line) {
+                        *l = Self::count_label(files, bytes);
+                    }
+                    changed = true;
                 }
-                changed = true;
             }
         }
         changed |= self.poll_comparing();

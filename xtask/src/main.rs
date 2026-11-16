@@ -59,10 +59,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+mod tryout;
+
 const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
                          [--only CASE] [--dir PATH]
        cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
-       cargo xtask fuzz [--secs N] [TARGET...]";
+       cargo xtask fuzz [--secs N] [TARGET...]
+       cargo xtask try --make [--small] | --check | --tamper | --clean [--dir D]";
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -72,6 +75,7 @@ fn main() {
         Some("bench") => bench(&args[1..]),
         Some("sync-sweep") => sync_sweep(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
+        Some("try") => tryout::run(&args[1..]),
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);

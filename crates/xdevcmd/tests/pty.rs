@@ -1824,6 +1824,8 @@ fn a_checked_resume_repairs_a_file_the_journal_called_done() {
     wait_file(&dst.join("a.txt"), "a repaired", |c| {
         c.as_deref() == Some("AAAA")
     });
+    // The job box ignores q: wait for its summary on the status line.
+    x.wait_for("copied");
     x.quit();
 }
 

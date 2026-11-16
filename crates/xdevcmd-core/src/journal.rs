@@ -450,9 +450,24 @@ pub struct Interrupted {
     pub done: Vec<PathBuf>,
     /// Big files cut short after a checkpoint, kept for Resume (Round 033).
     pub partial: Vec<Partial>,
-    /// The dead run's journal, kept while `partial` is not empty: a later start finds
-    /// it again if this one neither resumes nor discards it.
+    /// The dead run's journal, kept while the job is [offered](Self::offered) or
+    /// `partial` is not empty: a later start finds it again if this one neither
+    /// resumes nor discards it.
     pub journal: Option<PathBuf>,
+}
+
+impl Interrupted {
+    /// Whether the start offers this job again: a copy or a move, or a delete to the
+    /// trash, with sources. A permanent delete is not: it would go on with one Enter,
+    /// where Shift+F8 itself takes only Y.
+    pub fn offered(&self) -> bool {
+        let kind = match self.kind.as_str() {
+            "copy" | "move" => true,
+            "delete" => self.to_trash,
+            _ => false,
+        };
+        kind && !self.sources.is_empty()
+    }
 }
 
 /// Declined: the kept temporary files of `it` and its journal go.
@@ -542,7 +557,10 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         let mut it = tidy(&text, &run);
         #[cfg(test)]
         while_held_in_test();
-        if it.partial.is_empty() {
+        // Kept while the start may offer the job again, so Esc leaves it for the next
+        // start (#3); resuming or declining removes it. Tidying again is harmless:
+        // each step checks the files are still as the line says.
+        if it.partial.is_empty() && !it.offered() {
             let _ = fs::remove_file(&path);
         } else {
             it.journal = Some(path.clone());
@@ -956,6 +974,8 @@ mod tests {
         let got = recover_in(&d);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].kind, "copy");
+        // Kept while the copy is offered again (#3); declining removes it.
+        discard(&got[0]);
         assert!(!other.exists());
         let _ = fs::remove_dir_all(&d);
     }
@@ -1195,10 +1215,13 @@ mod tests {
             "a name that is not xdevcmd's own is never removed"
         );
         assert_eq!(fs::read_to_string(d.join("photo.jpg")).unwrap(), "photo");
+        // Kept while the copy is offered again (#3); declining removes it.
+        assert!(it.journal.is_some());
+        discard(it);
         assert_eq!(
             fs::read_dir(&jdir).unwrap().count(),
             0,
-            "the journal is gone"
+            "the journal is gone once declined"
         );
         let _ = fs::remove_dir_all(&d);
     }

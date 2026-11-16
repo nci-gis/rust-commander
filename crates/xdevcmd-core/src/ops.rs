@@ -1548,11 +1548,24 @@ impl Worker {
         let (Ok(mut fa), Ok(mut fb)) = (File::open(a), File::open(b)) else {
             return false;
         };
+        // The box names the file and its bar moves while a big one is read (#3): the
+        // bytes read are shown, not added; the file's size is added once, after.
+        let _ = self.tx.send(Event::Begin {
+            path: a.to_path_buf(),
+        });
+        let mut read = 0u64;
         let mut ba = vec![0u8; 1 << 20];
         let mut bb = vec![0u8; 1 << 20];
         loop {
             if self.stopped() {
                 return false;
+            }
+            if self.last_tick.elapsed() >= PROGRESS_EVERY {
+                self.last_tick = std::time::Instant::now();
+                let _ = self.tx.send(Event::Progress {
+                    bytes_done: self.bytes_done + read,
+                    files_done: self.sum.done + self.sum.skipped + self.sum.failed,
+                });
             }
             let Ok(n) = read_full(&mut fa, &mut ba) else {
                 return false;
@@ -1566,6 +1579,7 @@ impl Worker {
             if n == 0 {
                 return true;
             }
+            read += n as u64;
         }
         fn read_full(f: &mut File, buf: &mut [u8]) -> io::Result<usize> {
             let mut got = 0;

@@ -66,6 +66,25 @@ const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME]
        cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
        cargo xtask fuzz [--secs N] [TARGET...]
        cargo xtask try --make [--small] | --check | --tamper | --clean [--dir D]";
+/// `xtask --help`: what each task is for. It never runs, looks for or asks an installed
+/// xdevcmd: `bench --only` measures the engine built into this program, of the version
+/// `--version` prints (the release it came with).
+const HELP: &str =
+    "xtask: xdevcmd's tester and developer tasks (docs/benchmark.md, docs/testing-by-hand.md)
+
+  bench      measure copies, listing and the planner on your own drives
+             (--only CASE: the engine built into this xtask, no Rust needed)
+  try        the tester's sandbox: make it, kill a copy mid-job, check every file
+  sync-sweep how syncing many small files scales with threads (developers)
+  fuzz       the fuzz targets (developers, with Rust)
+  --version  the version this xtask was built from: measure with the same xdevcmd
+
+usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
+       xtask try --make [--small] | --kill-when A|B|C | --check | --tamper | --clean [--dir D]
+       xtask sync-sweep [--files N] [--dir PATH] [--probe]
+       xtask fuzz [--secs N] [TARGET...]
+(From the repository: cargo xtask …)";
+
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -75,7 +94,15 @@ fn main() {
         Some("bench") => bench(&args[1..]),
         Some("sync-sweep") => sync_sweep(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
-        Some("try") => tryout::run(&args[1..]),
+        Some("try") => tryout::run(&args[1..], built_from().unwrap_or("unknown")),
+        Some("--help" | "-h" | "help") => {
+            println!("{HELP}");
+            0
+        }
+        Some("--version" | "-V") => {
+            println!("xtask {}", built_from().unwrap_or("unknown"));
+            0
+        }
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);

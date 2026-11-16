@@ -23,44 +23,62 @@ echo 'export XDEVCMD_DEBUG=all' >> ~/.zshrc     # macOS; ~/.bashrc on Linux
 setx XDEVCMD_DEBUG all                         # Windows: in new windows
 ```
 
-**3. Make the sandbox** in a folder of your choice (`--small` on a slow disk: 400 MiB):
+**3. Make the sandbox** in a folder of your choice, and stay in that folder for every
+`xtask` command below (they also work from inside the sandbox):
 
 ```bash
-/path/to/xdevcmd-bench-…/xtask try --make         # Windows: …\xtask.exe try --make
+/path/to/xtask try --make            # Windows: C:\path\to\xtask.exe try --make
 ```
 
-It makes `xdevcmd-try/`: `big.log`, `many/` (100,000 names), `tree/`, `replace-src/`
-and `replace-dst/` (the same names, the destination older), `big/big.bin` (1 GiB) and an
-empty `copy-to/`. Start xdevcmd on it: `/path/to/xdevcmd xdevcmd-try xdevcmd-try/copy-to`.
+It makes `xdevcmd-try/` (2.5 GiB): `big.log`, `many/` (100,000 names), `tree/`,
+`replace-src/` and `replace-dst/` (the same names, the destination older), `big/big.bin`
+(1 GiB) and an empty `copy-to/`. `--small` (0.8 GiB) only for a slow disk or little
+space. Start xdevcmd on it:
+
+```bash
+/path/to/xdevcmd xdevcmd-try xdevcmd-try/replace-dst
+```
 
 **On a Mac**: F-keys need Fn (or "Use F1, F2, etc. keys as standard function keys" in
 System Settings → Keyboard); End is Fn+→; for Alt+ keys, Terminal → Settings → Profiles
 → Keyboard → "Use Option as Meta key".
 
-**4. Six tasks, scored**, with the previous version, then with this one: 1 (no thought)
-to 5 (gave up).
+**4. Five tasks, scored**, with the previous version, then with this one: 1 (no
+thought) to 5 (gave up). Then `xtask try --check`.
 
 1. F3 on `big.log`; End; `/` and search for `INFO`; Esc.
-2. Enter on `many`, then Esc at once.
-3. On `tree`: F5 and read the plan; Esc (nothing copied).
-4. F8 on a file in `replace-dst`, Enter; Ctrl+Z puts it back.
-5. F1, type `sync`, Enter; Esc.
-6. Anything you looked for and did not find: note it.
+2. Enter on `many`, and Esc while it is still opening (or `..` if it opened at once).
+3. Enter on `replace-src`, Ctrl+A, F5: read the table (it would replace older files);
+   Esc. Nothing is copied.
+4. Tab to `replace-dst`; F8 on a file, Enter; Ctrl+Z, Enter: it is back.
+5. F1, type `sync`, Enter: the Sync dialog; Esc.
 
-**5. Three data checks, this version only.** To kill xdevcmd, from another terminal:
-`pkill -9 xdevcmd` (macOS, Linux) or `Stop-Process -Name xdevcmd -Force` (PowerShell).
-After each, `xtask try --check` must end **no file lost or wrong**.
+Note anything you looked for and did not find.
 
-| | Do | You should see |
-|---|---|---|
-| A | In `replace-src`, Ctrl+A, F5 into `replace-dst`; choose **replace**; kill it mid-way. Start again: Enter | "ended in the middle of a job"; it finishes without asking again |
-| B | F5 `big` into `copy-to`; kill it past 30 %. Start again: Enter | "kept part way"; the bar starts near where it stopped |
+**5. Three data checks, this version only.** Each kills xdevcmd mid-job, as a crash
+would: run the `--kill-when` line in a second terminal first, in the same folder, then
+press Enter in xdevcmd. It waits, kills, and says so. Then start xdevcmd again as above
+(Linux, macOS: type `reset` first if the terminal looks wrong). After each, run
+`xtask try --check`: the check's own line must say **PASS**.
 
-On a Mac (and Linux on Btrfs or XFS) the copy of B is a clone, done at once: start
-xdevcmd for B with `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml` before its path.
-| C | F5 `tree` into `copy-to`; kill it mid-way. Run `xtask try --tamper`. Start again: **C** | "1 found different … copied again" |
+- **A, a replace.** `xtask try --kill-when A`. In xdevcmd: in `replace-src`, Ctrl+A, F5;
+  press Space until the group says `[replace]`; Enter. Start again: "ended in the middle
+  of a job"; Enter: it finishes without asking again. `--check`: PASS on check A.
+- **B, a big file.** Quit xdevcmd and start it on `xdevcmd-try xdevcmd-try/copy-to`.
+  `xtask try --kill-when B`; F5 on `big`, Enter. Start again: "kept part way"; Enter:
+  the bar starts near where it stopped. `--check`: PASS on check B. On a Mac (and Linux
+  on Btrfs or XFS) the copy would be a clone, done at once: for B start xdevcmd as
+  `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml /path/to/xdevcmd …`.
+- **C, after a power cut.** `xtask try --kill-when C`; F5 on `tree`, Enter. Then
+  `xtask try --tamper` (it zeroes one finished copy, as a power cut can). Start again:
+  press **C**: "1 found different … copied again". `--check`: PASS on check C, and the
+  last line **PASS: every copy whole**.
 
-**6. Clean up**: `xtask try --clean`. What the checks sent to the trash stays there.
+If `--kill-when` says the copy finished first, `--clean`, `--make` without `--small`, and
+do that check again. On Windows, `--kill-when` ends xdevcmd as Task Manager's End task.
+
+**6. Clean up**: `xtask try --clean`. It removes only what `--make` made, and refuses
+while anything else is in the sandbox. What the checks sent to the trash stays there.
 
 **Lost or wrong file**, now or in the week (gone, short, empty, or not the one you
 chose): stop and report it the same day as P0. Before starting xdevcmd again, copy the
@@ -88,8 +106,8 @@ sending too):
 version:      xdevcmd --version
 system/shell: e.g. Windows 11, pwsh 7.4, Windows Terminal
 lost data:    no (if yes: what you did, and is it in the trash?)
-friction:     1–5 for each of the six tasks, the previous version / this one
-checks A–C:   the last lines of each `xtask try --check`
+friction:     1–5 for each of the five tasks, the previous version / this one
+checks A–C:   the output of the last `xtask try --check`
 refusals:     any time xdevcmd refused something it should have done, and when
 attached:     the debug logs; bench/results/*.json if you ran the benchmark
 ```

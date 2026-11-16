@@ -33,9 +33,10 @@ that heading and starts a new, empty one here. -->
   robocopy, rclone).
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
 - **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
-  target): `xtask bench` measures your own drives, and `xtask try` makes a sandbox
-  whose copies it then checks file by file (PASS / FAIL). No Rust needed. See Testing
-  by hand ("Day 0") and Benchmarks.
+  target): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
+  copy mid-job at the right moment (`--kill-when`), and checks every file against its
+  manifest (PASS / FAIL). No Rust needed; `xtask --help`. See Testing by hand ("Day 0")
+  and Benchmarks.
 
 ### Changed
 - **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not

@@ -4771,6 +4771,32 @@ fn a_slow_directory_shows_a_bar_and_esc_stops_it() {
     xdevcmd.quit();
 }
 
+/// While a folder is still opening, the old listing is on screen and its cursor is on
+/// the folder being opened: F8 there deleted that folder, where the user meant a file
+/// inside it (#4). A write action waits for the listing it acts on, and says so.
+#[test]
+fn a_write_action_while_a_folder_opens_waits_for_it() {
+    let s = Scratch::new("slow-f8");
+    std::fs::create_dir_all(s.left().join("slowdir")).unwrap();
+    s.file("left/slowdir/inside.txt", "x");
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_TEST_SLOW_DIR", "slowdir")]);
+    x.wait_for("slowdir");
+    x.send(DOWN);
+    x.send(ENTER);
+    x.wait_for("opening slowdir\u{2026}");
+    x.send(b"\x1b[19~"); // F8
+    x.wait_for("still opening");
+    assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
+    x.wait_for("inside");
+    x.send(b"\x1b[19~"); // the refusal's next: the same key, now on inside.txt
+    x.wait_for("Moved to the trash");
+    assert!(x.screen().contains("inside.txt"), "{}", x.screen());
+    x.send(b"\x1b");
+    assert!(s.left().join("slowdir/inside.txt").exists());
+    x.quit();
+}
+
 /// B02 (Round 029): Enter on a search result whose directory is slow to read lands on
 /// that file once the listing arrives. Before, the cursor was placed while the old
 /// listing was still up, by a path made from it, and ended on `..`.

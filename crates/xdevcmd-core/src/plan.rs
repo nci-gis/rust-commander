@@ -1208,9 +1208,14 @@ impl Scan<'_> {
         if row.blocked.is_none() && row.warn.is_some() {
             self.totals.warned += 1;
         }
+        // A file and a folder of one name are skipped, never written (#5): not counted
+        // in what the copy needs, or the space check asks for bytes it never writes.
         if row.blocked.is_none()
-            && row.class != Class::Identical
-            && (!row.dir || row.class == Class::DirOverFile)
+            && !matches!(
+                row.class,
+                Class::Identical | Class::FileOverDir | Class::DirOverFile
+            )
+            && !row.dir
         {
             self.totals.writes += row.bytes;
         }

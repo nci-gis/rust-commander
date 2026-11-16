@@ -1481,7 +1481,12 @@ impl Worker {
                 // The archive is one new file: an existing one is asked about first.
                 match self.resolve_conflict(None, &dest, bytes) {
                     Some(true) => crate::archive::pack(&req.sources, &dest, self),
-                    _ => Ok(()),
+                    // Left as it is: counted, so the summary says so (red-team of #5).
+                    Some(false) => {
+                        self.sum.skipped += 1;
+                        Ok(())
+                    }
+                    None => Ok(()),
                 }
             }
         };
@@ -2396,7 +2401,10 @@ impl Worker {
             }
             // #5, once more at the last moment: a folder made there while the file was
             // copied is never sent to the trash for it (also reached from a batch).
-            if other_kind(Some(src), dst).is_some() {
+            // Counted and said here: the callers drop an `Ok(false)` without a word.
+            if let Some(why) = other_kind(Some(src), dst) {
+                self.sum.skipped += 1;
+                self.note_skip(dst, why);
                 return Ok(false);
             }
             if trash {
@@ -2869,7 +2877,13 @@ impl crate::archive::Hooks for Worker {
         });
     }
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
-        self.resolve_conflict(None, dst, incoming)
+        // An entry left as it is: counted here, as a copy counts its skips; the
+        // archive's walk goes on without a word (red-team of #5).
+        let r = self.resolve_conflict(None, dst, incoming);
+        if r == Some(false) {
+            self.sum.skipped += 1;
+        }
+        r
     }
     fn part(&mut self, p: &Path, made: bool) {
         // Only what is made is written down: a later start removes only what is

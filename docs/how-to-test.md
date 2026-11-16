@@ -10,7 +10,8 @@ You need two terminal windows, about 4 GiB free disk, and no Rust.
 ## The steps
 
 **1. Download** from [Releases](https://github.com/nci-gis/rust-commander/releases), for
-your system: this version's `xdevcmd-…` archive, the previous version's, and this
+your system: this version's `xdevcmd-…` archive; the previous version's (the release
+just below it on that page: for 0.4.0-beta.2, 0.4.0-beta.1), to compare with; and this
 version's `xdevcmd-bench-…` (it holds `xtask`, the test tool; `xtask --help`). Unpack
 each into a folder of its own. The builds are not signed: the first start may need
 [a click or two](troubleshooting.md#macos) ([Windows](troubleshooting.md#windows)).

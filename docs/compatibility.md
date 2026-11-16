@@ -1,9 +1,13 @@
 # What stays the same from 0.4.0
 
-0.4.0 is the first release called stable. This page says what that promises: what you
-write down or build on (a config file, a theme, a script that starts xdevcmd) keeps
-working across 0.4.x. It also says what is **not** promised, so that nothing here is
-read as more than it is.
+What you write down or build on keeps working across 0.4.x, and what is not promised.
+
+**In short**
+
+- Your `config.toml`, your themes, your `[keys]` bindings and scripts that start
+  xdevcmd with flags keep working from 0.4.0 to every 0.4.x.
+- Default keys, the look, message wording and diagnostic output may change.
+- The 0.4.0 betas and release candidates are not covered yet.
 
 ## The promise
 

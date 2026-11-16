@@ -1849,7 +1849,7 @@ impl Worker {
             if let Some(m) = there.as_ref().ok().filter(|m| !m.is_dir()) {
                 self.sum.skipped += 1;
                 let why = if m.is_symlink() {
-                    "is a link \u{2014} a folder is never copied through it"
+                    "is a link \u{2014} not copied through; open it to copy into it"
                 } else {
                     "is a file \u{2014} a folder never replaces it"
                 };

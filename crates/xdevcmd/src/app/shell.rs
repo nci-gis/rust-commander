@@ -701,6 +701,17 @@ impl App {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;
         };
+        // A `cd` (Alt+C) never goes after text typed and not run: with its Enter, that
+        // text would run with the directory as one more argument (#1). Names typed for
+        // the user to finish do go after it: adding to the line is what they are for.
+        let dirty = self
+            .panel_ref()
+            .and_then(|p| p.shell(s.target))
+            .is_some_and(crate::pane::TermPane::dirty);
+        if s.new_shell.is_none() && dirty && matches!(state, ShellState::Idle | ShellState::Unknown)
+        {
+            return self.cd_beside_typed_text(s);
+        }
         let long = s.here.len() > crate::pane::term::LONG_LINE;
         let decision = crate::pane::term::decide_for(
             &state,
@@ -783,6 +794,38 @@ impl App {
             footnote: None,
             pictures: Vec::new(),
         }));
+    }
+
+    /// Alt+C with text typed in the target shell: a new shell in the directory, the
+    /// typed text left where it is; with no room for one, nothing, and the key that
+    /// clears the line (#1).
+    fn cd_beside_typed_text(&mut self, s: ShellSend) {
+        let (n, before, room) = match self.panel_ref() {
+            Some(p) => (
+                p.tab_number(s.target).unwrap_or(1),
+                p.tab_count(),
+                p.shell_count() < self.settings.config.terminal.max_terminals,
+            ),
+            None => return,
+        };
+        if !room {
+            let r = crate::refusal::Refusal::Busy;
+            r.log();
+            self.status = if cfg!(unix) {
+                format!("Ctrl+C clears shell {n}'s line \u{2014} all shell tabs in use")
+            } else {
+                "close a shell tab \u{2014} all in use".into()
+            };
+            return;
+        }
+        let dir = xdevcmd_core::format::elide_middle(&tidy(&s.dir), 20);
+        self.open_shell_for(s);
+        let after = self.panel_ref().map_or(before, TermPanel::tab_count);
+        if after > before {
+            crate::refusal::Refusal::DirtyLine.log();
+            self.status =
+                format!("new shell {after} in {dir} \u{2014} shell {n} keeps its typed text");
+        }
     }
 
     /// Type `s` into its shell now, if that shell is still there.

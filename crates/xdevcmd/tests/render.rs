@@ -5562,5 +5562,6 @@ fn a_folder_copied_onto_a_link_to_a_folder_writes_nothing_through_it() {
     there.sort();
     assert_eq!(there, vec!["kept.txt"], "written through the link\n{s}");
     assert!(b.join("d").symlink_metadata().unwrap().is_symlink());
+    assert!(s.contains("1 skipped"), "the summary says so\n{s}");
     let _ = fs::remove_dir_all(&root);
 }

@@ -1840,12 +1840,20 @@ impl Worker {
                 return;
             }
             let failed_before = self.sum.failed;
-            let made = dst.symlink_metadata().is_err();
-            // #5: a folder never replaces a file (a link to a folder is a folder here,
-            // as before: the copy goes into it).
-            if !made && !dst.is_dir() {
+            let there = dst.symlink_metadata();
+            let made = there.is_err();
+            // #5: a folder never replaces a file, and a link is a file here, as the
+            // plan, a move and Alt+Y take it: the table says "skipped", and nothing is
+            // written through the link to wherever it points (QA 2026-11-17, P0; before,
+            // the copy went into the link's folder).
+            if let Some(m) = there.as_ref().ok().filter(|m| !m.is_dir()) {
                 self.sum.skipped += 1;
-                self.note_skip(dst, "is a file \u{2014} a folder never replaces it");
+                let why = if m.is_symlink() {
+                    "is a link \u{2014} a folder is never copied through it"
+                } else {
+                    "is a file \u{2014} a folder never replaces it"
+                };
+                self.note_skip(dst, why);
                 return;
             }
             if let Err(e) = fs::create_dir_all(dst) {

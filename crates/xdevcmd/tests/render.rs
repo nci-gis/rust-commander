@@ -2067,6 +2067,24 @@ fn closing_shells_then_the_last_one_removes_the_panel() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Plan A10, UX: Ctrl+O, mc's shell key, says where the shell is; in the shell the F-key
+/// bar is gone (its keys are the shell's), and back in the files it is there again.
+#[test]
+fn ctrl_o_names_the_shell_and_the_key_bar_hides_in_it() {
+    let (a, b) = files(&["alpha.txt"]);
+    let o = shot_keys(SIZE, "Ctrl+o", &a, &b);
+    assert!(status(&o).contains("the shell is F12"), "{o}");
+    let files_bar = shot_keys(SIZE, "", &a, &b);
+    assert!(files_bar.contains("8 Del"), "{files_bar}");
+    let shell = shot_keys(SIZE, "F12", &a, &b);
+    assert!(
+        !shell.contains("8 Del"),
+        "the bar shows in the shell\n{shell}"
+    );
+    let back = shot_keys(SIZE, "F12,F12", &a, &b);
+    assert!(back.contains("8 Del"), "{back}");
+}
+
 #[test]
 fn the_tab_bar_buttons_are_clickable() {
     let (a, b) = files(&["alpha.txt"]);

@@ -1,10 +1,11 @@
 # Round 025: xdevtheme-light (v0.4.0, step 2, item 37 part 2)
 
-**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, step 2 of `ROADMAP.md` ("Next"); item 37, part 2 (the owner's go,
 2026-11-12)
 **Date started**: 2026-11-12
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

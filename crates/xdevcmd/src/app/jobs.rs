@@ -16,7 +16,10 @@ impl App {
     /// A plan is being made for the open confirmation (`--screenshot` lets it finish
     /// before the next key, so a test sees the same dialog however fast the disk).
     pub fn planning(&self) -> bool {
-        matches!(&self.modal, Some(Modal::Confirm(c)) if c.planning.is_some())
+        // Counting too (a delete's "counting…"): on a slow Windows runner the frame was
+        // taken before the count came (a_confirmation_counts_one_file_in_the_singular,
+        // run 43715312082). Only `--screenshot` asks.
+        matches!(&self.modal, Some(Modal::Confirm(c)) if c.planning.is_some() || c.counting.is_some())
     }
 
     /// The viewer has lines on screen drawn plain until its scan reaches them

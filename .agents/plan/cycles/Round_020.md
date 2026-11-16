@@ -1,10 +1,11 @@
 # Round 020: Paths in the shell's output (v0.4 entry B)
 
-**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, entry B of `.agents/memory/2026-11-10-v0.4.0-plan.md`; ROADMAP item
 30, part 1
 **Date started**: 2026-11-11
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

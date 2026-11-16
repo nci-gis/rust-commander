@@ -1,10 +1,11 @@
 # Round 027: Log a terminal tab to a file (v0.4.0, step 4, item 35)
 
-**Status**: Review
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, step 4 of `ROADMAP.md` ("Next"); item 35 (the owner's go,
 2026-11-12: "go ahead")
 **Date started**: 2026-11-12
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

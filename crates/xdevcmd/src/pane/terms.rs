@@ -245,6 +245,11 @@ impl TermPanel {
         Some((tab.id, tab.focus))
     }
 
+    /// The number its tab shows (1 for the first), while it lives.
+    pub fn tab_number(&self, key: ShellKey) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == key.0).map(|i| i + 1)
+    }
+
     /// The shell `key` names, while it lives.
     pub fn shell(&self, key: ShellKey) -> Option<&TermPane> {
         self.tabs

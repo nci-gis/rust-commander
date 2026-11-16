@@ -867,6 +867,28 @@ rules and refusal texts as written there. #23 and #24 merged first.
   never opens. Cause: `if let (Some(r), Some(x)) = (got, slot.take())` empties the
   slot on the first tick (run.rs:355, :387). Red CI run 43885704745 (5d64f54).
 
+### 2026-11-16, plan A10: P1–P5 in pull requests, each red-teamed
+
+Each data-loss fix went red test → fix → an independent red-team agent (the red-team
+skill) → its P0/P1 findings red-first and fixed in the same PR. Every red-team found
+real holes the fix's own tests missed.
+
+| Fix | PR | Red run | Red-team found (fixed unless said) |
+|---|---|---|---|
+| P5 #6 count / archive view | #25 | 43885704745 | (not a data path: no red-team) |
+| P3 #3 checked resume, Esc keeps | #26 | 43888463088 | P1 two starts offered one job; P1 C hung on a link to a FIFO; P2 a cancelled check counted; **F3 → known issue** (a mid-job Skip is not journaled) |
+| P1 #1 typed line + Alt+C | #28 | 43889910529, 43896579060 | **P0 the user menu**; **P0 `\` continuation**; P1 `exec zsh` read as busy; P2 mouse bytes |
+| P2 #2 #4 guards, loading | #29 (on #28) | 43898582362, run for ded92b2 | **P0 `link/` with a trailing slash emptied the link's target, home included — also in beta.1**; P1 `./x` rows dropped; P1 only the focused pane's folder guarded; P1 drop-move and user menu unguarded |
+| P4 #5 file↔folder | branch feat/p4-file-over-dir (on #29) | run for 774fcc5 | red-team running |
+| T1 docs | #27 | — | — |
+
+- **Trust metrics so far:** red-team catches 3×P0, 7×P1, 2×P2 (all fixed) + 1 known
+  issue; AI-introduced regressions caught before merge: P2's `./x` rows (my own fix).
+- **Flaky, for the cut's list:** `everything_at_once_stays_bounded_and_keys_still_answer`
+  failed once under full-suite load on a 2-core machine, passed alone and in a rerun;
+  the exec test was flaky (1 in 3) until 919ee51 learnt the shell's name at the first look.
+- **Merge order:** #25, #26, #27 any time; #28 before #29; #29 before P4.
+
 ## Check
 
 ## Act

@@ -484,6 +484,9 @@ pub struct Summary {
     /// other bytes than their source, so were copied again. Also counted in `done`.
     pub repaired: u64,
     pub skipped: u64,
+    /// Of `skipped`: a file and a folder of the same name, which never replace each
+    /// other (#5). Said, and the Job box stays open for it.
+    pub kind_skips: u64,
     pub failed: u64,
     pub bytes: u64,
     pub cancelled: bool,
@@ -546,6 +549,14 @@ impl Summary {
         }
         if self.skipped > 0 {
             s.push_str(&format!(", {} skipped", self.skipped));
+            // #5: said every time, so a file and a folder of one name are never a
+            // silent skip.
+            if self.kind_skips > 0 {
+                s.push_str(&format!(
+                    " ({} a file and a folder of the same name: never replaced)",
+                    self.kind_skips
+                ));
+            }
         }
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
@@ -1558,6 +1569,14 @@ impl Worker {
         }
     }
 
+    /// Why a skip happened, for the summary, without counting it: the caller does.
+    fn note_skip(&mut self, path: &Path, why: &str) {
+        self.sum.kind_skips += 1;
+        if self.sum.errors.len() < 20 {
+            self.sum.errors.push(format!("{}: {why}", path.display()));
+        }
+    }
+
     /// Whether regular files `a` and `b` hold the same bytes, read side by side; a read
     /// that fails counts as different (copying again then reports the error). Stops
     /// early, as different, when the job is cancelled.
@@ -1606,6 +1625,13 @@ impl Worker {
         let Some(now) = Ident::at(dst) else {
             return Some(true);
         };
+        // #5: a file never replaces a folder, nor a folder a file — before every rule
+        // below, "replace all" and the plan's word included. Skipped (the caller counts
+        // it) and said; an archive's entry (no source) is a file.
+        if let Some(why) = other_kind(src, dst) {
+            self.note_skip(dst, why);
+            return Some(false);
+        }
         if self.approved.as_deref() == Some(dst) {
             // Agreed already, at the move's question: that file is still the one.
             self.approved = None;
@@ -1788,6 +1814,13 @@ impl Worker {
             }
             let failed_before = self.sum.failed;
             let made = dst.symlink_metadata().is_err();
+            // #5: a folder never replaces a file (a link to a folder is a folder here,
+            // as before: the copy goes into it).
+            if !made && !dst.is_dir() {
+                self.sum.skipped += 1;
+                self.note_skip(dst, "is a file \u{2014} a folder never replaces it");
+                return;
+            }
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
                 return;
@@ -2361,6 +2394,11 @@ impl Worker {
             if !self.still_agreed(Some(src), dst) {
                 return Ok(false);
             }
+            // #5, once more at the last moment: a folder made there while the file was
+            // copied is never sent to the trash for it (also reached from a batch).
+            if other_kind(Some(src), dst).is_some() {
+                return Ok(false);
+            }
             if trash {
                 let t = crate::faults::at(crate::faults::Point::Trash, dst)
                     .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
@@ -2870,6 +2908,18 @@ impl crate::archive::Hooks for Worker {
 }
 
 // ── free functions ─────────────────────────────────────────────────────────────────
+
+/// #5: why `src` may not replace `dst`, when one is a folder and the other is not. A
+/// link is not a folder here (replacing a link leaves its folder alone); no source (an
+/// archive's entry) is a file.
+fn other_kind(src: Option<&Path>, dst: &Path) -> Option<&'static str> {
+    let dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    match (src.is_some_and(dir), dir(dst)) {
+        (false, true) => Some("is a folder \u{2014} a file never replaces it"),
+        (true, false) => Some("is a file \u{2014} a folder never replaces it"),
+        _ => None,
+    }
+}
 
 /// What [`Existing::Resume`] makes of a destination that is there.
 #[derive(Debug, PartialEq, Eq)]

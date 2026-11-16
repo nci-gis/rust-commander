@@ -192,7 +192,8 @@ impl Choice {
 impl Group {
     pub fn level(self) -> Level {
         match self {
-            Group::Blocked => Level::Cannot,
+            // #5: never replaced, so left out, as what cannot be copied is.
+            Group::Blocked | Group::FileOverDir | Group::DirOverFile => Level::Cannot,
             Group::Identical => Level::Info,
             _ => Level::Loses,
         }
@@ -202,11 +203,10 @@ impl Group {
     /// data (owner, 2026-11-13). Empty: nothing to choose.
     pub fn choices(self) -> &'static [Choice] {
         match self {
-            Group::Blocked | Group::Identical => &[],
-            // A file and a folder cannot replace each other in one step.
-            Group::FileOverDir | Group::DirOverFile | Group::CaseClash => {
-                &[Choice::Skip, Choice::Ask]
-            }
+            // A file and a folder never replace each other (#5): skipped, nothing to
+            // choose. The engine skips them whatever is chosen elsewhere.
+            Group::Blocked | Group::Identical | Group::FileOverDir | Group::DirOverFile => &[],
+            Group::CaseClash => &[Choice::Skip, Choice::Ask],
             _ => &[Choice::Skip, Choice::Replace, Choice::Ask],
         }
     }
@@ -234,8 +234,14 @@ impl Group {
             Group::Newer => format!("{n} would replace a newer file"),
             Group::Older => format!("{n} would replace an older file"),
             Group::Differs => format!("{n} would replace a file of another size"),
-            Group::FileOverDir => format!("{n} {} where a folder is", s("file", "files")),
-            Group::DirOverFile => format!("{n} {} where a file is", s("folder", "folders")),
+            Group::FileOverDir => format!(
+                "{n} {} where a folder is: skipped, never replaced",
+                s("file", "files")
+            ),
+            Group::DirOverFile => format!(
+                "{n} {} where a file is: skipped, never replaced",
+                s("folder", "folders")
+            ),
             Group::Identical => format!(
                 "{n} already there, identical: left as {}",
                 s("it is", "they are")

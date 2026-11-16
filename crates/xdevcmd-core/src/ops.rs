@@ -3200,7 +3200,19 @@ fn appear_in_test(dst: &Path) {
         paths.remove(i);
         fs::write(dst, "theirs").unwrap();
     }
+    drop(paths);
+    // A folder in its place while the bytes are written (red-team of #5).
+    let mut dirs = APPEAR_DIR.lock().unwrap();
+    if let Some(i) = dirs.iter().position(|p| p == dst) {
+        dirs.remove(i);
+        let _ = fs::remove_file(dst);
+        fs::create_dir_all(dst.join("inner")).unwrap();
+        fs::write(dst.join("inner/keep.txt"), "kept").unwrap();
+    }
 }
+
+#[cfg(test)]
+static APPEAR_DIR: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(not(test))]
 fn appear_in_test(_: &Path) {}
@@ -3659,6 +3671,57 @@ mod tests {
     /// the old one back.
     /// #5: a file never replaces a folder, nor a folder a file — not with "replace all",
     /// not with Yes to the question, not in a move. Skipped, and the summary says why.
+    /// #5, said every time (red-team): a folder that appears while the file is
+    /// written is kept, and the skip is counted and said, so the Job box stays open; an
+    /// archive's entry onto a folder is counted and said too.
+    #[test]
+    fn a_late_folder_and_an_archive_entry_are_skips_said_aloud() {
+        journals();
+        for safe in [true, false] {
+            let d = tmp(&format!("late-folder-{safe}"));
+            fs::create_dir_all(d.join("src")).unwrap();
+            fs::create_dir_all(d.join("to")).unwrap();
+            fs::write(d.join("src/a"), "new").unwrap();
+            fs::write(d.join("to/a"), "old").unwrap();
+            APPEAR_DIR.lock().unwrap().push(d.join("to/a"));
+            let mut req = Request::copy(vec![d.join("src/a")], d.join("to"));
+            req.trash_root = Some(d.join("trash"));
+            req.safe = safe;
+            req.existing = Existing::Replace;
+            let (s, _) = run_with(req, Answer::Yes);
+            let read = fs::read_to_string(d.join("to/a/inner/keep.txt")).ok();
+            assert_eq!(read.as_deref(), Some("kept"), "safe={safe}: {s:?}");
+            assert_eq!((s.skipped, s.kind_skips), (1, 1), "safe={safe}: {s:?}");
+            assert!(s.describe(Kind::Copy).contains("never replaced"), "{s:?}");
+            let _ = fs::remove_dir_all(&d);
+        }
+        let d = tmp("extract-over-folder");
+        let zp = d.join("x.zip");
+        {
+            let f = File::create(&zp).unwrap();
+            let mut z = zip::ZipWriter::new(f);
+            z.start_file("a", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            use std::io::Write;
+            z.write_all(b"zipped").unwrap();
+            z.finish().unwrap();
+        }
+        fs::create_dir_all(d.join("out/a")).unwrap();
+        fs::write(d.join("out/a/keep.txt"), "kept").unwrap();
+        let mut req = Request::extract(zp, vec!["a".into()], String::new(), d.join("out"));
+        req.trash_root = Some(d.join("trash"));
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Yes);
+        let read = fs::read_to_string(d.join("out/a/keep.txt")).ok();
+        assert_eq!(read.as_deref(), Some("kept"), "{s:?}");
+        assert!(
+            s.describe(Kind::Extract).contains("never replaced"),
+            "{}",
+            s.describe(Kind::Extract)
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_file_never_replaces_a_folder_nor_the_reverse() {
         journals();

@@ -165,9 +165,33 @@ mixed: one large file and small files  84.33 ms   94.61 ms   78.69 ms   4.3 MiB 
 
 - **median** is the number. **p95** says how steady it was: far above the median means
   something else was running, so run again.
-- **vs base** is the change from this host's baseline, marked past ±15 %. To compare
-  two versions on one machine: run the older one with `--save-baseline`, then the newer
-  one with the same `--host`.
+- **vs base** is the change from this host's baseline, marked past ±15 %.
+
+## Two versions on one machine
+
+To see whether a new version is slower or faster where you work: the `xtask` of the
+older version in one folder, the newer one's in another, and the same names for both.
+
+`--save-baseline` writes `bench/baseline-<host>.json` whole, with only the cases of that
+run: a second `--only` run with the same `--host` replaces the first's. So one name per
+case (on Windows, `.\xtask.exe`):
+
+```bash
+cd old                 # the older version's xtask
+./xtask bench --only plan  --host mine-plan  --save-baseline
+./xtask bench --only list  --host mine-list  --save-baseline
+./xtask bench --only mixed --host mine-mixed --save-baseline
+cp bench/baseline-*.json ../new/bench/   # Windows: Copy-Item
+cd ../new              # the newer version's xtask
+./xtask bench --only plan  --host mine-plan
+./xtask bench --only list  --host mine-list
+./xtask bench --only mixed --host mine-mixed
+```
+
+(Make `new/bench` first: `mkdir -p ../new/bench`, or `New-Item -ItemType Directory`.)
+Each line of the newer runs then says how far it moved; ◀ marks more than 15 %. Run the
+pair again the other way round (newer as the baseline) before believing a small change:
+a busy minute shows as a change too.
 - With `XDEVCMD_DEBUG=jobs`, each run's debug log says where the time went: the small
   files against the large one, and what the large file's checkpoints cost
   ([what each field means](development.md#reading-a-debug-log)).

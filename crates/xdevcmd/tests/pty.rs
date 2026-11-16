@@ -1804,6 +1804,57 @@ fn an_interrupted_permanent_delete_is_not_offered_again() {
     x.quit();
 }
 
+/// The count in a delete box arrives on its own thread; the box shows it when it
+/// does. It stayed at "counting…" for good when the count was taken before it came
+/// (#6, 2026-11-16).
+#[test]
+fn the_count_in_a_delete_box_arrives_while_it_is_open() {
+    let s = Scratch::new("count-live");
+    std::fs::create_dir_all(s.left().join("many")).unwrap();
+    for i in 0..2000 {
+        s.file(&format!("left/many/f{i:04}.txt"), "x");
+    }
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(SHIFT_F8);
+    x.wait_for("This cannot be undone.");
+    x.wait_for("2000 files");
+    x.send(b"\x1b");
+    x.wait_gone("This cannot be undone.");
+    assert!(s.left().join("many/f0000.txt").exists());
+    x.quit();
+}
+
+/// F3 on an entry of a big archive extracts it on a thread; the viewer opens when it
+/// is done. It never opened when the result was taken before it came (#6).
+#[test]
+fn an_entry_of_a_big_archive_opens_in_the_viewer() {
+    let s = Scratch::new("view-big-tar");
+    let mut body = String::new();
+    for i in 0..400_000 {
+        body.push_str(&format!("LINE-{i:06} of the big entry\n"));
+    }
+    assert!(body.len() > 9 << 20, "past the 8 MiB read at once");
+    let mut b = tar::Builder::new(std::fs::File::create(s.left().join("big.tar")).unwrap());
+    let mut h = tar::Header::new_gnu();
+    h.set_size(body.len() as u64);
+    h.set_mode(0o644);
+    h.set_cksum();
+    b.append_data(&mut h, "inner.txt", body.as_bytes()).unwrap();
+    b.finish().unwrap();
+    drop(b);
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.wait_for("11 M"); // the entry, its name and extension in two columns
+    x.send(DOWN);
+    x.send(b"\x1bOR"); // F3
+    x.wait_for("LINE-000000 of the big entry");
+    x.send(b"\x1b");
+    x.wait_gone("LINE-000000");
+    x.quit();
+}
+
 #[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");

@@ -96,3 +96,4 @@ Agents MUST NOT:
 | [context/memory-placement.md](context/memory-placement.md) | Saving a memory, and unsure which system it goes in |
 | [context/philosophy.md](context/philosophy.md)       | A judgement call the rules above do not cover        |
 | [plan/PDCA.md](plan/PDCA.md)                         | Opening or closing a round                           |
+| [skills/red-team/SKILL.md](skills/red-team/SKILL.md) | Before approving a plan, a release cut or a data-path change |

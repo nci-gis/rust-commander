@@ -2462,6 +2462,28 @@ fn alt_c_with_a_typed_line_and_no_room_says_how_to_free_it() {
     x.quit();
 }
 
+/// `exec sleep 30` runs sleep as the shell's own process: the terminal is still that
+/// process's, so it looked like the shell at its prompt, and Alt+C typed its cd into
+/// sleep. Linux reads the new name in /proc (#1); elsewhere a known issue.
+#[cfg(target_os = "linux")]
+#[test]
+fn alt_c_does_not_type_into_a_program_the_shell_execed() {
+    let s = Scratch::new("exec");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"exec sleep 30\r");
+    std::thread::sleep(Duration::from_millis(500));
+    x.send(F12);
+    x.send(ALT_C);
+    x.wait_for("A program is running");
+    x.wait_for("sleep is running in this terminal");
+    x.send(b"\x1b");
+    x.wait_gone("A program is running");
+    assert!(!x.screen().contains("cd '"), "a cd was typed");
+    x.quit();
+}
+
 #[test]
 fn with_sending_without_asking_off_alt_c_asks_and_s_sends() {
     let s = Scratch::new("ask3");

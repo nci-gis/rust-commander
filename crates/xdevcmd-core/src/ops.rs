@@ -2850,7 +2850,7 @@ impl Worker {
     /// fails puts the old file back, so the cross-drive fallback (EXDEV) and any error
     /// leave both files as they were. Before (QA 2026-11-17, P0) the rename replaced the
     /// old file for good. A folder there is never sent: #5 refuses a file over a folder,
-    /// and a folder onto a folder is a merge, not a replacement.
+    /// and a folder onto a folder is not a replacement (the rename fails, nothing lost).
     fn move_over(&mut self, src: &Path, dst: &Path) -> io::Result<()> {
         let old_is_file = dst.symlink_metadata().is_ok_and(|m| !m.is_dir());
         if !old_is_file || !self.replace_into_trash(dst) {

@@ -179,3 +179,9 @@ Left out on purpose: clippy on other targets and `cargo deny` (CI runs both now)
 019's binstall dry run, possible only at 0.4.0 (release step). Round 033 stays at Do
 until beta.2 is cut (its step 9). 029–031 were already Complete (2026-11-13).
 **Promoted by**: XDevTeam. Written by Claude Code.
+
+## 2026-11-16: red-team skill and its pointer in AGENTS.md
+
+**Source**: the owner, 2026-11-16 ("bro có thể đưa Red-team vào instruction (.agents/AGENTS.md)"), after two review series (R1–R10) in which only the final red-team round caught each plan's fatal flaw.
+**What**: new skill `skills/red-team/SKILL.md` (procedure: fixed rubric first, four fresh role agents, varied round questions, mandatory final red-team after subtraction, verify before relaying, blind judging without hints, the human decides); one row in `AGENTS.md` "Where to look for more" (99 lines, under the 100-line budget). Procedure, not prose rule, per reference/mechanisms.md.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

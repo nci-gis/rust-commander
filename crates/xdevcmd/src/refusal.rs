@@ -13,6 +13,21 @@ pub enum Refusal {
     DirtyLine,
     /// The same, with every shell tab in use: nothing typed (#1).
     Busy,
+    /// A root, the home or a folder above it, a path with `.`/`..`, or the folder the
+    /// pane shows or one above it: never deleted, moved or renamed (#2).
+    Protected(Guard),
+    /// A write action while the pane's folder is still opening: the listing on screen
+    /// is the old one. Press the same key once it is shown (#4).
+    Loading(&'static str),
+}
+
+/// What a [`Refusal::Protected`] kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guard {
+    Root,
+    Home,
+    NotPlain,
+    Cwd,
 }
 
 impl Refusal {
@@ -21,13 +36,21 @@ impl Refusal {
         match self {
             Refusal::DirtyLine => "dirty_line",
             Refusal::Busy => "busy",
+            Refusal::Protected(Guard::Root) => "protected_root",
+            Refusal::Protected(Guard::Home) => "protected_home",
+            Refusal::Protected(Guard::NotPlain) => "protected_not_plain",
+            Refusal::Protected(Guard::Cwd) => "protected_cwd",
+            Refusal::Loading(_) => "loading",
         }
     }
 
     /// What to press next, or `None` when the refusal already did the safe thing.
     pub fn next(self) -> Option<&'static str> {
         match self {
-            Refusal::DirtyLine => None,
+            // Nothing was done and nothing is to be done: the safe thing happened.
+            Refusal::DirtyLine | Refusal::Protected(_) => None,
+            // The same action again, once the listing is shown.
+            Refusal::Loading(action) => Some(action),
             // In the shell: clears its line. Windows' consoles do not all clear it
             // with Ctrl+C (known issue): closing a shell tab makes room there.
             Refusal::Busy if cfg!(unix) => Some("Ctrl+C"),
@@ -53,9 +76,28 @@ mod tests {
     /// Codes are part of the interface: a change here is a change for agents too.
     #[test]
     fn codes_and_next_keys_are_stable() {
-        let all = [Refusal::DirtyLine, Refusal::Busy];
+        let all = [
+            Refusal::DirtyLine,
+            Refusal::Busy,
+            Refusal::Protected(Guard::Root),
+            Refusal::Protected(Guard::Home),
+            Refusal::Protected(Guard::NotPlain),
+            Refusal::Protected(Guard::Cwd),
+            Refusal::Loading("delete"),
+        ];
         let got: Vec<_> = all.iter().map(|r| (r.code(), r.next())).collect();
         let busy_next = if cfg!(unix) { "Ctrl+C" } else { "close_tab" };
-        assert_eq!(got, vec![("dirty_line", None), ("busy", Some(busy_next))]);
+        assert_eq!(
+            got,
+            vec![
+                ("dirty_line", None),
+                ("busy", Some(busy_next)),
+                ("protected_root", None),
+                ("protected_home", None),
+                ("protected_not_plain", None),
+                ("protected_cwd", None),
+                ("loading", Some("delete")),
+            ]
+        );
     }
 }

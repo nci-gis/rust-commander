@@ -1230,6 +1230,15 @@ impl FilePane {
         self.reading.is_some()
     }
 
+    /// The folder this pane is on its way to, while it opens: the listing on screen is
+    /// still the old one (#4). Not a reload or the periodic check, which keep the folder.
+    pub fn moving_to(&self) -> Option<&Path> {
+        self.reading
+            .as_ref()
+            .filter(|r| matches!(r.why, ReadFor::Move { .. }))
+            .map(|r| r.target.as_path())
+    }
+
     /// Stop waiting for a slow read. The directory it was for, if there was one.
     pub fn stop_reading(&mut self) -> Option<PathBuf> {
         self.reading.take().map(|r| r.target)

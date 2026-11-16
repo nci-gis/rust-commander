@@ -357,12 +357,63 @@ impl App {
         ))
     }
 
+    /// Why a write action waits (#4): the focused pane is still opening a folder, and
+    /// the listing on screen, whose cursor and marks it would act on, is the old one.
+    /// Copy too, though it changes nothing here: it would copy what the user left.
+    pub(super) fn loading_refused(&self, a: Action) -> Option<String> {
+        let writes = matches!(
+            a,
+            Action::Copy
+                | Action::Delete
+                | Action::DeletePermanent
+                | Action::Move
+                | Action::Rename
+                | Action::BulkRename
+                | Action::MkDir
+                | Action::Edit
+                | Action::NewFile
+                | Action::CopyAs
+                | Action::Symlink
+                | Action::Permissions
+                | Action::OpenWith
+                | Action::Checksum
+                | Action::Pack
+                | Action::Unpack
+                | Action::TypeNames
+        );
+        if !writes {
+            return None;
+        }
+        let to = self
+            .panes
+            .get(&self.focus)
+            .and_then(Pane::as_files)
+            .and_then(|f| f.moving_to())?;
+        let r = crate::refusal::Refusal::Loading(crate::keys::action_name(a));
+        r.log();
+        let key = self
+            .settings
+            .keymap
+            .keys_for(a)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "it".into());
+        let dir = xdevcmd_core::format::elide_middle(&tidy(to), 20);
+        Some(format!(
+            "{key} again when shown \u{2014} {dir} still opening"
+        ))
+    }
+
     pub(super) fn perform(&mut self, a: Action) {
         if let Some(why) = self.refused(a) {
             self.status = why;
             return;
         }
         if let Some(why) = self.archive_refused(a) {
+            self.status = why;
+            return;
+        }
+        if let Some(why) = self.loading_refused(a) {
             self.status = why;
             return;
         }
@@ -831,6 +882,23 @@ impl App {
                 moves,
                 undoing: true,
             } => self.undo_rename(moves, false),
+            Cmd::Transfer {
+                kind,
+                sources,
+                dest,
+            } if self.file_panes().iter().any(|id| {
+                self.panes
+                    .get(id)
+                    .and_then(Pane::as_files)
+                    .is_some_and(|f| f.moving_to().is_some())
+            }) =>
+            {
+                // A drop while a pane is still opening a folder: what was dragged or
+                // where it lands may be the old listing's (#4).
+                let _ = (kind, sources, dest);
+                crate::refusal::Refusal::Loading("copy").log();
+                self.status = "drop again when shown \u{2014} a folder is still opening".into();
+            }
             Cmd::Transfer {
                 kind,
                 sources,

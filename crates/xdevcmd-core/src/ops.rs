@@ -1054,6 +1054,25 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
+        // The engine's own wall behind the UI's (#2): a root, the home or a folder above
+        // it, or a path with `.`/`..`, is never deleted or moved, whatever asked.
+        if matches!(req.kind, Kind::Delete | Kind::Move) {
+            let homes = crate::protect::homes();
+            let refused: Vec<String> = req
+                .sources
+                .iter()
+                .filter_map(|s| {
+                    crate::protect::protected(s, &homes)
+                        .map(|_| format!("{}: never deleted or moved", s.display()))
+                })
+                .collect();
+            if !refused.is_empty() {
+                self.sum.failed = refused.len() as u64;
+                self.sum.errors = refused;
+                let _ = self.tx.send(Event::Done(self.sum.clone()));
+                return;
+            }
+        }
         let kind = match req.kind {
             Kind::Copy if !req.pairs.is_empty() => "sync",
             Kind::Copy => "copy",

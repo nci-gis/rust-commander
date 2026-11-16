@@ -64,6 +64,9 @@ pub fn tidy_rows(paths: impl IntoIterator<Item = PathBuf>) -> (Vec<PathBuf>, boo
     let mut seen = std::collections::HashSet::new();
     let (mut rows, mut capped, mut outside) = (Vec::new(), false, 0);
     for p in paths {
+        let Some(p) = plain_row(p) else {
+            continue;
+        };
         if !policy.allows(&p) {
             outside += 1;
             continue;
@@ -78,6 +81,21 @@ pub fn tidy_rows(paths: impl IntoIterator<Item = PathBuf>) -> (Vec<PathBuf>, boo
         rows.push(p);
     }
     (rows, capped, outside)
+}
+
+/// `p` as a row (#2): `None` for a line with `.` or `..` in it (`src/..`, `.`, `..`):
+/// it names a folder by where the shell was, which the row would show by another name
+/// than the folder it removes. Never a row. A home (`~`) or a root stays a row; the
+/// guards refuse to delete, move or rename it.
+fn plain_row(p: PathBuf) -> Option<PathBuf> {
+    // By its text: `Path::components` drops a `.` after the first name, so `proj/.`
+    // would pass for `proj`.
+    let text = p.as_os_str().to_string_lossy();
+    let odd = text
+        .split(['/', std::path::MAIN_SEPARATOR])
+        .skip(1)
+        .any(|seg| seg == "." || seg == "..");
+    (!odd).then_some(p)
 }
 
 /// Keep a new list; it becomes the active one. The least recently used goes past

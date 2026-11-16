@@ -4869,17 +4869,62 @@ fn a_listed_row_naming_a_folder_above_is_never_deleted() {
     x.drag((cx + 2, cy), (cx + 5, cy));
     x.wait_for("selected");
     x.send(b"p");
-    x.wait_for("items");
-    x.send(DOWN);
-    x.send(SHIFT_F8);
-    std::thread::sleep(Duration::from_millis(500));
-    x.send(b"y");
-    std::thread::sleep(Duration::from_millis(1500));
+    // Fixed: the line is not a row at all. Before, it made a list of one row.
+    x.until("a list, or none", |scr| {
+        scr.contains("no paths in those lines") || scr.contains(" items")
+    });
+    if x.screen().contains("no paths in those lines") {
+        x.send(b"\x1b"); // the selection
+        x.wait_for("Esc close");
+        x.send(b"\x1b"); // the view
+        x.wait_gone("history \u{b7} sh");
+        x.send(F12); // back to the files, for quit
+    } else {
+        x.send(DOWN);
+        x.send(SHIFT_F8);
+        std::thread::sleep(Duration::from_millis(500));
+        x.send(b"y");
+        std::thread::sleep(Duration::from_millis(1500));
+    }
     assert!(
         s.left().join("proj/keep.txt").exists(),
         "the folder above was deleted:\n{}",
         x.screen()
     );
+    x.quit();
+}
+
+/// A list made of `/ . .. ~ src/..`: the lines with `.` or `..` are not rows (they name
+/// a folder by where the shell was); `/` and the home are, and F8 on either is refused
+/// with its reason. Nothing is offered for deleting (#2).
+#[test]
+fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
+    let s = Scratch::new("list-guards");
+    std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
+    s.file("left/proj/keep.txt", "k");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    let proj = s.left().join("proj").display().to_string();
+    x.send(format!("cd '{proj}'\r").as_bytes());
+    x.send(b"printf '%s\\n' / . .. '~' src/..\r");
+    x.wait_for("\u{2502}src/..");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}src/..");
+    let (cx, cy) = x.locate("\u{2502}/");
+    x.drag((cx + 2, cy), (cx + 2, cy + 4));
+    x.wait_for("5 lines selected");
+    x.send(b"p");
+    x.wait_for("list 2"); // `/` and the home; the list's title: its rows are up
+    for _ in 0..2 {
+        x.send(DOWN);
+        x.send(b"\x1b[19~"); // F8
+        x.wait_for("is never deleted or moved");
+        x.send(b"\x1b[D"); // anything, so the next status is new
+    }
+    assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
+    assert!(s.left().join("proj/keep.txt").exists());
     x.quit();
 }
 
@@ -4968,6 +5013,7 @@ fn a_write_action_while_a_folder_opens_waits_for_it() {
     x.wait_for("still opening");
     assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
     x.wait_for("inside");
+    x.send(DOWN); // the new listing's cursor starts on `..`
     x.send(b"\x1b[19~"); // the refusal's next: the same key, now on inside.txt
     x.wait_for("Moved to the trash");
     assert!(x.screen().contains("inside.txt"), "{}", x.screen());

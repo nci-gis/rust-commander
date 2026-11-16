@@ -1170,7 +1170,8 @@ impl Default for Keymap {
     }
 }
 
-fn action_name(a: Action) -> &'static str {
+/// The `[keys]` name of `a` ("delete", "copy"), as config.toml writes it.
+pub fn action_name(a: Action) -> &'static str {
     BINDINGS
         .iter()
         .find(|b| b.action == a)

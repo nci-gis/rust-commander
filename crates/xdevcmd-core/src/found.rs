@@ -182,6 +182,16 @@ fn candidate(word: &str, at: usize) -> Option<Found> {
             }
         }
     }
+    // A name ending in `/.` or `/..` names a folder by where it was printed (`src/..`
+    // is the folder above src): not a file, and its dots are not a full stop (#2).
+    if line.is_none()
+        && [".", ".."].iter().any(|d| {
+            path.strip_suffix(d)
+                .is_some_and(|r| r.ends_with('/') || r.ends_with('\\'))
+        })
+    {
+        return None;
+    }
     // A sentence's full stop or a list's comma is not part of the name.
     if line.is_none() {
         let t = path.trim_end_matches(['.', ',', ';', ':', '!', '?']);
@@ -236,6 +246,20 @@ mod tests {
             .into_iter()
             .map(|f| (f.path, f.line, f.col))
             .collect()
+    }
+
+    /// `src/..` names the folder above src by where it was printed: not a path to take,
+    /// and its dots are not a full stop that leaves `src/` (#2).
+    #[test]
+    fn a_name_ending_in_dots_after_a_slash_is_not_taken() {
+        for line in ["src/..", "src/.", "a/b/..", r"C:\x\.."] {
+            assert!(found(line).is_empty(), "{line}: {:?}", found(line));
+        }
+        let f = found("see src/main.rs.");
+        assert!(
+            f.iter().any(|g| g.0 == "src/main.rs"),
+            "a full stop goes: {f:?}"
+        );
     }
 
     #[test]

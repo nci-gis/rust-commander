@@ -802,7 +802,7 @@ impl App {
 
     /// The tab number of `s`'s shell when `s` types without running (names) and that
     /// shell waits at a continuation prompt.
-    fn unfinished_target(&self, s: &ShellSend) -> Option<usize> {
+    fn into_unfinished_line(&self, s: &ShellSend) -> Option<usize> {
         let p = self.panel_ref()?;
         let t = p.shell(s.target)?;
         (!s.here.ends_with('\r') && t.unfinished()).then(|| p.tab_number(s.target).unwrap_or(1))
@@ -854,7 +854,7 @@ impl App {
         }
         // Names typed (no Enter) at a continuation prompt land inside an open quote or
         // here-doc, where a name like `$(…)` runs once it is closed (QA 2026-11-17).
-        if let Some(n) = self.unfinished_target(&s) {
+        if let Some(n) = self.into_unfinished_line(&s) {
             crate::refusal::Refusal::DirtyLine.log();
             self.status = format!(
                 "shell {n}'s line is not finished (> ) \u{2014} nothing typed; Ctrl+C clears it"

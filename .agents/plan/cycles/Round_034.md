@@ -1,9 +1,10 @@
 # Round 034: beta.2 review fixes (winget out, B1, B2, B4–B7)
 
-**Status**: Review
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: the v0.4.0 release plan (owner's doc, 2026-11-15): backlog B1–B7, gate beta.2
 **Date started**: 2026-11-15
-**Date completed**:
+**Date completed**: 2026-11-15
 
 ## Goal
 

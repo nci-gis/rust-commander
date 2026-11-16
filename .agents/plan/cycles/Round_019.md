@@ -1,9 +1,10 @@
 # Round 019: Foundation for v0.4 — split app.rs, Windows end to end, housekeeping
 
-**Status**: Review
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, entry A of `.agents/memory/2026-11-10-v0.4.0-plan.md`
 **Date started**: 2026-11-10
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

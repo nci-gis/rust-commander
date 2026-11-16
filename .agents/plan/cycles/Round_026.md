@@ -1,10 +1,11 @@
 # Round 026: Documentation from the app (v0.4.0, step 3, item 40)
 
-**Status**: Review
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, step 3 of `ROADMAP.md` ("Next"); item 40 (the owner's go,
 2026-11-12: "ok")
 **Date started**: 2026-11-12
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

@@ -1,10 +1,11 @@
 # Round 028: Syntax-highlighted viewer (v0.4.0, step 5, item 33)
 
-**Status**: Review
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, step 5 of `ROADMAP.md` ("Next"); item 33 (the owner's go,
 2026-11-12: "yes, pls go as plan")
 **Date started**: 2026-11-12
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

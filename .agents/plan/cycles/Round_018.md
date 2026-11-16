@@ -1,10 +1,11 @@
 # Round 018: Windows asks before starting inside its panel; pid on the menu bar
 
-**Status**: Review
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0 (`.agents/memory/2026-11-10-v0.4.0-plan.md`); a fix the owner found
 before Round A, on `feat/v0.4.0`
 **Date started**: 2026-11-10
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

@@ -489,6 +489,17 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Where `bench/` (results, baselines) goes: the repository's, for `cargo xtask` in it;
+/// otherwise beside where the program was started.
+fn results_root(source: &Path, _via_cargo: bool, cwd: PathBuf) -> PathBuf {
+    if source.join("Cargo.toml").is_file() {
+        source.to_path_buf()
+    } else {
+        // A copy of this program away from the source: results beside where it started.
+        cwd
+    }
+}
+
 fn bench(args: &[String]) -> i32 {
     let o = match parse(args) {
         Ok(o) => o,
@@ -497,13 +508,11 @@ fn bench(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let root = root();
-    let root = if root.join("Cargo.toml").is_file() {
-        root
-    } else {
-        // A copy of this program away from the source: results beside where it started.
-        std::env::current_dir().unwrap_or_default()
-    };
+    let root = results_root(
+        &root(),
+        std::env::var_os("CARGO").is_some(),
+        std::env::current_dir().unwrap_or_default(),
+    );
     // With --only, the in-process cases alone: no build, so a copy of this program
     // runs them on a machine without Rust (the bench workflow's artifact).
     let whole = o.only.is_none();
@@ -1225,6 +1234,20 @@ mod tests {
         assert_eq!(civil(0), (1970, 1, 1));
         assert_eq!(civil(20_405), (2025, 11, 13));
         assert_eq!(civil(11_016), (2000, 2, 29));
+    }
+
+    /// A copy unpacked from a release, run by hand on a machine that also has the source
+    /// (a CI runner, a developer's laptop): its results go beside where it started, not
+    /// into the source it was built from (review of 2026-11-17: the release's smoke test
+    /// found none). `cargo xtask` in the repository keeps the repository's.
+    #[test]
+    fn results_go_beside_a_copy_and_into_the_repository_under_cargo() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let cwd = std::env::temp_dir();
+        assert_eq!(results_root(source, false, cwd.clone()), cwd);
+        assert_eq!(results_root(source, true, cwd.clone()), source);
+        let gone = Path::new("/no/such/source");
+        assert_eq!(results_root(gone, true, cwd.clone()), cwd);
     }
 
     #[test]

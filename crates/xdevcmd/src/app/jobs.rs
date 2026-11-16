@@ -277,16 +277,9 @@ impl App {
                 tidy(orig)
             ));
         }
-        // A permanent delete is not offered again: it would go on with one Enter, where
-        // Shift+F8 itself takes only Y.
-        let resumable = found.into_iter().find(|i| {
-            let kind_ok = match i.kind.as_str() {
-                "copy" | "move" => true,
-                "delete" => i.to_trash,
-                _ => false,
-            };
-            kind_ok && !i.sources.is_empty()
-        });
+        // A permanent delete is not offered again (`offered`). One job at a time: any
+        // other keeps its journal and is offered at the next start.
+        let resumable = found.into_iter().find(|i| i.offered());
         let mut discard = None;
         let mut check = None;
         let yes = resumable.map(|it| {
@@ -311,7 +304,7 @@ impl App {
             // hold no data under its real name. Trusting is the default (Enter).
             if it.kind != "delete" {
                 body.push(
-                    "C checks first: each file it wrote is read again with its source (slow)."
+                    "C checks everything first, done files too (slow; after a power cut)."
                         .into(),
                 );
                 check = Some((
@@ -336,9 +329,14 @@ impl App {
             }
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
-        let footnote = discard
-            .is_some()
-            .then(|| "Esc: asked again at the next start, the kept parts left as they are.".into());
+        // Always said when a job is offered: its journal stays until it is answered (#3).
+        let footnote = yes.as_ref().map(|_| {
+            if discard.is_some() {
+                "Esc: asked again at the next start, the kept parts left as they are.".into()
+            } else {
+                "Esc: asked again at the next start.".into()
+            }
+        });
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Interrupted".into(),
             body,
@@ -357,11 +355,13 @@ impl App {
     /// delete on the sources still there.
     /// `verify`: trust nothing the run made ([`ops::Request::verify`]).
     pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted, verify: bool) {
-        // What it finished is left; what is gone cannot be done again.
+        // What it finished is left, unless C asked to check it (#3); what is gone cannot
+        // be done again. A set, not `Vec::contains`: 30,000 sources took 21 s.
+        let done: HashSet<&PathBuf> = it.done.iter().collect();
         let still: Vec<PathBuf> = it
             .sources
             .iter()
-            .filter(|p| !it.done.contains(p) && std::fs::symlink_metadata(p).is_ok())
+            .filter(|p| (verify || !done.contains(p)) && std::fs::symlink_metadata(p).is_ok())
             .cloned()
             .collect();
         if still.is_empty() {
@@ -369,11 +369,15 @@ impl App {
             self.status = "nothing left to do: every source has gone".into();
             return;
         }
-        let mut req = match (it.kind.as_str(), it.dest) {
+        let mut req = match (it.kind.as_str(), it.dest.clone()) {
             ("copy", Some(d)) => Request::copy(still, d),
             ("move", Some(d)) => Request::mv(still, d),
             ("delete", _) if it.to_trash => Request::delete(still, true),
-            _ => return,
+            _ => {
+                xdevcmd_core::journal::discard(&it);
+                self.status = "nothing to resume: the job's journal is incomplete".into();
+                return;
+            }
         };
         req.existing = ops::Existing::Resume;
         // The plan's decisions stand (Round 030): what the user chose to leave is left,

@@ -1548,11 +1548,24 @@ impl Worker {
         let (Ok(mut fa), Ok(mut fb)) = (File::open(a), File::open(b)) else {
             return false;
         };
+        // The box names the file and its bar moves while a big one is read (#3): the
+        // bytes read are shown, not added; the file's size is added once, after.
+        let _ = self.tx.send(Event::Begin {
+            path: a.to_path_buf(),
+        });
+        let mut read = 0u64;
         let mut ba = vec![0u8; 1 << 20];
         let mut bb = vec![0u8; 1 << 20];
         loop {
             if self.stopped() {
                 return false;
+            }
+            if self.last_tick.elapsed() >= PROGRESS_EVERY {
+                self.last_tick = std::time::Instant::now();
+                let _ = self.tx.send(Event::Progress {
+                    bytes_done: self.bytes_done + read,
+                    files_done: self.sum.done + self.sum.skipped + self.sum.failed,
+                });
             }
             let Ok(n) = read_full(&mut fa, &mut ba) else {
                 return false;
@@ -1566,6 +1579,7 @@ impl Worker {
             if n == 0 {
                 return true;
             }
+            read += n as u64;
         }
         fn read_full(f: &mut File, buf: &mut [u8]) -> io::Result<usize> {
             let mut got = 0;
@@ -1625,7 +1639,15 @@ impl Worker {
             match identical(src, dst) {
                 Same::Dirs => return Some(true),
                 Same::Yes => {
-                    let differs = self.verify && src.is_some_and(|s| !self.same_bytes(s, dst));
+                    // Regular files only: a link is checked by its target (identical),
+                    // and opening one to a FIFO or a device blocks or never ends
+                    // (red-team F2). A check that Stop cut short repairs nothing (F4).
+                    let regular = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_file());
+                    let differs = self.verify
+                        && src.is_some_and(|s| {
+                            regular(s) && regular(dst) && !self.same_bytes(s, dst)
+                        })
+                        && !self.stopped();
                     if !differs {
                         return Some(false);
                     }
@@ -4311,6 +4333,47 @@ mod tests {
 
     /// Checked is only for a resume: on any other job the flag changes nothing (a
     /// file already there is asked about as always).
+    /// C compares regular files only. A link is checked by its target alone: opening a
+    /// link to a FIFO blocked the job before its first read, where Stop is looked at
+    /// (red-team F2). A cancelled check repairs nothing, so it counts none (F4).
+    #[cfg(unix)]
+    #[test]
+    fn a_checked_resume_reads_regular_files_only() {
+        journals();
+        let root = tmp("verify-fifo");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let fifo = root.join("pipe");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let src = root.join("l");
+        std::os::unix::fs::symlink(&fifo, &src).unwrap();
+        std::os::unix::fs::symlink(&fifo, dst.join("l")).unwrap();
+        let mut req = Request::copy(vec![src], dst);
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.verify = true;
+        let h = start(req);
+        let mut done = None;
+        let t = std::time::Instant::now();
+        while done.is_none() && t.elapsed() < Duration::from_secs(5) {
+            if let Ok(Event::Done(s)) = h.events.recv_timeout(Duration::from_millis(100)) {
+                done = Some(s);
+            }
+        }
+        if done.is_none() {
+            h.cancel();
+            // A writer frees the blocked open, so the worker can end.
+            let _ = fs::OpenOptions::new().write(true).open(&fifo);
+        }
+        let s = done.expect("the check of a link to a FIFO hung");
+        assert_eq!((s.skipped, s.repaired), (1, 0), "{s:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn verify_outside_a_resume_asks_as_before() {
         let root = tmp("verify-ask");

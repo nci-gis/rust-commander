@@ -1067,9 +1067,18 @@ impl TermPane {
         line.unwrap_or_default()
     }
 
-    /// Whether the shell's line may hold text typed and not run (#1).
+    /// Whether the shell's line may hold text typed and not run (#1), or is not finished:
+    /// the cursor's row is a continuation prompt (an open quote, a here-doc, a `for`
+    /// waiting for its end), where a command typed lands inside what is open and a name
+    /// in it can run when that is closed (QA 2026-11-17, P0).
     pub fn dirty(&self) -> bool {
-        self.dirty.get()
+        self.dirty.get() || self.unfinished()
+    }
+
+    /// Whether the cursor's row is a continuation prompt: the shell's line is open (a
+    /// quote, a here-doc), and what is typed lands inside it.
+    pub fn unfinished(&self) -> bool {
+        continuation_prompt(&self.cursor_row())
     }
 
     /// Translate a key into what a terminal would have sent. Returns false for keys we
@@ -1523,8 +1532,49 @@ fn function_key_bytes(n: u8, mods: KeyModifiers) -> Option<Vec<u8>> {
     )
 }
 
+/// A shell's continuation prompt at the start of `row`: bash's and sh's `> `, zsh's
+/// `dquote> `, `heredoc> `, `for> ` (lowercase words, then `> `). A custom PS2 is not
+/// recognised (a known issue). A primary prompt that looks like one (`> `) only sends
+/// commands to a new shell: the safe side.
+fn continuation_prompt(row: &str) -> bool {
+    let Some(at) = row.find("> ") else {
+        return false;
+    };
+    let words = &row[..at];
+    !words.starts_with(' ')
+        && !words.ends_with(' ')
+        && words.chars().all(|c| c.is_ascii_lowercase() || c == ' ')
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// QA 2026-11-17: the continuation prompts of bash, sh and zsh count; a primary
+    /// prompt, output, or `>` inside a line do not.
+    #[test]
+    fn continuation_prompts_are_recognised() {
+        for row in [
+            "> ",
+            "> half typed",
+            "dquote> ",
+            "heredoc> x",
+            "for> ",
+            "cmdsubst pipe> ",
+        ] {
+            assert!(continuation_prompt(row), "{row:?}");
+        }
+        for row in [
+            "$ ",
+            "user@host:~/src$ ",
+            "a > b",
+            "~/src> ",
+            "",
+            "Error> 1",
+            "x->y",
+        ] {
+            assert!(!continuation_prompt(row), "{row:?}");
+        }
+    }
     use super::typed_after;
 
     /// Which keys leave text on the shell's line (#1).

@@ -2650,6 +2650,20 @@ fn alt_c_at_a_continuation_prompt_opens_a_new_shell() {
         x.wait_for("shell 1 keeps its typed text");
         x.quit();
     }
+    // Names typed with Alt+Enter would land there too: refused, nothing typed.
+    let s = Scratch::new("ps2-names");
+    std::fs::create_dir(s.left().join("$(touch PWNED)")).unwrap();
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"cat <<EOF\r");
+    x.wait_for("> ");
+    x.send(F12);
+    x.send(DOWN); // the folder
+    x.send(b"\x1b\r"); // Alt+Enter
+    x.wait_for("line is not finished");
+    assert!(!x.screen().contains("> '"), "names typed:\n{}", x.screen());
+    x.quit();
 }
 
 /// A line continued with `\` and Enter has not run: the shell waits at `> ` for the

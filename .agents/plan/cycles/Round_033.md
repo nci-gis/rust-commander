@@ -841,6 +841,32 @@ Decided:
 - **CHANGELOG Unreleased** cut from 7.1 KB to 2.9 KB (the owner), nothing dropped; the
   style it follows is `memory/2026-11-15-docs-style.md`, a candidate for `reference/`.
 
+### 2026-11-16, plan A10 approved: D0 (the owner: "Merged PR 24, duyệt nhé")
+
+The plan is `claude/xdevcmd_beta2_plan_A10.md` in the claude.ai project (two review
+series R1–R10, blind judges 92/92). The owner approved, with the judges' trims: the key
+table cut to 5 tasks (copy, F8, F8 in a panelized list, clean Alt+C, F1), the footer
+click on Linux only, the Windows Busy close-tab variant a known issue; and the user
+rules and refusal texts as written there. #23 and #24 merged first.
+
+- **Owner-hours ledger** (budget 9.5 h; cut back at 8 h or the end of day 3, whichever
+  first; day 1 = 2026-11-16):
+
+  | Date | What | Hours |
+  |---|---|---|
+  | 2026-11-16 | D0: approve plan, merge #23 #24 | 0.25 |
+
+- **Speed baseline, corrected before it ran.** The plan had side A run `--only plan`,
+  `--only list` and `--only mixed` each with `--save-baseline`. Read in xtask
+  (main.rs:801), `--save-baseline` writes the whole file, so each run would replace the
+  one before. Side A is one full run with `--save-baseline`; `--only` runs then compare
+  against it by case name. xtask built at ad065d5 (the feat tip after #23 and #24):
+  bench run 43885854166.
+- **P5 (#6), red first.** Two tests through the user's path fail before the fix:
+  Shift+F8 on 2,000 files stays at "counting…"; F3 on an entry of a .tar over 8 MiB
+  never opens. Cause: `if let (Some(r), Some(x)) = (got, slot.take())` empties the
+  slot on the first tick (run.rs:355, :387). Red CI run 43885704745 (5d64f54).
+
 ## Check
 
 ## Act

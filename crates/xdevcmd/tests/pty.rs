@@ -1804,6 +1804,27 @@ fn an_interrupted_permanent_delete_is_not_offered_again() {
     x.quit();
 }
 
+/// The count in a delete box arrives on its own thread; the box shows it when it
+/// does. It stayed at "counting…" for good when the count was taken before it came
+/// (#6, 2026-11-16).
+#[test]
+fn the_count_in_a_delete_box_arrives_while_it_is_open() {
+    let s = Scratch::new("count-live");
+    std::fs::create_dir_all(s.left().join("many")).unwrap();
+    for i in 0..2000 {
+        s.file(&format!("left/many/f{i:04}.txt"), "x");
+    }
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(SHIFT_F8);
+    x.wait_for("This cannot be undone.");
+    x.wait_for("2000 files");
+    x.send(b"\x1b");
+    x.wait_gone("This cannot be undone.");
+    assert!(s.left().join("many/f0000.txt").exists());
+    x.quit();
+}
+
 #[test]
 fn shift_f8_warns_then_deletes_for_real() {
     let s = Scratch::new("delete");

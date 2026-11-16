@@ -129,7 +129,7 @@ jobs:
         shell: bash
         run: scripts/smoke.sh xdevcmd-${GITHUB_REF_NAME}-*.* "$GITHUB_REF_NAME"
       # The benchmark and the tester's sandbox tool (docs/benchmark.md,
-      # docs/testing-by-hand.md), built here with the binary it measures, in an archive
+      # docs/how-to-test.md), built here with the binary it measures, in an archive
       # of its own: xdevcmd's stays lean, and an Actions artifact would go after 14 days.
       # It never holds the release: a failure here leaves it out of the draft, where the
       # person who publishes sees it missing.
@@ -142,7 +142,7 @@ jobs:
           name="xdevcmd-bench-${GITHUB_REF_NAME}-${{ matrix.target }}"
           # Made apart, and moved where the upload looks only once it has run.
           mkdir -p bench-stage/"$name"
-          cp LICENSE docs/benchmark.md docs/testing-by-hand.md bench-stage/"$name"/
+          cp LICENSE docs/how-to-test.md docs/benchmark.md bench-stage/"$name"/
           exe="target/${{ matrix.target }}/release/xtask"
           cd bench-stage
           if [[ "${{ matrix.target }}" == *windows* ]]; then

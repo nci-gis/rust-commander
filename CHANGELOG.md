@@ -35,7 +35,7 @@ that heading and starts a new, empty one here. -->
 - **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
   target): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
   copy mid-job at the right moment (`--kill-when`), and checks every file against its
-  manifest (PASS / FAIL). No Rust needed; `xtask --help`. See Testing by hand ("Day 0")
+  manifest (PASS / FAIL). No Rust needed; `xtask --help`. See How to test
   and Benchmarks.
 
 ### Changed

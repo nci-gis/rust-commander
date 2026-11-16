@@ -70,7 +70,7 @@ const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME]
 /// xdevcmd: `bench --only` measures the engine built into this program, of the version
 /// `--version` prints (the release it came with).
 const HELP: &str =
-    "xtask: xdevcmd's tester and developer tasks (docs/benchmark.md, docs/testing-by-hand.md)
+    "xtask: xdevcmd's tester and developer tasks (docs/how-to-test.md, docs/benchmark.md)
 
   bench      measure copies, listing and the planner on your own drives
              (--only CASE: the engine built into this xtask, no Rust needed)

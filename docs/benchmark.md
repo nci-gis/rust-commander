@@ -103,7 +103,7 @@ something else ran, so run again. **vs base** is the change from this host's bas
 
 ## What to send
 
-With your week's report ([Testing by hand, "What to send"](testing-by-hand.md#what-to-send)),
+With your report ([How to test](how-to-test.md), step 11),
 or alone as a comment on the release:
 
 - `bench/results/*.json` and `bench/results/debug-*/`, from the folder you ran it in

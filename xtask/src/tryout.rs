@@ -1,4 +1,4 @@
-//! `xtask try`: the tester's sandbox (docs/testing-by-hand.md, plan A10 Track T).
+//! `xtask try`: the tester's sandbox (docs/how-to-test.md, plan A10 Track T).
 //!
 //! ```text
 //! xtask try --make [--small] [--dir D]   make D/xdevcmd-try (D: here; it must exist)
@@ -327,7 +327,7 @@ pub fn make(root: &Path, s: Sizes, version: &str) -> io::Result<()> {
         m.push_str(&format!("{}\t{}\t{}\t{}\n", l.kind, l.len, l.sha, l.rel));
     }
     fs::write(root.join(MANIFEST), m).map_err(at(root))?;
-    println!("made; next: docs/testing-by-hand.md, \"Day 0\"");
+    println!("made; next: docs/how-to-test.md, step 4");
     Ok(())
 }
 
@@ -422,7 +422,7 @@ impl Report {
         }
         let all = self.areas.iter().all(|(_, s, _)| *s == "PASS");
         s.push_str(if self.failed() {
-            "FAIL: a file lost, short or wrong. Report it as P0 (docs/testing-by-hand.md).\n"
+            "FAIL: a file lost, short or wrong. Report it as P0 (docs/how-to-test.md).\n"
         } else if all {
             "PASS: every copy whole, no file lost or wrong\n"
         } else {

@@ -491,8 +491,9 @@ fn root() -> PathBuf {
 
 /// Where `bench/` (results, baselines) goes: the repository's, for `cargo xtask` in it;
 /// otherwise beside where the program was started.
-fn results_root(source: &Path, _via_cargo: bool, cwd: PathBuf) -> PathBuf {
-    if source.join("Cargo.toml").is_file() {
+fn results_root(source: &Path, via_cargo: bool, cwd: PathBuf) -> PathBuf {
+    // `CARGO` is set by `cargo run`/`cargo xtask`, not for a program started by hand.
+    if via_cargo && source.join("Cargo.toml").is_file() {
         source.to_path_buf()
     } else {
         // A copy of this program away from the source: results beside where it started.
@@ -801,10 +802,8 @@ fn bench(args: &[String]) -> i32 {
     let _ = std::fs::create_dir_all(&out_dir);
     let out = out_dir.join(format!("{version}-{}-{date}{suffix}.json", o.host));
     match std::fs::write(&out, &text) {
-        Ok(()) => println!(
-            "results: {}",
-            out.strip_prefix(&root).unwrap_or(&out).display()
-        ),
+        // Whole: where it went is never a guess.
+        Ok(()) => println!("results: {}", out.display()),
         Err(e) => eprintln!("could not write {}: {e}", out.display()),
     }
     if o.save_baseline {

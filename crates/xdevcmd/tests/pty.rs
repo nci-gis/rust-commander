@@ -2620,6 +2620,38 @@ fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
     x.quit();
 }
 
+/// QA 2026-11-17 (P0): an open double quote, or a here-doc, leaves the shell at its
+/// continuation prompt (`> `). Alt+C then typed `cd '<folder>'` into the quote, where a
+/// folder named `$(touch PWNED)` ran on the closing quote. At `> ` the line is not
+/// finished: Alt+C goes to a new shell, as for a line typed and not run.
+#[cfg(unix)]
+#[test]
+fn alt_c_at_a_continuation_prompt_opens_a_new_shell() {
+    for opener in [&b"echo \"\r"[..], &b"cat <<EOF\r"[..]] {
+        let s = Scratch::new("ps2-quote");
+        std::fs::create_dir(s.left().join("$(touch PWNED)")).unwrap();
+        let mut x = Session::start(&s, None);
+        x.send(F12);
+        x.wait_for("$ ");
+        x.send(opener);
+        x.wait_for("> ");
+        x.send(F12);
+        x.send(DOWN);
+        x.send(ENTER); // into the folder
+        x.send(ALT_C);
+        // The harm first: the cd typed at shell 1's `> `, where closing the quote (or
+        // the here-doc) runs the name.
+        std::thread::sleep(Duration::from_millis(1200));
+        assert!(
+            !x.screen().contains("> cd "),
+            "typed into the open quote:\n{}",
+            x.screen()
+        );
+        x.wait_for("shell 1 keeps its typed text");
+        x.quit();
+    }
+}
+
 /// A line continued with `\` and Enter has not run: the shell waits at `> ` for the
 /// rest, and Alt+C's cd would be the rest (red-team of #1: `rm -rf ~/old \` then Alt+C
 /// removes the pane's directory).

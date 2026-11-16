@@ -2620,36 +2620,68 @@ fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
     x.quit();
 }
 
-/// QA 2026-11-17 (P0): an open double quote, or a here-doc, leaves the shell at its
-/// continuation prompt (`> `). Alt+C then typed `cd '<folder>'` into the quote, where a
-/// folder named `$(touch PWNED)` ran on the closing quote. At `> ` the line is not
-/// finished: Alt+C goes to a new shell, as for a line typed and not run.
+/// QA 2026-11-17 (P0): what xdevcmd types must be inert wherever the shell's line is: at
+/// its prompt, and inside a double quote, a single quote or a here-doc left open, where
+/// Alt+C typed `cd '<folder>'` and a folder named `$(touch PWNED)` ran once the quote
+/// was closed. Each case: open, type with Alt+C (or names with Alt+Enter), close, and
+/// look for PWNED on the disk.
 #[cfg(unix)]
 #[test]
-fn alt_c_at_a_continuation_prompt_opens_a_new_shell() {
-    for opener in [&b"echo \"\r"[..], &b"cat <<EOF\r"[..]] {
-        let s = Scratch::new("ps2-quote");
-        std::fs::create_dir(s.left().join("$(touch PWNED)")).unwrap();
+fn what_is_typed_into_an_open_quote_never_runs_a_name() {
+    let cases: [(&[u8], &str, &[u8], &[u8]); 4] = [
+        (b"echo \"\r", "$(touch PWNED)", ALT_C, b"\"\r"),
+        (b"cat <<EOF\r", "$(touch PWNED)", ALT_C, b"EOF\r"),
+        (b"echo \"\r", "d\";touch PWNED;\"", ALT_C, b"\"\r"),
+        (b"echo '\r", "q';touch PWNED;'", ALT_C, b"'\r"),
+    ];
+    for (open, name, key, close) in cases {
+        let s = Scratch::new("open-quote");
+        std::fs::create_dir(s.left().join(name)).unwrap();
         let mut x = Session::start(&s, None);
         x.send(F12);
         x.wait_for("$ ");
-        x.send(opener);
+        x.send(open);
         x.wait_for("> ");
         x.send(F12);
         x.send(DOWN);
         x.send(ENTER); // into the folder
-        x.send(ALT_C);
-        // The harm first: the cd typed at shell 1's `> `, where closing the quote (or
-        // the here-doc) runs the name.
-        std::thread::sleep(Duration::from_millis(1200));
-        assert!(
-            !x.screen().contains("> cd "),
-            "typed into the open quote:\n{}",
-            x.screen()
-        );
-        x.wait_for("shell 1 keeps its typed text");
+        x.send(key);
+        std::thread::sleep(Duration::from_millis(800));
+        x.send(F12);
+        x.send(close);
+        x.send(b"echo closed-$((6*7))\r");
+        x.wait_for("closed-42");
+        let pwned: Vec<_> = walk(&s.0)
+            .into_iter()
+            .filter(|p| p.file_name().is_some_and(|n| n == "PWNED"))
+            .collect();
+        assert!(pwned.is_empty(), "{name:?} ran:\n{}", x.screen());
+        x.send(F12);
         x.quit();
     }
+    // Names typed with Alt+Enter, inside an open double quote.
+    let s = Scratch::new("open-quote-names");
+    std::fs::create_dir(s.left().join("$(touch PWNED)")).unwrap();
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"echo \"\r");
+    x.wait_for("> ");
+    x.send(F12);
+    x.send(DOWN); // the folder
+    x.send(ALT_ENTER);
+    std::thread::sleep(Duration::from_millis(800));
+    x.send(F12);
+    x.send(b"\"\r");
+    x.send(b"echo closed-$((6*7))\r");
+    x.wait_for("closed-42");
+    let pwned: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| p.file_name().is_some_and(|n| n == "PWNED"))
+        .collect();
+    assert!(pwned.is_empty(), "a typed name ran:\n{}", x.screen());
+    x.send(F12);
+    x.quit();
 }
 
 /// A line continued with `\` and Enter has not run: the shell waits at `> ` for the

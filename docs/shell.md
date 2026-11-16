@@ -79,15 +79,13 @@ user menu (Shift+F9) go through the same check first:
 | at its prompt, surely | Typed at once (with `[terminal] send_when_idle = true`, the default). With it off, the question below with three buttons. |
 | running a program, or `ssh` | A question: **Open a new shell** (default) or **Cancel**. Nothing is typed into the program. |
 | in a state xdevcmd cannot tell | A question: **Open a new shell** (default), **Send to this shell** (S), or **Cancel**, with a pointer to this page. |
-| at its prompt, with text you typed and did not run | A command that ends in Enter (Alt+C's `cd`, a user-menu command) opens a new shell in that folder instead, and the status line says "shell N keeps its typed text". Your line is left as it is. Typed names (Alt+Enter) still go after it: finishing the line is what they are for. |
+| at its prompt, with text you typed and did not run | Alt+C and the user menu run in a new shell instead; your line stays. Typed names (Alt+Enter) still join it. |
 
-**Text typed and not run** is any key since your last Enter, Ctrl+C (Linux and macOS)
-or a command xdevcmd ran; a line ending in `\` and Enter is still being typed. With
-every shell tab in use (`[terminal] max_terminals`), nothing is typed and the status
-line says "Ctrl+C clears shell N's line" (Windows: close a shell tab). After `q` in
-less, or text typed and erased, xdevcmd cannot know the line is empty: it opens a new
-shell until you press Enter. An open quote or an unfinished `for … end` block is not
-seen: the command lands inside it, harmlessly; press Ctrl+C first.
+"Typed and not run" means any key since your last Enter or Ctrl+C (Linux, macOS); a
+line ending in `\` is still typed. With every shell tab in use, nothing is typed and
+the status line says to press Ctrl+C there. After `q` in less, or text erased, press
+Enter once. Not seen: an open quote or an unfinished `for … end` (the command lands
+inside it, harmlessly).
 
 **Open a new shell** starts a new terminal tab in the pane's directory. For Alt+C that
 is the whole job. Names, or the user menu's command, are typed there once its prompt is
@@ -98,9 +96,8 @@ says so). A name with a control character, or one your shell cannot be given saf
 about first, even at an idle prompt: a shell without a line editor of its own (dash,
 sh, cmd) silently drops a line longer than about 4 KB.
 
-"Surely at its prompt" comes from the system on Linux (`/proc`) and macOS (`ps`). On
-Linux a program the shell `exec`ed (`exec sleep 30`) counts as a program too; on macOS
-and Windows it is not seen. On
+"Surely at its prompt" comes from the system on Linux (`/proc`) and macOS (`ps`). A
+program the shell `exec`ed is seen on Linux only. On
 Windows the system does not say; only the prompt marks below can tell, and without them
 every send asks.
 

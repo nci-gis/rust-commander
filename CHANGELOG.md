@@ -32,6 +32,10 @@ that heading and starts a new, empty one here. -->
   your machine); the guide says what a copy keeps, and what to use instead (rsync,
   robocopy, rclone).
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
+- **The benchmark ships with each release** (`xdevcmd-bench-<version>-<target>`, Linux,
+  macOS, Windows): measure on your own drives without Rust. See Benchmarks.
+- **Check it yourself first**: Testing by hand says how to run the tests at a tag and
+  the benchmark on your machine, and adds "First 10 minutes".
 
 ### Changed
 - **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not
@@ -53,6 +57,17 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **Alt+C and the user menu never add to a line you typed and did not run**: before,
+  a half-typed `rm -rf x` ran with the folder appended. They open a new shell instead.
+- **Your root, home, and the folders shown or in a shell are never deleted, moved or
+  renamed**, however written: a list row `src/..` removed its parent, and `link/` (a
+  trailing slash) emptied the folder the link points to (also in 0.4.0-beta.1).
+- **Writes wait while a folder opens**: F8 there acted on the old listing.
+- **A file never replaces a folder, nor the reverse**, even with "replace all".
+- **C checks the files the job had finished too**, and Esc keeps the job for the next
+  start.
+- **The delete box's count, and F3 in a big archive**, no longer stay at "counting…" or
+  "extracting…".
 - **A copy or move of a folder into its own subfolder is refused** however the
   destination is written (a link, `..`, another case). Before, it recursed until the
   disk filled or xdevcmd crashed.

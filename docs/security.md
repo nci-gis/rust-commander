@@ -44,16 +44,13 @@ your permissions. It was tested against attacks on all three before release.
   type into the terminal only when a shell is at its prompt there, never into a program
   that owns it — an editor, a password prompt, `ssh`, a program run in a terminal tab.
   When xdevcmd cannot tell, it asks first (see [The shell panel](#the-shell-panel)).
-  A command it runs (Alt+C's `cd`, the user menu) never joins text you typed and did not
-  run: it goes to a new shell instead ([shell.md](shell.md#before-anything-is-typed-into-the-shell)).
-- **Deleting the wrong folder.** Your drive's root, your home and the folders above it,
-  and every folder a pane shows or a shell is in (and the folders above them), are never
-  deleted, moved or renamed, however the path is written: a row `src/..` or `link/` of a
-  list is refused, by the screen and again by the engine. A write action (F5, F6, F8,
-  F2, the user menu…) waits while a pane is still opening a folder: the listing on
-  screen is the old one until then.
-- **A file over a folder.** A file never replaces a folder, nor a folder a file, not
-  even with "replace all": it is skipped, and the job says so before it closes.
+  Nor does it add to a line you typed and did not run ([shell.md](shell.md#before-anything-is-typed-into-the-shell)).
+- **The wrong folder.** The drive's root, your home, every folder a pane shows or a
+  shell is in, and the folders above them, are never deleted, moved or renamed, however
+  the path is written (`src/..`, `link/`); the engine checks again. Writes wait while a
+  pane is still opening a folder.
+- **A file over a folder**, or the reverse: never, even with "replace all". Skipped, and
+  the job says so.
 - **A config file others can write.** xdevcmd refuses it on Unix, because it names the
   programs xdevcmd runs.
 
@@ -174,10 +171,9 @@ system's cloning is in doubt (OpenZFS 2.2.0 and 2.2.1 had a block-cloning bug, f
   right after a kill, fast and safe. After a power cut, press **C** (check, slow)
   instead: every file already copied is read again with its source, the ones the run
   had finished and finished folders included, and one that differs is copied again
-  (the old one to the trash); the job box shows the file being checked. **Esc** leaves
-  the job for the next start, which asks again. One known gap: a file you answered
-  "Skip" for during the job that died, and that has its source's size and date, is
-  replaced by C. A big
+  (the old one to the trash). **Esc** leaves the job for the next start. Known gap: a
+  file you answered "Skip" for during the job that died is replaced by C if it has
+  its source's size and date. A big
   file's kept part is only what was synced at a checkpoint, so it survives a power cut
   too. A later version will also sync new files before a job ends.
 

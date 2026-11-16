@@ -335,10 +335,10 @@ command, typed into the terminal for you.
   **!** until you stop it; it never carries on with a gap. F1 has both as rows
   ("log tab"), acting on the active tab. Off in the read-only modes. A log keeps
   everything the shell prints: see [security.md](security.md#the-shell-panel).
-- **Alt+C** sends the current directory to the shell (`cd`). With text typed at the
-  prompt and not run, it opens a new shell there instead, and leaves your line alone.
-- **Ctrl+O** (the shell in mc) says the shell is F12. In the shell the F-key bar is
-  hidden: its keys are the shell's there.
+- **Alt+C** sends the current directory to the shell (`cd`); a new shell if you have
+  typed something not yet run.
+- **Ctrl+O** (mc's shell key) says the shell is F12. In the shell the F-key bar is
+  hidden: its keys are the shell's.
 - **Alt+T** hides or shows the terminal. `exit` closes one.
 - The wheel scrolls back through a shell's history. A full-screen program gets the
   wheel instead: as the mouse if it asked for it (Claude Code, vim, htop), otherwise as

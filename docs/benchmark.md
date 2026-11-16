@@ -43,42 +43,32 @@ run. It prints how long each copy took and how much memory it used.
 
 ## Get the program
 
-**With Rust** (any system): clone the repository and run `cargo xtask bench …` from it,
-in place of `./xtask bench …` below. It builds what it needs; nothing else to install.
-On an Intel Mac or an ARM Linux machine this is the only way.
+**From the release** (no Rust): each release, from 0.4.0-beta.2, has the benchmark built
+from its own code beside xdevcmd's archives:
+`xdevcmd-bench-<version>-x86_64-unknown-linux-gnu.tar.gz`, `…-aarch64-apple-darwin.tar.gz`
+(Apple silicon) and `…-x86_64-pc-windows-msvc.zip`, in `SHA256SUMS` and with build
+provenance like the rest ([checking a download](security.md#checking-a-download)).
 
-**Without Rust**: download `xtask` from the bench workflow on GitHub. Actions → bench →
-the run → Artifacts: `xtask-macOS` (Apple silicon only), `xtask-Windows`, `xtask-Linux`
-(x86-64).
+**With Rust** (any system, any commit): clone the repository and run `cargo xtask bench …`
+from it, in place of `./xtask bench …` below. On an Intel Mac or ARM Linux this is the
+only way.
 
-- The program must be built from the code being measured, and a run's artifacts last
-  14 days. Take the newest run: an older one may not have the `mixed` case.
-- To make a new run (a maintainer, with push access): push a branch whose name starts
-  with `bench/` and does **not** end in `-<digits>`, which the workflow reads as a
-  number of files:
-
-  ```bash
-  git push origin HEAD:bench/beta2-mixed
-  ```
-
-  Once `bench.yml` is on `main`, Actions → bench → Run workflow does the same.
+**Code not released yet** (a maintainer): Actions → bench → Run workflow on the branch,
+then the run's Artifacts (`xtask-Linux`, `xtask-macOS`, `xtask-Windows`; kept 14 days).
 
 ## macOS
 
-In Terminal, in the folder where the download is (if Safari already unzipped it, use
-the `xtask-macOS` folder it made):
+In Terminal, where the download is:
 
 ```bash
 cd ~/Downloads
-unzip xtask-macOS.zip -d xdevcmd-bench
-cd xdevcmd-bench
-chmod +x xtask
+tar xzf xdevcmd-bench-*-aarch64-apple-darwin.tar.gz
+cd xdevcmd-bench-*/
 xattr -d com.apple.quarantine xtask
 ```
 
-`chmod` because the zip keeps no permissions; `xattr` because macOS blocks a downloaded
-program that is not notarised. Do this only for a file you downloaded from this
-repository's Actions.
+`xattr` because macOS blocks a downloaded program that is not notarised; do it only for
+a file from this repository's release.
 
 **The internal drive (APFS), twice.** On APFS, xdevcmd's default fast copy is a clone:
 the file is not written at all, which is what a copy within one APFS volume does. The
@@ -104,18 +94,17 @@ XDEVCMD_BENCH_FAST=0 ./xtask bench --only mixed --host mbp-m2-apfs-own
 
 ## Windows
 
-In PowerShell, in the folder where the download is:
+In PowerShell, where the download is:
 
 ```powershell
 cd $HOME\Downloads
-Expand-Archive xtask-Windows.zip -DestinationPath xdevcmd-bench
-cd xdevcmd-bench
+Expand-Archive xdevcmd-bench-*-x86_64-pc-windows-msvc.zip -DestinationPath .
+cd (Get-ChildItem -Directory xdevcmd-bench-*).FullName
 Unblock-File .\xtask.exe
 ```
 
 `Unblock-File` removes the "downloaded from the internet" mark, so SmartScreen does not
-stop the program. Do this only for a file you downloaded from this repository's
-Actions.
+stop the program; do it only for a file from this repository's release.
 
 **The internal drive, then each other drive.** Windows has no fast copy in xdevcmd yet,
 so one run per drive:
@@ -134,9 +123,8 @@ $env:XDEVCMD_DEBUG = "jobs"
 ## Linux
 
 ```bash
-unzip xtask-Linux.zip -d xdevcmd-bench
-cd xdevcmd-bench
-chmod +x xtask
+tar xzf xdevcmd-bench-*-x86_64-unknown-linux-gnu.tar.gz
+cd xdevcmd-bench-*/
 export XDEVCMD_DEBUG=jobs
 ./xtask bench --only mixed --host thinkpad-ext4
 ./xtask bench --only mixed --dir /media/$USER/STICK/xdevcmd-bench --host thinkpad-usb-exfat
@@ -166,35 +154,29 @@ mixed: one large file and small files  84.33 ms   94.61 ms   78.69 ms   4.3 MiB 
 - **median** is the number. **p95** says how steady it was: far above the median means
   something else was running, so run again.
 - **vs base** is the change from this host's baseline, marked past ±15 %.
+- With `XDEVCMD_DEBUG=jobs`, each run's debug log says where the time went: the small
+  files against the large one, and what the large file's checkpoints cost
+  ([what each field means](development.md#reading-a-debug-log)).
 
 ## Two versions on one machine
 
-To see whether a new version is slower or faster where you work: the `xtask` of the
-older version in one folder, the newer one's in another, and the same names for both.
-
-`--save-baseline` writes `bench/baseline-<host>.json` whole, with only the cases of that
-run: a second `--only` run with the same `--host` replaces the first's. So one name per
-case (on Windows, `.\xtask.exe`):
+Each version's `xtask` in its own folder, the same names for both. `--save-baseline`
+writes `bench/baseline-<host>.json` whole, so use one `--host` per case:
 
 ```bash
-cd old                 # the older version's xtask
+cd old        # the older version's xtask (Windows: .\xtask.exe, Copy-Item)
 ./xtask bench --only plan  --host mine-plan  --save-baseline
 ./xtask bench --only list  --host mine-list  --save-baseline
 ./xtask bench --only mixed --host mine-mixed --save-baseline
-cp bench/baseline-*.json ../new/bench/   # Windows: Copy-Item
-cd ../new              # the newer version's xtask
+mkdir -p ../new/bench && cp bench/baseline-*.json ../new/bench/
+cd ../new     # the newer one: each line then says how far it moved (◀ past 15 %)
 ./xtask bench --only plan  --host mine-plan
 ./xtask bench --only list  --host mine-list
 ./xtask bench --only mixed --host mine-mixed
 ```
 
-(Make `new/bench` first: `mkdir -p ../new/bench`, or `New-Item -ItemType Directory`.)
-Each line of the newer runs then says how far it moved; ◀ marks more than 15 %. Run the
-pair again the other way round (newer as the baseline) before believing a small change:
-a busy minute shows as a change too.
-- With `XDEVCMD_DEBUG=jobs`, each run's debug log says where the time went: the small
-  files against the large one, and what the large file's checkpoints cost
-  ([what each field means](development.md#reading-a-debug-log)).
+Before believing a small change, run the pair the other way round too: a busy minute
+shows as a change.
 
 ## What to send
 
@@ -211,3 +193,5 @@ From the folder you ran it in, after all your runs:
 They are small text files holding numbers only: times, memory, counts, the OS name,
 xdevcmd's version, the date and the `--host` name you gave. The debug logs hold no file,
 folder or user names (a test checks this). Open them before you send them if you like.
+
+**Next:** what the numbers cannot show, by hand: [Testing by hand](testing-by-hand.md).

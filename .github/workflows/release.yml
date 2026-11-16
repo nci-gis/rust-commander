@@ -136,9 +136,68 @@ jobs:
             xdevcmd-*.zip
           if-no-files-found: error
 
+  # The benchmark program of this tag (docs/benchmark.md), beside the archives: built
+  # from the code it measures, kept as long as the release (an Actions artifact goes
+  # after 14 days), for a machine without Rust. Its own archive: xdevcmd's stays lean.
+  bench-tool:
+    name: bench ${{ matrix.target }}
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    # Never holds the release: should it fail, the draft goes out without it, and the
+    # person who publishes sees it missing from the assets.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked -p xtask --target ${{ matrix.target }}
+      - name: package
+        shell: bash
+        run: |
+          name="xdevcmd-bench-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$name"
+          cp LICENSE docs/benchmark.md "$name/"
+          exe="target/${{ matrix.target }}/release/xtask"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "$exe.exe" "$name/"
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            cp "$exe" "$name/"
+            tar czf "$name.tar.gz" "$name"
+          fi
+      # As a user runs it: unpacked elsewhere, one small case, its results file made.
+      - name: smoke test
+        shell: bash
+        run: |
+          mkdir smoke && cd smoke
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            7z x ../xdevcmd-bench-*.zip > /dev/null
+          else
+            tar xzf ../xdevcmd-bench-*.tar.gz
+          fi
+          cd xdevcmd-bench-*/
+          ./xtask bench --only "plan 10,000" --runs 1 --host smoke
+          ls bench/results/*-smoke-*.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xdevcmd-bench-${{ matrix.target }}
+          path: |
+            xdevcmd-bench-*.tar.gz
+            xdevcmd-bench-*.zip
+          if-no-files-found: error
+
   release:
     name: draft release
-    needs: [check, build]
+    needs: [check, build, bench-tool]
     runs-on: ubuntu-latest
     permissions:
       contents: write

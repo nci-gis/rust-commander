@@ -4668,6 +4668,42 @@ fn panelize_takes_a_whole_line_that_names_a_file() {
     x.quit();
 }
 
+/// A list from the output may hold `src/..`, `.` or `~`: a row that names a folder
+/// above, the shell's own, or home. Shift+F8 on `src/..` removed its parent, the folder
+/// the shell was in, with everything in it (#2, reproduced 2026-11-16).
+#[test]
+fn a_listed_row_naming_a_folder_above_is_never_deleted() {
+    let s = Scratch::new("list-dotdot");
+    std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
+    s.file("left/proj/keep.txt", "k");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    let proj = s.left().join("proj").display().to_string();
+    x.send(format!("cd '{proj}'\r").as_bytes());
+    x.send(b"printf '%s\\n' src/..\r");
+    x.wait_for("\u{2502}src/..");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}src/..");
+    let (cx, cy) = x.locate("\u{2502}src/..");
+    x.drag((cx + 2, cy), (cx + 5, cy));
+    x.wait_for("selected");
+    x.send(b"p");
+    x.wait_for("items");
+    x.send(DOWN);
+    x.send(SHIFT_F8);
+    std::thread::sleep(Duration::from_millis(500));
+    x.send(b"y");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        s.left().join("proj/keep.txt").exists(),
+        "the folder above was deleted:\n{}",
+        x.screen()
+    );
+    x.quit();
+}
+
 /// `--root`: a path outside it is left out of a list, and the title counts it.
 #[test]
 fn a_list_leaves_out_what_is_outside_the_root() {

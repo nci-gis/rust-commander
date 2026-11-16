@@ -127,45 +127,21 @@ jobs:
       # tag's, and the --print commands work.
       - name: smoke test
         shell: bash
-        run: scripts/smoke.sh xdevcmd-*.* "$GITHUB_REF_NAME"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: xdevcmd-${{ matrix.target }}
-          path: |
-            xdevcmd-*.tar.gz
-            xdevcmd-*.zip
-          if-no-files-found: error
-
-  # The benchmark program of this tag (docs/benchmark.md), beside the archives: built
-  # from the code it measures, kept as long as the release (an Actions artifact goes
-  # after 14 days), for a machine without Rust. Its own archive: xdevcmd's stays lean.
-  bench-tool:
-    name: bench ${{ matrix.target }}
-    needs: check
-    if: github.event_name == 'push'
-    runs-on: ${{ matrix.os }}
-    # Never holds the release: should it fail, the draft goes out without it, and the
-    # person who publishes sees it missing from the assets.
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
-          - { os: macos-latest, target: aarch64-apple-darwin }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - run: cargo build --release --locked -p xtask --target ${{ matrix.target }}
-      - name: package
+        run: scripts/smoke.sh xdevcmd-${GITHUB_REF_NAME}-*.* "$GITHUB_REF_NAME"
+      # The benchmark and the tester's sandbox tool (docs/benchmark.md,
+      # docs/testing-by-hand.md), built here with the binary it measures, in an archive
+      # of its own: xdevcmd's stays lean, and an Actions artifact would go after 14 days.
+      # It never holds the release: a failure here leaves it out of the draft, where the
+      # person who publishes sees it missing.
+      - name: bench tool
+        id: bench
+        continue-on-error: true
         shell: bash
         run: |
+          cargo build --release --locked -p xtask --target ${{ matrix.target }}
           name="xdevcmd-bench-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$name"
-          cp LICENSE docs/benchmark.md "$name/"
+          cp LICENSE docs/benchmark.md docs/testing-by-hand.md "$name/"
           exe="target/${{ matrix.target }}/release/xtask"
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             cp "$exe.exe" "$name/"
@@ -174,30 +150,33 @@ jobs:
             cp "$exe" "$name/"
             tar czf "$name.tar.gz" "$name"
           fi
-      # As a user runs it: unpacked elsewhere, one small case, its results file made.
-      - name: smoke test
-        shell: bash
-        run: |
+          # As a tester runs it: unpacked elsewhere, one small case, its results there.
+          # Not where this runner's CPU cannot run the target (x86_64 macOS on ARM).
           mkdir smoke && cd smoke
           if [[ "${{ matrix.target }}" == *windows* ]]; then
-            7z x ../xdevcmd-bench-*.zip > /dev/null
+            7z x "../$name.zip" > /dev/null
           else
-            tar xzf ../xdevcmd-bench-*.tar.gz
+            tar xzf "../$name.tar.gz"
           fi
-          cd xdevcmd-bench-*/
-          ./xtask bench --only "plan 10,000" --runs 1 --host smoke
-          ls bench/results/*-smoke-*.json
+          cd "$name"
+          if ./xtask bench --only "plan 10,000" --runs 1 --host smoke; then
+            ls bench/results/*-smoke-*.json
+          elif [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then
+            echo "not run on this runner's CPU"
+          else
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: xdevcmd-bench-${{ matrix.target }}
+          name: xdevcmd-${{ matrix.target }}
           path: |
-            xdevcmd-bench-*.tar.gz
-            xdevcmd-bench-*.zip
+            xdevcmd-*.tar.gz
+            xdevcmd-*.zip
           if-no-files-found: error
 
   release:
     name: draft release
-    needs: [check, build, bench-tool]
+    needs: [check, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

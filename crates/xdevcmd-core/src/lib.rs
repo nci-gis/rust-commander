@@ -32,6 +32,7 @@ pub mod ops;
 pub mod paths;
 pub mod plan;
 pub mod policy;
+pub mod protect;
 pub mod rename;
 pub mod sha256;
 pub mod size;

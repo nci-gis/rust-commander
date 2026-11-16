@@ -4946,6 +4946,92 @@ fn panelize_takes_a_whole_line_that_names_a_file() {
     x.quit();
 }
 
+/// A list from the output may hold `src/..`, `.` or `~`: a row that names a folder
+/// above, the shell's own, or home. Shift+F8 on `src/..` removed its parent, the folder
+/// the shell was in, with everything in it (#2, reproduced 2026-11-16).
+#[test]
+fn a_listed_row_naming_a_folder_above_is_never_deleted() {
+    let s = Scratch::new("list-dotdot");
+    std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
+    s.file("left/proj/keep.txt", "k");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    let proj = s.left().join("proj").display().to_string();
+    x.send(format!("cd '{proj}'\r").as_bytes());
+    x.send(b"printf '%s\\n' src/..\r");
+    x.wait_for("\u{2502}src/..");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}src/..");
+    let (cx, cy) = x.locate("\u{2502}src/..");
+    x.drag((cx + 2, cy), (cx + 5, cy));
+    x.wait_for("selected");
+    x.send(b"p");
+    // Fixed: the line is not a row at all. Before, it made a list of one row.
+    x.until("a list, or none", |scr| {
+        scr.contains("no paths in those lines") || scr.contains(" items")
+    });
+    if x.screen().contains("no paths in those lines") {
+        x.send(b"\x1b"); // the selection
+        x.wait_for("Esc close");
+        x.send(b"\x1b"); // the view
+        x.wait_gone("history \u{b7} sh");
+        x.send(F12); // back to the files, for quit
+    } else {
+        x.send(DOWN);
+        x.send(SHIFT_F8);
+        std::thread::sleep(Duration::from_millis(500));
+        x.send(b"y");
+        std::thread::sleep(Duration::from_millis(1500));
+    }
+    assert!(
+        s.left().join("proj/keep.txt").exists(),
+        "the folder above was deleted:\n{}",
+        x.screen()
+    );
+    x.quit();
+}
+
+/// A list made of `/ . .. ~ src/..`: a line with `..` is not a row (it names a folder by
+/// where the shell was); `.` is the shell's folder, `/` and the home are rows, and F8 on
+/// each is refused with its reason. Nothing is offered for deleting (#2).
+#[test]
+fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
+    let s = Scratch::new("list-guards");
+    std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
+    s.file("left/proj/keep.txt", "k");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    let proj = s.left().join("proj").display().to_string();
+    x.send(format!("cd '{proj}'\r").as_bytes());
+    x.send(b"printf '%s\\n' / . .. '~' src/..\r");
+    x.wait_for("\u{2502}src/..");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}src/..");
+    let (cx, cy) = x.locate("\u{2502}/");
+    x.drag((cx + 2, cy), (cx + 2, cy + 4));
+    x.wait_for("5 lines selected");
+    x.send(b"p");
+    // `.` is the shell's folder (the list's own root, so no name), `/`, the home; the
+    // title says the rows are up.
+    x.wait_for("list 3");
+    x.send(DOWN);
+    x.send(b"\x1b[19~"); // F8
+    x.wait_for("holds a folder shown or in a shell");
+    for _ in 0..2 {
+        x.send(DOWN);
+        x.send(b"\x1b[19~");
+        x.wait_for("is never deleted or moved");
+        x.send(b"\x1b[D"); // anything, so the next status is new
+    }
+    assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
+    assert!(s.left().join("proj/keep.txt").exists());
+    x.quit();
+}
+
 /// `--root`: a path outside it is left out of a list, and the title counts it.
 #[test]
 fn a_list_leaves_out_what_is_outside_the_root() {
@@ -5011,6 +5097,33 @@ fn a_slow_directory_shows_a_bar_and_esc_stops_it() {
         xdevcmd.screen()
     );
     xdevcmd.quit();
+}
+
+/// While a folder is still opening, the old listing is on screen and its cursor is on
+/// the folder being opened: F8 there deleted that folder, where the user meant a file
+/// inside it (#4). A write action waits for the listing it acts on, and says so.
+#[test]
+fn a_write_action_while_a_folder_opens_waits_for_it() {
+    let s = Scratch::new("slow-f8");
+    std::fs::create_dir_all(s.left().join("slowdir")).unwrap();
+    s.file("left/slowdir/inside.txt", "x");
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_TEST_SLOW_DIR", "slowdir")]);
+    x.wait_for("slowdir");
+    x.send(DOWN);
+    x.send(ENTER);
+    x.wait_for("opening slowdir\u{2026}");
+    x.send(b"\x1b[19~"); // F8
+    x.wait_for("still opening");
+    assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
+    x.wait_for("inside");
+    x.send(DOWN); // the new listing's cursor starts on `..`
+    x.send(b"\x1b[19~"); // the refusal's next: the same key, now on inside.txt
+    x.wait_for("Moved to the trash");
+    assert!(x.screen().contains("inside.txt"), "{}", x.screen());
+    x.send(b"\x1b");
+    assert!(s.left().join("slowdir/inside.txt").exists());
+    x.quit();
 }
 
 /// B02 (Round 029): Enter on a search result whose directory is slow to read lands on

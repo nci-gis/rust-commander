@@ -45,8 +45,13 @@ impl App {
     /// get, from the same places.
     pub(super) fn row_refused(&self, r: &Run) -> Option<String> {
         match r {
-            Run::Act(a) => self.refused(*a).or_else(|| self.archive_refused(*a)),
-            Run::User(_) => self.refused(Action::UserMenu),
+            Run::Act(a) => self
+                .refused(*a)
+                .or_else(|| self.archive_refused(*a))
+                .or_else(|| self.loading_refused(*a)),
+            Run::User(_) => self
+                .refused(Action::UserMenu)
+                .or_else(|| self.loading_refused(Action::UserMenu)),
             Run::Extra(Extra::LogTab) => self.refused(Action::CopyAs),
             Run::Extra(Extra::CopyPath | Extra::CopyRelativePath)
                 if self.settings.mode == Mode::Restricted =>

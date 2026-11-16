@@ -61,10 +61,72 @@ impl App {
         }
     }
 
+    /// #2: whether a target is never deleted, moved or renamed — a root, the home or a
+    /// folder above it, a path with `.`/`..` (core's [`xdevcmd_core::protect`]), or the
+    /// folder the focused pane shows or one above it. Said on the status line; true when
+    /// refused. The engine checks the first kinds again before a delete or a move.
+    pub(super) fn guard_refused(&mut self, targets: &[PathBuf]) -> bool {
+        use crate::refusal::{Guard, Refusal};
+        use xdevcmd_core::protect::{self, Guarded};
+        let homes = protect::homes();
+        // Every folder something is in now: each file pane's (a list's own root
+        // included) and each shell's (red-team of #2: not the focused pane's alone).
+        let mut inside: Vec<PathBuf> = self
+            .panes
+            .values()
+            .filter_map(Pane::as_files)
+            .map(|f| f.cwd.clone())
+            .collect();
+        inside.extend(self.panel_ref().map(|p| p.shell_dirs()).unwrap_or_default());
+        let real: Vec<PathBuf> = inside
+            .iter()
+            .filter_map(|d| xdevcmd_core::paths::canonical(d).ok())
+            .collect();
+        // Resolved only when a target's name is one of those folders' names: a link on
+        // the way can make it one of them; any other name cannot be.
+        let names: Vec<std::ffi::OsString> = inside
+            .iter()
+            .chain(&real)
+            .flat_map(|d| d.ancestors())
+            .filter_map(|p| p.file_name().map(|n| n.to_os_string()))
+            .collect();
+        for t in targets {
+            let guard = match protect::protected(t, &homes) {
+                Some(Guarded::Root) => Some(Guard::Root),
+                Some(Guarded::Home) => Some(Guard::Home),
+                Some(Guarded::NotPlain) => Some(Guard::NotPlain),
+                None => {
+                    let holds = inside.iter().any(|d| d.starts_with(t))
+                        || t.file_name().is_some_and(|n| names.iter().any(|m| m == n))
+                            && xdevcmd_core::paths::canonical(t)
+                                .is_ok_and(|rt| real.iter().any(|d| d.starts_with(&rt)));
+                    holds.then_some(Guard::Cwd)
+                }
+            };
+            let Some(guard) = guard else {
+                continue;
+            };
+            Refusal::Protected(guard).log();
+            let name = xdevcmd_core::format::elide_middle(&tidy(t), 20);
+            self.status = match guard {
+                Guard::Cwd => {
+                    format!("{name} holds a folder shown or in a shell \u{2014} not removed")
+                }
+                Guard::NotPlain => format!("{name} names a folder by . or .. \u{2014} not touched"),
+                Guard::Root | Guard::Home => format!("{name} is never deleted or moved"),
+            };
+            return true;
+        }
+        false
+    }
+
     pub(super) fn begin_transfer(&mut self, kind: ops::Kind) {
         let sources = self.selection();
         if sources.is_empty() {
             self.status = "nothing selected".into();
+            return;
+        }
+        if kind == ops::Kind::Move && self.guard_refused(&sources) {
             return;
         }
         let choices = self.transfer_targets();
@@ -130,6 +192,9 @@ impl App {
         let targets = self.selection();
         if targets.is_empty() {
             self.status = "nothing selected".into();
+            return;
+        }
+        if self.guard_refused(&targets) {
             return;
         }
         let mut body = vec![Self::describe(&targets), String::new(), COUNTING.into()];
@@ -212,18 +277,22 @@ impl App {
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return;
         };
-        let Some(e) = f.current().filter(|e| !e.is_parent()) else {
+        let Some(e) = f.current().filter(|e| !e.is_parent()).cloned() else {
             self.status = "nothing to rename here".into();
             return;
         };
+        let (label, dir) = (format!("in {}", f.cwd.display()), f.cwd.clone());
+        if self.guard_refused(std::slice::from_ref(&e.path)) {
+            return;
+        }
         self.modal = Some(Modal::Input(Input {
             title: "Rename".into(),
-            label: format!("in {}", f.cwd.display()),
+            label,
             edit: LineEdit::for_rename(&e.name, e.is_dir()),
             kind: InputKind::Rename {
                 from: e.path.clone(),
             },
-            dir: f.cwd.clone(),
+            dir,
             buttons: Vec::new(),
             error: None,
         }));

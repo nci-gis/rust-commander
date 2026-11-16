@@ -566,13 +566,19 @@ impl App {
 
     /// Rename many: `moves`, with safe operations' journal when `safe`. `None` when its
     /// journal could not be written: nothing was renamed, and a dialog says why and
-    /// offers to rename without it (`undoing`: this is an undo).
+    /// offers to rename without it (`undoing`: this is an undo); `None` too when a name
+    /// is guarded (#2), said on the status line.
     fn rename_many(
         &mut self,
         moves: Vec<(PathBuf, PathBuf)>,
         safe: bool,
         undoing: bool,
     ) -> Option<xdevcmd_core::batch_rename::Outcome> {
+        let from: Vec<PathBuf> = moves.iter().map(|(f, _)| f.clone()).collect();
+        // A guarded name (#2): nothing renamed, the status says why.
+        if self.guard_refused(&from) {
+            return None;
+        }
         let out = xdevcmd_core::batch_rename::apply(&moves, safe);
         let Some(why) = out.no_journal else {
             self.reload_all();
@@ -699,6 +705,9 @@ impl App {
                 return;
             }
             Plan::Move { back, into } => {
+                if self.guard_refused(&back) {
+                    return;
+                }
                 let request = Request::mv(back, into);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
                 self.status = format!("undoing the {}", u.describe());

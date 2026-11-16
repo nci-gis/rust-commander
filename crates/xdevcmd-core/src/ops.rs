@@ -1054,6 +1054,25 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
+        // The engine's own wall behind the UI's (#2): a root, the home or a folder above
+        // it, or a path with `.`/`..`, is never deleted or moved, whatever asked.
+        if matches!(req.kind, Kind::Delete | Kind::Move) {
+            let homes = crate::protect::homes();
+            let refused: Vec<String> = req
+                .sources
+                .iter()
+                .filter_map(|s| {
+                    crate::protect::protected(s, &homes)
+                        .map(|_| format!("{}: never deleted or moved", s.display()))
+                })
+                .collect();
+            if !refused.is_empty() {
+                self.sum.failed = refused.len() as u64;
+                self.sum.errors = refused;
+                let _ = self.tx.send(Event::Done(self.sum.clone()));
+                return;
+            }
+        }
         let kind = match req.kind {
             Kind::Copy if !req.pairs.is_empty() => "sync",
             Kind::Copy => "copy",
@@ -5761,6 +5780,23 @@ mod tests {
         assert!(!f.exists(), "the source must be gone after a move");
         assert_eq!(fs::read(dst.join("f.txt")).unwrap(), b"payload");
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A trailing slash goes through a link: deleting `link/` emptied the folder it
+    /// points to, and then failed on the link (red-team of #2). Refused whole.
+    #[cfg(unix)]
+    #[test]
+    fn a_delete_never_goes_through_a_link_by_its_trailing_slash() {
+        let root = tmp("delete-link-slash");
+        let target = root.join("precious");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("f"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&target, root.join("link")).unwrap();
+        let through = PathBuf::from(format!("{}/", root.join("link").display()));
+        let s = run(Request::delete(vec![through], false));
+        assert!(target.join("f").exists(), "emptied through the link: {s:?}");
+        assert_eq!(s.done, 0, "{s:?}");
         fs::remove_dir_all(&root).unwrap();
     }
 

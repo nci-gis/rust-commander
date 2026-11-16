@@ -651,6 +651,10 @@ impl TermPane {
                 // Not started yet: asked again next time, not in 500 ms.
                 (None, None, None)
             } else {
+                // The shell's own name, at the first look with its pid: the pid is known
+                // once its exec is done, before anything typed can exec another (#1).
+                #[cfg(target_os = "linux")]
+                self.learn_shell_name(pid);
                 let (label, dir) = activity_of(pid);
                 // At its prompt (a directory is read only then): where the shell's own
                 // name is learnt, before any `exec` can change it (#1).
@@ -850,7 +854,24 @@ impl TermPane {
         }
         match self.pid.load(Ordering::Relaxed) {
             0 => Fg::Unknown,
-            pid => self.after_exec(pid, foreground_of(pid)),
+            pid => {
+                #[cfg(target_os = "linux")]
+                self.learn_shell_name(pid);
+                self.after_exec(pid, foreground_of(pid))
+            }
+        }
+    }
+
+    /// Linux: read the shell's name in /proc, once.
+    #[cfg(target_os = "linux")]
+    fn learn_shell_name(&self, pid: u32) {
+        if self.shell_comm.get().is_none() {
+            if let Ok(c) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
+                let c = c.trim();
+                if !c.is_empty() {
+                    let _ = self.shell_comm.set(c.to_string());
+                }
+            }
         }
     }
 

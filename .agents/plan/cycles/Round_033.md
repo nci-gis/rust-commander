@@ -907,6 +907,40 @@ real holes the fix's own tests missed.
 - **For the owner**: `plan/ROADMAP.md` item 2 and closed rounds still say
   `docs/testing-by-hand.md` (history; ROADMAP is the owner's to edit).
 
+### 2026-11-17, what is left before the cut (the owner: "list các việc phần mình và log cho bro")
+
+All A10 fixes are merged: #25–#32 (#33, the guide's contents, open). Left, in order:
+
+- **The owner**
+  1. Merge #33. Delete the merged branches `feat/a10-docs`, `feat/a10-docs-guide-toc`
+     and `fix/p5-count-live` (the session's proxy refuses ref deletes).
+  2. **D0 speed baseline** on the Windows laptop, side A at ad065d5 (bench run
+     43885854166): one full `--save-baseline` run, then `--only` cases against it
+     (mains power, unattended ≈25 min). Side B at the cut.
+  3. **The hand test** (development.md, "Testing a pre-release by hand"), macOS first;
+     on Windows also the Alt+C/pwsh charter and the junction case (P4's known issue).
+  4. Owner-hours in the ledger above (only 0.25 h is logged; cap 9.5 h, cut back at 8 h).
+  5. At the cut: read Check, approve the speed A/B, merge feat → dev, publish the draft,
+     say "close 033".
+- **Claude Code**
+  1. **Key table**: render.rs `shot_keys`, 5 tasks (copy, F8, F8 in a panelized list,
+     clean Alt+C, F1), fails if a row needs more keys than beta.1; dead-end rows
+     (Ctrl+O; F8 while loading, SLOW_DIR) assert a message; one footer click, Linux only.
+  2. **One round-trip per refusal code** (DirtyLine, Busy, Protected, Loading,
+     FileOverDir): refuse → golden debug line → press `next` → assert the action; a
+     `code()` snapshot. Linux PR, red first where a test can fail.
+  3. **Early speed check**, Linux: `--only plan` and `--only list`, beta.1 against the
+     merged tree (≈3 min); the owner's side A decides the gate.
+  4. **Flaky list**: new tests ×10 on Linux, ×3 on macOS and Windows; each flaky test
+     named fixed or ignored (two listed in plan A10's status).
+  5. **Round 033 Check**: evidence, red runs, red-team findings, flaky list, speed and
+     key tables; the plan A10 doc's status brought up to date.
+  6. **The cut**, after the owner's go: PR feat → dev (merge commit, CI, no
+     `[skip ci]`), `cargo release 0.4.0-beta.2` (dry run, then `--execute`), author
+     check, tag; draft notes (release notes first, refusal table, known issues);
+     verify SHA256SUMS, the attestation, `--version`, and the six
+     `xdevcmd-bench-v0.4.0-beta.2-<target>` assets.
+
 ## Check
 
 ## Act

@@ -18,12 +18,21 @@ What xdevcmd can do, one topic at a time. Every key here is a default. Lost? Pre
 | **F1** | Find any command |
 | **F10** | Quit |
 
-Contents: [Panes and tabs](#panes-and-tabs) · [Moving around](#moving-around) ·
-[Remote files](#remote-files-through-a-mount) · [Selecting](#selecting) ·
-[Files](#files) · [Find, filter, compare](#find-filter-compare) ·
-[Archives](#archives) · [The terminal](#the-terminal) · [Mouse](#mouse) ·
-[Keys a terminal does not send](#keys-a-terminal-does-not-send) ·
-[Menus and help](#menus-and-help). All keys: [keys.md](keys.md).
+**Contents**
+
+- [Panes and tabs](#panes-and-tabs)
+- [Moving around](#moving-around)
+- [Remote files through a mount](#remote-files-through-a-mount)
+- [Selecting](#selecting)
+- [Files](#files)
+- [Find, filter, compare](#find-filter-compare)
+- [Archives](#archives)
+- [The terminal](#the-terminal)
+- [Mouse](#mouse)
+- [Keys a terminal does not send](#keys-a-terminal-does-not-send)
+- [Menus and help](#menus-and-help)
+
+Every key: [keys.md](keys.md).
 
 ## Panes and tabs
 

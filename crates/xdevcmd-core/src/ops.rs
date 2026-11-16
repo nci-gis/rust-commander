@@ -5827,6 +5827,23 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A trailing slash goes through a link: deleting `link/` emptied the folder it
+    /// points to, and then failed on the link (red-team of #2). Refused whole.
+    #[cfg(unix)]
+    #[test]
+    fn a_delete_never_goes_through_a_link_by_its_trailing_slash() {
+        let root = tmp("delete-link-slash");
+        let target = root.join("precious");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("f"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&target, root.join("link")).unwrap();
+        let through = PathBuf::from(format!("{}/", root.join("link").display()));
+        let s = run(Request::delete(vec![through], false));
+        assert!(target.join("f").exists(), "emptied through the link: {s:?}");
+        assert_eq!(s.done, 0, "{s:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn delete_removes_a_whole_tree() {
         let root = tmp("delete");

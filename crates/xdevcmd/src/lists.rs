@@ -83,19 +83,25 @@ pub fn tidy_rows(paths: impl IntoIterator<Item = PathBuf>) -> (Vec<PathBuf>, boo
     (rows, capped, outside)
 }
 
-/// `p` as a row (#2): `None` for a line with `.` or `..` in it (`src/..`, `.`, `..`):
-/// it names a folder by where the shell was, which the row would show by another name
-/// than the folder it removes. Never a row. A home (`~`) or a root stays a row; the
-/// guards refuse to delete, move or rename it.
+/// `p` as a row (#2): `None` when it has a `..` in it (`src/..` names a folder by
+/// where the shell was, which the row would show by another name than the folder it
+/// removes). A `.` in it (`find .` prints `./src`) and a trailing slash (a link's
+/// target, through it) go: the row is the path as plain names.
 fn plain_row(p: PathBuf) -> Option<PathBuf> {
-    // By its text: `Path::components` drops a `.` after the first name, so `proj/.`
-    // would pass for `proj`.
+    use std::path::Component;
     let text = p.as_os_str().to_string_lossy();
-    let odd = text
+    if text
         .split(['/', std::path::MAIN_SEPARATOR])
-        .skip(1)
-        .any(|seg| seg == "." || seg == "..");
-    (!odd).then_some(p)
+        .any(|seg| seg == "..")
+    {
+        return None;
+    }
+    // `components` drops every `.` but a leading one, and the trailing slash.
+    let plain: PathBuf = p
+        .components()
+        .filter(|c| !matches!(c, Component::CurDir))
+        .collect();
+    (plain.file_name().is_some() || plain.parent().is_none()).then_some(plain)
 }
 
 /// Keep a new list; it becomes the active one. The least recently used goes past
@@ -436,6 +442,21 @@ mod tests {
             "/q was there before: a new line's whole does not decide it"
         );
         assert_eq!(add(0, vec![], vec![], "x"), None, "no such list");
+    }
+
+    /// `find .` and `grep -rl x .` print `./src/main.rs`: a row, with the `.` gone; a
+    /// `..` in a line is still never a row, and a trailing slash goes (red-team of #2).
+    #[test]
+    fn a_dot_slash_line_is_a_row_and_a_dot_dot_one_is_not() {
+        let (rows, _, _) = tidy_rows([
+            PathBuf::from("/tmp/./src/main.rs"),
+            PathBuf::from("/tmp/src/../etc"),
+            PathBuf::from("/tmp/lib/"),
+        ]);
+        assert_eq!(
+            rows,
+            vec![PathBuf::from("/tmp/src/main.rs"), PathBuf::from("/tmp/lib")]
+        );
     }
 
     #[test]

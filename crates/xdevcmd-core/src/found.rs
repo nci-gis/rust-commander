@@ -184,9 +184,11 @@ fn candidate(word: &str, at: usize) -> Option<Found> {
     }
     // A name ending in `/.` or `/..` names a folder by where it was printed (`src/..`
     // is the folder above src): not a file, and its dots are not a full stop (#2).
+    // Punctuation after it first: `cd src/..;` is the same `src/..`.
+    let bare = path.trim_end_matches([',', ';', ':', '!', '?']);
     if line.is_none()
         && [".", ".."].iter().any(|d| {
-            path.strip_suffix(d)
+            bare.strip_suffix(d)
                 .is_some_and(|r| r.ends_with('/') || r.ends_with('\\'))
         })
     {
@@ -252,8 +254,21 @@ mod tests {
     /// and its dots are not a full stop that leaves `src/` (#2).
     #[test]
     fn a_name_ending_in_dots_after_a_slash_is_not_taken() {
-        for line in ["src/..", "src/.", "a/b/..", r"C:\x\.."] {
-            assert!(found(line).is_empty(), "{line}: {:?}", found(line));
+        for line in [
+            "src/..",
+            "src/.",
+            "a/b/..",
+            r"C:\x\..",
+            "cd src/..;",
+            "src/..,",
+        ] {
+            // Only the dotted name matters: `cd` alone may be taken, as before.
+            let f = found(line);
+            assert!(
+                f.iter()
+                    .all(|g| !["src", "src/", "a/b/", "a/b", r"C:\x\"].contains(&g.0.as_str())),
+                "{line}: {f:?}"
+            );
         }
         let f = found("see src/main.rs.");
         assert!(

@@ -82,12 +82,31 @@ pub fn homes() -> Vec<PathBuf> {
             out.push(p);
         }
     }
+    // HOME unset or relative: the system's own idea of it (red-team of #2).
+    if out.is_empty() {
+        // Deprecated before Rust 1.86 fixed it on Windows; MSRV 1.90 may still warn.
+        #[allow(deprecated)]
+        let home = std::env::home_dir();
+        if let Some(h) = home.filter(|h| h.is_absolute()) {
+            if let Ok(real) = crate::paths::canonical(&h) {
+                out.push(real);
+            }
+            if !out.contains(&h) {
+                out.push(h);
+            }
+        }
+    }
     out
 }
 
-/// No `.` or `..` in it, and a name at its end.
+/// No `.` or `..` in it, a name at its end, and no separator after that name: a
+/// trailing slash makes the system follow a link (`link/` is its target), which every
+/// check here, on the link's own name, would miss (red-team of #2).
 fn plain(path: &Path) -> bool {
-    path.file_name().is_some()
+    let text = path.as_os_str().to_string_lossy();
+    !text.ends_with('/')
+        && !text.ends_with(std::path::MAIN_SEPARATOR)
+        && path.file_name().is_some()
         && !path
             .components()
             .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
@@ -245,6 +264,13 @@ mod tests {
         std::os::unix::fs::symlink(&real, other.join("real-home")).unwrap();
         assert_eq!(protected(&other.join("real-home"), &h), Some(Guarded::Home));
         assert_eq!(protected(&real.join("src"), &h), None);
+        // A trailing slash goes through a link: `link/` is the home, whatever the link
+        // is called (red-team of #2: remove_tree emptied the home through it).
+        let data = top.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::os::unix::fs::symlink(&real, data.join("link")).unwrap();
+        let through = PathBuf::from(format!("{}/", data.join("link").display()));
+        assert!(protected(&through, &h).is_some(), "{through:?}");
         let _ = std::fs::remove_dir_all(&top);
     }
 }

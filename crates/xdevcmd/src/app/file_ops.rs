@@ -69,13 +69,25 @@ impl App {
         use crate::refusal::{Guard, Refusal};
         use xdevcmd_core::protect::{self, Guarded};
         let homes = protect::homes();
-        let cwd = self.focused_cwd();
-        let cwd_real = xdevcmd_core::paths::canonical(&cwd).unwrap_or_else(|_| cwd.clone());
-        // Resolved only when a target's name is one of the pane's folders' names: a link
-        // on the way can make it one of them; any other name cannot be.
-        let names: Vec<std::ffi::OsString> = cwd
-            .ancestors()
-            .chain(cwd_real.ancestors())
+        // Every folder something is in now: each file pane's (a list's own root
+        // included) and each shell's (red-team of #2: not the focused pane's alone).
+        let mut inside: Vec<PathBuf> = self
+            .panes
+            .values()
+            .filter_map(Pane::as_files)
+            .map(|f| f.cwd.clone())
+            .collect();
+        inside.extend(self.panel_ref().map(|p| p.shell_dirs()).unwrap_or_default());
+        let real: Vec<PathBuf> = inside
+            .iter()
+            .filter_map(|d| xdevcmd_core::paths::canonical(d).ok())
+            .collect();
+        // Resolved only when a target's name is one of those folders' names: a link on
+        // the way can make it one of them; any other name cannot be.
+        let names: Vec<std::ffi::OsString> = inside
+            .iter()
+            .chain(&real)
+            .flat_map(|d| d.ancestors())
             .filter_map(|p| p.file_name().map(|n| n.to_os_string()))
             .collect();
         for t in targets {
@@ -84,11 +96,11 @@ impl App {
                 Some(Guarded::Home) => Some(Guard::Home),
                 Some(Guarded::NotPlain) => Some(Guard::NotPlain),
                 None => {
-                    let shown = cwd.starts_with(t)
+                    let holds = inside.iter().any(|d| d.starts_with(t))
                         || t.file_name().is_some_and(|n| names.iter().any(|m| m == n))
                             && xdevcmd_core::paths::canonical(t)
-                                .is_ok_and(|real| cwd_real.starts_with(real));
-                    shown.then_some(Guard::Cwd)
+                                .is_ok_and(|rt| real.iter().any(|d| d.starts_with(&rt)));
+                    holds.then_some(Guard::Cwd)
                 }
             };
             let Some(guard) = guard else {
@@ -98,7 +110,7 @@ impl App {
             let name = xdevcmd_core::format::elide_middle(&tidy(t), 20);
             self.status = match guard {
                 Guard::Cwd => {
-                    format!("{name} holds the folder this pane shows \u{2014} not removed")
+                    format!("{name} holds a folder shown or in a shell \u{2014} not removed")
                 }
                 Guard::NotPlain => format!("{name} names a folder by . or .. \u{2014} not touched"),
                 Guard::Root | Guard::Home => format!("{name} is never deleted or moved"),

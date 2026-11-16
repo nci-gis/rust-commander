@@ -588,6 +588,17 @@ impl TermPanel {
         self.focused().and_then(TermPane::shell_dir)
     }
 
+    /// Where every shell is, as far as this system tells (each shell's
+    /// [`TermPane::shell_dir`]): folders a delete must not take from under them (#2).
+    pub fn shell_dirs(&self) -> Vec<std::path::PathBuf> {
+        self.tabs
+            .iter()
+            .flat_map(|t| t.terms.values())
+            .filter_map(TermPane::shell_dir)
+            .map(|d| d.path)
+            .collect()
+    }
+
     /// Move a border between this tab's shells. False when the focused shell has no
     /// border that way inside the tab, so the caller moves the panel's own edge.
     pub fn move_boundary(&mut self, axis: Axis, delta: i16) -> bool {

@@ -5533,3 +5533,28 @@ fn a_copy_with_nothing_to_decide_is_the_dialog_it_always_was() {
         assert!(!s.contains(not), "{not}\n{s}");
     }
 }
+
+/// QA 2026-11-17 (P0): F6 on the same drive replacing a file sent the old one nowhere:
+/// renamed over, gone for good, while the table said "a file replaced goes to the
+/// trash". The old file must be in the trash, as with F5. Linux only, as above.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_a_move_replaces_goes_to_the_trash() {
+    let (a, b) = planned_trees();
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let old = format!("old body of a moved-over file {n} {}", std::process::id());
+    aged(&b.join("older.txt"), &old, 3600);
+    let s = shot_keys("118x34", "*,F6,Down,Space", &a, &b);
+    assert!(s.contains("a file replaced goes to the trash"), "{s}");
+    let s = shot_keys("118x34", "*,F6,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert!(!a.join("older.txt").exists(), "moved\n{s}");
+    let trash = scratch("isolation").join("data/Trash/files");
+    let kept = fs::read_dir(&trash)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t == old));
+    assert!(kept, "the replaced file is not in the trash\n{s}");
+    assert!(s.contains("(the old one in the trash)"), "{s}");
+}

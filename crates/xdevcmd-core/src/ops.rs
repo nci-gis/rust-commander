@@ -484,6 +484,9 @@ pub struct Summary {
     /// other bytes than their source, so were copied again. Also counted in `done`.
     pub repaired: u64,
     pub skipped: u64,
+    /// Of `skipped`: a file and a folder of the same name, which never replace each
+    /// other (#5). Said, and the Job box stays open for it.
+    pub kind_skips: u64,
     pub failed: u64,
     pub bytes: u64,
     pub cancelled: bool,
@@ -546,6 +549,14 @@ impl Summary {
         }
         if self.skipped > 0 {
             s.push_str(&format!(", {} skipped", self.skipped));
+            // #5: said every time, so a file and a folder of one name are never a
+            // silent skip.
+            if self.kind_skips > 0 {
+                s.push_str(&format!(
+                    " ({} a file and a folder of the same name: never replaced)",
+                    self.kind_skips
+                ));
+            }
         }
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
@@ -1470,7 +1481,12 @@ impl Worker {
                 // The archive is one new file: an existing one is asked about first.
                 match self.resolve_conflict(None, &dest, bytes) {
                     Some(true) => crate::archive::pack(&req.sources, &dest, self),
-                    _ => Ok(()),
+                    // Left as it is: counted, so the summary says so (red-team of #5).
+                    Some(false) => {
+                        self.sum.skipped += 1;
+                        Ok(())
+                    }
+                    None => Ok(()),
                 }
             }
         };
@@ -1558,6 +1574,14 @@ impl Worker {
         }
     }
 
+    /// Why a skip happened, for the summary, without counting it: the caller does.
+    fn note_skip(&mut self, path: &Path, why: &str) {
+        self.sum.kind_skips += 1;
+        if self.sum.errors.len() < 20 {
+            self.sum.errors.push(format!("{}: {why}", path.display()));
+        }
+    }
+
     /// Whether regular files `a` and `b` hold the same bytes, read side by side; a read
     /// that fails counts as different (copying again then reports the error). Stops
     /// early, as different, when the job is cancelled.
@@ -1620,6 +1644,13 @@ impl Worker {
         let Some(now) = Ident::at(dst) else {
             return Some(true);
         };
+        // #5: a file never replaces a folder, nor a folder a file — before every rule
+        // below, "replace all" and the plan's word included. Skipped (the caller counts
+        // it) and said; an archive's entry (no source) is a file.
+        if let Some(why) = other_kind(src, dst) {
+            self.note_skip(dst, why);
+            return Some(false);
+        }
         if self.approved.as_deref() == Some(dst) {
             // Agreed already, at the move's question: that file is still the one.
             self.approved = None;
@@ -1810,6 +1841,13 @@ impl Worker {
             }
             let failed_before = self.sum.failed;
             let made = dst.symlink_metadata().is_err();
+            // #5: a folder never replaces a file (a link to a folder is a folder here,
+            // as before: the copy goes into it).
+            if !made && !dst.is_dir() {
+                self.sum.skipped += 1;
+                self.note_skip(dst, "is a file \u{2014} a folder never replaces it");
+                return;
+            }
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
                 return;
@@ -2383,6 +2421,14 @@ impl Worker {
             if !self.still_agreed(Some(src), dst) {
                 return Ok(false);
             }
+            // #5, once more at the last moment: a folder made there while the file was
+            // copied is never sent to the trash for it (also reached from a batch).
+            // Counted and said here: the callers drop an `Ok(false)` without a word.
+            if let Some(why) = other_kind(Some(src), dst) {
+                self.sum.skipped += 1;
+                self.note_skip(dst, why);
+                return Ok(false);
+            }
             if trash {
                 let t = crate::faults::at(crate::faults::Point::Trash, dst)
                     .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
@@ -2853,7 +2899,13 @@ impl crate::archive::Hooks for Worker {
         });
     }
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
-        self.resolve_conflict(None, dst, incoming)
+        // An entry left as it is: counted here, as a copy counts its skips; the
+        // archive's walk goes on without a word (red-team of #5).
+        let r = self.resolve_conflict(None, dst, incoming);
+        if r == Some(false) {
+            self.sum.skipped += 1;
+        }
+        r
     }
     fn part(&mut self, p: &Path, made: bool) {
         // Only what is made is written down: a later start removes only what is
@@ -2892,6 +2944,18 @@ impl crate::archive::Hooks for Worker {
 }
 
 // ── free functions ─────────────────────────────────────────────────────────────────
+
+/// #5: why `src` may not replace `dst`, when one is a folder and the other is not. A
+/// link is not a folder here (replacing a link leaves its folder alone); no source (an
+/// archive's entry) is a file.
+fn other_kind(src: Option<&Path>, dst: &Path) -> Option<&'static str> {
+    let dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    match (src.is_some_and(dir), dir(dst)) {
+        (false, true) => Some("is a folder \u{2014} a file never replaces it"),
+        (true, false) => Some("is a file \u{2014} a folder never replaces it"),
+        _ => None,
+    }
+}
 
 /// What [`Existing::Resume`] makes of a destination that is there.
 #[derive(Debug, PartialEq, Eq)]
@@ -3172,7 +3236,19 @@ fn appear_in_test(dst: &Path) {
         paths.remove(i);
         fs::write(dst, "theirs").unwrap();
     }
+    drop(paths);
+    // A folder in its place while the bytes are written (red-team of #5).
+    let mut dirs = APPEAR_DIR.lock().unwrap();
+    if let Some(i) = dirs.iter().position(|p| p == dst) {
+        dirs.remove(i);
+        let _ = fs::remove_file(dst);
+        fs::create_dir_all(dst.join("inner")).unwrap();
+        fs::write(dst.join("inner/keep.txt"), "kept").unwrap();
+    }
 }
+
+#[cfg(test)]
+static APPEAR_DIR: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(not(test))]
 fn appear_in_test(_: &Path) {}
@@ -3629,6 +3705,114 @@ mod tests {
     /// Round 031: with a trash on the volume, a replaced file goes there, after the
     /// journal is on disk and before the rename; undo removes the new one and brings
     /// the old one back.
+    /// #5: a file never replaces a folder, nor a folder a file — not with "replace all",
+    /// not with Yes to the question, not in a move. Skipped, and the summary says why.
+    /// #5, said every time (red-team): a folder that appears while the file is
+    /// written is kept, and the skip is counted and said, so the Job box stays open; an
+    /// archive's entry onto a folder is counted and said too.
+    #[test]
+    fn a_late_folder_and_an_archive_entry_are_skips_said_aloud() {
+        journals();
+        for safe in [true, false] {
+            let d = tmp(&format!("late-folder-{safe}"));
+            fs::create_dir_all(d.join("src")).unwrap();
+            fs::create_dir_all(d.join("to")).unwrap();
+            fs::write(d.join("src/a"), "new").unwrap();
+            fs::write(d.join("to/a"), "old").unwrap();
+            APPEAR_DIR.lock().unwrap().push(d.join("to/a"));
+            let mut req = Request::copy(vec![d.join("src/a")], d.join("to"));
+            req.trash_root = Some(d.join("trash"));
+            req.safe = safe;
+            req.existing = Existing::Replace;
+            let (s, _) = run_with(req, Answer::Yes);
+            let read = fs::read_to_string(d.join("to/a/inner/keep.txt")).ok();
+            assert_eq!(read.as_deref(), Some("kept"), "safe={safe}: {s:?}");
+            assert_eq!((s.skipped, s.kind_skips), (1, 1), "safe={safe}: {s:?}");
+            assert!(s.describe(Kind::Copy).contains("never replaced"), "{s:?}");
+            let _ = fs::remove_dir_all(&d);
+        }
+        let d = tmp("extract-over-folder");
+        let zp = d.join("x.zip");
+        {
+            let f = File::create(&zp).unwrap();
+            let mut z = zip::ZipWriter::new(f);
+            z.start_file("a", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            use std::io::Write;
+            z.write_all(b"zipped").unwrap();
+            z.finish().unwrap();
+        }
+        fs::create_dir_all(d.join("out/a")).unwrap();
+        fs::write(d.join("out/a/keep.txt"), "kept").unwrap();
+        let mut req = Request::extract(zp, vec!["a".into()], String::new(), d.join("out"));
+        req.trash_root = Some(d.join("trash"));
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Yes);
+        let read = fs::read_to_string(d.join("out/a/keep.txt")).ok();
+        assert_eq!(read.as_deref(), Some("kept"), "{s:?}");
+        assert!(
+            s.describe(Kind::Extract).contains("never replaced"),
+            "{}",
+            s.describe(Kind::Extract)
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_file_never_replaces_a_folder_nor_the_reverse() {
+        journals();
+        let d = tmp("file-over-dir");
+        for (existing, answer, mv) in [
+            (Existing::Replace, Answer::Yes, false),
+            (Existing::Ask, Answer::Yes, false),
+            (Existing::Ask, Answer::YesToAll, false),
+            (Existing::Replace, Answer::Yes, true),
+        ] {
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(d.join("src/b")).unwrap();
+            fs::create_dir_all(d.join("to/a")).unwrap();
+            fs::write(d.join("src/a"), "a file").unwrap();
+            fs::write(d.join("src/b/in.txt"), "in").unwrap();
+            fs::write(d.join("to/a/keep.txt"), "kept").unwrap();
+            fs::write(d.join("to/b"), "a file there").unwrap();
+            let sources = vec![d.join("src/a"), d.join("src/b")];
+            let mut req = if mv {
+                Request::mv(sources, d.join("to"))
+            } else {
+                Request::copy(sources, d.join("to"))
+            };
+            req.trash_root = Some(d.join("trash"));
+            req.safe = true;
+            req.existing = existing;
+            let (s, _) = run_with(req, answer);
+            let case = format!("{existing:?} {answer:?} move={mv}: {s:?}");
+            assert_eq!(
+                fs::read_to_string(d.join("to/a/keep.txt")).unwrap(),
+                "kept",
+                "{case}"
+            );
+            assert_eq!(
+                fs::read_to_string(d.join("to/b")).unwrap(),
+                "a file there",
+                "{case}"
+            );
+            assert!(
+                d.join("src/a").is_file() && d.join("src/b/in.txt").is_file(),
+                "{case}"
+            );
+            assert!(s.skipped >= 2, "{case}");
+            assert!(
+                s.errors
+                    .iter()
+                    .filter(|e| e.contains("is a folder") || e.contains("is a file"))
+                    .count()
+                    >= 2,
+                "{case}"
+            );
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_replaced_file_goes_to_the_trash_first_and_undo_brings_it_back() {
         journals();

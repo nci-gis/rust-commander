@@ -4690,6 +4690,58 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// Repo review RR01: C (a checked continue) read every finished copy again, but took
+    /// over a big file's kept part on trust: a part damaged after its checkpoint (`XXXX`
+    /// where the source has other bytes) was finished as a good copy. Under C the kept
+    /// bytes are compared with the source's: a part that differs goes, and the copy
+    /// starts again; one that matches is still taken over. Enter (not checked) is
+    /// unchanged.
+    #[test]
+    fn a_checked_resume_reads_a_kept_part_again_with_its_source() {
+        journals();
+        let root = tmp("ckpt-checked");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(200u32 << 10)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        let kept = 64 << 10;
+        let req = |part_bytes: &[u8]| {
+            fs::write(&part, part_bytes).unwrap();
+            let mut r = Request::copy(vec![src.clone()], dst.clone());
+            r.safe = true;
+            r.existing = Existing::Resume;
+            r.verify = true;
+            r.checkpoint = 32 << 10;
+            r.partial = vec![crate::journal::Partial {
+                part: part.clone(),
+                src: src.clone(),
+                dst: dst.join("big.bin"),
+                ident: Ident::at(&src).unwrap(),
+                bytes: kept as u64,
+            }];
+            r
+        };
+        // Damaged: the start written over after its checkpoint.
+        let mut damaged = body[..kept].to_vec();
+        damaged[..4].copy_from_slice(b"XXXX");
+        let s = run(req(&damaged));
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(
+            fs::read(dst.join("big.bin")).unwrap() == body,
+            "copied again"
+        );
+        assert!(!part.exists());
+        // As it should be: still taken over, and the copy is whole.
+        fs::remove_file(dst.join("big.bin")).unwrap();
+        let s = run(req(&body[..kept]));
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(fs::read(dst.join("big.bin")).unwrap() == body);
+        assert!(!part.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// Resume takes over a big file kept after a checkpoint: what it holds is not
     /// copied again (marked here with X, so a copy from the start would show), and the
     /// rest follows. A source changed since starts again; a kept file no file of the

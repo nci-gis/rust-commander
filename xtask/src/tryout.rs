@@ -3,6 +3,7 @@
 //! ```text
 //! xtask try --make [--small] [--dir D]   make D/xdevcmd-try (D: here; it must exist)
 //! xtask try --kill-when A|B|C [--dir D]  wait, then kill xdevcmd at the right moment
+//! xtask try --reset A|B|C [--dir D]      undo that check's copy, to run it again
 //! xtask try --check [--dir D]            PASS / FAIL / NOT DONE, from its manifest
 //! xtask try --tamper [--dir D]           one finished copy zeroed, size and date kept
 //! xtask try --clean [--dir D]            remove D/xdevcmd-try, and only what it made
@@ -96,12 +97,12 @@ pub fn run(args: &[String], version: &str) -> i32 {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--make" | "--check" | "--tamper" | "--clean" => what = Some(a.clone()),
-            "--kill-when" => match it.next().map(|c| c.to_ascii_uppercase()) {
+            "--kill-when" | "--reset" => match it.next().map(|c| c.to_ascii_uppercase()) {
                 Some(c) if ["A", "B", "C"].contains(&c.as_str()) => {
                     what = Some(a.clone());
                     when = Some(c);
                 }
-                _ => return usage("--kill-when needs A, B or C"),
+                _ => return usage(&format!("{a} needs A, B or C")),
             },
             "--small" => sizes = Sizes::SMALL,
             "--dir" => match it.next() {
@@ -126,9 +127,19 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 println!("removed {}", root.display());
                 0
             }),
+            "--reset" => {
+                let c = when.as_deref().unwrap_or("A");
+                reset(&root, c).map(|what| {
+                    println!("check {c} can run again: {what}");
+                    println!(
+                        "if xdevcmd still offers an interrupted job, press F (forget it) first"
+                    );
+                    0
+                })
+            }
             _ => kill_when(&root, when.as_deref().unwrap_or("A")),
         }),
-        None => return usage("one of --make, --kill-when, --check, --tamper, --clean"),
+        None => return usage("one of --make, --kill-when, --reset, --check, --tamper, --clean"),
     };
     r.unwrap_or_else(|e| {
         eprintln!("try: {e}");
@@ -142,9 +153,10 @@ fn usage(why: &str) -> i32 {
 }
 
 pub const HELP: &str =
-    "usage: xtask try --make [--small] | --kill-when A|B|C | --check | --tamper | --clean [--dir D]
+    "usage: xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
   --make        make D/xdevcmd-try (2.5 GiB; --small: 0.8 GiB), with a manifest
   --kill-when   run before Enter on check A, B or C: waits, kills xdevcmd mid-job
+  --reset       undo what check A, B or C's copy changed, to run it again
   --check       every copy against the manifest: PASS, FAIL (a P0) or NOT DONE
   --tamper      check C: one finished copy zeroed, its size and date kept
   --clean       remove the sandbox, only what --make made in it";
@@ -718,6 +730,68 @@ fn reached(done: usize, all: usize, at: usize) -> Option<bool> {
     }
 }
 
+/// `--reset A|B|C`: put back what that check's copy changed, so it can run again
+/// without making the whole sandbox (the owner, 2026-11-17). A: replace-dst's old files
+/// written again from their seeds, each checked against the manifest, with the old date;
+/// xdevcmd's temporary files there removed. B, C: copy-to/big or copy-to/tree removed (a
+/// real folder only, never a link: what a copy made). Sources are never touched.
+fn reset(root: &Path, c: &str) -> io::Result<String> {
+    marked(root)?;
+    let lines = manifest(root)?;
+    match c {
+        "A" => {
+            let dst = root.join("replace-dst");
+            for e in fs::read_dir(&dst).map_err(at(&dst))?.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n.starts_with('.') && n.contains(".xdevcmd-part-") {
+                    fs::remove_file(e.path()).map_err(at(&e.path()))?;
+                }
+            }
+            let old = SystemTime::UNIX_EPOCH + Duration::from_secs(OLD);
+            let mut n = 0;
+            for l in lines.iter().filter(|l| l.kind == "old") {
+                let name = l.rel.strip_prefix("replace-dst/").unwrap_or(&l.rel);
+                let i: u64 = name
+                    .strip_prefix('r')
+                    .and_then(|d| d.parse().ok())
+                    .ok_or_else(|| io::Error::other(format!("{}: not made by --make", l.rel)))?;
+                let p = dst.join(name);
+                write_file(&p, 8_000_000 + i, l.len)?;
+                if hash(&p)? != l.sha {
+                    return Err(io::Error::other(format!(
+                        "{}: written again but not as made; --clean and --make",
+                        p.display()
+                    )));
+                }
+                File::options()
+                    .write(true)
+                    .open(&p)
+                    .and_then(|f| f.set_modified(old))
+                    .map_err(at(&p))?;
+                n += 1;
+            }
+            Ok(format!("{n} old files back in replace-dst"))
+        }
+        _ => {
+            let name = if c == "B" { "big" } else { "tree" };
+            let p = root.join("copy-to").join(name);
+            match fs::symlink_metadata(&p) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    Ok(format!("copy-to/{name} was not there"))
+                }
+                Err(e) => Err(at(&p)(e)),
+                Ok(m) if !m.is_dir() => Err(io::Error::other(format!(
+                    "{} is not a folder a copy made: left as it is",
+                    p.display()
+                ))),
+                Ok(_) => fs::remove_dir_all(&p)
+                    .map(|()| format!("copy-to/{name} removed"))
+                    .map_err(at(&p)),
+            }
+        }
+    }
+}
+
 /// `--kill-when A|B|C`: run before Enter on that check's copy. Waits for the copy to
 /// reach its point, then kills xdevcmd as a crash would (`kill -9`, End task).
 fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
@@ -725,8 +799,7 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
     let lines = manifest(root)?;
     if let Some(what) = already(root, c) {
         return Err(io::Error::other(format!(
-            "check {c} was already run here ({what}): xtask try --clean, then --make, \
-             to run it again"
+            "check {c} was already run here ({what}): xtask try --reset {c} to run it again"
         )));
     }
     println!("check {c}: waiting for the copy; press Enter on it in xdevcmd now");
@@ -874,7 +947,24 @@ mod tests {
         fs::write(root.join("copy-to/tree/d0/f0"), "x").unwrap();
         for c in ["A", "B", "C"] {
             let e = kill_when(&root, c).unwrap_err().to_string();
-            assert!(e.contains("already") && e.contains("--clean"), "{c}: {e}");
+            assert!(e.contains("already") && e.contains("--reset"), "{c}: {e}");
+        }
+        // --reset puts each back, without --make: then the check is offered again, and
+        // the sandbox checks as made (sources untouched, old files as they were).
+        for c in ["A", "B", "C"] {
+            reset(&root, c).unwrap();
+            assert!(already(&root, c).is_none(), "{c} after --reset");
+        }
+        let r = check(&root).unwrap();
+        assert!(!r.failed(), "{}", r.text());
+        assert_eq!(state_of(&r, "copy of tree/"), "NOT DONE", "{}", r.text());
+        // A link where a copy's folder is, is never followed or removed.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&t, root.join("copy-to/tree")).unwrap();
+            assert!(reset(&root, "C").is_err());
+            assert!(t.exists());
+            fs::remove_file(root.join("copy-to/tree")).unwrap();
         }
         fs::remove_file(root.join(MANIFEST)).unwrap();
         let e = manifest(&root).err().unwrap().to_string();

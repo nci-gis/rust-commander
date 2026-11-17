@@ -814,11 +814,13 @@ impl App {
             Cmd::Discard(it) => {
                 xdevcmd_core::journal::discard(&it);
                 let n = it.partial.len();
-                self.status = format!(
-                    "the part{} of the interrupted job's big file{} removed",
-                    if n == 1 { "" } else { "s" },
-                    if n == 1 { "" } else { "s" },
-                );
+                self.status = match n {
+                    0 => "the interrupted job forgotten: nothing more is done".into(),
+                    n => format!(
+                        "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
+                        if n == 1 { "" } else { "s" },
+                    ),
+                };
             }
             Cmd::EditConfig(p) => {
                 self.recheck_config = Some(p.clone());

@@ -101,8 +101,12 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
   `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml` in front: on APFS a copy is a clone,
   done at once (the same on Linux with Btrfs or XFS).
 - **After a kill**, on macOS and Linux the terminal may look wrong: type `reset`.
+- **To do a check again**: `xtask try --reset A` (or `B`, `C`) puts back what that
+  check's copy changed, in seconds; no new `--make`. If xdevcmd still offers the job at
+  its start, press **F** (forget it) first.
 - **If `--kill-when` says the copy finished first**, the disk is fast and the sandbox
-  small: `--clean`, `--make` (without `--small`), and do that check again.
+  small: `--reset` that check and try again; if it keeps finishing first, `--clean`,
+  then `--make` without `--small`.
 - **`--small`** (0.8 GiB) is for a slow disk or little space.
 - **`--clean`** removes only what `--make` made, and refuses while anything else is in
   the sandbox. What the checks sent to the trash stays there.

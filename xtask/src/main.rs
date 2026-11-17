@@ -80,7 +80,7 @@ const HELP: &str =
   --version  the version this xtask was built from: measure with the same xdevcmd
 
 usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
-       xtask try --make [--small] | --kill-when A|B|C | --check | --tamper | --clean [--dir D]
+       xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
        xtask sync-sweep [--files N] [--dir PATH] [--probe]
        xtask fuzz [--secs N] [TARGET...]
 (From the repository: cargo xtask …)";

@@ -326,12 +326,22 @@ impl App {
                     plural(n),
                     xdevcmd_core::format::human_size(kept),
                 ));
-                discard = Some((
-                    'd',
-                    "discard them".to_string(),
-                    Cmd::Discard(Box::new(it.clone())),
-                ));
             }
+            // The owner, 2026-11-17: a way to say "never mind", not only "later". The
+            // journal goes (and any part kept); what the run copied or moved stays where
+            // it is, and Ctrl+Z, which does not outlive a run, cannot undo it.
+            body.push(if n > 0 {
+                "F forgets it: nothing more is done, the parts kept are removed; what it"
+                    .into()
+            } else {
+                "F forgets it: nothing more is done; what it".into()
+            });
+            body.push("did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into());
+            discard = Some((
+                'f',
+                "forget it".to_string(),
+                Cmd::Discard(Box::new(it.clone())),
+            ));
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
         // Always said when a job is offered: its journal stays until it is answered (#3).
@@ -339,7 +349,10 @@ impl App {
         // (the owner and QA, 2026-11-17).
         if yes.is_some() {
             body.push(String::new());
-            body.push(if discard.is_some() {
+            let kept = yes
+                .as_ref()
+                .is_some_and(|(_, c)| matches!(c, Cmd::Resume(it) if !it.partial.is_empty()));
+            body.push(if kept {
                 "Esc: asked again at the next start, the kept parts left as they are.".into()
             } else {
                 "Esc: asked again at the next start.".into()

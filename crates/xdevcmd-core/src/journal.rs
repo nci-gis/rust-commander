@@ -1007,6 +1007,39 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// The owner, 2026-11-17: with two jobs interrupted, the start offered the one read
+    /// first from the folder (the oldest, often), and Esc kept it in front, so the job
+    /// just interrupted was never offered. Newest first.
+    #[test]
+    fn interrupted_jobs_come_newest_first() {
+        let d = dir("newest");
+        let old = d.join(format!("{DEAD}-0.journal"));
+        let new = d.join(format!("{DEAD}-1.journal"));
+        for (p, src) in [(&old, "old-src"), (&new, "new-src")] {
+            let text = format!(
+                "host {}\nkind copy\nsrc {}\n",
+                enc(Path::new(&hostname())),
+                enc(&d.join(src))
+            );
+            fs::write(p, text).unwrap();
+        }
+        let at = |p: &Path, secs: u64| {
+            let f = fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        at(&old, 1_700_000_000);
+        at(&new, 1_800_000_000);
+        let got = recover_in(&d);
+        let firsts: Vec<_> = got.iter().map(|i| i.sources[0].clone()).collect();
+        assert_eq!(firsts, vec![d.join("new-src"), d.join("old-src")]);
+        // And the other way round: the order is the dates', not the names'.
+        at(&old, 1_900_000_000);
+        let got = recover_in(&d);
+        assert_eq!(got[0].sources[0], d.join("old-src"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_journal_from_another_host_is_left_alone() {
         let d = dir("host");

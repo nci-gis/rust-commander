@@ -1231,6 +1231,70 @@ mod tests {
     }
 
     #[test]
+    fn every_path_a_journal_names_is_held_to_the_root() {
+        // Repo review RR02: only dir/part/ren/swap were checked, so a journal whose
+        // other lines name a place outside the root was still offered and tidied.
+        let d = dir("rootall");
+        let inside = d.join("in");
+        let outside = d.join("out");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let root = crate::policy::Policy {
+            read_only: false,
+            root: Some(crate::paths::canonical(&inside).unwrap()),
+        };
+        let (i, o) = (inside.join("a"), outside.join("a"));
+        let one = ["src", "dest", "gone", "unren", "skip", "done"];
+        for kind in one {
+            let line = |p: &Path| format!("kind copy\n{kind} {}\n", enc(p));
+            assert!(may_tidy(&line(&i), &root), "{kind} inside");
+            assert!(!may_tidy(&line(&o), &root), "{kind} outside");
+        }
+        let replace = format!("kind copy\nreplace {} 7\n", enc(&o));
+        assert!(!may_tidy(&replace, &root), "replace outside");
+        let moved = format!("kind move\nmoved {} {}\n", enc(&i), enc(&o));
+        assert!(!may_tidy(&moved, &root), "moved to outside");
+        for at in 0..3 {
+            let mut ps = [i.clone(), i.clone(), i.clone()];
+            ps[at] = o.clone();
+            let ckpt = format!(
+                "kind copy\nckpt {} {} {} 7 4\n",
+                enc(&ps[0]),
+                enc(&ps[1]),
+                enc(&ps[2])
+            );
+            assert!(!may_tidy(&ckpt, &root), "ckpt path {at} outside");
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_root_to_outside_is_not_inside_by_its_parent() {
+        // Repo review RR03: a path that exists but resolves outside passed because
+        // its parent is inside. Only a path that is gone may lean on its parent.
+        let d = dir("rootlink");
+        let inside = d.join("in");
+        let outside = d.join("out");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let link = inside.join("door");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let root = crate::policy::Policy {
+            read_only: false,
+            root: Some(crate::paths::canonical(&inside).unwrap()),
+        };
+        let text = format!("kind copy\ndir {}\n", enc(&link));
+        assert!(!may_tidy(&text, &root), "a dir that leads outside");
+        let gone = format!(
+            "kind copy\npart {}\n",
+            enc(&inside.join(".a.xdevcmd-part-9-0"))
+        );
+        assert!(may_tidy(&gone, &root), "a gone file inside still may");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn a_dead_runs_parts_are_removed_and_renames_put_back() {
         let d = dir("dead");
         let jdir = d.join("journal");

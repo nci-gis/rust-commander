@@ -165,7 +165,7 @@ fn escaped(text: &str) -> String {
 fn refuse_breakouts(text: &str, bad: &[&str], shell: &str) -> Result<(), String> {
     match bad.iter().find(|b| text.contains(*b)) {
         Some(b) => Err(format!(
-            "{shell} cannot be given a name holding {b:?} safely \u{2014} not sent"
+            "{shell} cannot be given a name holding {b:?} safely \u{2014} not sent; rename it, or type it yourself"
         )),
         None => Ok(()),
     }

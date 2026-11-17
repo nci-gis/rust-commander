@@ -1320,6 +1320,44 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// F says what it removed, and a kept part it could not remove keeps the journal,
+    /// so the next start offers the job again (repo review RR06: F said done whatever
+    /// happened, and counted the parts it was given).
+    #[test]
+    fn forgetting_reports_what_was_removed_and_keeps_the_journal_when_a_part_stays() {
+        let d = dir("forget");
+        let src = d.join("src");
+        fs::write(&src, "abc").unwrap();
+        let gone_ok = d.join(".a.xdevcmd-part-9-0");
+        fs::write(&gone_ok, "ab").unwrap();
+        // A part that cannot be removed as a file (a folder by that name, not empty).
+        let stuck = d.join(".b.xdevcmd-part-9-1");
+        fs::create_dir_all(stuck.join("x")).unwrap();
+        let journal = d.join("dead.journal");
+        fs::write(&journal, "kind copy\n").unwrap();
+        let part = |p: &Path| Partial {
+            part: p.to_path_buf(),
+            src: src.clone(),
+            dst: d.join("a"),
+            ident: crate::ops::Ident::at(&src).unwrap(),
+            bytes: 2,
+        };
+        let mut it = tidy("kind copy\n", "x");
+        it.partial = vec![part(&gone_ok), part(&stuck)];
+        it.journal = Some(journal.clone());
+        let f = discard(&it);
+        assert_eq!(f.removed, 1);
+        assert_eq!(f.left, vec![stuck.clone()]);
+        assert!(!gone_ok.exists());
+        assert!(journal.exists(), "kept: the next start offers it again");
+        // All gone (one already was): the journal goes too.
+        fs::remove_dir_all(&stuck).unwrap();
+        let f = discard(&it);
+        assert_eq!((f.removed, f.left.len()), (2, 0));
+        assert!(!journal.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_dead_runs_parts_are_removed_and_renames_put_back() {
         let d = dir("dead");

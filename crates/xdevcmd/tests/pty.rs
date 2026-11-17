@@ -1335,21 +1335,21 @@ fn two_interrupted_jobs_the_newest_first_and_the_other_said() {
     for _ in 0..2 {
         let mut x = Session::start(&s, None);
         x.wait_for("Interrupted");
-        x.wait_for("newer.txt");
+        x.wait_for("copy of newer.txt");
         x.wait_for("1 older interrupted job waits");
         x.wait_for("Esc: asked again at the next start");
         x.send(b"\x1b"); // Esc: both kept
         x.quit();
     }
     let mut x = Session::start(&s, None);
-    x.wait_for("newer.txt");
+    x.wait_for("copy of newer.txt");
     x.send(ENTER);
     x.wait_for("1 copied");
     x.quit();
     assert_eq!(std::fs::read_to_string(dst.join("newer.txt")).unwrap(), "n");
     let mut x = Session::start(&s, None);
     x.wait_for("Interrupted");
-    x.wait_for("older.txt");
+    x.wait_for("copy of older.txt");
     assert!(
         !x.screen().contains("older interrupted job"),
         "{}",
@@ -1398,7 +1398,8 @@ fn f_forgets_an_interrupted_job() {
         "not asked again"
     );
     let x = Session::start(&s, None);
-    std::thread::sleep(Duration::from_millis(800));
+    x.wait_for("Name"); // the panes are drawn: a dialog would be up by now
+    std::thread::sleep(Duration::from_millis(500));
     assert!(!x.screen().contains("Interrupted"), "{}", x.screen());
     x.quit();
 }

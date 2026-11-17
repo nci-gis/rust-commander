@@ -69,9 +69,16 @@ many's files back under their names, and offers:
   is asked about again, not replaced because its source is newer.
 - **C** (check, slow): when a copy may be damaged, as after a power cut or a drive pulled
   out. Every file already copied is read again with its source, finished folders
-  included, and one that differs is copied again (the old one to the trash). Known gap: a file you answered "Skip" for in the run that died is
-  replaced by C if it has its source's size and date.
+  included, and one that differs is copied again (the old one to the trash). Known gap:
+  a file you answered "Skip" for in the run that died is replaced by C if it has its
+  source's size and date.
+- **F** (forget it): nothing more is done. What the run did stays where it is (copied
+  files at the destination, a replaced file in the trash), and Ctrl+Z cannot undo it:
+  undo does not outlive a run. Any part of a big file kept is removed.
 - **Esc**: leave the job for the next start.
+
+With several jobs interrupted, the newest is asked first; the dialog says how many
+older ones wait, and each is asked at a later start.
 
 A move continues with the sources still there. A source whose identical copy is already
 at the destination (a move across drives stopped between the copy and the removal) is
@@ -87,8 +94,8 @@ asking again; a file to be replaced that has changed since is asked about.
 256 MiB while it is copied, and the journal says how much is there. The next start keeps
 that part (the dialog says "kept part way") and Continue goes on from it, at most
 256 MiB back, as long as the source is the same file (size, date and identity);
-otherwise it starts again. "Discard them" removes the kept parts; Esc leaves them for
-the next start. The cost is one sync per 256 MiB of a big file, none for smaller files.
+otherwise it starts again. F (forget it) removes the kept parts with the job; Esc leaves
+them for the next start. The cost is one sync per 256 MiB of a big file, none for smaller files.
 
 ### How it works
 

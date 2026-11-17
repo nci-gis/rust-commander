@@ -336,7 +336,11 @@ impl App {
             } else {
                 "F forgets it: nothing more is done; what it".into()
             });
-            body.push("did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into());
+            body.push(if it.kind == "delete" {
+                "did stays in the trash, and Ctrl+Z cannot undo that.".into()
+            } else {
+                "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into()
+            });
             discard = Some((
                 'f',
                 "forget it".to_string(),
@@ -359,7 +363,7 @@ impl App {
             });
             if waiting > 0 {
                 body.push(format!(
-                    "{waiting} older interrupted job{} wait{}: each is asked after this one.",
+                    "{waiting} older interrupted job{} wait{}: each is asked at a later start.",
                     plural(waiting),
                     if waiting == 1 { "s" } else { "" }
                 ));

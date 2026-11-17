@@ -815,7 +815,8 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
             Some(true) => break,
             Some(false) => {
                 return Err(io::Error::other(
-                    "the copy finished before its point: --clean, --make, and try again",
+                    "the copy finished before its point: --reset that check and try again (a fast disk: \
+                     --clean, then --make without --small)",
                 ))
             }
             None if start.elapsed() > Duration::from_secs(600) => {

@@ -355,7 +355,16 @@ fn marked(root: &Path) -> io::Result<()> {
 /// error, never an empty list that passes everything.
 fn manifest(root: &Path) -> io::Result<Vec<Line>> {
     let p = root.join(MANIFEST);
-    let text = fs::read_to_string(&p).map_err(at(&p))?;
+    let text = match fs::read_to_string(&p) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(io::Error::other(format!(
+                "no finished sandbox here ({} is missing): xtask try --make first, from \
+                 the folder you run every check in",
+                p.display()
+            )))
+        }
+        r => r.map_err(at(&p))?,
+    };
     let bad =
         |why: &str| io::Error::other(format!("{}: {why}; make the sandbox again", p.display()));
     let mut rows = text.lines();
@@ -678,6 +687,28 @@ fn progress(root: &Path, c: &str, lines: &[Line]) -> Option<bool> {
     }
 }
 
+/// What a check's copy left in the sandbox already, if anything: counting from there
+/// would kill xdevcmd at once, before Enter (the owner, 2026-11-17).
+fn already(root: &Path, c: &str) -> Option<&'static str> {
+    let any = |dir: &Path| fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some());
+    match c {
+        "A" => {
+            let old = SystemTime::UNIX_EPOCH + Duration::from_secs(OLD);
+            fs::read_dir(root.join("replace-dst"))
+                .ok()?
+                .flatten()
+                .any(|e| {
+                    e.metadata()
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|t| t != old)
+                })
+                .then_some("replace-dst holds replaced files")
+        }
+        "B" => any(&root.join("copy-to").join("big")).then_some("copy-to/big is there"),
+        _ => any(&root.join("copy-to").join("tree")).then_some("copy-to/tree is there"),
+    }
+}
+
 /// `None` before `at`, `Some(true)` from `at` until all are done, `Some(false)` then.
 fn reached(done: usize, all: usize, at: usize) -> Option<bool> {
     if done >= all {
@@ -692,6 +723,12 @@ fn reached(done: usize, all: usize, at: usize) -> Option<bool> {
 fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
     marked(root)?;
     let lines = manifest(root)?;
+    if let Some(what) = already(root, c) {
+        return Err(io::Error::other(format!(
+            "check {c} was already run here ({what}): xtask try --clean, then --make, \
+             to run it again"
+        )));
+    }
     println!("check {c}: waiting for the copy; press Enter on it in xdevcmd now");
     let start = Instant::now();
     loop {

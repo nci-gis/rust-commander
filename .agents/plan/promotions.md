@@ -191,3 +191,9 @@ until beta.2 is cut (its step 9). 029–031 were already Complete (2026-11-13).
 **Source**: the owner, 2026-11-17 ("mình approve bro sửa nhé … ROADMAP item 2 thành `how-to-test.md`").
 **What**: `plan/ROADMAP.md` item 2 now names `docs/development.md#testing-a-pre-release-by-hand`, where the owner's hand-test list moved in PR #32 (`docs/testing-by-hand.md` became the tester page `docs/how-to-test.md`). First set to `how-to-test.md`, then corrected the same day (owner: "okay, duyệt bro correct lại nhé"). One path, nothing else.
 **Promoted by**: XDevTeam. Written by Claude Code.
+
+## 2026-11-17: QA skill, and manual test cases in the crate
+
+**Source**: the owner, 2026-11-17 ("có thể tạo QA Skill để chạy các agents tương ứng để kiểm thử"), then the answers "Repo: .agents/skills/qa", "tests/manual/", "Data paths first".
+**What**: new skill `skills/qa/SKILL.md` (the user docs as the oracle; PROVES / CONFIRMS / MISSING / MANUAL; audit and hunt agents per area; verify before relaying; fix bugs only, red first). The hand-test list moved from `docs/development.md` to `crates/xdevcmd/tests/manual/` (README + one file per area, cases with IDs); development.md points there. First run's findings: `memory/2026-11-17-qa-beta2.md`.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

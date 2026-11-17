@@ -1397,7 +1397,7 @@ fn f_forgets_an_interrupted_job() {
         0,
         "not asked again"
     );
-    let mut x = Session::start(&s, None);
+    let x = Session::start(&s, None);
     std::thread::sleep(Duration::from_millis(800));
     assert!(!x.screen().contains("Interrupted"), "{}", x.screen());
     x.quit();

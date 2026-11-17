@@ -104,6 +104,10 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 }
                 _ => return usage(&format!("{a} needs A, B or C")),
             },
+            "--help" | "-h" => {
+                println!("{HELP}");
+                return 0;
+            }
             "--small" => sizes = Sizes::SMALL,
             "--dir" => match it.next() {
                 Some(d) => dir = PathBuf::from(d),
@@ -159,7 +163,9 @@ pub const HELP: &str =
   --reset       undo what check A, B or C's copy changed, to run it again
   --check       every copy against the manifest: PASS, FAIL (a P0) or NOT DONE
   --tamper      check C: one finished copy zeroed, its size and date kept
-  --clean       remove the sandbox, only what --make made in it";
+  --clean       remove the sandbox, only what --make made in it
+  --dir D       the folder holding xdevcmd-try (default: here; run every command from it)
+Steps: docs/how-to-test.md.";
 
 /// An error that names its path.
 fn at(path: &Path) -> impl Fn(io::Error) -> io::Error + '_ {

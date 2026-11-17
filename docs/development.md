@@ -102,9 +102,8 @@ cd ../new     # each line now says how far it moved (◀ past 15 %)
 Then the other way round (the newer as the baseline) before believing a small change:
 a busy minute shows as one.
 
-**The tester's sandbox.** `xtask try --make | --kill-when A|B|C | --check | --tamper |
---clean` (in the same archive) makes the folder that [How to test](how-to-test.md)
-uses, with a SHA-256 manifest that counts its own lines (a cut one is an error, never a
+**The tester's sandbox.** `xtask try` (in the same archive; its options:
+`xtask try --help`) makes the folder that [How to test](how-to-test.md) uses, with a SHA-256 manifest that counts its own lines (a cut one is an error, never a
 PASS); kills xdevcmd by name when a check's copy reaches its point (a tenth replaced,
 past the first checkpoint, a fifth of the tree); checks every copy; `--clean` removes
 only what `--make` made, in a folder named `xdevcmd-try` holding its marker, the marker

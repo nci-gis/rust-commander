@@ -33,7 +33,7 @@ setx XDEVCMD_DEBUG all                         # Windows; new windows
 ```
 
 It makes `xdevcmd-try/` (2.5 GiB): `big.log`, `many/`, `tree/`, `replace-src/`,
-`replace-dst/`, `big/` and an empty `copy-to/`.
+`replace-dst/`, `big/` and an empty `copy-to/`. Every command and option: `xtask try --help`.
 
 **4. Five tasks with the previous version.** Start it on the sandbox:
 `/path/to/old/xdevcmd xdevcmd-try xdevcmd-try/replace-dst`. Score each task from 1 (no

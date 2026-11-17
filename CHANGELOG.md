@@ -12,9 +12,9 @@ that heading and starts a new, empty one here. -->
 
 ### Added
 - **A big copy goes on from where it stopped**: with safe operations on, a file over
-  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`,
-  the terminal closed) resumes from there. Continue also skips the folders the first run
-  finished. A power cut is best effort: see Security, "What survives a power cut".
+  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`)
+  resumes from there. Continue also skips the folders the first run finished. A power
+  cut is best effort: see Security, "Safe operations".
 - **C, a checked continue**: when a copy may be damaged (a power cut, a drive pulled
   out), C at the Interrupted dialog reads every file already copied again with its
   source, finished folders included, and copies again any that differ (a file can keep
@@ -30,7 +30,8 @@ that heading and starts a new, empty one here. -->
 - **A debug log for bug reports**: `XDEVCMD_DEBUG=all`. It holds no file, folder, user
   or host name. See Troubleshooting.
 - **Release archives can be checked** with build provenance (`gh attestation verify`),
-  and each is unpacked and run before the release. See Security, "Checking a download".
+  and each is unpacked and checked before the release (run too, but for Intel macOS,
+  built on Apple Silicon). See Security, "Checking a download".
 - **Docs**: Compatibility (what stays the same from 0.4.0) and Benchmarks (measuring on
   your machine); the guide says what a copy keeps, and what to use instead (rsync,
   robocopy, rclone).
@@ -38,9 +39,9 @@ that heading and starts a new, empty one here. -->
 - **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
   target): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
   copy mid-job at the right moment (`--kill-when`), and checks every file against its
-  manifest (PASS / FAIL); `--reset A|B|C` runs a check again without making the sandbox
-  again. No Rust needed; `xtask --help`, `xtask try --help`, `xtask bench --help`. See
-  How to test and Benchmarks.
+  manifest (PASS / FAIL); `--reset A|B|C` puts back a check's files, to do it again
+  without making the sandbox again. No Rust needed; `xtask --help`, `xtask try --help`,
+  `xtask bench --help`. See How to test and Benchmarks.
 
 ### Changed
 - **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not

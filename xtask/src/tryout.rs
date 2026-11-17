@@ -170,8 +170,9 @@ fn usage(why: &str) -> i32 {
 pub const HELP: &str =
     "usage: xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
   --make        make D/xdevcmd-try (2.5 GiB, 3.8 with the copies; --small: 0.6 and 1.1)
-  --kill-when   run before Enter on check A, B or C: waits, kills xdevcmd mid-job
-  --reset       undo what check A, B or C's copy changed, to run it again
+  --kill-when   run before Enter on check A, B or C: waits, kills xdevcmd mid-job (every
+                running xdevcmd, by name: quit the others first)
+  --reset       put back the files check A, B or C's copy changed, to do its steps again
   --check       every copy against the manifest: PASS, FAIL (a P0) or NOT DONE
   --tamper      check C: one finished copy zeroed, its size and date kept
   --clean       remove the sandbox, copies included (refused if its top holds anything

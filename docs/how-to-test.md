@@ -2,7 +2,7 @@
 
 For anyone who wants to see for themselves that a version of xdevcmd does what it says,
 on their own machine, before trusting it with real files. About 45 minutes, then a week
-of normal use. Everything happens in a sandbox folder made for it: never use your only
+of normal use. The test files are in a sandbox folder made for it: never use your only
 copy of anything.
 
 You need two terminal windows, about 4 GiB free disk, and no Rust.
@@ -14,7 +14,7 @@ your system: this version's `xdevcmd-…` archive; the previous version's (the r
 just below it on that page: for 0.4.0-beta.2, 0.4.0-beta.1), to compare with; and this
 version's `xdevcmd-bench-…` (it holds `xtask`, the test tool; `xtask --help`). Unpack
 each into a folder of its own. The builds are not signed: the first start may need
-[a click or two](troubleshooting.md#macos) ([Windows](troubleshooting.md#windows)).
+[a click or two](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md#macos) ([Windows](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md#windows)).
 
 **2. Turn the debug log on** for the week. It holds no file, folder, user or host name.
 
@@ -25,14 +25,17 @@ echo 'export XDEVCMD_DEBUG=all' >> ~/.zshrc     # macOS (Linux: ~/.bashrc); new 
 setx XDEVCMD_DEBUG all                         # Windows; new windows
 ```
 
-**3. Make the sandbox.** In a new window, in a folder of your choice; run every later
-`xtask` command from this same folder:
+**3. Make the sandbox.** In a new window, in a folder of your choice, give the full path
+of the `xtask` you unpacked:
 
 ```bash
-/path/to/xtask try --make            # Windows: C:\path\to\xtask.exe try --make
+/path/to/xtask try --make
+```
+```powershell
+& 'C:\path\to\xtask.exe' try --make
 ```
 
-It makes `xdevcmd-try/` (2.5 GiB): `big.log`, `many/`, `tree/`, `replace-src/`,
+Every later `xtask` line means that same full path, run from this same folder. It makes `xdevcmd-try/` (2.5 GiB): `big.log`, `many/`, `tree/`, `replace-src/`,
 `replace-dst/`, `big/` and an empty `copy-to/`. Every command and option: `xtask try --help`.
 
 **4. Five tasks with the previous version.** Start it on the sandbox:
@@ -48,16 +51,23 @@ thought) to 5 (gave up), then quit (F10).
 **5. The same five tasks with this version**, scored the same way:
 `/path/to/xdevcmd xdevcmd-try xdevcmd-try/replace-dst`. Then `xtask try --check`.
 
+**Before checks A to C, quit every other xdevcmd.** `--kill-when` kills every running
+program named xdevcmd on this machine (`kill -9`, End task), not only the one in the
+sandbox.
+
 **6. Check A, a replace killed mid-way.** In the second window:
 `xtask try --kill-when A`. In xdevcmd: in `replace-src`, Ctrl+A, F5; Space until the
 line says `[replace]`; Enter. The second window kills xdevcmd mid-job. Start xdevcmd
 again (same line as step 5): it says "ended in the middle of a job"; Enter. It finishes
 without asking again.
 
-**7. Check B, a big file killed mid-way.** Start xdevcmd on
-`xdevcmd-try xdevcmd-try/copy-to`. In the second window: `xtask try --kill-when B`. In
-xdevcmd: F5 on `big`, Enter. Start again: "kept part way"; Enter. The bar starts near
-where it stopped.
+**7. Check B, a big file killed mid-way.** On macOS and Linux, start xdevcmd with the
+sandbox's config, which turns the fast copy off: on APFS, Btrfs or XFS a copy is a
+clone, done at once, with no checkpoint to stop at.
+`XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml /path/to/xdevcmd xdevcmd-try xdevcmd-try/copy-to`
+(on Windows: `/path/to/xdevcmd xdevcmd-try xdevcmd-try/copy-to`). In the second window:
+`xtask try --kill-when B`. In xdevcmd: F5 on `big`, Enter. Start again with the same
+line: "kept part way"; Enter. The bar starts near where it stopped.
 
 **8. Check C, after a power cut.** `xtask try --kill-when C`; in xdevcmd: F5 on `tree`,
 Enter. Then `xtask try --tamper` (it spoils one finished copy, as a power cut can). Start
@@ -89,7 +99,7 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
 - **A lost or wrong file** (gone, short, empty, or not the one you chose), at any step
   or in the week: stop, and report it the same day as **P0**. Before starting xdevcmd
   again, copy the debug log and the state folder
-  ([how](troubleshooting.md#sending-a-log-with-a-report)); keep the trash.
+  ([how](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md#sending-a-log-with-a-report)); keep the trash.
 - **Each problem as its own [issue](https://github.com/nci-gis/rust-commander/issues)**,
   with a level in the title: **P0** data lost or the wrong file touched; **P1** a crash,
   a hang, the terminal left broken; **P2** a wrong screen or doc; **P3** cosmetic. Say
@@ -97,13 +107,11 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
   names you would not share in public ("a folder of 3,000 small files on a share").
 - **On a Mac**: F-keys need Fn (or "Use F1, F2, etc. keys as standard function keys" in
   System Settings → Keyboard); End is Fn+→; for Alt+ keys, Terminal → Settings →
-  Profiles → Keyboard → "Use Option as Meta key". For check B start xdevcmd with
-  `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml` in front: on APFS a copy is a clone,
-  done at once (the same on Linux with Btrfs or XFS).
+  Profiles → Keyboard → "Use Option as Meta key".
 - **After a kill**, on macOS and Linux the terminal may look wrong: type `reset`.
-- **To do a check again**: `xtask try --reset A` (or `B`, `C`) puts back what that
-  check's copy changed, in seconds; no new `--make`. If xdevcmd still offers the job at
-  its start, press **F** (forget it) first.
+- **To do a check again**: `xtask try --reset A` (or `B`, `C`) puts back the files that
+  check's copy changed, in seconds, with no new `--make`; then do its steps again. If
+  xdevcmd still offers the job at its start, press **F** (forget it) first.
 - **If `--kill-when` says the copy finished first**, the disk is fast and the sandbox
   small: `--reset` that check and try again; if it keeps finishing first, `--clean`,
   then `--make` without `--small`.
@@ -114,4 +122,4 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
   it. What the checks sent to the trash stays there.
 - **The speed** on your own drives, unattended, any day: [Benchmarks](benchmark.md).
 - **With Rust 1.90+**: the automated tests at this version's tag,
-  `cargo test --workspace --locked --no-fail-fast` ([Development](development.md)).
+  `cargo test --workspace --locked --no-fail-fast` ([Development](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md)).

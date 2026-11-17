@@ -33,7 +33,10 @@ and prints how long each copy took and how much memory it used.
 The same download as [How to test](how-to-test.md), step 1: `xdevcmd-bench-<tag>-<target>`
 from Releases (from 0.4.0-beta.2), built from that release's code, so it measures that
 release. Every option: `xtask bench --help`. With Rust, any commit: `cargo xtask bench …`
-in the repository ([Development](development.md#benchmarks)).
+in the repository ([Development](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#benchmarks)).
+
+Check the archive first ([Checking a download](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md#checking-a-download)).
+The lines below that unblock it are only for an archive from this repository's Releases.
 
 ## macOS
 
@@ -41,7 +44,7 @@ in the repository ([Development](development.md#benchmarks)).
 cd ~/Downloads
 tar xzf xdevcmd-bench-v0.4.0-beta.2-aarch64-apple-darwin.tar.gz
 cd xdevcmd-bench-v0.4.0-beta.2-aarch64-apple-darwin
-xattr -d com.apple.quarantine xtask 2>/dev/null   # a download not notarised
+xattr -d com.apple.quarantine xtask 2>/dev/null   # this repository's download only
 export XDEVCMD_DEBUG=jobs
 ./xtask bench --only mixed --host mbp-m2-apfs
 XDEVCMD_BENCH_FAST=0 ./xtask bench --only mixed --host mbp-m2-apfs-own
@@ -60,7 +63,7 @@ XDEVCMD_BENCH_FAST=0 ./xtask bench --only mixed --host mbp-m2-apfs-own
 cd $HOME\Downloads
 Expand-Archive xdevcmd-bench-v0.4.0-beta.2-x86_64-pc-windows-msvc.zip -DestinationPath .
 cd xdevcmd-bench-v0.4.0-beta.2-x86_64-pc-windows-msvc
-Unblock-File .\xtask.exe                           # so SmartScreen lets it run
+Unblock-File .\xtask.exe                           # this repository's download only
 $env:XDEVCMD_DEBUG = "jobs"
 .\xtask.exe bench --only mixed --host win11-ssd-ntfs
 .\xtask.exe bench --only mixed --dir E:\xdevcmd-bench --host win11-usb-exfat
@@ -97,7 +100,7 @@ mixed: one large file and small files                  84.33 ms   94.61 ms   78.
 something else ran, so run again. **vs base** is the change from this host's baseline
 (`—` without one; ◀ past ±15 %). With `XDEVCMD_DEBUG=jobs`, the debug logs in
 `bench/results/debug-<host>-<date>/` say where the time went
-([each field](development.md#reading-a-debug-log)).
+([each field](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#reading-a-debug-log)).
 
 ## What to send
 

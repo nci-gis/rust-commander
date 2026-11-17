@@ -14,8 +14,8 @@ not xdevcmd: a key it never sends, a colour it cannot show.
 | Shift+F keys do nothing | macOS Terminal.app | Alt+X, then the F key |
 | Green or red backgrounds | macOS before 26 | `XDEVCMD_COLORS=256` |
 | The mouse does nothing | macOS | View → Allow Mouse Reporting (⌘R) |
-| "cannot be opened … developer cannot be verified" | macOS | `xattr -d com.apple.quarantine xdevcmd` |
-| "Windows protected your PC" | Windows | More info → Run anyway |
+| "cannot be opened … developer cannot be verified" | macOS | [macOS](#macos): only for a download from this repository |
+| "Windows protected your PC" | Windows | [Windows](#windows): only for a download from this repository |
 | `o` says "no DISPLAY" | Linux | set `[commands] opener`, or F3 |
 | A copy fails or is slow, or it crashed | all | [Reporting a problem](#reporting-a-problem) |
 
@@ -92,7 +92,9 @@ hides the bar.
 colour, your terminal profile's background shows through, as outside xdevcmd.
 
 **"xdevcmd cannot be opened because the developer cannot be verified."** The downloads
-are not signed. In the unpacked `xdevcmd-…-apple-darwin` folder:
+are not signed. Do this only for an archive from this repository's Releases, after
+[checking it](security.md#checking-a-download). In the unpacked
+`xdevcmd-…-apple-darwin` folder, remove the download's quarantine mark:
 
 ```bash
 xattr -d com.apple.quarantine xdevcmd
@@ -103,8 +105,9 @@ permission.
 
 ## Windows
 
-**"Windows protected your PC" (SmartScreen).** The downloads are not signed: **More
-info** → **Run anyway**, once.
+**"Windows protected your PC" (SmartScreen).** The downloads are not signed. Only for
+an archive from this repository's Releases, after
+[checking it](security.md#checking-a-download): **More info** → **Run anyway**, once.
 
 **A config written by PowerShell's `>` is UTF-16.** xdevcmd reads it; other tools may
 not. `xdevcmd --print-config | Out-File -Encoding utf8 config.toml` writes UTF-8.

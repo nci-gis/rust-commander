@@ -70,7 +70,9 @@ The newest code, from the repository:
 cargo install --git https://github.com/nci-gis/rust-commander xdevcmd --locked
 ```
 
-Each way installs the `xdevcmd` command. Each release's archives can be checked:
+The `cargo` ways install the `xdevcmd` command. A download runs from the folder you
+unpack it in (`./xdevcmd`; `.\xdevcmd.exe` in PowerShell) until you put that folder on
+your `PATH`. Each release's archives can be checked:
 [security.md, "Checking a download"](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md#checking-a-download).
 
 **Planned, not available yet:** a Scoop bucket for Windows.
@@ -113,7 +115,7 @@ The [guide](https://github.com/nci-gis/rust-commander/blob/main/docs/guide.md) e
 What has been checked, and how. "CI" is the whole test suite on GitHub's runners at
 every pull request; "by hand" is the maintainer using it with
 [the hand-test list](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#testing-a-pre-release-by-hand).
-To check a version yourself: [How to test](docs/how-to-test.md).
+To check a version yourself: [How to test](https://github.com/nci-gis/rust-commander/blob/main/docs/how-to-test.md).
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
@@ -127,12 +129,15 @@ Known gaps are in [troubleshooting](https://github.com/nci-gis/rust-commander/bl
 
 ## Configure
 
+On Linux and macOS (on Windows the file is `%APPDATA%\xdevcmd\config.toml`):
+
 ```bash
 mkdir -p ~/.config/xdevcmd
 xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # all settings, with defaults
 ```
 
-Keep only the lines you change. See [docs/config.md](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md).
+Keep only the lines you change. The steps for Windows, and how the file is chosen:
+[docs/config.md](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md).
 
 ## Docs
 

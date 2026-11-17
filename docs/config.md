@@ -2,13 +2,24 @@
 
 xdevcmd works without a config file. Write one only to change something.
 
-**In short**
+**In short**, on Linux and macOS:
 
 ```bash
 mkdir -p ~/.config/xdevcmd
 xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # every setting, with its default
 xdevcmd --check-config                                   # check it; exit code 1 if wrong
 ```
+
+On Windows, in PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\xdevcmd" | Out-Null
+xdevcmd --print-config | Out-File -Encoding utf8 "$env:APPDATA\xdevcmd\config.toml"
+xdevcmd --check-config
+```
+
+These are the default places. If `XDEVCMD_CONFIG` or `XDG_CONFIG_HOME` is set, the file
+is elsewhere: see [Where the file is](#where-the-file-is).
 
 - Keep only the lines you change; the rest keep their defaults.
 - **File → Settings…** inside xdevcmd changes the common settings for you and writes
@@ -28,12 +39,16 @@ xdevcmd --check-config                                   # check it; exit code 1
 
 ## Where the file is
 
-The file given with `--config PATH`; otherwise the first that exists:
+The file given with `--config PATH`. Otherwise xdevcmd takes the first of these that is
+set, and reads only that file:
 
-1. `$XDEVCMD_CONFIG`
-2. `$XDG_CONFIG_HOME/xdevcmd/config.toml`
+1. `$XDEVCMD_CONFIG`, if set and not empty
+2. `$XDG_CONFIG_HOME/xdevcmd/config.toml`, if `XDG_CONFIG_HOME` is set and not empty
 3. `%APPDATA%\xdevcmd\config.toml` (Windows)
 4. `~/.config/xdevcmd/config.toml`
+
+If the file it chose is missing, xdevcmd uses the defaults; it does not look further
+down the list. A missing file named with `--config` is an error.
 
 **If the file has a mistake**, xdevcmd ignores all of it and asks at start
 (**Config not loaded**, with the error):

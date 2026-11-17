@@ -4763,6 +4763,43 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A resumed job writes the plan's decisions to its own journal before the old one
+    /// goes, so a second kill keeps them too (repo review RR05: only a job with a plan
+    /// wrote them, and a resume has none, so the choices were lost the second time).
+    #[test]
+    fn a_resumed_job_carries_the_plans_decisions_into_its_own_journal() {
+        journals();
+        let root = tmp("resume-decided");
+        let tag = format!("xrd-{}", std::process::id());
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join(&tag);
+        fs::write(&src, "new").unwrap();
+        fs::write(dst.join(&tag), "old, left by the plan").unwrap();
+        let old_journal = root.join("old.journal");
+        fs::write(&old_journal, "kind copy\n").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.expect = [(dst.join(&tag), Expect::Skip)].into_iter().collect();
+        req.resumed = Some(old_journal.clone());
+        let s = run(req);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(
+            fs::read_to_string(dst.join(&tag)).unwrap(),
+            "old, left by the plan"
+        );
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            seen.iter()
+                .any(|(p, at)| *p == crate::faults::Point::JournalLine && at == &dst.join(&tag)),
+            "the skip was written to the new journal: {seen:?}"
+        );
+        assert!(!old_journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// Resume takes over a big file kept after a checkpoint: what it holds is not
     /// copied again (marked here with X, so a copy from the start would show), and the
     /// rest follows. A source changed since starts again; a kept file no file of the

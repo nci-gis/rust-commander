@@ -5,7 +5,8 @@ on their own machine, before trusting it with real files. About 45 minutes, then
 of normal use. The test files are in a sandbox folder made for it: never use your only
 copy of anything.
 
-You need two terminal windows, about 4 GiB free disk, and no Rust.
+You need two terminal windows, about 4 GiB free disk, and no Rust (unless the test kit
+for your system is missing from the release: step 1).
 
 ## The steps
 

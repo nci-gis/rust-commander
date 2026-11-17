@@ -360,6 +360,38 @@ impl Drop for Session {
     }
 }
 
+/// Plan A10: the refusals in the debug log, as `(code, next)` in the order written. The
+/// log is read after quit, from the state directory (`XDEVCMD_DEBUG=errors`).
+fn refusals(s: &Scratch) -> Vec<(String, String)> {
+    let field = |line: &str, k: &str| {
+        let key = format!("\"{k}\":\"");
+        let at = line.find(&key)? + key.len();
+        Some(line[at..].split('"').next()?.to_string())
+    };
+    std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(".jsonl"))
+        .flat_map(|p| {
+            std::fs::read_to_string(p)
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|l| l.contains("\"ev\":\"refused\""))
+        .map(|l| (field(&l, "code").unwrap(), field(&l, "next").unwrap()))
+        .collect()
+}
+
+/// The pairs `refusals` should find.
+fn pairs(want: &[(&str, &str)]) -> Vec<(String, String)> {
+    want.iter()
+        .map(|(c, n)| (c.to_string(), n.to_string()))
+        .collect()
+}
+
 fn wait_file(path: &Path, what: &str, ok: impl Fn(Option<String>) -> bool) {
     let start = Instant::now();
     while !ok(std::fs::read_to_string(path).ok()) {
@@ -2480,7 +2512,8 @@ fn alt_c_does_not_type_into_a_pipeline_whose_first_program_ended() {
 fn alt_c_never_adds_to_a_line_typed_and_not_run() {
     let s = Scratch::new("dirty");
     std::fs::create_dir(s.left().join("sub")).unwrap();
-    let mut x = Session::start(&s, None);
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_DEBUG", "errors")]);
     x.send(F12);
     x.wait_for("$ ");
     x.send(b"touch made");
@@ -2511,6 +2544,7 @@ fn alt_c_never_adds_to_a_line_typed_and_not_run() {
     );
     x.send(F12);
     x.quit();
+    assert_eq!(refusals(&s), pairs(&[("dirty_line", "done")]));
 }
 
 /// With every shell tab in use the new shell cannot open: nothing is typed, and the
@@ -2526,7 +2560,7 @@ fn alt_c_with_a_typed_line_and_no_room_says_how_to_free_it() {
         &s,
         None,
         &[s.left(), s.right()],
-        &[("XDEVCMD_CONFIG", &cfg)],
+        &[("XDEVCMD_CONFIG", &cfg), ("XDEVCMD_DEBUG", "errors")],
     );
     x.send(F12);
     x.wait_for("$ ");
@@ -2559,6 +2593,8 @@ fn alt_c_with_a_typed_line_and_no_room_says_how_to_free_it() {
     });
     x.send(F12);
     x.quit();
+    // The key it names is the key pressed above.
+    assert_eq!(refusals(&s), pairs(&[("busy", "Ctrl+C")]));
 }
 
 /// `exec sleep 30` runs sleep as the shell's own process: the terminal is still that
@@ -5070,7 +5106,8 @@ fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
     let s = Scratch::new("list-guards");
     std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
     s.file("left/proj/keep.txt", "k");
-    let mut x = Session::start(&s, None);
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_DEBUG", "errors")]);
     x.send(F12);
     x.wait_for("$ ");
     let proj = s.left().join("proj").display().to_string();
@@ -5099,6 +5136,15 @@ fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
     assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
     assert!(s.left().join("proj/keep.txt").exists());
     x.quit();
+    // Nothing to press: the safe thing (nothing) is done.
+    assert_eq!(
+        refusals(&s),
+        pairs(&[
+            ("protected_cwd", "done"),
+            ("protected_root", "done"),
+            ("protected_home", "done"),
+        ])
+    );
 }
 
 /// `--root`: a path outside it is left out of a list, and the title counts it.
@@ -5177,7 +5223,15 @@ fn a_write_action_while_a_folder_opens_waits_for_it() {
     std::fs::create_dir_all(s.left().join("slowdir")).unwrap();
     s.file("left/slowdir/inside.txt", "x");
     let dirs = [s.left(), s.right()];
-    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_TEST_SLOW_DIR", "slowdir")]);
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &dirs,
+        &[
+            ("XDEVCMD_TEST_SLOW_DIR", "slowdir"),
+            ("XDEVCMD_DEBUG", "errors"),
+        ],
+    );
     x.wait_for("slowdir");
     x.send(DOWN);
     x.send(ENTER);
@@ -5193,6 +5247,8 @@ fn a_write_action_while_a_folder_opens_waits_for_it() {
     x.send(b"\x1b");
     assert!(s.left().join("slowdir/inside.txt").exists());
     x.quit();
+    // `next` is the action pressed again: F8's `[keys]` name.
+    assert_eq!(refusals(&s), pairs(&[("loading", "delete")]));
 }
 
 /// B02 (Round 029): Enter on a search result whose directory is slow to read lands on

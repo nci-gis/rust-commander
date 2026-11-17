@@ -580,8 +580,10 @@ mod tests {
             None,
             "6 MiB before it: plain for now"
         );
+        // Lexing 6 MiB on the spot takes seconds; a loaded CI runner can take more than
+        // 100 ms for the plain answer (windows-latest, 2026-11-16): the bound is 1 s.
         assert!(
-            t.elapsed() < Duration::from_millis(100),
+            t.elapsed() < Duration::from_secs(1),
             "{:?}",
             t.elapsed()
         );

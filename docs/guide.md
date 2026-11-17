@@ -207,8 +207,9 @@ seconds' bytes and files; nothing for the first three seconds or while nothing m
 is complete: cancelling leaves the old one. With **Safe operations** (Settings →
 General, on by default), if xdevcmd is killed mid-job, the next start cleans up and
 offers to continue: what was finished is left, your table choices hold, identical files
-are skipped, anything else there is asked about. After a power cut, **C** in that dialog
-re-reads every copied file against its source (slow) and copies again what differs.
+are skipped, anything else there is asked about. When a copy may be damaged (a power
+cut, a drive pulled out), **C** in that dialog re-reads every copied file against its
+source (slow) and copies again what differs; **F** forgets the job.
 Closing the terminal stops jobs tidily and saves the session. Details:
 [security.md](security.md#safe-operations).
 

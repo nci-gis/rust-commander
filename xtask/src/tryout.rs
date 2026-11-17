@@ -3,6 +3,7 @@
 //! ```text
 //! xtask try --make [--small] [--dir D]   make D/xdevcmd-try (D: here; it must exist)
 //! xtask try --kill-when A|B|C [--dir D]  wait, then kill xdevcmd at the right moment
+//! xtask try --reset A|B|C [--dir D]      undo that check's copy, to run it again
 //! xtask try --check [--dir D]            PASS / FAIL / NOT DONE, from its manifest
 //! xtask try --tamper [--dir D]           one finished copy zeroed, size and date kept
 //! xtask try --clean [--dir D]            remove D/xdevcmd-try, and only what it made
@@ -95,14 +96,29 @@ pub fn run(args: &[String], version: &str) -> i32 {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--make" | "--check" | "--tamper" | "--clean" => what = Some(a.clone()),
-            "--kill-when" => match it.next().map(|c| c.to_ascii_uppercase()) {
+            "--make" | "--check" | "--tamper" | "--clean" => {
+                // One thing per run: `--check --make` started a whole make (QA of #42).
+                if what.is_some() {
+                    return usage(
+                        "one of --make, --kill-when, --reset, --check, --tamper, --clean",
+                    );
+                }
+                what = Some(a.clone())
+            }
+            "--kill-when" | "--reset" => match it.next().map(|c| c.to_ascii_uppercase()) {
+                _ if what.is_some() => {
+                    return usage("one of --make, --kill-when, --reset, --check, --tamper, --clean")
+                }
                 Some(c) if ["A", "B", "C"].contains(&c.as_str()) => {
                     what = Some(a.clone());
                     when = Some(c);
                 }
-                _ => return usage("--kill-when needs A, B or C"),
+                _ => return usage(&format!("{a} needs A, B or C")),
             },
+            "--help" | "-h" => {
+                println!("{HELP}");
+                return 0;
+            }
             "--small" => sizes = Sizes::SMALL,
             "--dir" => match it.next() {
                 Some(d) => dir = PathBuf::from(d),
@@ -126,9 +142,19 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 println!("removed {}", root.display());
                 0
             }),
+            "--reset" => {
+                let c = when.as_deref().unwrap_or("A");
+                reset(&root, c).map(|what| {
+                    println!("check {c} can run again: {what}");
+                    println!(
+                        "if xdevcmd still offers an interrupted job, press F (forget it) first"
+                    );
+                    0
+                })
+            }
             _ => kill_when(&root, when.as_deref().unwrap_or("A")),
         }),
-        None => return usage("one of --make, --kill-when, --check, --tamper, --clean"),
+        None => return usage("one of --make, --kill-when, --reset, --check, --tamper, --clean"),
     };
     r.unwrap_or_else(|e| {
         eprintln!("try: {e}");
@@ -142,12 +168,16 @@ fn usage(why: &str) -> i32 {
 }
 
 pub const HELP: &str =
-    "usage: xtask try --make [--small] | --kill-when A|B|C | --check | --tamper | --clean [--dir D]
-  --make        make D/xdevcmd-try (2.5 GiB; --small: 0.8 GiB), with a manifest
+    "usage: xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
+  --make        make D/xdevcmd-try (2.5 GiB, 3.8 with the copies; --small: 0.6 and 1.1)
   --kill-when   run before Enter on check A, B or C: waits, kills xdevcmd mid-job
+  --reset       undo what check A, B or C's copy changed, to run it again
   --check       every copy against the manifest: PASS, FAIL (a P0) or NOT DONE
   --tamper      check C: one finished copy zeroed, its size and date kept
-  --clean       remove the sandbox, only what --make made in it";
+  --clean       remove the sandbox, copies included (refused if its top holds anything
+                --make did not make; keep nothing of yours inside)
+  --dir D       the folder holding xdevcmd-try (default: here; run every command from it)
+Steps: docs/how-to-test.md.";
 
 /// An error that names its path.
 fn at(path: &Path) -> impl Fn(io::Error) -> io::Error + '_ {
@@ -192,8 +222,14 @@ fn fill(out: &mut impl Write, seed: u64, len: u64) -> io::Result<()> {
     Ok(())
 }
 
+/// A new file only (`create_new`): never written through a link or over a file.
 fn write_file(path: &Path, seed: u64, len: u64) -> io::Result<()> {
-    let mut f = io::BufWriter::new(File::create(path).map_err(at(path))?);
+    let f = File::options()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(at(path))?;
+    let mut f = io::BufWriter::new(f);
     fill(&mut f, seed, len).map_err(at(path))?;
     f.flush().map_err(at(path))
 }
@@ -355,7 +391,16 @@ fn marked(root: &Path) -> io::Result<()> {
 /// error, never an empty list that passes everything.
 fn manifest(root: &Path) -> io::Result<Vec<Line>> {
     let p = root.join(MANIFEST);
-    let text = fs::read_to_string(&p).map_err(at(&p))?;
+    let text = match fs::read_to_string(&p) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(io::Error::other(format!(
+                "no finished sandbox here ({} is missing): xtask try --make first, from \
+                 the folder you run every check in",
+                p.display()
+            )))
+        }
+        r => r.map_err(at(&p))?,
+    };
     let bad =
         |why: &str| io::Error::other(format!("{}: {why}; make the sandbox again", p.display()));
     let mut rows = text.lines();
@@ -547,6 +592,12 @@ pub fn tamper(root: &Path) -> io::Result<PathBuf> {
     {
         let copy = copy_to.join(&l.rel);
         let src = root.join(&l.rel);
+        // Every folder from the sandbox down to the copy its own, never a link (the
+        // red-team of the reset fix: a linked folder let it zero a file outside).
+        let parent = Path::new(&l.rel).parent().unwrap_or(Path::new(""));
+        if own_dir(root, &format!("copy-to/{}", parent.display())).is_err() {
+            continue;
+        }
         let Ok(m) = fs::symlink_metadata(&copy) else {
             continue;
         };
@@ -678,6 +729,28 @@ fn progress(root: &Path, c: &str, lines: &[Line]) -> Option<bool> {
     }
 }
 
+/// What a check's copy left in the sandbox already, if anything: counting from there
+/// would kill xdevcmd at once, before Enter (the owner, 2026-11-17).
+fn already(root: &Path, c: &str) -> Option<&'static str> {
+    let any = |dir: &Path| fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some());
+    match c {
+        "A" => {
+            let old = SystemTime::UNIX_EPOCH + Duration::from_secs(OLD);
+            fs::read_dir(root.join("replace-dst"))
+                .ok()?
+                .flatten()
+                .any(|e| {
+                    e.metadata()
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|t| t != old)
+                })
+                .then_some("replace-dst holds replaced files")
+        }
+        "B" => any(&root.join("copy-to").join("big")).then_some("copy-to/big is there"),
+        _ => any(&root.join("copy-to").join("tree")).then_some("copy-to/tree is there"),
+    }
+}
+
 /// `None` before `at`, `Some(true)` from `at` until all are done, `Some(false)` then.
 fn reached(done: usize, all: usize, at: usize) -> Option<bool> {
     if done >= all {
@@ -687,11 +760,114 @@ fn reached(done: usize, all: usize, at: usize) -> Option<bool> {
     }
 }
 
+/// `rel` under `root`, if it and every folder on the way (root included) is a real
+/// folder, not a link: what `--reset` changes must be the sandbox's own (QA hunt of #42,
+/// P0: a link let it remove or write outside).
+fn own_dir(root: &Path, rel: &str) -> io::Result<PathBuf> {
+    let mut p = root.to_path_buf();
+    let mut parts = vec![p.clone()];
+    for c in Path::new(rel).components() {
+        p.push(c);
+        parts.push(p.clone());
+    }
+    for d in &parts {
+        let m = fs::symlink_metadata(d).map_err(at(d))?;
+        if m.file_type().is_symlink() || !m.is_dir() {
+            return Err(io::Error::other(format!(
+                "{} is not a folder --make made (a link or a file): nothing changed; \
+                 xtask try --clean, then --make",
+                d.display()
+            )));
+        }
+    }
+    Ok(p)
+}
+
+/// `--reset A|B|C`: put back what that check's copy changed, so it can run again
+/// without making the whole sandbox (the owner, 2026-11-17). A: replace-dst's old files
+/// written again from their seeds, each checked against the manifest, with the old date;
+/// xdevcmd's temporary files there removed. B, C: copy-to/big or copy-to/tree removed (a
+/// real folder only, never a link: what a copy made). Sources are never touched.
+fn reset(root: &Path, c: &str) -> io::Result<String> {
+    marked(root)?;
+    let lines = manifest(root)?;
+    match c {
+        "A" => {
+            let dst = own_dir(root, "replace-dst")?;
+            for e in fs::read_dir(&dst).map_err(at(&dst))?.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n.starts_with('.') && n.contains(".xdevcmd-part-") {
+                    fs::remove_file(e.path()).map_err(at(&e.path()))?;
+                }
+            }
+            let old = SystemTime::UNIX_EPOCH + Duration::from_secs(OLD);
+            let mut n = 0;
+            for l in lines.iter().filter(|l| l.kind == "old") {
+                let name = l.rel.strip_prefix("replace-dst/").unwrap_or(&l.rel);
+                let i: u64 = name
+                    .strip_prefix('r')
+                    .and_then(|d| d.parse().ok())
+                    .ok_or_else(|| io::Error::other(format!("{}: not made by --make", l.rel)))?;
+                let p = dst.join(name);
+                // Only a file (never a link or a folder) is written again, as a new one:
+                // the old one removed first, so nothing is written through anything.
+                match fs::symlink_metadata(&p) {
+                    Ok(m) if !m.file_type().is_file() => {
+                        return Err(io::Error::other(format!(
+                            "{} is not a file --make made (a link or a folder): left as it \
+                             is; xtask try --clean, then --make",
+                            p.display()
+                        )))
+                    }
+                    Ok(_) => fs::remove_file(&p).map_err(at(&p))?,
+                    Err(_) => {}
+                }
+                write_file(&p, 8_000_000 + i, l.len)?;
+                if hash(&p)? != l.sha {
+                    return Err(io::Error::other(format!(
+                        "{}: written again but not as made; --clean and --make",
+                        p.display()
+                    )));
+                }
+                File::options()
+                    .write(true)
+                    .open(&p)
+                    .and_then(|f| f.set_modified(old))
+                    .map_err(at(&p))?;
+                n += 1;
+            }
+            Ok(format!("{n} old files back in replace-dst"))
+        }
+        _ => {
+            let name = if c == "B" { "big" } else { "tree" };
+            let p = own_dir(root, "copy-to")?.join(name);
+            match fs::symlink_metadata(&p) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    Ok(format!("copy-to/{name} was not there"))
+                }
+                Err(e) => Err(at(&p)(e)),
+                Ok(m) if !m.is_dir() => Err(io::Error::other(format!(
+                    "{} is not a folder a copy made: left as it is",
+                    p.display()
+                ))),
+                Ok(_) => fs::remove_dir_all(&p)
+                    .map(|()| format!("copy-to/{name} removed"))
+                    .map_err(at(&p)),
+            }
+        }
+    }
+}
+
 /// `--kill-when A|B|C`: run before Enter on that check's copy. Waits for the copy to
 /// reach its point, then kills xdevcmd as a crash would (`kill -9`, End task).
 fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
     marked(root)?;
     let lines = manifest(root)?;
+    if let Some(what) = already(root, c) {
+        return Err(io::Error::other(format!(
+            "check {c} was already run here ({what}): xtask try --reset {c} to run it again"
+        )));
+    }
     println!("check {c}: waiting for the copy; press Enter on it in xdevcmd now");
     let start = Instant::now();
     loop {
@@ -699,7 +875,8 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
             Some(true) => break,
             Some(false) => {
                 return Err(io::Error::other(
-                    "the copy finished before its point: --clean, --make, and try again",
+                    "the copy finished before its point: --reset that check and try again (a fast disk: \
+                     --clean, then --make without --small)",
                 ))
             }
             None if start.elapsed() > Duration::from_secs(600) => {
@@ -816,6 +993,140 @@ mod tests {
         assert!(make(&t.join("no-such").join(NAME), TINY, "test").is_err());
         clean(&root).unwrap();
         assert!(!root.exists());
+        let _ = fs::remove_dir_all(&t);
+    }
+
+    /// Owner, 2026-11-17: check A run a second time killed xdevcmd at once, before
+    /// Enter: the first run's replaced files already passed the 10 % point. A check
+    /// whose copy is already in the sandbox is refused, with what to do, and nothing is
+    /// killed; so is a sandbox never made (no manifest).
+    #[test]
+    fn a_check_already_run_here_is_refused_before_anything_is_killed() {
+        let t = top("again");
+        let root = t.join(NAME);
+        make(&root, TINY, "test").unwrap();
+        for e in fs::read_dir(root.join("replace-src")).unwrap() {
+            let e = e.unwrap();
+            fs::copy(e.path(), root.join("replace-dst").join(e.file_name())).unwrap();
+        }
+        copy_tree(&root.join("big"), &root.join("copy-to/big"));
+        fs::create_dir_all(root.join("copy-to/tree/d0")).unwrap();
+        fs::write(root.join("copy-to/tree/d0/f0"), "x").unwrap();
+        for c in ["A", "B", "C"] {
+            let e = kill_when(&root, c).unwrap_err().to_string();
+            assert!(e.contains("already") && e.contains("--reset"), "{c}: {e}");
+        }
+        // --reset puts each back, without --make: then the check is offered again, and
+        // the sandbox checks as made (sources untouched, old files as they were).
+        for c in ["A", "B", "C"] {
+            reset(&root, c).unwrap();
+            assert!(already(&root, c).is_none(), "{c} after --reset");
+        }
+        let r = check(&root).unwrap();
+        assert!(!r.failed(), "{}", r.text());
+        assert_eq!(state_of(&r, "copy of tree/"), "NOT DONE", "{}", r.text());
+        // A link where a copy's folder is, is never followed or removed.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&t, root.join("copy-to/tree")).unwrap();
+            assert!(reset(&root, "C").is_err());
+            assert!(t.exists());
+            fs::remove_file(root.join("copy-to/tree")).unwrap();
+        }
+        fs::remove_file(root.join(MANIFEST)).unwrap();
+        let e = manifest(&root).err().unwrap().to_string();
+        assert!(e.contains("--make"), "{e}");
+        let _ = fs::remove_dir_all(&t);
+    }
+
+    /// QA hunt of #42 (P0, reproduced): `--reset` followed links the tester (or anyone)
+    /// put in the sandbox. With `copy-to` a link, `--reset C` removed the tree it points
+    /// to; with a link in replace-dst, `--reset A` wrote through it. A link anywhere on
+    /// the way is refused, and nothing outside is touched.
+    #[cfg(unix)]
+    #[test]
+    fn reset_never_follows_a_link_out_of_the_sandbox() {
+        use std::os::unix::fs::symlink;
+        let t = top("reset-links");
+        let root = t.join(NAME);
+        make(&root, TINY, "test").unwrap();
+        let outside = t.join("outside");
+        fs::create_dir_all(outside.join("tree")).unwrap();
+        fs::write(outside.join("tree/keep"), "mine").unwrap();
+        fs::write(outside.join("file"), "mine").unwrap();
+
+        // copy-to itself a link.
+        fs::remove_dir_all(root.join("copy-to")).unwrap();
+        symlink(&outside, root.join("copy-to")).unwrap();
+        assert!(reset(&root, "C").is_err());
+        assert!(reset(&root, "B").is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("tree/keep")).unwrap(),
+            "mine"
+        );
+        fs::remove_file(root.join("copy-to")).unwrap();
+        fs::create_dir(root.join("copy-to")).unwrap();
+
+        // A file in replace-dst a link to a file outside.
+        let r = fs::read_dir(root.join("replace-dst"))
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path();
+        fs::remove_file(&r).unwrap();
+        symlink(outside.join("file"), &r).unwrap();
+        assert!(reset(&root, "A").is_err());
+        assert_eq!(fs::read_to_string(outside.join("file")).unwrap(), "mine");
+        fs::remove_file(&r).unwrap();
+
+        // replace-dst itself a link.
+        let dst = root.join("replace-dst");
+        fs::rename(&dst, t.join("moved-dst")).unwrap();
+        symlink(&outside, &dst).unwrap();
+        assert!(reset(&root, "A").is_err());
+        assert_eq!(
+            fs::read_dir(&outside).unwrap().count(),
+            2,
+            "nothing written outside"
+        );
+        let _ = fs::remove_dir_all(&t);
+    }
+
+    /// Red-team of the reset fix (P1, reproduced): `--tamper` checked only copy-to and
+    /// the file, so a folder link between them (copy-to/tree, or a folder in it) let it
+    /// zero a file outside the sandbox. Only a copy whose every folder is the sandbox's
+    /// own is tampered with.
+    #[cfg(unix)]
+    #[test]
+    fn tamper_never_writes_through_a_folder_link() {
+        use std::os::unix::fs::symlink;
+        let t = top("tamper-links");
+        let root = t.join(NAME);
+        make(&root, TINY, "test").unwrap();
+        let outside = t.join("outside");
+        copy_tree(&root.join("tree"), &outside.join("tree"));
+        symlink(outside.join("tree"), root.join("copy-to/tree")).unwrap();
+        assert!(tamper(&root).is_err(), "copy-to/tree a link");
+        fs::remove_file(root.join("copy-to/tree")).unwrap();
+        // A folder inside copy-to/tree a link.
+        fs::create_dir(root.join("copy-to/tree")).unwrap();
+        for e in fs::read_dir(outside.join("tree")).unwrap().flatten() {
+            symlink(e.path(), root.join("copy-to/tree").join(e.file_name())).unwrap();
+        }
+        assert!(tamper(&root).is_err(), "a folder in copy-to/tree a link");
+        let r = check(&root.clone()).unwrap();
+        assert!(!r.text().contains("FAIL"), "{}", r.text());
+        for e in fs::read_dir(outside.join("tree")).unwrap().flatten() {
+            for f in fs::read_dir(e.path()).unwrap().flatten() {
+                let b = fs::read(f.path()).unwrap();
+                assert!(
+                    b.iter().any(|&x| x != 0),
+                    "zeroed outside: {}",
+                    f.path().display()
+                );
+            }
+        }
         let _ = fs::remove_dir_all(&t);
     }
 

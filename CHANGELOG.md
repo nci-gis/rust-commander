@@ -15,10 +15,13 @@ that heading and starts a new, empty one here. -->
   256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`,
   the terminal closed) resumes from there. Continue also skips the folders the first run
   finished. A power cut is best effort: see Security, "What survives a power cut".
-- **C, a checked continue**: after a power cut, C at the Interrupted dialog reads every
-  file already copied again with its source, finished folders included, and copies
-  again any that differ (a file can keep its size and date with no data in it). Slow;
-  Enter still trusts what was copied.
+- **C, a checked continue**: when a copy may be damaged (a power cut, a drive pulled
+  out), C at the Interrupted dialog reads every file already copied again with its
+  source, finished folders included, and copies again any that differ (a file can keep
+  its size and date with no data in it). Slow; Enter still trusts what was copied.
+- **F forgets an interrupted job**: nothing more is done, what it did stays (Ctrl+Z
+  cannot undo it). With several jobs interrupted, the newest is asked first and the
+  dialog says how many wait; "Esc: asked again at the next start" is always shown.
 - **Messages** (Alt+M): the status line's last 50 messages, whole and with their times.
 - **Copy relative path** (right-click, F1): from the repository's root, else the folder.
 - **`o` and Open with… say what happened**: "opening …", then "opened …" or the error.
@@ -35,8 +38,9 @@ that heading and starts a new, empty one here. -->
 - **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
   target): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
   copy mid-job at the right moment (`--kill-when`), and checks every file against its
-  manifest (PASS / FAIL). No Rust needed; `xtask --help`. See How to test
-  and Benchmarks.
+  manifest (PASS / FAIL); `--reset A|B|C` runs a check again without making the sandbox
+  again. No Rust needed; `xtask --help`, `xtask try --help`, `xtask bench --help`. See
+  How to test and Benchmarks.
 
 ### Changed
 - **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not

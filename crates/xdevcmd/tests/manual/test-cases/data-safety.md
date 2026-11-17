@@ -4,7 +4,7 @@ Promise: however a job ends, no file is cut short under its real name, and no so
 removed before its copy is complete ([security.md](../../../../../docs/security.md#safe-operations)).
 
 ### M-DS-01 Kill a copy that replaces files
-**Platform**: all, on a real disk · **Automated**: pty kill tests and `xtask try` (Linux, macOS, sandbox)
+**Platform**: all, on a real disk · **Automated**: pty kill tests · **With xtask**: `try` check A
 **Setup**: two folders with the same file names, the destination's files older.
 **Steps**: 1. F5, choose **replace** for the older ones. 2. While it runs, `kill -9`
 xdevcmd (Windows: Task Manager → End task). 3. Start it again.
@@ -23,7 +23,7 @@ being written is not there under its real name.
 **Fail if**: the job says done; a file under its real name with the wrong size.
 
 ### M-DS-03 A big copy, killed past a checkpoint
-**Platform**: all · **Automated**: checkpoint unit tests; `xtask try --kill-when B`
+**Platform**: all · **Automated**: checkpoint unit tests, a pty kill past a checkpoint (Linux, macOS) · **With xtask**: `try` check B
 **Setup**: a file of 1 GB or more. Copy to another drive, or set
 `[general] fast_copy = false` (on the same APFS, Btrfs or XFS volume a copy is a clone:
 instant, no checkpoint).
@@ -34,7 +34,7 @@ copy equals the source (`cmp`; Windows `fc.exe /b`).
 **Fail if**: the bar starts at 0 %, or the copy differs.
 
 ### M-DS-04 A checked continue (C)
-**Platform**: all · **Automated**: pty resume tests (Linux, macOS)
+**Platform**: all · **Automated**: pty resume tests (Linux, macOS) · **With xtask**: `try` check C
 **Steps**: 1. As M-DS-03 with a folder of small files: kill mid-way. 2. Overwrite one
 finished copy with zeros of the same size and the source's date
 (`truncate -s0 f && truncate -s <size> f && touch -r src f`). 3. Start again, press **C**.

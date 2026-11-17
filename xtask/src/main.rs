@@ -65,7 +65,7 @@ const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME]
                          [--only CASE] [--dir PATH]
        cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
        cargo xtask fuzz [--secs N] [TARGET...]
-       cargo xtask try --make [--small] | --check | --tamper | --clean [--dir D]";
+       cargo xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]";
 /// `xtask --help`: what each task is for. It never runs, looks for or asks an installed
 /// xdevcmd: `bench --only` measures the engine built into this program, of the version
 /// `--version` prints (the release it came with).
@@ -79,8 +79,10 @@ const HELP: &str =
   fuzz       the fuzz targets (developers, with Rust)
   --version  the version this xtask was built from: measure with the same xdevcmd
 
+Each task's options: xtask bench --help, xtask try --help.
+
 usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
-       xtask try --make [--small] | --kill-when A|B|C | --check | --tamper | --clean [--dir D]
+       xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
        xtask sync-sweep [--files N] [--dir PATH] [--probe]
        xtask fuzz [--secs N] [TARGET...]
 (From the repository: cargo xtask …)";
@@ -532,7 +534,24 @@ fn results_root(source: &Path, via_cargo: bool, cwd: PathBuf) -> PathBuf {
     }
 }
 
+/// `xtask bench --help`: the options, the one place they are described (the owner,
+/// 2026-11-17: docs say what to do and point here for the rest).
+const BENCH_HELP: &str = "usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
+  --only CASE       only the cases whose name holds CASE (plan, list, mixed, copy-small,
+                    copy-big, undo): no build, so it runs without Rust
+  --dir PATH        make the test trees on this drive, not the temporary folder
+  --host NAME       a name for this machine and drive; results and baselines carry it
+  --save-baseline   keep this run as bench/baseline-<host>.json: later runs say how far
+                    each case moved (marked past 15 %); one --host per --only case
+  --runs N          runs per case (5); the median, p95 and best are printed
+  --quick           fewer, smaller cases
+Results: bench/results/ where it was started. Steps: docs/benchmark.md.";
+
 fn bench(args: &[String]) -> i32 {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{BENCH_HELP}");
+        return 0;
+    }
     let o = match parse(args) {
         Ok(o) => o,
         Err(e) => {

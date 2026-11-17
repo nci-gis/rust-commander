@@ -22,7 +22,12 @@ targets = [
 
 [advisories]
 # Any advisory fails the check. An entry in `ignore` must say why, with a date.
-ignore = []
+ignore = [
+    # 2026-11-18: chrono is unmaintained (no vulnerability). It is used for local time
+    # and date formatting, and `trash` depends on it too, so it cannot be dropped alone.
+    # Moving our own uses to jiff or time is planned for rc.1; review again then.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, no known vulnerability; trash needs it; migration planned for rc.1" },
+]
 yanked = "deny"
 
 [licenses]

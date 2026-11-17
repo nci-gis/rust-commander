@@ -33,7 +33,7 @@ setx XDEVCMD_DEBUG all                         # Windows; new windows
 ```
 
 It makes `xdevcmd-try/` (2.5 GiB): `big.log`, `many/`, `tree/`, `replace-src/`,
-`replace-dst/`, `big/` and an empty `copy-to/`.
+`replace-dst/`, `big/` and an empty `copy-to/`. Every command and option: `xtask try --help`.
 
 **4. Five tasks with the previous version.** Start it on the sandbox:
 `/path/to/old/xdevcmd xdevcmd-try xdevcmd-try/replace-dst`. Score each task from 1 (no
@@ -101,11 +101,17 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
   `XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml` in front: on APFS a copy is a clone,
   done at once (the same on Linux with Btrfs or XFS).
 - **After a kill**, on macOS and Linux the terminal may look wrong: type `reset`.
+- **To do a check again**: `xtask try --reset A` (or `B`, `C`) puts back what that
+  check's copy changed, in seconds; no new `--make`. If xdevcmd still offers the job at
+  its start, press **F** (forget it) first.
 - **If `--kill-when` says the copy finished first**, the disk is fast and the sandbox
-  small: `--clean`, `--make` (without `--small`), and do that check again.
-- **`--small`** (0.8 GiB) is for a slow disk or little space.
-- **`--clean`** removes only what `--make` made, and refuses while anything else is in
-  the sandbox. What the checks sent to the trash stays there.
+  small: `--reset` that check and try again; if it keeps finishing first, `--clean`,
+  then `--make` without `--small`.
+- **`--small`** (0.6 GiB, about 1.1 GiB with the copies; 2.5 and 3.8 GiB without it) is
+  for a slow disk or little space.
+- **`--clean`** removes the whole sandbox, the copies in it included, and refuses only
+  when its top holds something `--make` did not make. Keep nothing of your own inside
+  it. What the checks sent to the trash stays there.
 - **The speed** on your own drives, unattended, any day: [Benchmarks](benchmark.md).
 - **With Rust 1.90+**: the automated tests at this version's tag,
   `cargo test --workspace --locked --no-fail-fast` ([Development](development.md)).

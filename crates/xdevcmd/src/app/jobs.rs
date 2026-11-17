@@ -279,6 +279,12 @@ impl App {
         }
         // A permanent delete is not offered again (`offered`). One job at a time: any
         // other keeps its journal and is offered at the next start.
+        // Newest first (journal::recover): the job just interrupted. The others wait.
+        let waiting = found
+            .iter()
+            .filter(|i| i.offered())
+            .count()
+            .saturating_sub(1);
         let resumable = found.into_iter().find(|i| i.offered());
         let mut discard = None;
         let mut check = None;
@@ -298,15 +304,18 @@ impl App {
                 "It was {what} of {}{to}.",
                 Self::describe(&it.sources)
             ));
-            body.push("Continue it? What was done is skipped; a file cut short starts".into());
-            body.push("again; you are asked about any other file already there.".into());
+            if it.kind == "delete" {
+                body.push("Continue it? What is left goes to the trash.".into());
+            } else {
+                body.push("Continue it? What was done is skipped; a file cut short starts".into());
+                body.push("again; you are asked about any other file already there.".into());
+            }
             // B2 (owner, 2026-11-15): after a power cut a copied file can be short or
             // hold no data under its real name. Trusting is the default (Enter).
             if it.kind != "delete" {
-                body.push(
-                    "C checks everything first, done files too (slow; after a power cut)."
-                        .into(),
-                );
+                // The owner, 2026-11-17: what C is for, not one cause of it.
+                body.push("C reads every copied file again against its source (slow): for".into());
+                body.push("when a copy may be damaged, as after a power cut or a drive pulled out.".into());
                 check = Some((
                     'c',
                     "check (slow)".to_string(),
@@ -321,22 +330,54 @@ impl App {
                     plural(n),
                     xdevcmd_core::format::human_size(kept),
                 ));
-                discard = Some((
-                    'd',
-                    "discard them".to_string(),
-                    Cmd::Discard(Box::new(it.clone())),
-                ));
             }
+            // The owner, 2026-11-17: a way to say "never mind", not only "later". The
+            // journal goes (and any part kept); what the run copied or moved stays where
+            // it is, and Ctrl+Z, which does not outlive a run, cannot undo it.
+            body.push(match (it.kind.as_str(), n) {
+                ("delete", _) => "F forgets it: nothing more is done. What it moved to the trash".into(),
+                (_, 0) => "F forgets it: nothing more is done. What it did stays where it is,".into(),
+                _ => "F forgets it: nothing more is done, the parts kept are removed. What it".into(),
+            });
+            body.push(match (it.kind.as_str(), n) {
+                ("delete", _) => "stays there, and Ctrl+Z cannot undo that.".into(),
+                (_, 0) => "and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
+                _ => "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
+            });
+            discard = Some((
+                'f',
+                "forget it".to_string(),
+                Cmd::Discard(Box::new(it.clone())),
+            ));
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
+        // The dialog draws a third key only after a second: a delete has no C, so F
+        // takes the second place, or it worked unshown (QA of #42, P1). With C and F,
+        // Esc is not on the key row; the body says what it does.
+        if check.is_none() {
+            check = discard.take();
+        }
         // Always said when a job is offered: its journal stays until it is answered (#3).
-        let footnote = yes.as_ref().map(|_| {
-            if discard.is_some() {
+        // In the body: a footnote beside three buttons had no room and was never drawn
+        // (the owner and QA, 2026-11-17).
+        if yes.is_some() {
+            body.push(String::new());
+            let kept = yes
+                .as_ref()
+                .is_some_and(|(_, c)| matches!(c, Cmd::Resume(it) if !it.partial.is_empty()));
+            body.push(if kept {
                 "Esc: asked again at the next start, the kept parts left as they are.".into()
             } else {
                 "Esc: asked again at the next start.".into()
+            });
+            if waiting > 0 {
+                body.push(format!(
+                    "{waiting} older interrupted job{} wait{}: each is asked at a later start.",
+                    plural(waiting),
+                    if waiting == 1 { "s" } else { "" }
+                ));
             }
-        });
+        }
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Interrupted".into(),
             body,
@@ -345,7 +386,7 @@ impl App {
             buttons: Vec::new(),
             also: check,
             more: discard,
-            footnote,
+            footnote: None,
             pictures: Vec::new(),
         }));
     }

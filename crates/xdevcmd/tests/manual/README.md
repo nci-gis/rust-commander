@@ -15,6 +15,14 @@ Before a pre-release is called good (beta, rc), on the maintainer's machines: ev
 case whose **Platform** you have. A case not run is written down as not run, never as
 passed.
 
+## Before you start: the test environment
+
+Set it up as [How to test](../../../../docs/how-to-test.md) does, steps 1 to 3: the
+release's archives from Releases, the debug log on, the sandbox made with `xtask try`.
+Its checks A, B and C are M-DS-01, M-DS-03 and M-DS-04 here. Every option of the tool:
+`xtask try --help`, `xtask bench --help`. Use test data only (`~/tmp`, `C:\tmp`): the
+checks use the real trash.
+
 ## Cases
 
 | File | Area |

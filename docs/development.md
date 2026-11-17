@@ -73,11 +73,17 @@ budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
 the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
 **On another machine or drive.** `--only CASE` runs just the cases whose name holds
-`CASE`, with no build and no start-up cases, so a copy of `xtask` runs on a machine
-without Rust: a release's `xdevcmd-bench-<tag>-<target>`, or, for code not released
-yet, Actions → bench → Run workflow (or a push to a `bench/<name>` branch) and the run's
-artifacts `xtask-Linux`, `xtask-macOS`, `xtask-Windows` (bare binaries: `chmod +x`;
-kept 14 days). `--dir PATH` makes the trees on the
+`CASE`, with no build and no start-up cases. Where to get `xtask`:
+
+- **With Rust**, any commit: `cargo xtask bench --only …` (and `cargo xtask try …`) in
+  the repository. The simplest for a developer.
+- **Without Rust, a release**: its `xdevcmd-bench-<tag>-<target>`, as testers do
+  ([How to test](how-to-test.md), step 1).
+- **Without Rust, code not released yet** (maintainers only, before a cut): Actions →
+  bench → Run workflow on the branch; the run's artifacts `xtask-Linux`, `xtask-macOS`
+  (Apple Silicon only), `xtask-Windows`, bare binaries (`chmod +x`), kept 14 days.
+
+`--dir PATH` makes the trees on the
 drive being measured instead of the temporary directory. Away from the source, results
 go to `bench/results/` where it was started; with `XDEVCMD_DEBUG`, each run's jobs are
 logged in `bench/results/debug-<host>-<date>/<case>/`. `XDEVCMD_BENCH_FAST=0` turns the
@@ -102,13 +108,12 @@ cd ../new     # each line now says how far it moved (◀ past 15 %)
 Then the other way round (the newer as the baseline) before believing a small change:
 a busy minute shows as one.
 
-**The tester's sandbox.** `xtask try --make | --kill-when A|B|C | --check | --tamper |
---clean` (in the same archive) makes the folder that [How to test](how-to-test.md)
-uses, with a SHA-256 manifest that counts its own lines (a cut one is an error, never a
-PASS); kills xdevcmd by name when a check's copy reaches its point (a tenth replaced,
-past the first checkpoint, a fifth of the tree); checks every copy; `--clean` removes
-only what `--make` made, in a folder named `xdevcmd-try` holding its marker, the marker
-last. It never runs or looks for xdevcmd otherwise.
+**The tester's sandbox.** `xtask try` (in the same archive; what it does and its
+options: `xtask try --help`) makes the folder that [How to test](how-to-test.md) uses.
+Inside: a SHA-256 manifest that counts its own lines (a cut one is an error, never a
+PASS); a check's point is a tenth replaced (A), past the first checkpoint (B), a fifth
+of the tree (C), where it kills xdevcmd by name; it is removed only through its marker,
+the marker last. It never runs or looks for xdevcmd otherwise.
 
 How a tester measures on macOS, Windows and Linux: [Benchmarks](benchmark.md).
 

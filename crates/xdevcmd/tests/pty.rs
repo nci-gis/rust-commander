@@ -207,6 +207,15 @@ impl Session {
         session
     }
 
+    /// Wait for `what` on the status line (the last two rows), not anywhere: since the
+    /// Interrupted dialog says "every copied file", "copied" on screen is not the end
+    /// of a job, and F10 pressed while the job's box is up is not seen (CI, ARM).
+    fn wait_for_status(&self, what: &str) {
+        self.until(what, |scr| {
+            scr.lines().rev().take(2).any(|l| l.contains(what))
+        });
+    }
+
     fn screen(&self) -> String {
         self.parser.lock().unwrap().screen().contents()
     }
@@ -1299,6 +1308,140 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.quit();
 }
 
+/// The owner, 2026-11-17: two interrupted jobs. The newest is offered first, the dialog
+/// says one more waits, Esc keeps both, and once the newest is answered the older one is
+/// offered at the next start.
+#[test]
+fn two_interrupted_jobs_the_newest_first_and_the_other_said() {
+    let s = Scratch::new("two-jobs");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("older.txt"), "o").unwrap();
+    std::fs::write(src.join("newer.txt"), "n").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    for (n, name, secs) in [
+        (1, "older.txt", 1_700_000_000u64),
+        (0, "newer.txt", 1_800_000_000),
+    ] {
+        let p = journal.join(format!("2147483646-{n}.journal"));
+        std::fs::write(
+            &p,
+            format!(
+                "{}kind copy\nsrc {}\ndest {}\n",
+                host_line(),
+                hex(&src.join(name)),
+                hex(&dst)
+            ),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+            .unwrap();
+    }
+    for _ in 0..2 {
+        let mut x = Session::start(&s, None);
+        x.wait_for("Interrupted");
+        x.wait_for("copy of newer.txt");
+        x.wait_for("1 older interrupted job waits");
+        x.wait_for("Esc: asked again at the next start");
+        x.send(b"\x1b"); // Esc: both kept
+        x.quit();
+    }
+    let mut x = Session::start(&s, None);
+    x.wait_for("copy of newer.txt");
+    x.send(ENTER);
+    x.wait_for("1 copied");
+    x.quit();
+    assert_eq!(std::fs::read_to_string(dst.join("newer.txt")).unwrap(), "n");
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("copy of older.txt");
+    assert!(
+        !x.screen().contains("older interrupted job"),
+        "{}",
+        x.screen()
+    );
+    x.send(ENTER);
+    x.wait_for("1 copied");
+    x.quit();
+    assert_eq!(std::fs::read_to_string(dst.join("older.txt")).unwrap(), "o");
+}
+
+/// The owner, 2026-11-17: an interrupted job can be forgotten for good (F), not only
+/// put off (Esc): nothing more is done, what it copied stays, and the next start does
+/// not ask again.
+#[test]
+fn f_forgets_an_interrupted_job() {
+    let s = Scratch::new("forget");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "a").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    std::fs::write(dst.join("a.txt"), "a").unwrap(); // copied before the kill
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst)
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("F forgets it");
+    x.send(b"f");
+    x.wait_for("forgotten");
+    x.quit();
+    assert!(!dst.join("b.txt").exists(), "nothing more is done");
+    assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "a");
+    assert_eq!(
+        std::fs::read_dir(&journal).unwrap().count(),
+        0,
+        "not asked again"
+    );
+    let x = Session::start(&s, None);
+    x.wait_for("Name"); // the panes are drawn: a dialog would be up by now
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!x.screen().contains("Interrupted"), "{}", x.screen());
+    x.quit();
+}
+
+/// QA of #42 (P1): a killed delete to the trash. Its dialog showed `[Enter] continue
+/// [Esc] cancel` and no F, though F worked, and spoke of copies. The keys that work are
+/// the keys shown, and the words are a delete's.
+#[test]
+fn an_interrupted_delete_shows_f_and_speaks_of_the_trash() {
+    let s = Scratch::new("forget-delete");
+    std::fs::write(s.left().join("gone.txt"), "g").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind delete\nsrc {}\ntrash\n",
+            host_line(),
+            hex(&s.left().join("gone.txt"))
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("[F] forget it");
+    assert!(!x.screen().contains("cut short"), "{}", x.screen());
+    x.send(b"f");
+    x.wait_for("forgotten");
+    x.quit();
+    assert!(s.left().join("gone.txt").exists(), "nothing more is done");
+    assert_eq!(std::fs::read_dir(&journal).unwrap().count(), 0);
+}
+
 /// B2: the Interrupted dialog offers C, a checked continue. A copy left with the right
 /// size and date and no data (a power cut) is read with its source and copied again.
 #[cfg(unix)]
@@ -1444,7 +1587,7 @@ fn a_planned_copy_killed_then_continued_keeps_every_decision() {
     let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
     x.wait_for("Interrupted");
     x.send(ENTER); // continue
-    x.wait_for("copied");
+    x.wait_for_status("copied");
     assert!(!x.screen().contains("Already exists"), "{}", x.screen());
     assert_eq!(
         std::fs::read_to_string(s.right().join("b-fresh.txt")).unwrap(),
@@ -1857,7 +2000,7 @@ fn a_checked_resume_repairs_a_file_the_journal_called_done() {
         c.as_deref() == Some("AAAA")
     });
     // The job box ignores q: wait for its summary on the status line.
-    x.wait_for("copied");
+    x.wait_for_status("copied");
     x.quit();
 }
 

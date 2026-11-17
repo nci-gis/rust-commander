@@ -30,11 +30,9 @@ and prints how long each copy took and how much memory it used.
 
 ## Get it
 
-From [Releases](https://github.com/nci-gis/rust-commander/releases), from 0.4.0-beta.2:
-`xdevcmd-bench-<tag>-<target>` beside xdevcmd's archives (`<tag>` as `v0.4.0-beta.2`),
-for the same six targets, in `SHA256SUMS` and with build provenance
-([checking a download](security.md#checking-a-download)). It is built from that
-release's code, so it measures that release. With Rust, any commit: `cargo xtask bench …`
+The same download as [How to test](how-to-test.md), step 1: `xdevcmd-bench-<tag>-<target>`
+from Releases (from 0.4.0-beta.2), built from that release's code, so it measures that
+release. Every option: `xtask bench --help`. With Rust, any commit: `cargo xtask bench …`
 in the repository ([Development](development.md#benchmarks)).
 
 ## macOS

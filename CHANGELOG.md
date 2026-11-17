@@ -63,6 +63,12 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **Continue after a kill keeps what the job was asked to do**: C reads a big file's
+  kept part again with its source before going on from it; a Copy As goes on under its
+  new name; the table's skip and replace choices survive a second kill; and with
+  `--root`, a job whose record names a place outside the root is not offered or tidied
+  (also in 0.4.0-beta.1). F says if a kept part could not be removed, and the job is
+  then offered again at the next start.
 - **Alt+C and the user menu never add to a line you typed and did not run**: before,
   a half-typed `rm -rf x` ran with the folder appended. They open a new shell instead.
 - **Your root, home, and the folders shown or in a shell are never deleted, moved or

@@ -1122,6 +1122,17 @@ impl Worker {
         // they are copied again from the start.
         // The folders finished before stay finished if this run dies too. A line that
         // fails only breaks the journal, asked about before a step that needs it.
+        // The plan's decisions, for a resume to keep them (Round 030): written before
+        // the first step, synced with the first commit like every line. A resume
+        // writes them again before its old journal goes, for a second kill (repo
+        // review RR05: they were lost then).
+        if req.planned.is_some() || req.resumed.is_some() {
+            if let Some(j) = self.journal.as_mut() {
+                for (dst, e) in &req.expect {
+                    let _ = j.decided(dst, e);
+                }
+            }
+        }
         if let Some(j) = self.journal.as_mut() {
             for d in &self.done_dirs {
                 if j.done(d).is_err() {
@@ -1157,15 +1168,6 @@ impl Worker {
             Existing::Resume => self.resuming = true,
         }
         self.expect = req.expect.clone();
-        // The plan's decisions, for a resume to keep them (Round 030): written before
-        // the first step, synced with the first commit like every line.
-        if req.planned.is_some() {
-            if let Some(j) = self.journal.as_mut() {
-                for (dst, e) in &req.expect {
-                    let _ = j.decided(dst, e);
-                }
-            }
-        }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);

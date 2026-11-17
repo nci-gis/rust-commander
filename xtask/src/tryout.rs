@@ -819,6 +819,32 @@ mod tests {
         let _ = fs::remove_dir_all(&t);
     }
 
+    /// Owner, 2026-11-17: check A run a second time killed xdevcmd at once, before
+    /// Enter: the first run's replaced files already passed the 10 % point. A check
+    /// whose copy is already in the sandbox is refused, with what to do, and nothing is
+    /// killed; so is a sandbox never made (no manifest).
+    #[test]
+    fn a_check_already_run_here_is_refused_before_anything_is_killed() {
+        let t = top("again");
+        let root = t.join(NAME);
+        make(&root, TINY, "test").unwrap();
+        for e in fs::read_dir(root.join("replace-src")).unwrap() {
+            let e = e.unwrap();
+            fs::copy(e.path(), root.join("replace-dst").join(e.file_name())).unwrap();
+        }
+        copy_tree(&root.join("big"), &root.join("copy-to/big"));
+        fs::create_dir_all(root.join("copy-to/tree/d0")).unwrap();
+        fs::write(root.join("copy-to/tree/d0/f0"), "x").unwrap();
+        for c in ["A", "B", "C"] {
+            let e = kill_when(&root, c).unwrap_err().to_string();
+            assert!(e.contains("already") && e.contains("--clean"), "{c}: {e}");
+        }
+        fs::remove_file(root.join(MANIFEST)).unwrap();
+        let e = manifest(&root).err().unwrap().to_string();
+        assert!(e.contains("--make"), "{e}");
+        let _ = fs::remove_dir_all(&t);
+    }
+
     /// A manifest cut, emptied or changed is an error: never a PASS for everything
     /// (red-team: an emptied one passed with replace-dst deleted).
     #[test]

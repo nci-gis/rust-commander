@@ -106,9 +106,8 @@ mod tests {
         let mut c = cx("bash");
         c.current = Some(PathBuf::from("/w/-rf"));
         c.selection = vec![PathBuf::from("/w/-n"), PathBuf::from("/w/c")];
-        let sep = std::path::MAIN_SEPARATOR;
-        assert_eq!(expand("rm %f", &c).unwrap(), format!("rm .{sep}-rf"));
-        assert_eq!(expand("ls %s", &c).unwrap(), format!("ls .{sep}-n c"));
+        assert_eq!(expand("rm %f", &c).unwrap(), "rm ./-rf".to_string());
+        assert_eq!(expand("ls %s", &c).unwrap(), "ls ./-n c".to_string());
         // As typed names do: the same rule, the same place.
         assert_eq!(
             expand("rm %f", &c).unwrap(),

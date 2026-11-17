@@ -190,9 +190,16 @@ pub fn words(shell: &str, names: &[&str]) -> Result<String, String> {
 /// file called `-rf`). The rule for every name xdevcmd types, here and in the user
 /// menu.
 pub fn word(shell: &str, name: &str) -> Result<String, String> {
-    let dashed = name.starts_with('-') && !matches!(shell_kind(shell), Shell::Cmd);
+    let kind = shell_kind(shell);
+    let dashed = name.starts_with('-') && !matches!(kind, Shell::Cmd);
     if dashed {
-        quote(shell, &format!(".{}{name}", std::path::MAIN_SEPARATOR))
+        // `./` for sh, bash, zsh and fish everywhere (Git Bash too), so no backslash
+        // needs escaping; PowerShell takes the system's own separator.
+        let sep = match kind {
+            Shell::Posix | Shell::Fish => '/',
+            _ => std::path::MAIN_SEPARATOR,
+        };
+        quote(shell, &format!(".{sep}{name}"))
     } else {
         quote(shell, name)
     }
@@ -299,7 +306,8 @@ mod tests {
     #[test]
     fn a_name_that_looks_like_an_option_is_not_one() {
         let sep = std::path::MAIN_SEPARATOR;
-        assert_eq!(words("bash", &["-rf"]).unwrap(), format!(".{sep}-rf "));
+        assert_eq!(words("bash", &["-rf"]).unwrap(), "./-rf ");
+        assert_eq!(words("pwsh", &["-rf"]).unwrap(), format!("'.{sep}-rf' "));
         assert_eq!(words("cmd", &["-rf"]).unwrap(), "\"-rf\" ");
     }
 

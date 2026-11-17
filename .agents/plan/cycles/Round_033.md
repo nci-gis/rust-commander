@@ -943,4 +943,96 @@ All A10 fixes are merged: #25–#32 (#33, the guide's contents, open). Left, in 
 
 ## Check
 
+Written 2026-11-17 by Claude Code, on `feat/v0.4.0-beta.2` at 5574138 (CI green, all six
+systems). What is still the owner's is marked **owner**; the cut waits on it.
+
+### 1. Plan A10's data-loss fixes (#25–#30), each red first
+
+| Fix | PR | Red run | Red-team |
+|---|---|---|---|
+| P5 #6 count / archive view | #25 | 43885704745 | not a data path |
+| P3 #3 checked resume, Esc keeps | #26 | 43888463088 | 2×P1 fixed, F3 known issue |
+| P1 #1 typed line + Alt+C | #28 | 43889910529, 43896579060 | 2×P0 + P1 + P2 fixed |
+| P2 #2 #4 guards, loading | #29 | 43898582362 | P0 (`link/` emptied its target, also in beta.1) + 4×P1 fixed |
+| P4 #5 file↔folder | #30 | run for 774fcc5 | no data loss; 2 silent skips fixed |
+
+### 2. QA: do the tests prove what a user expects? (#35, skill `qa`)
+
+The user docs as the oracle; four audit and four hunt agents on the data paths
+(`memory/2026-11-17-qa-beta2.md`, reports beside it).
+
+- **Audit**: 319 promises; 109 PROVES, 137 CONFIRMS (screen text only), 57 MISSING,
+  16+ MANUAL. The manual ones are cases in `crates/xdevcmd/tests/manual/`.
+- **Hunt**: three P0 classes, each reproduced again by the main session, each fixed red
+  first with an independent red-team:
+
+| Finding | PR | Red-team |
+|---|---|---|
+| P0 F6 replacing a file on one drive: the old file gone for good | #36 | no P0/P1 |
+| P0 F5 wrote through a link at the destination that the plan said it skipped | #37 | SIGN WITH AMENDMENTS (taken) |
+| P0 a typed name ran inside a quote or here-doc left open | #39 | prompt check REFUSED and reverted; escaping: one P0 (backtick) found and fixed; final SIGN (107,060 fuzz runs, none ran) |
+| P1 F2 / Shift+F2 changed non-UTF-8 name bytes | #38 | not a data path |
+
+### 3. Proofs plan A10 asked for (#34)
+
+- **One round trip per refusal code**, with its debug line read back: dirty_line,
+  busy (`Ctrl+C`, pressed), protected_cwd/root/home, loading (`delete`, pressed). Red:
+  the log wrote `CtrlC`; fixed. Not covered by a UI round trip: protected_not_plain (a
+  list drops `.`/`..` rows first; the core table tests it); Windows' busy → close_tab.
+- **Key table** (render, measured with the same keys on a v0.4.0-beta.1 build):
+
+| Task | Keys now | beta.1 |
+|---|---|---|
+| copy a file | 3 | 3 |
+| delete to the trash | 3 | 3 |
+| delete from a list (Alt+F7's results) | 9 | 9 |
+| Alt+C, line empty | 1 | 1 |
+| run a command from F1 | 6 | 6 |
+
+  Dead end: Ctrl+O names F12 (fails on beta.1, by design). Footer click on `8 Del`
+  (Linux). New and changed tests: 10 runs, no failure.
+
+### 4. Early speed check (Linux, this machine, 2026-11-17)
+
+xtask `--only` at ad065d5 (side A, before the fixes) against 5574138 (side B). Medians:
+
+| Case | A, pass 1 | A, pass 2 | B | B vs A |
+|---|---|---|---|---|
+| plan 10,000 | 15.3 ms | 16.2 ms | 18.0 ms (3 runs: 18.0, 18.7, 17.5) | **≈ +10 %** |
+| plan 100,000 | 169 ms | 170 ms | 162 ms | −4 % |
+| plan 200,000 | 349 ms | 375 ms | 351 ms | ±0 |
+| list 10,000 | 19.4 ms | 20.5 ms | 16.9 ms | −15 % |
+| list 100,000 | 220 ms | 224 ms | 229 ms | +3 % |
+
+A against itself moved up to 7 %, so only plan 10,000 stands out: about 1.6 ms more,
+under the ±15 % block, inside the 5–15 % band. By plan A10's rule: "slower by" in the
+notes and an rc.1 issue. The gate is the owner's laptop run (D0), not this one.
+
+### 5. Flaky tests, for the cut
+
+| Test | Seen | State |
+|---|---|---|
+| `everything_at_once_stays_bounded_and_keys_still_answer` | full suite, 2-core | known, passes alone |
+| `dragging_the_scrollbar_scrolls_the_list_and_the_cursor_follows` | macOS, once | known |
+| `a_far_jump_in_long_lines_waits_for_the_scan` | windows-latest | fixed (#35: 1 s bound) |
+| `a_directory_name_cannot_run_a_command_through_alt_c` | ubuntu-24.04-arm, once | passed on rerun; watch |
+
+### 6. Known issues for the release notes (rc.1)
+
+From A10: C after a power cut may replace a file answered "Skip" in the run that died;
+Windows junctions; most terminal scenarios run only on Linux and macOS. From QA: F6 of a
+folder onto a same-named folder on one drive is a dead end (os error 39, nothing lost);
+a killed Alt+Y is not offered Continue; Ctrl+Z refuses a rename-many that swapped names;
+Alt+F5 and tar extraction turn non-UTF-8 names into U+FFFD; bash's `read -s` is not seen
+as busy; an open single quote in fish or PowerShell; names with a backtick are refused
+for sh/bash/zsh; plan 10,000 ≈ 10 % slower on Linux.
+
+### 7. Still to do before the cut
+
+- **owner**: D0 speed A/B on the Windows laptop (side A: bench run 43885854166, side B:
+  bench run 44009694319), two passes.
+- **owner**: manual cases, at least M-DS-01..07 on macOS and Windows, one line each here.
+- **owner**: read this Check, then the go for the cut (PR feat → dev, `cargo release`,
+  tag, notes, verify the six `xdevcmd-bench-*` assets).
+
 ## Act

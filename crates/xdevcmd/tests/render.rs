@@ -5534,6 +5534,38 @@ fn a_copy_with_nothing_to_decide_is_the_dialog_it_always_was() {
     }
 }
 
+/// QA 2026-11-17 (P0): a folder copied onto a name that is a link to a folder elsewhere.
+/// The table says "⛔ folder where a file is: skipped, never replaced"; the copy went
+/// through the link anyway and wrote outside the destination. What the table shows is
+/// what happens: nothing is written through the link. Unix: Windows' links need rights.
+#[cfg(unix)]
+#[test]
+fn a_folder_copied_onto_a_link_to_a_folder_writes_nothing_through_it() {
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let root = scratch(&format!("link-dest-{n}"));
+    let _ = fs::remove_dir_all(&root);
+    let (a, b, outside) = (root.join("a"), root.join("b"), root.join("outside"));
+    fs::create_dir_all(a.join("d")).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(a.join("d/new.txt"), "new").unwrap();
+    fs::write(outside.join("kept.txt"), "kept").unwrap();
+    std::os::unix::fs::symlink("../outside", b.join("d")).unwrap();
+    let s = shot_keys("118x34", "Ctrl+a,F5", &a, &b);
+    assert!(s.contains("skipped, never replaced"), "the table\n{s}");
+    let s = shot_keys("118x34", "Ctrl+a,F5,Enter,wait", &a, &b);
+    let mut there: Vec<_> = fs::read_dir(&outside)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    there.sort();
+    assert_eq!(there, vec!["kept.txt"], "written through the link\n{s}");
+    assert!(b.join("d").symlink_metadata().unwrap().is_symlink());
+    assert!(s.contains("1 skipped"), "the summary says so\n{s}");
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// QA 2026-11-17 (P0): F6 on the same drive replacing a file sent the old one nowhere:
 /// renamed over, gone for good, while the table said "a file replaced goes to the
 /// trash". The old file must be in the trash, as with F5. Linux only, as above.

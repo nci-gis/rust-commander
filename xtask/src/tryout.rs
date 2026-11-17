@@ -979,6 +979,60 @@ mod tests {
         let _ = fs::remove_dir_all(&t);
     }
 
+    /// QA hunt of #42 (P0, reproduced): `--reset` followed links the tester (or anyone)
+    /// put in the sandbox. With `copy-to` a link, `--reset C` removed the tree it points
+    /// to; with a link in replace-dst, `--reset A` wrote through it. A link anywhere on
+    /// the way is refused, and nothing outside is touched.
+    #[cfg(unix)]
+    #[test]
+    fn reset_never_follows_a_link_out_of_the_sandbox() {
+        use std::os::unix::fs::symlink;
+        let t = top("reset-links");
+        let root = t.join(NAME);
+        make(&root, TINY, "test").unwrap();
+        let outside = t.join("outside");
+        fs::create_dir_all(outside.join("tree")).unwrap();
+        fs::write(outside.join("tree/keep"), "mine").unwrap();
+        fs::write(outside.join("file"), "mine").unwrap();
+
+        // copy-to itself a link.
+        fs::remove_dir_all(root.join("copy-to")).unwrap();
+        symlink(&outside, root.join("copy-to")).unwrap();
+        assert!(reset(&root, "C").is_err());
+        assert!(reset(&root, "B").is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("tree/keep")).unwrap(),
+            "mine"
+        );
+        fs::remove_file(root.join("copy-to")).unwrap();
+        fs::create_dir(root.join("copy-to")).unwrap();
+
+        // A file in replace-dst a link to a file outside.
+        let r = fs::read_dir(root.join("replace-dst"))
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path();
+        fs::remove_file(&r).unwrap();
+        symlink(outside.join("file"), &r).unwrap();
+        assert!(reset(&root, "A").is_err());
+        assert_eq!(fs::read_to_string(outside.join("file")).unwrap(), "mine");
+        fs::remove_file(&r).unwrap();
+
+        // replace-dst itself a link.
+        let dst = root.join("replace-dst");
+        fs::rename(&dst, t.join("moved-dst")).unwrap();
+        symlink(&outside, &dst).unwrap();
+        assert!(reset(&root, "A").is_err());
+        assert_eq!(
+            fs::read_dir(&outside).unwrap().count(),
+            2,
+            "nothing written outside"
+        );
+        let _ = fs::remove_dir_all(&t);
+    }
+
     /// A manifest cut, emptied or changed is an error: never a PASS for everything
     /// (red-team: an emptied one passed with replace-dst deleted).
     #[test]

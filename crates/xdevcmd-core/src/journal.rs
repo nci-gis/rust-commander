@@ -842,6 +842,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("kind", _, _) => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
             ("src", Some(p), _) => it.sources.push(p),
             ("dest", Some(p), _) => it.dest = Some(p),
+            ("as", None, _) => bad_name = true,
             // One plain name, or the job is not trusted (RR04).
             ("as", Some(p), _) => {
                 let mut c = p.components();
@@ -1453,6 +1454,8 @@ mod tests {
             it.rename_to.as_deref(),
             Some(std::ffi::OsStr::new("b c.txt"))
         );
+        let t = format!("{text}as zz-not-hex\n");
+        assert!(tidy(&t, "x").kind.is_empty(), "a name that does not decode");
         for bad in ["../b", "x/b", ".."] {
             let t = format!("{text}as {}\n", enc(Path::new(bad)));
             let it = tidy(&t, "x");

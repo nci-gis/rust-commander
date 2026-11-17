@@ -406,8 +406,14 @@ impl App {
             .cloned()
             .collect();
         if still.is_empty() {
-            let _ = xdevcmd_core::journal::discard(&it);
-            self.status = "nothing left to do: every source has gone".into();
+            let f = xdevcmd_core::journal::discard(&it);
+            self.status = match f.left.len() {
+                0 => "nothing left to do: every source has gone".into(),
+                l => format!(
+                    "nothing left to do: every source has gone; {l} kept part{} could not be removed, offered again at the next start",
+                    if l == 1 { "" } else { "s" },
+                ),
+            };
             return;
         }
         let mut req = match (it.kind.as_str(), it.dest.clone()) {

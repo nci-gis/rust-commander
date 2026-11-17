@@ -4763,6 +4763,43 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// C's look at a kept part reaches its last byte when the part ends on the read
+    /// buffer's edge and one past it (red-team on RR01): damage there is copied again.
+    #[test]
+    fn a_checked_resume_sees_damage_at_the_last_byte_of_a_kept_part() {
+        journals();
+        let root = tmp("ckpt-edge");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(3u32 << 20)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        for kept in [1usize << 20, (1 << 20) + 1, 2 << 20] {
+            let mut damaged = body[..kept].to_vec();
+            damaged[kept - 1] ^= 0xFF;
+            fs::write(&part, &damaged).unwrap();
+            let mut r = Request::copy(vec![src.clone()], dst.clone());
+            r.safe = true;
+            r.existing = Existing::Resume;
+            r.verify = true;
+            r.checkpoint = 1 << 20;
+            r.partial = vec![crate::journal::Partial {
+                part: part.clone(),
+                src: src.clone(),
+                dst: dst.join("big.bin"),
+                ident: Ident::at(&src).unwrap(),
+                bytes: kept as u64,
+            }];
+            let s = run(r);
+            assert_eq!((s.done, s.failed), (1, 0), "{kept}: {s:?}");
+            assert!(fs::read(dst.join("big.bin")).unwrap() == body, "{kept}");
+            assert!(!part.exists(), "{kept}");
+            fs::remove_file(dst.join("big.bin")).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// A resumed job writes the plan's decisions to its own journal before the old one
     /// goes, so a second kill keeps them too (repo review RR05: only a job with a plan
     /// wrote them, and a resume has none, so the choices were lost the second time).

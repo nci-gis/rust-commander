@@ -108,12 +108,14 @@ cd ../new     # each line now says how far it moved (◀ past 15 %)
 Then the other way round (the newer as the baseline) before believing a small change:
 a busy minute shows as one.
 
-**The tester's sandbox.** `xtask try` (in the same archive; what it does and its
-options: `xtask try --help`) makes the folder that [How to test](how-to-test.md) uses.
-Inside: a SHA-256 manifest that counts its own lines (a cut one is an error, never a
-PASS); a check's point is a tenth replaced (A), past the first checkpoint (B), a fifth
-of the tree (C), where it kills xdevcmd by name; it is removed only through its marker,
-the marker last. It never runs or looks for xdevcmd otherwise.
+**The tester's sandbox.** `xtask try` is in the same archive; `xtask try --help` lists
+every option. `--make` makes the folder that [How to test](how-to-test.md) uses, with a
+SHA-256 manifest of its files. The manifest counts its own lines: a cut one is an
+error, never a PASS. `--kill-when` waits until a tenth of the files are replaced (check
+A), the first checkpoint is past (B) or a fifth of the tree is copied (C), then kills
+every running xdevcmd by name, not only the one in the sandbox. `--clean` removes the
+sandbox only when `--make`'s marker is in it, and removes the marker last. Apart from
+`--kill-when`, `xtask try` never runs or looks for xdevcmd.
 
 How a tester measures on macOS, Windows and Linux: [Benchmarks](benchmark.md).
 
@@ -272,7 +274,7 @@ Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it
    A version on crates.io cannot be replaced, only yanked; publish after the GitHub
    release is good, not before.
 6. **Scoop**, from the published release's `SHA256SUMS`: see
-   [packaging/README.md](../packaging/README.md).
+   [packaging/README.md](https://github.com/nci-gis/rust-commander/blob/main/packaging/README.md).
 
 ## Pre-releases
 
@@ -285,7 +287,9 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
 1. **Try the rules first** (nothing is built): Actions → release → Run workflow, with
    the tag to be (or `gh workflow run release --ref dev -f tag=v0.4.0-beta.1`). Before
    step 2 it fails on the version and the CHANGELOG, as it should; the branch rule is
-   what this tries. Locally: `scripts/release-check.sh v0.4.0-beta.1 origin/dev`.
+   what this tries. Locally, with `dev` checked out and pulled:
+   `scripts/release-check.sh v0.4.0-beta.1 HEAD` (another commit than the one checked
+   out is refused).
 2. **On `dev`**, the version and the dated notes, never published:
 
    ```bash
@@ -308,7 +312,10 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
 4. **The `release` workflow** checks the tag (`scripts/release-check.sh`: a pre-release
    on `dev` or `main`), waits for the `ci` run of the tag's commit (the one the push to
    `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
-   six archives and opens a **draft marked pre-release**. Read it, then Publish. Help →
+   six archives and opens a **draft marked pre-release**. Read it, then Publish. A
+   tester's kit (`xdevcmd-bench-…`) may be missing: its build never holds the release.
+   Count the six; for each one missing, say in the notes which target, and that it can
+   be built from the tag (How to test, step 1). Help →
    Documentation in that build links the tag's `docs/`.
 5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop (step 6). `release.toml` (`publish = false`) keeps every `cargo release` off crates.io.
 
@@ -327,7 +334,7 @@ tag. If that run fails, nothing is released: fix it on `dev`, merge, delete the 
 ## Testing a pre-release by hand
 
 Before a pre-release is called good, the maintainer runs the manual cases on real
-hardware the CI cannot reach: [crates/xdevcmd/tests/manual/](../crates/xdevcmd/tests/manual/README.md),
+hardware the CI cannot reach: [crates/xdevcmd/tests/manual/](https://github.com/nci-gis/rust-commander/blob/main/crates/xdevcmd/tests/manual/README.md),
 one file per area (data safety, undo and the trash, the plan table, running jobs,
 start-up and the screen, each system and terminal). Each case has an ID, its platform,
 steps, the expected result from the user docs, and what counts as a fail; results go
@@ -335,5 +342,5 @@ in the round's `Check`, one line per case. Testers follow [How to test](how-to-t
 
 ## How the code is organised
 
-Start with [.agents/context/project.md](../.agents/context/project.md): the rules,
-the layout and the conventions. Topic notes are in [.agents/reference/](../.agents/reference/).
+Start with `.agents/context/project.md` in the repository: the rules, the layout and
+the conventions. Topic notes are in `.agents/reference/`.

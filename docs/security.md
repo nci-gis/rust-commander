@@ -12,8 +12,9 @@ your permissions. This page says what it guards against, and where the limits ar
   [Safe operations](#safe-operations)
 - **`--read-only`, `--restricted` and `--root`** limit what xdevcmd can do.
   [Safe modes](#safe-modes)
-- **Nothing is typed into a running program**; what the shell prints is never trusted
-  to run anything. [The shell panel](#the-shell-panel)
+- **Nothing is typed into a running program**, with two known gaps (a shell's own
+  `read`; on Windows, a program that prints a prompt mark). What the shell prints is
+  never trusted to run anything. [The shell panel](#the-shell-panel)
 - **Your config is trusted like `.bashrc`**: keep it yours.
   [The config file is trusted](#the-config-file-is-trusted)
 - **No network access, no telemetry.** Downloads can be checked:
@@ -32,7 +33,7 @@ your permissions. This page says what it guards against, and where the limits ar
 | **Names a command line would misread** | Programs get their arguments as a list, never through a shell. On Windows, a batch file (`.bat`, `.cmd`) started in a terminal tab is refused when a file name holds a character `cmd.exe` acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when its own path has a space (as in `C:\Program Files\nodejs\npm.cmd`). |
 | **A same-named program in the folder you browse** | On Linux and macOS a program named without a path (in `[[open]]`, or run in a terminal tab) is looked up only in the absolute directories of `PATH`; `.` and empty entries are skipped. |
 | **A file that appears while xdevcmd writes** | Renaming (F2, rename many, moving into the Linux trash) is refused by the system if the new name is taken, even a moment earlier. Copy and move write to a free name only if it is still free; otherwise you get the usual overwrite question. Nothing is replaced without asking. |
-| **Typing into the wrong program** | Alt+C, Alt+Enter and your own commands type only into a shell at its prompt, never into an editor, a password prompt, `ssh` or another program; when unsure, xdevcmd asks. It never adds to a line you typed and did not run ([shell.md](shell.md#before-anything-is-typed-into-the-shell)). |
+| **Typing into the wrong program** | Alt+C, Alt+Enter and your own commands type only into a shell at its prompt, never into an editor, a password prompt, `ssh` or another program; when unsure, xdevcmd asks. It never adds to a line you typed and did not run. Known gaps: a prompt built into the shell, such as bash's `read -s`, looks like the shell's own prompt; on Windows, a program that prints a prompt mark can look idle ([shell.md](shell.md#before-anything-is-typed-into-the-shell)). |
 | **The wrong folder** | The drive's root, your home, every folder a pane shows or a shell is in, and the folders above them, are never deleted, moved or renamed, however the path is written (`src/..`, `link/`); the engine checks again. Writes wait while a pane is still opening a folder. |
 | **A file over a folder, or the reverse** | Never, even with "replace all": skipped, and the job says so. |
 | **A config file others can write** | Refused on Unix, because it names the programs xdevcmd runs. |
@@ -49,7 +50,7 @@ before release.
 
 | What ends the run | With safe operations on |
 |---|---|
-| **A kill** (`kill -9`, a crash, the terminal closed) | No file is ever cut short under its real name: it holds the old file or the complete new one. The next start tidies up and offers to continue. |
+| **A kill** (`kill -9`, a crash; on Windows, the terminal's close button too) | No file is ever cut short under its real name: it holds the old file or the complete new one. The next start tidies up and offers to continue. |
 | **A power cut** | A file replaced is the old one or the complete new one; a source moved across drives is never gone before its copy is on disk. But a **new** file copied just before the cut can be short or empty under its real name: continue with **C** (below). |
 
 **Covered**: F5 copy, F6 move, Shift+F5 copy as, Alt+Y sync, extracting (F5 inside an
@@ -69,9 +70,10 @@ many's files back under their names, and offers:
   is asked about again, not replaced because its source is newer.
 - **C** (check, slow): when a copy may be damaged, as after a power cut or a drive pulled
   out. Every file already copied is read again with its source, finished folders
-  included, and one that differs is copied again (the old one to the trash). Known gap:
-  a file you answered "Skip" for in the run that died is replaced by C if it has its
-  source's size and date.
+  included, and one that differs is copied again (the old one to the trash). A Skip
+  chosen in the table before the job is kept. Known gap: a "Skip" answered at an
+  overwrite question in the run that died is not saved, so C copies that file again if
+  it has its source's size and date but other bytes.
 - **F** (forget it): nothing more is done. What the run did stays where it is (copied
   files at the destination, a replaced file in the trash), and Ctrl+Z cannot undo it:
   undo does not outlive a run. Any part of a big file kept is removed.
@@ -242,7 +244,7 @@ is in doubt (OpenZFS 2.2.0 and 2.2.1 had a block-cloning bug, fixed in 2.2.2).
 ## Safe modes
 
 ```bash
-xdevcmd --read-only        # xdevcmd changes nothing on disk
+xdevcmd --read-only        # no copy, move, delete, rename, edit or save
 xdevcmd --restricted       # read-only, and no shell, no editor, no clipboard
 xdevcmd --root /srv/data   # never go above /srv/data, links included
 ```
@@ -254,6 +256,10 @@ xdevcmd --root /srv/data   # never go above /srv/data, links included
 | open files in other programs, run a file as a program | yes | no | no |
 | view and browse | yes | yes | yes |
 | terminal, clipboard | yes | yes | no |
+
+The read-only modes still write the file named with `--cwd-file`, and a temporary copy
+of a file viewed inside an archive ([Files xdevcmd keeps](config.md#files-xdevcmd-keeps)).
+In read-only mode, a command you run in the shell panel can change files as anywhere.
 
 The config has the same settings (`[security] mode` and `root`). A command-line flag can
 make the config stricter, never looser.
@@ -347,11 +353,13 @@ Without it, compare the archive's SHA-256 with its line in `SHA256SUMS` (`sha256
 
 The binaries are **not code-signed** yet: Windows SmartScreen and macOS Gatekeeper warn
 the first time ([troubleshooting](troubleshooting.md#macos) says what to do). Before each
-release, the release workflow unpacks and runs every archive (`scripts/smoke.sh`): its
-files, its size (at most 7 MiB), its version and its `--print` commands.
+release, the release workflow unpacks every archive and checks its files and its size
+(at most 7 MiB), then runs its version and its `--print` commands
+(`scripts/smoke.sh`). The Intel macOS archive is built and checked on an Apple Silicon
+machine, so it is not run there.
 
 ## Reporting a problem
 
-A security problem: report it privately, as [SECURITY.md](../SECURITY.md) explains, not
+A security problem: report it privately, as [SECURITY.md](https://github.com/nci-gis/rust-commander/blob/main/SECURITY.md) explains, not
 in a public issue. Anything else:
 [open an issue](https://github.com/nci-gis/rust-commander/issues).

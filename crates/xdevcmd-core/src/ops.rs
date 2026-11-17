@@ -1099,8 +1099,13 @@ impl Worker {
                 req.pairs.iter().map(|(s, _)| s.clone()).collect()
             };
             let t = self.clock();
-            let begun =
-                crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash);
+            let begun = crate::journal::Journal::begin_as(
+                kind,
+                &sources,
+                req.dest.as_deref(),
+                req.rename_to.as_deref(),
+                req.to_trash,
+            );
             if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
                 d.journal = t.elapsed();
             }
@@ -1122,6 +1127,17 @@ impl Worker {
         // they are copied again from the start.
         // The folders finished before stay finished if this run dies too. A line that
         // fails only breaks the journal, asked about before a step that needs it.
+        // The plan's decisions, for a resume to keep them (Round 030): written before
+        // the first step, synced with the first commit like every line. A resume
+        // writes them again before its old journal goes, for a second kill (repo
+        // review RR05: they were lost then).
+        if req.planned.is_some() || req.resumed.is_some() {
+            if let Some(j) = self.journal.as_mut() {
+                for (dst, e) in &req.expect {
+                    let _ = j.decided(dst, e);
+                }
+            }
+        }
         if let Some(j) = self.journal.as_mut() {
             for d in &self.done_dirs {
                 if j.done(d).is_err() {
@@ -1157,15 +1173,6 @@ impl Worker {
             Existing::Resume => self.resuming = true,
         }
         self.expect = req.expect.clone();
-        // The plan's decisions, for a resume to keep them (Round 030): written before
-        // the first step, synced with the first commit like every line.
-        if req.planned.is_some() {
-            if let Some(j) = self.journal.as_mut() {
-                for (dst, e) in &req.expect {
-                    let _ = j.decided(dst, e);
-                }
-            }
-        }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
@@ -1586,6 +1593,12 @@ impl Worker {
     /// that fails counts as different (copying again then reports the error). Stops
     /// early, as different, when the job is cancelled.
     fn same_bytes(&mut self, a: &Path, b: &Path) -> bool {
+        self.same_upto(a, b, None)
+    }
+
+    /// [`same_bytes`](Self::same_bytes) for the first `upto` bytes only, when given:
+    /// both must hold that many (a kept part read again with its source, RR01).
+    fn same_upto(&mut self, a: &Path, b: &Path, upto: Option<u64>) -> bool {
         use std::io::Read;
         self.phase = "verify";
         let (Ok(mut fa), Ok(mut fb)) = (File::open(a), File::open(b)) else {
@@ -1610,17 +1623,22 @@ impl Worker {
                     files_done: self.sum.done + self.sum.skipped + self.sum.failed,
                 });
             }
-            let Ok(n) = read_full(&mut fa, &mut ba) else {
+            let want = upto.map_or(ba.len(), |u| (u - read).min(ba.len() as u64) as usize);
+            if want == 0 {
+                return true;
+            }
+            let Ok(n) = read_full(&mut fa, &mut ba[..want]) else {
                 return false;
             };
-            let Ok(m) = read_full(&mut fb, &mut bb) else {
+            let Ok(m) = read_full(&mut fb, &mut bb[..want]) else {
                 return false;
             };
             if n != m || ba[..n] != bb[..m] {
                 return false;
             }
             if n == 0 {
-                return true;
+                // Both ended: whole files match; a prefix one short of `upto` does not.
+                return upto.is_none();
             }
             read += n as u64;
         }
@@ -2658,7 +2676,10 @@ impl Worker {
         let same = p.src == src
             && Ident::at(src) == Some(p.ident)
             && p.bytes <= fs::metadata(src).map(|m| m.len()).unwrap_or(0)
-            && fs::symlink_metadata(&p.part).is_ok_and(|m| m.is_file() && m.len() >= p.bytes);
+            && fs::symlink_metadata(&p.part).is_ok_and(|m| m.is_file() && m.len() >= p.bytes)
+            // C trusts nothing the run that died made: the kept bytes are read again
+            // with the source's (repo review RR01: a damaged part was finished whole).
+            && (!self.verify || self.same_upto(src, &p.part, Some(p.bytes)));
         if same && fs::rename(&p.part, target).is_ok() {
             return Some(p.bytes);
         }
@@ -4687,6 +4708,132 @@ mod tests {
         let (s, asked) = run_with(req, Answer::Skip);
         assert_eq!((asked, s.repaired), (1, 0), "{s:?}");
         assert_eq!(fs::read_to_string(dst.join("a.txt")).unwrap(), "old");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Repo review RR01: C (a checked continue) read every finished copy again, but took
+    /// over a big file's kept part on trust: a part damaged after its checkpoint (`XXXX`
+    /// where the source has other bytes) was finished as a good copy. Under C the kept
+    /// bytes are compared with the source's: a part that differs goes, and the copy
+    /// starts again; one that matches is still taken over. Enter (not checked) is
+    /// unchanged.
+    #[test]
+    fn a_checked_resume_reads_a_kept_part_again_with_its_source() {
+        journals();
+        let root = tmp("ckpt-checked");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(200u32 << 10)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        let kept = 64 << 10;
+        let req = |part_bytes: &[u8]| {
+            fs::write(&part, part_bytes).unwrap();
+            let mut r = Request::copy(vec![src.clone()], dst.clone());
+            r.safe = true;
+            r.existing = Existing::Resume;
+            r.verify = true;
+            r.checkpoint = 32 << 10;
+            r.partial = vec![crate::journal::Partial {
+                part: part.clone(),
+                src: src.clone(),
+                dst: dst.join("big.bin"),
+                ident: Ident::at(&src).unwrap(),
+                bytes: kept as u64,
+            }];
+            r
+        };
+        // Damaged: the start written over after its checkpoint.
+        let mut damaged = body[..kept].to_vec();
+        damaged[..4].copy_from_slice(b"XXXX");
+        let s = run(req(&damaged));
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(
+            fs::read(dst.join("big.bin")).unwrap() == body,
+            "copied again"
+        );
+        assert!(!part.exists());
+        // As it should be: still taken over, and the copy is whole.
+        fs::remove_file(dst.join("big.bin")).unwrap();
+        let s = run(req(&body[..kept]));
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(fs::read(dst.join("big.bin")).unwrap() == body);
+        assert!(!part.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// C's look at a kept part reaches its last byte when the part ends on the read
+    /// buffer's edge and one past it (red-team on RR01): damage there is copied again.
+    #[test]
+    fn a_checked_resume_sees_damage_at_the_last_byte_of_a_kept_part() {
+        journals();
+        let root = tmp("ckpt-edge");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(3u32 << 20)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        for kept in [1usize << 20, (1 << 20) + 1, 2 << 20] {
+            let mut damaged = body[..kept].to_vec();
+            damaged[kept - 1] ^= 0xFF;
+            fs::write(&part, &damaged).unwrap();
+            let mut r = Request::copy(vec![src.clone()], dst.clone());
+            r.safe = true;
+            r.existing = Existing::Resume;
+            r.verify = true;
+            r.checkpoint = 1 << 20;
+            r.partial = vec![crate::journal::Partial {
+                part: part.clone(),
+                src: src.clone(),
+                dst: dst.join("big.bin"),
+                ident: Ident::at(&src).unwrap(),
+                bytes: kept as u64,
+            }];
+            let s = run(r);
+            assert_eq!((s.done, s.failed), (1, 0), "{kept}: {s:?}");
+            assert!(fs::read(dst.join("big.bin")).unwrap() == body, "{kept}");
+            assert!(!part.exists(), "{kept}");
+            fs::remove_file(dst.join("big.bin")).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A resumed job writes the plan's decisions to its own journal before the old one
+    /// goes, so a second kill keeps them too (repo review RR05: only a job with a plan
+    /// wrote them, and a resume has none, so the choices were lost the second time).
+    #[test]
+    fn a_resumed_job_carries_the_plans_decisions_into_its_own_journal() {
+        journals();
+        let root = tmp("resume-decided");
+        let tag = format!("xrd-{}", std::process::id());
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join(&tag);
+        fs::write(&src, "new").unwrap();
+        fs::write(dst.join(&tag), "old, left by the plan").unwrap();
+        let old_journal = root.join("old.journal");
+        fs::write(&old_journal, "kind copy\n").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.expect = [(dst.join(&tag), Expect::Skip)].into_iter().collect();
+        req.resumed = Some(old_journal.clone());
+        let s = run(req);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(
+            fs::read_to_string(dst.join(&tag)).unwrap(),
+            "old, left by the plan"
+        );
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            seen.iter()
+                .any(|(p, at)| *p == crate::faults::Point::JournalLine && at == &dst.join(&tag)),
+            "the skip was written to the new journal: {seen:?}"
+        );
+        assert!(!old_journal.exists());
         fs::remove_dir_all(&root).unwrap();
     }
 

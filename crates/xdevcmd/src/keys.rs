@@ -669,7 +669,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "undo",
         title: "Undo",
         group: "Files",
-        about: "Undo the last rename, move, new directory or new file (asks first)",
+        about: "Undo the last copy, move, rename, sync, new item or F8 delete (asks first)",
         keys: &["Ctrl+z"],
     },
     Binding {

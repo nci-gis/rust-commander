@@ -406,8 +406,14 @@ impl App {
             .cloned()
             .collect();
         if still.is_empty() {
-            xdevcmd_core::journal::discard(&it);
-            self.status = "nothing left to do: every source has gone".into();
+            let f = xdevcmd_core::journal::discard(&it);
+            self.status = match f.left.len() {
+                0 => "nothing left to do: every source has gone".into(),
+                l => format!(
+                    "nothing left to do: every source has gone; {l} kept part{} could not be removed, offered again at the next start",
+                    if l == 1 { "" } else { "s" },
+                ),
+            };
             return;
         }
         let mut req = match (it.kind.as_str(), it.dest.clone()) {
@@ -415,12 +421,14 @@ impl App {
             ("move", Some(d)) => Request::mv(still, d),
             ("delete", _) if it.to_trash => Request::delete(still, true),
             _ => {
-                xdevcmd_core::journal::discard(&it);
+                let _ = xdevcmd_core::journal::discard(&it);
                 self.status = "nothing to resume: the job's journal is incomplete".into();
                 return;
             }
         };
         req.existing = ops::Existing::Resume;
+        // Copy As: the name it was given, not the source's (repo review RR04).
+        req.rename_to = it.rename_to.clone();
         // The plan's decisions stand (Round 030): what the user chose to leave is left,
         // what they chose to replace is replaced while it is still that file.
         req.expect = it.decided.iter().cloned().collect();

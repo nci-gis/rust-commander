@@ -12,9 +12,9 @@ that heading and starts a new, empty one here. -->
 
 ### Added
 - **A big copy goes on from where it stopped**: with safe operations on, a file over
-  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`,
-  the terminal closed) resumes from there. Continue also skips the folders the first run
-  finished. A power cut is best effort: see Security, "What survives a power cut".
+  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`)
+  resumes from there. Continue also skips the folders the first run finished. A power
+  cut is best effort: see Security, "Safe operations".
 - **C, a checked continue**: when a copy may be damaged (a power cut, a drive pulled
   out), C at the Interrupted dialog reads every file already copied again with its
   source, finished folders included, and copies again any that differ (a file can keep
@@ -30,17 +30,19 @@ that heading and starts a new, empty one here. -->
 - **A debug log for bug reports**: `XDEVCMD_DEBUG=all`. It holds no file, folder, user
   or host name. See Troubleshooting.
 - **Release archives can be checked** with build provenance (`gh attestation verify`),
-  and each is unpacked and run before the release. See Security, "Checking a download".
+  and each is unpacked and checked before the release (run too, but for Intel macOS,
+  built on Apple Silicon). See Security, "Checking a download".
 - **Docs**: Compatibility (what stays the same from 0.4.0) and Benchmarks (measuring on
   your machine); the guide says what a copy keeps, and what to use instead (rsync,
   robocopy, rclone).
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
-- **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
-  target): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
+- **A tester's kit comes with each release** (`xdevcmd-bench-<tag>-<target>`, built
+  for every target; a kit that fails to build does not hold the release back, its notes
+  say which is missing, and it can be built from the tag: see How to test): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
   copy mid-job at the right moment (`--kill-when`), and checks every file against its
-  manifest (PASS / FAIL); `--reset A|B|C` runs a check again without making the sandbox
-  again. No Rust needed; `xtask --help`, `xtask try --help`, `xtask bench --help`. See
-  How to test and Benchmarks.
+  manifest (PASS / FAIL); `--reset A|B|C` puts back a check's files, to do it again
+  without making the sandbox again. No Rust needed; `xtask --help`, `xtask try --help`,
+  `xtask bench --help`. See How to test and Benchmarks.
 
 ### Changed
 - **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not
@@ -62,6 +64,12 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **Continue after a kill keeps what the job was asked to do**: C reads a big file's
+  kept part again with its source before going on from it; a Copy As goes on under its
+  new name; the table's skip and replace choices survive a second kill; and with
+  `--root`, a job whose record names a place outside the root is not offered or tidied
+  (also in 0.4.0-beta.1). F says if a kept part could not be removed, and the job is
+  then offered again at the next start.
 - **Alt+C and the user menu never add to a line you typed and did not run**: before,
   a half-typed `rm -rf x` ran with the folder appended. They open a new shell instead.
 - **Your root, home, and the folders shown or in a shell are never deleted, moved or

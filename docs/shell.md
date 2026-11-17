@@ -1,7 +1,7 @@
 # Your shell and xdevcmd
 
-xdevcmd has a shell panel under the file panes, and it works with the shell you started
-it from.
+xdevcmd has a shell panel under the file panes. It starts a new shell there, of the
+kind you use: not the session you started xdevcmd from.
 
 **In short**
 
@@ -42,7 +42,8 @@ function xc { $f = New-TemporaryFile; xdevcmd --cwd-file="$f" @args; $d = Get-Co
 
 ## The shell panel
 
-- It runs your shell: `$SHELL`, or `[terminal] shell` in the config.
+- It starts a new shell: `[terminal] shell` in the config, else `$SHELL` (Windows:
+  `%COMSPEC%`).
 - **Keys inside it**: xdevcmd takes only F12, Shift+F12 and Alt+X. **Alt+X, then a
   terminal key** acts on the shell (Alt+S split, Alt+W close, Alt+N new tab, Alt+1…9
   tab N). Anything else after Alt+X, Enter too, goes to the program with it; Esc

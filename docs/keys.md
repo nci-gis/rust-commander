@@ -70,7 +70,7 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Shift+F8` `Alt+x F8` | Delete permanently |
 | `o` | Open with the system's default application |
 | `O` | Open with…: your [[open]] rules, the system's program, view, edit |
-| `Ctrl+z` | Undo the last rename, move, new directory or new file (asks first) |
+| `Ctrl+z` | Undo the last copy, move, rename, sync, new item or F8 delete (asks first) |
 | `Ctrl+Space` | Work out the size of every directory shown |
 | `Alt+F7` | Find files by name and content; results open in a new tab |
 | `Shift+F2` `Alt+x F2` | Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR |

@@ -224,14 +224,45 @@ impl Journal {
         dest: Option<&Path>,
         to_trash: bool,
     ) -> Option<std::io::Result<Self>> {
-        Some(Self::begin_in(DIR.get()?, kind, sources, dest, to_trash))
+        Self::begin_as(kind, sources, dest, None, to_trash)
     }
 
+    /// [`begin`](Self::begin) for a copy given a new name (Copy As): the journal keeps
+    /// the name, for a resume to use it (repo review RR04).
+    pub fn begin_as(
+        kind: &str,
+        sources: &[PathBuf],
+        dest: Option<&Path>,
+        rename_to: Option<&std::ffi::OsStr>,
+        to_trash: bool,
+    ) -> Option<std::io::Result<Self>> {
+        Some(Self::begin_in_as(
+            DIR.get()?,
+            kind,
+            sources,
+            dest,
+            rename_to,
+            to_trash,
+        ))
+    }
+
+    #[cfg(test)]
     pub(crate) fn begin_in(
         dir: &Path,
         kind: &str,
         sources: &[PathBuf],
         dest: Option<&Path>,
+        to_trash: bool,
+    ) -> std::io::Result<Self> {
+        Self::begin_in_as(dir, kind, sources, dest, None, to_trash)
+    }
+
+    pub(crate) fn begin_in_as(
+        dir: &Path,
+        kind: &str,
+        sources: &[PathBuf],
+        dest: Option<&Path>,
+        rename_to: Option<&std::ffi::OsStr>,
         to_trash: bool,
     ) -> std::io::Result<Self> {
         static N: AtomicU64 = AtomicU64::new(0);
@@ -289,6 +320,9 @@ impl Journal {
         }
         if let Some(d) = dest {
             j.line(&format!("dest {}", enc(d)), about)?;
+        }
+        if let Some(n) = rename_to {
+            j.line(&format!("as {}", enc(Path::new(n))), about)?;
         }
         if to_trash {
             j.line("trash", about)?;
@@ -451,6 +485,8 @@ pub struct Interrupted {
     pub kind: String,
     pub sources: Vec<PathBuf>,
     pub dest: Option<PathBuf>,
+    /// The name Copy As gave the copy, in place of the source's (RR04).
+    pub rename_to: Option<std::ffi::OsString>,
     pub to_trash: bool,
     /// Temporary files of copies removed.
     pub cleaned: usize,
@@ -493,19 +529,39 @@ impl Interrupted {
 }
 
 /// Declined: the kept temporary files of `it` and its journal go.
-pub fn discard(it: &Interrupted) {
+pub fn discard(it: &Interrupted) -> Forgotten {
+    let mut f = Forgotten::default();
     if crate::policy::guard_write().is_err() {
-        return;
+        f.left = it.partial.iter().map(|p| p.part.clone()).collect();
+        return f;
     }
     for p in &it.partial {
-        if ours(&p.part) {
-            let _ = fs::remove_file(&p.part);
+        if !ours(&p.part) {
+            continue;
+        }
+        match fs::remove_file(&p.part) {
+            Ok(()) => f.removed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => f.removed += 1,
+            Err(_) => f.left.push(p.part.clone()),
         }
     }
-    if let Some(j) = &it.journal {
-        let_go(j);
-        let _ = fs::remove_file(j);
+    // A part still there keeps its journal: the next start offers the job again, and
+    // F can be tried again (repo review RR06).
+    if f.left.is_empty() {
+        if let Some(j) = &it.journal {
+            let_go(j);
+            let _ = fs::remove_file(j);
+        }
     }
+    f
+}
+
+/// What [`discard`] did: kept parts removed (or already gone), and those still there.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct Forgotten {
+    pub removed: usize,
+    pub left: Vec<PathBuf>,
 }
 
 /// A resumed job has its own journal, with the kept files in it: the old one goes.
@@ -705,13 +761,28 @@ fn pid_alive(run: &str) -> bool {
 /// the part files, both names of each rename — is inside `policy`'s root. A file that is
 /// gone is judged by its directory.
 fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
-    let inside = |p: &Path| policy.allows(p) || p.parent().is_some_and(|d| policy.allows(d));
+    if policy.root.is_none() {
+        return true;
+    }
+    // A path that is gone may lean on its parent; one that exists answers for
+    // itself, so a link in the root that leads out of it is outside (RR03).
+    let inside = |p: &Path| {
+        policy.allows(p)
+            || (fs::symlink_metadata(p).is_err() && p.parent().is_some_and(|d| policy.allows(d)))
+    };
+    // Every path a line names, not only the ones tidy touches: a journal that
+    // reaches outside is left whole and not offered (RR02).
     text.lines().all(|line| {
         let mut w = line.split(' ');
-        match w.next() {
-            Some("dir" | "part" | "ren" | "swap") => w.filter_map(dec).all(|p| inside(&p)),
-            _ => true,
-        }
+        let paths = match w.next() {
+            Some(
+                "src" | "dest" | "dir" | "part" | "gone" | "unren" | "skip" | "replace" | "done",
+            ) => 1,
+            Some("ren" | "moved" | "swap") => 2,
+            Some("ckpt") => 3,
+            _ => 0,
+        };
+        w.take(paths).all(|t| dec(t).is_some_and(|p| inside(&p)))
     })
 }
 
@@ -720,6 +791,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         kind: String::new(),
         sources: Vec::new(),
         dest: None,
+        rename_to: None,
         to_trash: false,
         cleaned: 0,
         restored: 0,
@@ -731,6 +803,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         partial: Vec::new(),
         journal: None,
     };
+    let mut bad_name = false;
     let mut ckpts: Vec<Partial> = Vec::new();
     let mut swaps: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut parts: Vec<PathBuf> = Vec::new();
@@ -769,6 +842,17 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("kind", _, _) => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
             ("src", Some(p), _) => it.sources.push(p),
             ("dest", Some(p), _) => it.dest = Some(p),
+            ("as", None, _) => bad_name = true,
+            // One plain name, or the job is not trusted (RR04).
+            ("as", Some(p), _) => {
+                let mut c = p.components();
+                match (c.next(), c.next()) {
+                    (Some(std::path::Component::Normal(n)), None) => {
+                        it.rename_to = Some(n.to_os_string())
+                    }
+                    _ => bad_name = true,
+                }
+            }
             ("trash", _, _) => it.to_trash = true,
             ("dir", Some(d), _) => dirs.push(d),
             ("part", Some(p), _) => parts.push(p),
@@ -787,6 +871,12 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("swap", Some(t), Some(d)) => swaps.push((t, d)),
             _ => {}
         }
+    }
+    // A Copy As whose name is not one plain name: its leftovers are tidied as any,
+    // but it is not offered as a copy to run again (RR04).
+    if bad_name {
+        it.kind.clear();
+        it.rename_to = None;
     }
     // Before the temporary files go: one whose destination is empty is the complete,
     // synced replacement of a file now in the trash. Renamed in, never over anything.
@@ -1010,7 +1100,7 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].kind, "copy");
         // Kept while the copy is offered again (#3); declining removes it.
-        discard(&got[0]);
+        let _ = discard(&got[0]);
         assert!(!other.exists());
         let _ = fs::remove_dir_all(&d);
     }
@@ -1231,6 +1321,154 @@ mod tests {
     }
 
     #[test]
+    fn every_path_a_journal_names_is_held_to_the_root() {
+        // Repo review RR02: only dir/part/ren/swap were checked, so a journal whose
+        // other lines name a place outside the root was still offered and tidied.
+        let d = dir("rootall");
+        let inside = d.join("in");
+        let outside = d.join("out");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let root = crate::policy::Policy {
+            read_only: false,
+            root: Some(crate::paths::canonical(&inside).unwrap()),
+        };
+        let (i, o) = (inside.join("a"), outside.join("a"));
+        let one = ["src", "dest", "gone", "unren", "skip", "done"];
+        for kind in one {
+            let line = |p: &Path| format!("kind copy\n{kind} {}\n", enc(p));
+            assert!(may_tidy(&line(&i), &root), "{kind} inside");
+            assert!(!may_tidy(&line(&o), &root), "{kind} outside");
+        }
+        let replace = format!("kind copy\nreplace {} 7\n", enc(&o));
+        assert!(!may_tidy(&replace, &root), "replace outside");
+        let moved = format!("kind move\nmoved {} {}\n", enc(&i), enc(&o));
+        assert!(!may_tidy(&moved, &root), "moved to outside");
+        for at in 0..3 {
+            let mut ps = [i.clone(), i.clone(), i.clone()];
+            ps[at] = o.clone();
+            let ckpt = format!(
+                "kind copy\nckpt {} {} {} 7 4\n",
+                enc(&ps[0]),
+                enc(&ps[1]),
+                enc(&ps[2])
+            );
+            assert!(!may_tidy(&ckpt, &root), "ckpt path {at} outside");
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_root_to_outside_is_not_inside_by_its_parent() {
+        // Repo review RR03: a path that exists but resolves outside passed because
+        // its parent is inside. Only a path that is gone may lean on its parent.
+        let d = dir("rootlink");
+        let inside = d.join("in");
+        let outside = d.join("out");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let link = inside.join("door");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let root = crate::policy::Policy {
+            read_only: false,
+            root: Some(crate::paths::canonical(&inside).unwrap()),
+        };
+        let text = format!("kind copy\ndir {}\n", enc(&link));
+        assert!(!may_tidy(&text, &root), "a dir that leads outside");
+        let gone = format!(
+            "kind copy\npart {}\n",
+            enc(&inside.join(".a.xdevcmd-part-9-0"))
+        );
+        assert!(may_tidy(&gone, &root), "a gone file inside still may");
+        // Pinned from the red-team: a gone file under the escaping link, and a dangling
+        // link (it exists, so it answers for itself, and it does not resolve).
+        let under = format!(
+            "kind copy\npart {}\n",
+            enc(&link.join(".a.xdevcmd-part-9-0"))
+        );
+        assert!(!may_tidy(&under, &root), "a gone file under the link");
+        let dangling = inside.join("loose");
+        std::os::unix::fs::symlink(outside.join("nothing"), &dangling).unwrap();
+        let text = format!("kind copy\ndest {}\n", enc(&dangling));
+        assert!(!may_tidy(&text, &root), "a dangling link");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// F says what it removed, and a kept part it could not remove keeps the journal,
+    /// so the next start offers the job again (repo review RR06: F said done whatever
+    /// happened, and counted the parts it was given).
+    #[test]
+    fn forgetting_reports_what_was_removed_and_keeps_the_journal_when_a_part_stays() {
+        let d = dir("forget");
+        let src = d.join("src");
+        fs::write(&src, "abc").unwrap();
+        let gone_ok = d.join(".a.xdevcmd-part-9-0");
+        fs::write(&gone_ok, "ab").unwrap();
+        // A part that cannot be removed as a file (a folder by that name, not empty).
+        let stuck = d.join(".b.xdevcmd-part-9-1");
+        fs::create_dir_all(stuck.join("x")).unwrap();
+        let journal = d.join("dead.journal");
+        fs::write(&journal, "kind copy\n").unwrap();
+        let part = |p: &Path| Partial {
+            part: p.to_path_buf(),
+            src: src.clone(),
+            dst: d.join("a"),
+            ident: crate::ops::Ident::at(&src).unwrap(),
+            bytes: 2,
+        };
+        let mut it = tidy("kind copy\n", "x");
+        it.partial = vec![part(&gone_ok), part(&stuck)];
+        it.journal = Some(journal.clone());
+        let f = discard(&it);
+        assert_eq!(f.removed, 1);
+        assert_eq!(f.left, vec![stuck.clone()]);
+        assert!(!gone_ok.exists());
+        assert!(journal.exists(), "kept: the next start offers it again");
+        // All gone (one already was): the journal goes too.
+        fs::remove_dir_all(&stuck).unwrap();
+        let f = discard(&it);
+        assert_eq!((f.removed, f.left.len()), (2, 0));
+        assert!(!journal.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Copy As keeps the name it was given across a kill: the journal says it, and the
+    /// job found again asks for it, not the source's name (repo review RR04). A name
+    /// that is not one plain name is not trusted: the job is not resumed as a copy.
+    #[test]
+    fn copy_as_keeps_its_new_name_across_a_kill() {
+        let d = dir("copy-as");
+        let j = Journal::begin_in_as(
+            &d,
+            "copy",
+            &[d.join("a.txt")],
+            Some(&d),
+            Some(std::ffi::OsStr::new("b c.txt")),
+            false,
+        )
+        .unwrap();
+        let text = fs::read_to_string(&j.path).unwrap();
+        let it = tidy(&text, "x");
+        assert_eq!(
+            it.rename_to.as_deref(),
+            Some(std::ffi::OsStr::new("b c.txt"))
+        );
+        let t = format!("{text}as zz-not-hex\n");
+        assert!(tidy(&t, "x").kind.is_empty(), "a name that does not decode");
+        for bad in ["../b", "x/b", ".."] {
+            let t = format!("{text}as {}\n", enc(Path::new(bad)));
+            let it = tidy(&t, "x");
+            assert!(
+                it.rename_to.is_none() && it.kind.is_empty(),
+                "{bad}: {it:?}"
+            );
+        }
+        drop(j);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn a_dead_runs_parts_are_removed_and_renames_put_back() {
         let d = dir("dead");
         let jdir = d.join("journal");
@@ -1279,7 +1517,7 @@ mod tests {
         assert_eq!(fs::read_to_string(d.join("photo.jpg")).unwrap(), "photo");
         // Kept while the copy is offered again (#3); declining removes it.
         assert!(it.journal.is_some());
-        discard(it);
+        let _ = discard(it);
         assert_eq!(
             fs::read_dir(&jdir).unwrap().count(),
             0,
@@ -1342,7 +1580,7 @@ mod tests {
         let again = recover_in(&jdir);
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].partial, it.partial);
-        discard(&again[0]);
+        let _ = discard(&again[0]);
         assert!(!kept.exists() && !journal.exists(), "declined: both go");
         // A delete keeps nothing: there is no copy to go on with.
         fs::write(&kept, vec![7u8; 3000]).unwrap();
@@ -1535,7 +1773,7 @@ mod tests {
             let again = recover_in(&jdir);
             assert_eq!(again.len(), usize::from(kept), "offered again: {text}");
             if let Some(it) = again.first() {
-                discard(it);
+                let _ = discard(it);
             }
             assert_eq!(fs::read_dir(&jdir).unwrap().count(), 0, "{text}");
         }

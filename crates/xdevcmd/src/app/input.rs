@@ -812,13 +812,17 @@ impl App {
             Cmd::Resume(it) => self.resume(*it, false),
             Cmd::ResumeChecked(it) => self.resume(*it, true),
             Cmd::Discard(it) => {
-                xdevcmd_core::journal::discard(&it);
-                let n = it.partial.len();
-                self.status = match n {
-                    0 => "the interrupted job forgotten: nothing more is done".into(),
-                    n => format!(
+                let f = xdevcmd_core::journal::discard(&it);
+                let s = |n: usize| if n == 1 { "" } else { "s" };
+                self.status = match (f.removed, f.left.len()) {
+                    (_, l) if l > 0 => format!(
+                        "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
+                        s(l),
+                    ),
+                    (0, _) => "the interrupted job forgotten: nothing more is done".into(),
+                    (n, _) => format!(
                         "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
-                        if n == 1 { "" } else { "s" },
+                        s(n),
                     ),
                 };
             }

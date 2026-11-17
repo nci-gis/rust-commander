@@ -1404,6 +1404,35 @@ fn f_forgets_an_interrupted_job() {
     x.quit();
 }
 
+/// QA of #42 (P1): a killed delete to the trash. Its dialog showed `[Enter] continue
+/// [Esc] cancel` and no F, though F worked, and spoke of copies. The keys that work are
+/// the keys shown, and the words are a delete's.
+#[test]
+fn an_interrupted_delete_shows_f_and_speaks_of_the_trash() {
+    let s = Scratch::new("forget-delete");
+    std::fs::write(s.left().join("gone.txt"), "g").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind delete\nsrc {}\ntrash\n",
+            host_line(),
+            hex(&s.left().join("gone.txt"))
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("[F] forget it");
+    assert!(!x.screen().contains("cut short"), "{}", x.screen());
+    x.send(b"f");
+    x.wait_for("forgotten");
+    x.quit();
+    assert!(s.left().join("gone.txt").exists(), "nothing more is done");
+    assert_eq!(std::fs::read_dir(&journal).unwrap().count(), 0);
+}
+
 /// B2: the Interrupted dialog offers C, a checked continue. A copy left with the right
 /// size and date and no data (a power cut) is read with its source and copied again.
 #[cfg(unix)]

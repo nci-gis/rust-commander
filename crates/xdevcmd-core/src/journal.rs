@@ -1306,6 +1306,17 @@ mod tests {
             enc(&inside.join(".a.xdevcmd-part-9-0"))
         );
         assert!(may_tidy(&gone, &root), "a gone file inside still may");
+        // Pinned from the red-team: a gone file under the escaping link, and a dangling
+        // link (it exists, so it answers for itself, and it does not resolve).
+        let under = format!(
+            "kind copy\npart {}\n",
+            enc(&link.join(".a.xdevcmd-part-9-0"))
+        );
+        assert!(!may_tidy(&under, &root), "a gone file under the link");
+        let dangling = inside.join("loose");
+        std::os::unix::fs::symlink(outside.join("nothing"), &dangling).unwrap();
+        let text = format!("kind copy\ndest {}\n", enc(&dangling));
+        assert!(!may_tidy(&text, &root), "a dangling link");
         let _ = fs::remove_dir_all(&d);
     }
 

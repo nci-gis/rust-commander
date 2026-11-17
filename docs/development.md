@@ -73,11 +73,17 @@ budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
 the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
 **On another machine or drive.** `--only CASE` runs just the cases whose name holds
-`CASE`, with no build and no start-up cases, so a copy of `xtask` runs on a machine
-without Rust: a release's `xdevcmd-bench-<tag>-<target>`, or, for code not released
-yet, Actions → bench → Run workflow (or a push to a `bench/<name>` branch) and the run's
-artifacts `xtask-Linux`, `xtask-macOS`, `xtask-Windows` (bare binaries: `chmod +x`;
-kept 14 days). `--dir PATH` makes the trees on the
+`CASE`, with no build and no start-up cases. Where to get `xtask`:
+
+- **With Rust**, any commit: `cargo xtask bench --only …` (and `cargo xtask try …`) in
+  the repository. The simplest for a developer.
+- **Without Rust, a release**: its `xdevcmd-bench-<tag>-<target>`, as testers do
+  ([How to test](how-to-test.md), step 1).
+- **Without Rust, code not released yet** (maintainers only, before a cut): Actions →
+  bench → Run workflow on the branch; the run's artifacts `xtask-Linux`, `xtask-macOS`
+  (Apple Silicon only), `xtask-Windows`, bare binaries (`chmod +x`), kept 14 days.
+
+`--dir PATH` makes the trees on the
 drive being measured instead of the temporary directory. Away from the source, results
 go to `bench/results/` where it was started; with `XDEVCMD_DEBUG`, each run's jobs are
 logged in `bench/results/debug-<host>-<date>/<case>/`. `XDEVCMD_BENCH_FAST=0` turns the

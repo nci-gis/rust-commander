@@ -493,19 +493,39 @@ impl Interrupted {
 }
 
 /// Declined: the kept temporary files of `it` and its journal go.
-pub fn discard(it: &Interrupted) {
+pub fn discard(it: &Interrupted) -> Forgotten {
+    let mut f = Forgotten::default();
     if crate::policy::guard_write().is_err() {
-        return;
+        f.left = it.partial.iter().map(|p| p.part.clone()).collect();
+        return f;
     }
     for p in &it.partial {
-        if ours(&p.part) {
-            let _ = fs::remove_file(&p.part);
+        if !ours(&p.part) {
+            continue;
+        }
+        match fs::remove_file(&p.part) {
+            Ok(()) => f.removed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => f.removed += 1,
+            Err(_) => f.left.push(p.part.clone()),
         }
     }
-    if let Some(j) = &it.journal {
-        let_go(j);
-        let _ = fs::remove_file(j);
+    // A part still there keeps its journal: the next start offers the job again, and
+    // F can be tried again (repo review RR06).
+    if f.left.is_empty() {
+        if let Some(j) = &it.journal {
+            let_go(j);
+            let _ = fs::remove_file(j);
+        }
     }
+    f
+}
+
+/// What [`discard`] did: kept parts removed (or already gone), and those still there.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct Forgotten {
+    pub removed: usize,
+    pub left: Vec<PathBuf>,
 }
 
 /// A resumed job has its own journal, with the kept files in it: the old one goes.
@@ -1025,7 +1045,7 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].kind, "copy");
         // Kept while the copy is offered again (#3); declining removes it.
-        discard(&got[0]);
+        let _ = discard(&got[0]);
         assert!(!other.exists());
         let _ = fs::remove_dir_all(&d);
     }
@@ -1407,7 +1427,7 @@ mod tests {
         assert_eq!(fs::read_to_string(d.join("photo.jpg")).unwrap(), "photo");
         // Kept while the copy is offered again (#3); declining removes it.
         assert!(it.journal.is_some());
-        discard(it);
+        let _ = discard(it);
         assert_eq!(
             fs::read_dir(&jdir).unwrap().count(),
             0,
@@ -1470,7 +1490,7 @@ mod tests {
         let again = recover_in(&jdir);
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].partial, it.partial);
-        discard(&again[0]);
+        let _ = discard(&again[0]);
         assert!(!kept.exists() && !journal.exists(), "declined: both go");
         // A delete keeps nothing: there is no copy to go on with.
         fs::write(&kept, vec![7u8; 3000]).unwrap();
@@ -1663,7 +1683,7 @@ mod tests {
             let again = recover_in(&jdir);
             assert_eq!(again.len(), usize::from(kept), "offered again: {text}");
             if let Some(it) = again.first() {
-                discard(it);
+                let _ = discard(it);
             }
             assert_eq!(fs::read_dir(&jdir).unwrap().count(), 0, "{text}");
         }

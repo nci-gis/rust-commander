@@ -406,7 +406,7 @@ impl App {
             .cloned()
             .collect();
         if still.is_empty() {
-            xdevcmd_core::journal::discard(&it);
+            let _ = xdevcmd_core::journal::discard(&it);
             self.status = "nothing left to do: every source has gone".into();
             return;
         }
@@ -415,7 +415,7 @@ impl App {
             ("move", Some(d)) => Request::mv(still, d),
             ("delete", _) if it.to_trash => Request::delete(still, true),
             _ => {
-                xdevcmd_core::journal::discard(&it);
+                let _ = xdevcmd_core::journal::discard(&it);
                 self.status = "nothing to resume: the job's journal is incomplete".into();
                 return;
             }

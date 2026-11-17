@@ -1099,8 +1099,13 @@ impl Worker {
                 req.pairs.iter().map(|(s, _)| s.clone()).collect()
             };
             let t = self.clock();
-            let begun =
-                crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash);
+            let begun = crate::journal::Journal::begin_as(
+                kind,
+                &sources,
+                req.dest.as_deref(),
+                req.rename_to.as_deref(),
+                req.to_trash,
+            );
             if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
                 d.journal = t.elapsed();
             }

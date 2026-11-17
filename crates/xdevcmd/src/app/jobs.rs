@@ -421,6 +421,8 @@ impl App {
             }
         };
         req.existing = ops::Existing::Resume;
+        // Copy As: the name it was given, not the source's (repo review RR04).
+        req.rename_to = it.rename_to.clone();
         // The plan's decisions stand (Round 030): what the user chose to leave is left,
         // what they chose to replace is replaced while it is still that file.
         req.expect = it.decided.iter().cloned().collect();

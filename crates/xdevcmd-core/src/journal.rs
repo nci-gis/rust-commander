@@ -224,14 +224,45 @@ impl Journal {
         dest: Option<&Path>,
         to_trash: bool,
     ) -> Option<std::io::Result<Self>> {
-        Some(Self::begin_in(DIR.get()?, kind, sources, dest, to_trash))
+        Self::begin_as(kind, sources, dest, None, to_trash)
     }
 
+    /// [`begin`](Self::begin) for a copy given a new name (Copy As): the journal keeps
+    /// the name, for a resume to use it (repo review RR04).
+    pub fn begin_as(
+        kind: &str,
+        sources: &[PathBuf],
+        dest: Option<&Path>,
+        rename_to: Option<&std::ffi::OsStr>,
+        to_trash: bool,
+    ) -> Option<std::io::Result<Self>> {
+        Some(Self::begin_in_as(
+            DIR.get()?,
+            kind,
+            sources,
+            dest,
+            rename_to,
+            to_trash,
+        ))
+    }
+
+    #[cfg(test)]
     pub(crate) fn begin_in(
         dir: &Path,
         kind: &str,
         sources: &[PathBuf],
         dest: Option<&Path>,
+        to_trash: bool,
+    ) -> std::io::Result<Self> {
+        Self::begin_in_as(dir, kind, sources, dest, None, to_trash)
+    }
+
+    pub(crate) fn begin_in_as(
+        dir: &Path,
+        kind: &str,
+        sources: &[PathBuf],
+        dest: Option<&Path>,
+        rename_to: Option<&std::ffi::OsStr>,
         to_trash: bool,
     ) -> std::io::Result<Self> {
         static N: AtomicU64 = AtomicU64::new(0);
@@ -289,6 +320,9 @@ impl Journal {
         }
         if let Some(d) = dest {
             j.line(&format!("dest {}", enc(d)), about)?;
+        }
+        if let Some(n) = rename_to {
+            j.line(&format!("as {}", enc(Path::new(n))), about)?;
         }
         if to_trash {
             j.line("trash", about)?;
@@ -451,6 +485,8 @@ pub struct Interrupted {
     pub kind: String,
     pub sources: Vec<PathBuf>,
     pub dest: Option<PathBuf>,
+    /// The name Copy As gave the copy, in place of the source's (RR04).
+    pub rename_to: Option<std::ffi::OsString>,
     pub to_trash: bool,
     /// Temporary files of copies removed.
     pub cleaned: usize,
@@ -755,6 +791,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         kind: String::new(),
         sources: Vec::new(),
         dest: None,
+        rename_to: None,
         to_trash: false,
         cleaned: 0,
         restored: 0,
@@ -766,6 +803,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         partial: Vec::new(),
         journal: None,
     };
+    let mut bad_name = false;
     let mut ckpts: Vec<Partial> = Vec::new();
     let mut swaps: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut parts: Vec<PathBuf> = Vec::new();
@@ -804,6 +842,16 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("kind", _, _) => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
             ("src", Some(p), _) => it.sources.push(p),
             ("dest", Some(p), _) => it.dest = Some(p),
+            // One plain name, or the job is not trusted (RR04).
+            ("as", Some(p), _) => {
+                let mut c = p.components();
+                match (c.next(), c.next()) {
+                    (Some(std::path::Component::Normal(n)), None) => {
+                        it.rename_to = Some(n.to_os_string())
+                    }
+                    _ => bad_name = true,
+                }
+            }
             ("trash", _, _) => it.to_trash = true,
             ("dir", Some(d), _) => dirs.push(d),
             ("part", Some(p), _) => parts.push(p),
@@ -822,6 +870,12 @@ fn tidy(text: &str, run: &str) -> Interrupted {
             ("swap", Some(t), Some(d)) => swaps.push((t, d)),
             _ => {}
         }
+    }
+    // A Copy As whose name is not one plain name: its leftovers are tidied as any,
+    // but it is not offered as a copy to run again (RR04).
+    if bad_name {
+        it.kind.clear();
+        it.rename_to = None;
     }
     // Before the temporary files go: one whose destination is empty is the complete,
     // synced replacement of a file now in the trash. Renamed in, never over anything.

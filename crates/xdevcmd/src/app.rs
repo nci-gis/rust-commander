@@ -1158,6 +1158,7 @@ mod tests {
             kind: "copy".into(),
             sources: vec![a.join("one.txt"), a.join("two.txt")],
             dest: Some(b.clone()),
+            rename_to: None,
             to_trash: false,
             cleaned: 0,
             restored: 0,
@@ -1174,6 +1175,40 @@ mod tests {
         wait_until(&mut app, "two.txt copied", |_| b.join("two.txt").exists());
         let repaired = || std::fs::read_to_string(b.join("one.txt")).unwrap() == "AAAA";
         wait_until(&mut app, "one.txt repaired", |_| repaired());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Copy As found again after a kill finishes under the name it was given, not
+    /// the source's (repo review RR04): beside its source, the source's name is the
+    /// source itself, and the copy was skipped.
+    #[test]
+    fn a_resumed_copy_as_writes_the_name_it_was_given() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-rcas-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "AAAA").unwrap();
+        let it = xdevcmd_core::journal::Interrupted {
+            kind: "copy".into(),
+            sources: vec![root.join("a.txt")],
+            dest: Some(root.clone()),
+            rename_to: Some("b.txt".into()),
+            to_trash: false,
+            cleaned: 0,
+            restored: 0,
+            stranded: Vec::new(),
+            moved: Vec::new(),
+            decided: Vec::new(),
+            swapped: Vec::new(),
+            done: Vec::new(),
+            partial: Vec::new(),
+            journal: None,
+        };
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.resume(it, false);
+        wait_until(&mut app, "b.txt copied", |_| {
+            std::fs::read_to_string(root.join("b.txt")).is_ok_and(|t| t == "AAAA")
+        });
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "AAAA");
         let _ = std::fs::remove_dir_all(&root);
     }
 

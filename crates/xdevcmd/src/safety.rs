@@ -91,11 +91,11 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         // takes the typographic quotes ‘ ’ ‚ ‛ as single quotes, so a name like
         // `it’s` would end the string early: each is doubled the same way.
         Shell::Pwsh => {
-            // Inside a double quote left open, `$(…)` runs and a typographic double
-            // quote ends it (Windows names cannot hold `"` itself).
+            // Inside a double quote left open, `$(…)` runs and a double quote, plain
+            // (a Unix name can hold one) or typographic, ends it.
             refuse_breakouts(
                 text,
-                &["$(", "\u{201c}", "\u{201d}", "\u{201e}", "\u{201f}"],
+                &["$(", "\"", "\u{201c}", "\u{201d}", "\u{201e}", "\u{201f}"],
                 "PowerShell",
             )?;
             let mut q = String::with_capacity(text.len() + 2);
@@ -129,7 +129,13 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         // own backslash, no quotes. That reads as the name at a prompt, and stays inert
         // inside a double quote, a single quote or a here-doc the user left open, where
         // a single-quoted `'$(…)'` ran once the quote was closed (QA 2026-11-17, P0).
-        Shell::Posix => escaped(text),
+        // A backtick is refused: inside a backtick left open the shell takes one
+        // backslash off, and no form of it is inert both there and at a prompt
+        // (red-team of the escaping, P0).
+        Shell::Posix => {
+            refuse_breakouts(text, &["`"], "This shell")?;
+            escaped(text)
+        }
     })
 }
 
@@ -202,8 +208,16 @@ mod tests {
     #[test]
     fn a_name_cannot_break_out_of_an_open_quote() {
         assert_eq!(quote("bash", "$(touch x)").unwrap(), "\\$\\(touch\\ x\\)");
-        assert_eq!(quote("sh", "a\"b'c`d").unwrap(), "a\\\"b\\'c\\`d");
+        assert_eq!(quote("sh", "a\"b'c$d").unwrap(), "a\\\"b\\'c\\$d");
         assert_eq!(quote("bash", "").unwrap(), "''");
+        assert!(
+            quote("bash", "a`touch x`").is_err(),
+            "a backtick is refused"
+        );
+        assert!(
+            quote("pwsh", "x\";calc;\"").is_err(),
+            "pwsh on Unix: a plain quote"
+        );
         assert_eq!(
             quote("bash", "Vi\u{1ec7}t-nam_1.txt").unwrap(),
             "Vi\u{1ec7}t-nam_1.txt"

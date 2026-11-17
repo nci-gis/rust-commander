@@ -91,6 +91,13 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         // takes the typographic quotes ‘ ’ ‚ ‛ as single quotes, so a name like
         // `it’s` would end the string early: each is doubled the same way.
         Shell::Pwsh => {
+            // Inside a double quote left open, `$(…)` runs and a double quote, plain
+            // (a Unix name can hold one) or typographic, ends it.
+            refuse_breakouts(
+                text,
+                &["$(", "\"", "\u{201c}", "\u{201d}", "\u{201e}", "\u{201f}"],
+                "PowerShell",
+            )?;
             let mut q = String::with_capacity(text.len() + 2);
             q.push('\'');
             for c in text.chars() {
@@ -111,11 +118,57 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
             }
             format!("\"{text}\"")
         }
-        // fish: inside single quotes, backslash and quote are escapes.
-        Shell::Fish => format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'")),
-        // POSIX shells and anything unknown: close the quote, escape one, reopen.
-        Shell::Posix => format!("'{}'", text.replace('\'', r"'\''")),
+        // fish: inside single quotes, backslash and quote are escapes. Inside a double
+        // quote left open on the user's line, `$(…)` runs and `"` ends it: refused
+        // (fish has no quoting that is inert in both places).
+        Shell::Fish => {
+            refuse_breakouts(text, &["$(", "\""], "fish")?;
+            format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
+        }
+        // POSIX shells and anything unknown: every character a shell acts on gets its
+        // own backslash, no quotes. That reads as the name at a prompt, and stays inert
+        // inside a double quote, a single quote or a here-doc the user left open, where
+        // a single-quoted `'$(…)'` ran once the quote was closed (QA 2026-11-17, P0).
+        // A backtick is refused: inside a backtick left open the shell takes one
+        // backslash off, and no form of it is inert both there and at a prompt
+        // (red-team of the escaping, P0).
+        Shell::Posix => {
+            refuse_breakouts(text, &["`"], "This shell")?;
+            escaped(text)
+        }
     })
+}
+
+/// `text` with a backslash before each ASCII character a POSIX shell can act on
+/// (everything but letters, digits and `/ . _ -`); other characters as they are. `''`
+/// for the empty name. Inert wherever it lands: at a prompt each escaped character is
+/// itself; inside an open double quote or a here-doc `\$`, `\``, `\"` and `\\` are
+/// literal and the rest keep a harmless backslash; inside an open single quote every
+/// backslash is literal, and a `'` in the name that ends the quote is followed only by
+/// escaped characters.
+fn escaped(text: &str) -> String {
+    if text.is_empty() {
+        return "''".into();
+    }
+    let mut q = String::with_capacity(text.len() * 2);
+    for c in text.chars() {
+        if c.is_ascii() && !(c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-')) {
+            q.push('\\');
+        }
+        q.push(c);
+    }
+    q
+}
+
+/// Refuse `text` if it holds one of `bad`: what would end, or run inside, a double quote
+/// the user left open in `shell`.
+fn refuse_breakouts(text: &str, bad: &[&str], shell: &str) -> Result<(), String> {
+    match bad.iter().find(|b| text.contains(*b)) {
+        Some(b) => Err(format!(
+            "{shell} cannot be given a name holding {b:?} safely \u{2014} not sent; rename it, or type it yourself"
+        )),
+        None => Ok(()),
+    }
 }
 
 /// File names as words for `shell`'s command line: each quoted, joined by spaces,
@@ -137,9 +190,16 @@ pub fn words(shell: &str, names: &[&str]) -> Result<String, String> {
 /// file called `-rf`). The rule for every name xdevcmd types, here and in the user
 /// menu.
 pub fn word(shell: &str, name: &str) -> Result<String, String> {
-    let dashed = name.starts_with('-') && !matches!(shell_kind(shell), Shell::Cmd);
+    let kind = shell_kind(shell);
+    let dashed = name.starts_with('-') && !matches!(kind, Shell::Cmd);
     if dashed {
-        quote(shell, &format!(".{}{name}", std::path::MAIN_SEPARATOR))
+        // `./` for sh, bash, zsh and fish everywhere (Git Bash too), so no backslash
+        // needs escaping; PowerShell takes the system's own separator.
+        let sep = match kind {
+            Shell::Posix | Shell::Fish => '/',
+            _ => std::path::MAIN_SEPARATOR,
+        };
+        quote(shell, &format!(".{sep}{name}"))
     } else {
         quote(shell, name)
     }
@@ -149,16 +209,49 @@ pub fn word(shell: &str, name: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /// QA 2026-11-17 (P0): a name typed for a POSIX shell is backslash-escaped, never
+    /// quoted, so an open quote on the user's line cannot make it run; fish and
+    /// PowerShell, which have no such form, refuse what would break out of an open `"`.
+    #[test]
+    fn a_name_cannot_break_out_of_an_open_quote() {
+        assert_eq!(quote("bash", "$(touch x)").unwrap(), "\\$\\(touch\\ x\\)");
+        assert_eq!(quote("sh", "a\"b'c$d").unwrap(), "a\\\"b\\'c\\$d");
+        assert_eq!(quote("bash", "").unwrap(), "''");
+        assert!(
+            quote("bash", "a`touch x`").is_err(),
+            "a backtick is refused"
+        );
+        assert!(
+            quote("pwsh", "x\";calc;\"").is_err(),
+            "pwsh on Unix: a plain quote"
+        );
+        assert_eq!(
+            quote("bash", "Vi\u{1ec7}t-nam_1.txt").unwrap(),
+            "Vi\u{1ec7}t-nam_1.txt"
+        );
+        for name in ["$(touch x)", "a\"b"] {
+            assert!(quote("fish", name).is_err(), "{name}");
+        }
+        assert!(quote("fish", "$HOME").is_ok(), "a variable is not run");
+        for name in ["$(calc)", "a\u{201c}b", "c\u{201d}", "\u{201e}"] {
+            assert!(quote("pwsh", name).is_err(), "{name}");
+        }
+        assert!(
+            quote("pwsh", r"C:\$Recycle.Bin").is_ok(),
+            "a $ alone is not run"
+        );
+    }
+
     #[test]
     fn each_shell_gets_its_own_quoting() {
         let p = "/home/me/it's here";
         assert_eq!(
             cd_command("bash", p).unwrap(),
-            "cd '/home/me/it'\\''s here'\r"
+            "cd /home/me/it\\'s\\ here\r"
         );
         assert_eq!(
             cd_command("/bin/zsh -l", p).unwrap(),
-            "cd '/home/me/it'\\''s here'\r"
+            "cd /home/me/it\\'s\\ here\r"
         );
         assert_eq!(
             cd_command("fish", p).unwrap(),
@@ -187,7 +280,7 @@ mod tests {
         let names = ["a b", "it's", "$HOME", "bang!", "50%"];
         assert_eq!(
             words("bash", &names).unwrap(),
-            "'a b' 'it'\\''s' '$HOME' 'bang!' '50%' "
+            "a\\ b it\\'s \\$HOME bang\\! 50\\% "
         );
         assert_eq!(
             words("/usr/bin/fish", &names).unwrap(),
@@ -213,7 +306,8 @@ mod tests {
     #[test]
     fn a_name_that_looks_like_an_option_is_not_one() {
         let sep = std::path::MAIN_SEPARATOR;
-        assert_eq!(words("bash", &["-rf"]).unwrap(), format!("'.{sep}-rf' "));
+        assert_eq!(words("bash", &["-rf"]).unwrap(), "./-rf ");
+        assert_eq!(words("pwsh", &["-rf"]).unwrap(), format!("'.{sep}-rf' "));
         assert_eq!(words("cmd", &["-rf"]).unwrap(), "\"-rf\" ");
     }
 
@@ -228,7 +322,7 @@ mod tests {
             "'\u{2018}\u{2018}a\u{201a}\u{201a}b\u{201b}\u{201b}'"
         );
         // Other shells leave them alone: they are ordinary characters there.
-        assert_eq!(quote("bash", "it\u{2019}s").unwrap(), "'it\u{2019}s'");
+        assert_eq!(quote("bash", "it\u{2019}s").unwrap(), "it\u{2019}s");
     }
 
     #[test]

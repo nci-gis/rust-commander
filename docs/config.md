@@ -328,6 +328,9 @@ command = "robocopy %d %D %s /COPYALL /SL"
 | `%%` | a `%` sign |
 
 xdevcmd quotes every file name for your shell, so spaces and quotes in names are safe.
+When a command hands its text to another shell (`sh -c`, `bash -c`, `eval`, `ssh`), put
+`%f` and the others inside single quotes there (`sh -c 'wc -l %f'`), never double quotes:
+the second shell reads the name again.
 
 ## Security
 

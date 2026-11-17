@@ -1378,6 +1378,39 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// Copy As keeps the name it was given across a kill: the journal says it, and the
+    /// job found again asks for it, not the source's name (repo review RR04). A name
+    /// that is not one plain name is not trusted: the job is not resumed as a copy.
+    #[test]
+    fn copy_as_keeps_its_new_name_across_a_kill() {
+        let d = dir("copy-as");
+        let j = Journal::begin_in_as(
+            &d,
+            "copy",
+            &[d.join("a.txt")],
+            Some(&d),
+            Some(std::ffi::OsStr::new("b c.txt")),
+            false,
+        )
+        .unwrap();
+        let text = fs::read_to_string(&j.path).unwrap();
+        let it = tidy(&text, "x");
+        assert_eq!(
+            it.rename_to.as_deref(),
+            Some(std::ffi::OsStr::new("b c.txt"))
+        );
+        for bad in ["../b", "x/b", ".."] {
+            let t = format!("{text}as {}\n", enc(Path::new(bad)));
+            let it = tidy(&t, "x");
+            assert!(
+                it.rename_to.is_none() && it.kind.is_empty(),
+                "{bad}: {it:?}"
+            );
+        }
+        drop(j);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_dead_runs_parts_are_removed_and_renames_put_back() {
         let d = dir("dead");

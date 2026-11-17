@@ -209,8 +209,10 @@ General, on by default), if xdevcmd is killed mid-job, the next start cleans up 
 offers to continue: what was finished is left, your table choices hold, identical files
 are skipped, anything else there is asked about. When a copy may be damaged (a power
 cut, a drive pulled out), **C** in that dialog re-reads every copied file against its
-source (slow) and copies again what differs; **F** forgets the job.
-Closing the terminal stops jobs tidily and saves the session. Details:
+source (slow) and copies again what differs. **F** forgets the job: nothing more is
+done, what it finished stays, a big file's kept part is removed, and Ctrl+Z cannot undo
+it. Closing the terminal (Linux, macOS) cancels jobs tidily and saves the session; on
+Windows the next start cleans up instead. Details:
 [security.md](security.md#safe-operations).
 
 **A file replaced goes to the trash** where the trash is on the same drive, so Ctrl+Z
@@ -222,7 +224,8 @@ table says ℹ "a file replaced goes to the trash"; the summary says how many we
 ### Undo (Ctrl+Z)
 
 Undoes the last rename (one or many), move, copy, Alt+Y sync, new directory, new file
-or delete to the trash (F8 puts things back), after showing what it will do.
+or delete to the trash (F8), after showing what it will do. Undo is for this run only:
+it ends when xdevcmd quits.
 
 - It checks the disk first: a file renamed since, a name taken again, or a new
   directory with something in it now, is left alone.

@@ -23,12 +23,14 @@ being written is not there under its real name.
 **Fail if**: the job says done; a file under its real name with the wrong size.
 
 ### M-DS-03 A big copy, killed past a checkpoint
-**Platform**: all · **Automated**: checkpoint unit tests, a pty kill past a checkpoint (Linux, macOS) · **With xtask**: `try` check B
+**Platform**: all · **Automated**: checkpoint unit tests, a pty kill past a checkpoint (Linux only) · **With xtask**: `try` check B
 **Setup**: a file of 1 GB or more. Copy to another drive, or set
 `[general] fast_copy = false` (on the same APFS, Btrfs or XFS volume a copy is a clone:
 instant, no checkpoint).
-**Steps**: 1. F5. 2. Past 30 %, `kill -9` xdevcmd or close the terminal window.
+**Steps**: 1. F5. 2. Past 30 %, `kill -9` xdevcmd (Windows: Task Manager → End task).
 3. Start again, Continue.
+Not the terminal's close button: on Linux and macOS it cancels the job tidily, and
+nothing is offered at the next start ([security.md](../../../../../docs/security.md#whatever-the-setting)).
 **Expected**: the dialog says "kept part way"; the bar starts near where it stopped; the
 copy equals the source (`cmp`; Windows `fc.exe /b`).
 **Fail if**: the bar starts at 0 %, or the copy differs.

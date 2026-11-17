@@ -67,9 +67,9 @@ many's files back under their names, and offers:
   on with a big file from its last checkpoint, starts a smaller cut-short file again,
   and asks about any other file already there. A file you chose to keep the first time
   is asked about again, not replaced because its source is newer.
-- **C** (check, slow): after a power cut. Every file already copied is read again with
-  its source, finished folders included, and one that differs is copied again (the old
-  one to the trash). Known gap: a file you answered "Skip" for in the run that died is
+- **C** (check, slow): when a copy may be damaged, as after a power cut or a drive pulled
+  out. Every file already copied is read again with its source, finished folders
+  included, and one that differs is copied again (the old one to the trash). Known gap: a file you answered "Skip" for in the run that died is
   replaced by C if it has its source's size and date.
 - **Esc**: leave the job for the next start.
 

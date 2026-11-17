@@ -1299,6 +1299,68 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     x.quit();
 }
 
+/// The owner, 2026-11-17: two interrupted jobs. The newest is offered first, the dialog
+/// says one more waits, Esc keeps both, and once the newest is answered the older one is
+/// offered at the next start.
+#[test]
+fn two_interrupted_jobs_the_newest_first_and_the_other_said() {
+    let s = Scratch::new("two-jobs");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("older.txt"), "o").unwrap();
+    std::fs::write(src.join("newer.txt"), "n").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    for (n, name, secs) in [
+        (1, "older.txt", 1_700_000_000u64),
+        (0, "newer.txt", 1_800_000_000),
+    ] {
+        let p = journal.join(format!("2147483646-{n}.journal"));
+        std::fs::write(
+            &p,
+            format!(
+                "{}kind copy\nsrc {}\ndest {}\n",
+                host_line(),
+                hex(&src.join(name)),
+                hex(&dst)
+            ),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+            .unwrap();
+    }
+    for _ in 0..2 {
+        let mut x = Session::start(&s, None);
+        x.wait_for("Interrupted");
+        x.wait_for("newer.txt");
+        x.wait_for("1 older interrupted job waits");
+        x.wait_for("Esc: asked again at the next start");
+        x.send(b"\x1b"); // Esc: both kept
+        x.quit();
+    }
+    let mut x = Session::start(&s, None);
+    x.wait_for("newer.txt");
+    x.send(ENTER);
+    x.wait_for("1 copied");
+    x.quit();
+    assert_eq!(std::fs::read_to_string(dst.join("newer.txt")).unwrap(), "n");
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("older.txt");
+    assert!(
+        !x.screen().contains("older interrupted job"),
+        "{}",
+        x.screen()
+    );
+    x.send(ENTER);
+    x.wait_for("1 copied");
+    x.quit();
+    assert_eq!(std::fs::read_to_string(dst.join("older.txt")).unwrap(), "o");
+}
+
 /// B2: the Interrupted dialog offers C, a checked continue. A copy left with the right
 /// size and date and no data (a power cut) is read with its source and copied again.
 #[cfg(unix)]

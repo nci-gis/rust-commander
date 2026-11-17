@@ -279,6 +279,12 @@ impl App {
         }
         // A permanent delete is not offered again (`offered`). One job at a time: any
         // other keeps its journal and is offered at the next start.
+        // Newest first (journal::recover): the job just interrupted. The others wait.
+        let waiting = found
+            .iter()
+            .filter(|i| i.offered())
+            .count()
+            .saturating_sub(1);
         let resumable = found.into_iter().find(|i| i.offered());
         let mut discard = None;
         let mut check = None;
@@ -303,10 +309,9 @@ impl App {
             // B2 (owner, 2026-11-15): after a power cut a copied file can be short or
             // hold no data under its real name. Trusting is the default (Enter).
             if it.kind != "delete" {
-                body.push(
-                    "C checks everything first, done files too (slow; after a power cut)."
-                        .into(),
-                );
+                // The owner, 2026-11-17: what C is for, not one cause of it.
+                body.push("C reads every copied file again against its source (slow): for".into());
+                body.push("when a copy may be damaged, as after a power cut or a drive pulled out.".into());
                 check = Some((
                     'c',
                     "check (slow)".to_string(),
@@ -330,13 +335,23 @@ impl App {
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
         // Always said when a job is offered: its journal stays until it is answered (#3).
-        let footnote = yes.as_ref().map(|_| {
-            if discard.is_some() {
+        // In the body: a footnote beside three buttons had no room and was never drawn
+        // (the owner and QA, 2026-11-17).
+        if yes.is_some() {
+            body.push(String::new());
+            body.push(if discard.is_some() {
                 "Esc: asked again at the next start, the kept parts left as they are.".into()
             } else {
                 "Esc: asked again at the next start.".into()
+            });
+            if waiting > 0 {
+                body.push(format!(
+                    "{waiting} older interrupted job{} wait{}: each is asked after this one.",
+                    plural(waiting),
+                    if waiting == 1 { "s" } else { "" }
+                ));
             }
-        });
+        }
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Interrupted".into(),
             body,
@@ -345,7 +360,7 @@ impl App {
             buttons: Vec::new(),
             also: check,
             more: discard,
-            footnote,
+            footnote: None,
             pictures: Vec::new(),
         }));
     }

@@ -526,14 +526,14 @@ pub fn recover() -> Vec<Interrupted> {
 }
 
 fn recover_in(dir: &Path) -> Vec<Interrupted> {
-    let mut out = Vec::new();
+    let mut out: Vec<(std::time::SystemTime, Interrupted)> = Vec::new();
     // The engine's own wall, behind the UI's: tidying removes and renames files.
     // Read-only leaves every journal as it is, for a run that may write.
     if crate::policy::guard_write().is_err() {
-        return out;
+        return Vec::new();
     }
     let Ok(entries) = fs::read_dir(dir) else {
-        return out;
+        return Vec::new();
     };
     let host = hostname();
     for e in entries.flatten() {
@@ -567,6 +567,11 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         if run == run_tag() {
             continue;
         }
+        // When the run last wrote it: the newest interrupted job is offered first.
+        let written = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
         let mut text = String::new();
         // Held until the journal is gone: another start at the same moment finds it
         // locked (alive, to it), or removed, and never offers the same job again.
@@ -592,9 +597,12 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
                 h.push((path.clone(), held));
             }
         }
-        out.push(it);
+        out.push((written, it));
     }
-    out
+    // Newest first (the owner, 2026-11-17): the job just interrupted is the one the
+    // user remembers, and one left with Esc must not stay in front of it for good.
+    out.sort_by_key(|o| std::cmp::Reverse(o.0));
+    out.into_iter().map(|(_, it)| it).collect()
 }
 
 /// The journal at `path`, if the run that wrote it is gone, told by its lock: returned
@@ -1012,32 +1020,26 @@ mod tests {
     /// just interrupted was never offered. Newest first.
     #[test]
     fn interrupted_jobs_come_newest_first() {
-        let d = dir("newest");
-        let old = d.join(format!("{DEAD}-0.journal"));
-        let new = d.join(format!("{DEAD}-1.journal"));
-        for (p, src) in [(&old, "old-src"), (&new, "new-src")] {
-            let text = format!(
-                "host {}\nkind copy\nsrc {}\n",
-                enc(Path::new(&hostname())),
-                enc(&d.join(src))
-            );
-            fs::write(p, text).unwrap();
+        // (seconds of the journal named -0, of the one named -1) → the first offered.
+        for (tag, t0, t1, first) in [("newest-a", 1, 2, "src1"), ("newest-b", 2, 1, "src0")] {
+            let d = dir(tag);
+            for (n, secs) in [(0, t0), (1, t1)] {
+                let p = d.join(format!("{DEAD}-{n}.journal"));
+                let text = format!(
+                    "host {}\nkind copy\nsrc {}\n",
+                    enc(Path::new(&hostname())),
+                    enc(&d.join(format!("src{n}")))
+                );
+                fs::write(&p, text).unwrap();
+                let f = fs::File::options().write(true).open(&p).unwrap();
+                let at = std::time::Duration::from_secs(1_700_000_000 + secs * 1000);
+                f.set_modified(std::time::UNIX_EPOCH + at).unwrap();
+            }
+            let got = recover_in(&d);
+            assert_eq!(got.len(), 2, "{tag}");
+            assert_eq!(got[0].sources[0], d.join(first), "{tag}: newest first");
+            let _ = fs::remove_dir_all(&d);
         }
-        let at = |p: &Path, secs: u64| {
-            let f = fs::File::options().write(true).open(p).unwrap();
-            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
-                .unwrap();
-        };
-        at(&old, 1_700_000_000);
-        at(&new, 1_800_000_000);
-        let got = recover_in(&d);
-        let firsts: Vec<_> = got.iter().map(|i| i.sources[0].clone()).collect();
-        assert_eq!(firsts, vec![d.join("new-src"), d.join("old-src")]);
-        // And the other way round: the order is the dates', not the names'.
-        at(&old, 1_900_000_000);
-        let got = recover_in(&d);
-        assert_eq!(got[0].sources[0], d.join("old-src"));
-        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

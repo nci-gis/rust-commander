@@ -1361,6 +1361,48 @@ fn two_interrupted_jobs_the_newest_first_and_the_other_said() {
     assert_eq!(std::fs::read_to_string(dst.join("older.txt")).unwrap(), "o");
 }
 
+/// The owner, 2026-11-17: an interrupted job can be forgotten for good (F), not only
+/// put off (Esc): nothing more is done, what it copied stays, and the next start does
+/// not ask again.
+#[test]
+fn f_forgets_an_interrupted_job() {
+    let s = Scratch::new("forget");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "a").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    std::fs::write(dst.join("a.txt"), "a").unwrap(); // copied before the kill
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst)
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("F forgets it");
+    x.send(b"f");
+    x.wait_for("forgotten");
+    x.quit();
+    assert!(!dst.join("b.txt").exists(), "nothing more is done");
+    assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "a");
+    assert_eq!(
+        std::fs::read_dir(&journal).unwrap().count(),
+        0,
+        "not asked again"
+    );
+    let mut x = Session::start(&s, None);
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(!x.screen().contains("Interrupted"), "{}", x.screen());
+    x.quit();
+}
+
 /// B2: the Interrupted dialog offers C, a checked continue. A copy left with the right
 /// size and date and no data (a power cut) is read with its source and copied again.
 #[cfg(unix)]

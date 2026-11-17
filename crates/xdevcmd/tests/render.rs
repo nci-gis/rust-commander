@@ -5566,6 +5566,31 @@ fn a_folder_copied_onto_a_link_to_a_folder_writes_nothing_through_it() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// QA 2026-11-17 (P0): F6 on the same drive replacing a file sent the old one nowhere:
+/// renamed over, gone for good, while the table said "a file replaced goes to the
+/// trash". The old file must be in the trash, as with F5. Linux only, as above.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_a_move_replaces_goes_to_the_trash() {
+    let (a, b) = planned_trees();
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let old = format!("old body of a moved-over file {n} {}", std::process::id());
+    aged(&b.join("older.txt"), &old, 3600);
+    let s = shot_keys("118x34", "*,F6,Down,Space", &a, &b);
+    assert!(s.contains("a file replaced goes to the trash"), "{s}");
+    let s = shot_keys("118x34", "*,F6,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert!(!a.join("older.txt").exists(), "moved\n{s}");
+    let trash = scratch("isolation").join("data/Trash/files");
+    let kept = fs::read_dir(&trash)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t == old));
+    assert!(kept, "the replaced file is not in the trash\n{s}");
+    assert!(s.contains("(the old one in the trash)"), "{s}");
+}
+
 /// Plan A10's key table: the first day's tasks, each done by its keys on a fresh pair of
 /// folders, never needing more keys than beta.1 did (measured on the v0.4.0-beta.1 build
 /// with the same keys, 2026-11-17). `wait` lets a job finish and is not a key. The

@@ -592,6 +592,12 @@ pub fn tamper(root: &Path) -> io::Result<PathBuf> {
     {
         let copy = copy_to.join(&l.rel);
         let src = root.join(&l.rel);
+        // Every folder from the sandbox down to the copy its own, never a link (the
+        // red-team of the reset fix: a linked folder let it zero a file outside).
+        let parent = Path::new(&l.rel).parent().unwrap_or(Path::new(""));
+        if own_dir(root, &format!("copy-to/{}", parent.display())).is_err() {
+            continue;
+        }
         let Ok(m) = fs::symlink_metadata(&copy) else {
             continue;
         };

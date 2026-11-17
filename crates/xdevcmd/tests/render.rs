@@ -5570,6 +5570,63 @@ fn a_rename_keeps_the_bytes_of_a_name_it_did_not_change() {
     assert_eq!(bytes(&a), vec![b"a\xff-new".to_vec()], "Shift+F2\n{s}");
 }
 
+/// QA 2026-11-17 (P0): a folder copied onto a name that is a link to a folder elsewhere.
+/// The table says "⛔ folder where a file is: skipped, never replaced"; the copy went
+/// through the link anyway and wrote outside the destination. What the table shows is
+/// what happens: nothing is written through the link. Unix: Windows' links need rights.
+#[cfg(unix)]
+#[test]
+fn a_folder_copied_onto_a_link_to_a_folder_writes_nothing_through_it() {
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let root = scratch(&format!("link-dest-{n}"));
+    let _ = fs::remove_dir_all(&root);
+    let (a, b, outside) = (root.join("a"), root.join("b"), root.join("outside"));
+    fs::create_dir_all(a.join("d")).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(a.join("d/new.txt"), "new").unwrap();
+    fs::write(outside.join("kept.txt"), "kept").unwrap();
+    std::os::unix::fs::symlink("../outside", b.join("d")).unwrap();
+    let s = shot_keys("118x34", "Ctrl+a,F5", &a, &b);
+    assert!(s.contains("skipped, never replaced"), "the table\n{s}");
+    let s = shot_keys("118x34", "Ctrl+a,F5,Enter,wait", &a, &b);
+    let mut there: Vec<_> = fs::read_dir(&outside)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    there.sort();
+    assert_eq!(there, vec!["kept.txt"], "written through the link\n{s}");
+    assert!(b.join("d").symlink_metadata().unwrap().is_symlink());
+    assert!(s.contains("1 skipped"), "the summary says so\n{s}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// QA 2026-11-17 (P0): F6 on the same drive replacing a file sent the old one nowhere:
+/// renamed over, gone for good, while the table said "a file replaced goes to the
+/// trash". The old file must be in the trash, as with F5. Linux only, as above.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_a_move_replaces_goes_to_the_trash() {
+    let (a, b) = planned_trees();
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let old = format!("old body of a moved-over file {n} {}", std::process::id());
+    aged(&b.join("older.txt"), &old, 3600);
+    let s = shot_keys("118x34", "*,F6,Down,Space", &a, &b);
+    assert!(s.contains("a file replaced goes to the trash"), "{s}");
+    let s = shot_keys("118x34", "*,F6,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert!(!a.join("older.txt").exists(), "moved\n{s}");
+    let trash = scratch("isolation").join("data/Trash/files");
+    let kept = fs::read_dir(&trash)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t == old));
+    assert!(kept, "the replaced file is not in the trash\n{s}");
+    assert!(s.contains("(the old one in the trash)"), "{s}");
+}
+
 /// Plan A10's key table: the first day's tasks, each done by its keys on a fresh pair of
 /// folders, never needing more keys than beta.1 did (measured on the v0.4.0-beta.1 build
 /// with the same keys, 2026-11-17). `wait` lets a job finish and is not a key. The

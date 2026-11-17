@@ -1840,12 +1840,20 @@ impl Worker {
                 return;
             }
             let failed_before = self.sum.failed;
-            let made = dst.symlink_metadata().is_err();
-            // #5: a folder never replaces a file (a link to a folder is a folder here,
-            // as before: the copy goes into it).
-            if !made && !dst.is_dir() {
+            let there = dst.symlink_metadata();
+            let made = there.is_err();
+            // #5: a folder never replaces a file, and a link is a file here, as the
+            // plan, a move and Alt+Y take it: the table says "skipped", and nothing is
+            // written through the link to wherever it points (QA 2026-11-17, P0; before,
+            // the copy went into the link's folder).
+            if let Some(m) = there.as_ref().ok().filter(|m| !m.is_dir()) {
                 self.sum.skipped += 1;
-                self.note_skip(dst, "is a file \u{2014} a folder never replaces it");
+                let why = if m.is_symlink() {
+                    "is a link \u{2014} not copied through; open it to copy into it"
+                } else {
+                    "is a file \u{2014} a folder never replaces it"
+                };
+                self.note_skip(dst, why);
                 return;
             }
             if let Err(e) = fs::create_dir_all(dst) {
@@ -2789,7 +2797,7 @@ impl Worker {
                 self.approved = None;
                 continue;
             } else {
-                fs::rename(src, &dst)
+                self.move_over(src, &dst)
             };
             match r {
                 Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -2842,6 +2850,40 @@ impl Worker {
             }
         }
         self.approved = None;
+    }
+
+    /// A move by rename over an existing `dst` the user agreed to replace. Where the
+    /// trash is on its volume, a file there goes to the trash first, as a copy's does
+    /// (Round 031); then `src` takes the name only if it is still free. A rename that
+    /// fails puts the old file back, so the cross-drive fallback (EXDEV) and any error
+    /// leave both files as they were. Before (QA 2026-11-17, P0) the rename replaced the
+    /// old file for good. A folder there is never sent: #5 refuses a file over a folder,
+    /// and a folder onto a folder is not a replacement (the rename fails, nothing lost).
+    fn move_over(&mut self, src: &Path, dst: &Path) -> io::Result<()> {
+        let old_is_file = dst.symlink_metadata().is_ok_and(|m| !m.is_dir());
+        if !old_is_file || !self.replace_into_trash(dst) {
+            return fs::rename(src, dst);
+        }
+        let t = crate::faults::at(crate::faults::Point::Trash, dst)
+            .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
+            .map_err(|e| {
+                io::Error::new(
+                    e.kind(),
+                    format!("the old file could not go to the trash: {e}"),
+                )
+            })?;
+        let r = crate::faults::at(crate::faults::Point::Rename, dst)
+            .and_then(|()| crate::noreplace::rename_noreplace(src, dst));
+        match r {
+            Ok(()) => {
+                self.sum.replaced_to_trash += 1;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = crate::trashed::restore(&t);
+                Err(e)
+            }
+        }
     }
 
     // ── delete ─────────────────────────────────────────────────────────────────────
@@ -3896,6 +3938,62 @@ mod tests {
         assert_eq!(fs::read_to_string(d.join("to").join(&tag)).unwrap(), "old");
         let left: Vec<_> = fs::read_dir(d.join("to")).unwrap().flatten().collect();
         assert_eq!(left.len(), 1, "no temporary file left: {left:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// QA 2026-11-17 (P0): a move by rename over a file sends the old file to the trash;
+    /// the rename failing after that puts it back, and the source stays where it was.
+    #[test]
+    fn a_move_over_a_file_trashes_the_old_one_and_a_failed_rename_puts_it_back() {
+        let d = tmp("move-over-trash");
+        let tag = format!("xmot-{}", std::process::id());
+        let setup = || {
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(d.join("src")).unwrap();
+            fs::create_dir_all(d.join("to")).unwrap();
+            fs::write(d.join("src").join(&tag), "new contents").unwrap();
+            fs::write(d.join("to").join(&tag), "old").unwrap();
+        };
+        let trashed = || -> Vec<String> {
+            fs::read_dir(d.join("trash/files"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| fs::read_to_string(e.path()).ok())
+                .collect()
+        };
+        let req = || {
+            let mut r = Request::mv(vec![d.join("src").join(&tag)], d.join("to"));
+            r.trash_root = Some(d.join("trash"));
+            r.existing = Existing::Replace;
+            r
+        };
+
+        setup();
+        let (s, _) = run_with(req(), Answer::Skip);
+        assert_eq!((s.done, s.replaced_to_trash), (1, 1), "{s:?}");
+        assert_eq!(
+            fs::read_to_string(d.join("to").join(&tag)).unwrap(),
+            "new contents"
+        );
+        assert!(!d.join("src").join(&tag).exists());
+        assert_eq!(trashed(), vec!["old".to_string()]);
+
+        setup();
+        let _f = crate::faults::fail(
+            crate::faults::Point::Rename,
+            &tag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let (s, _) = run_with(req(), Answer::Skip);
+        assert_eq!(s.replaced_to_trash, 0, "{s:?}");
+        assert_eq!(fs::read_to_string(d.join("to").join(&tag)).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(d.join("src").join(&tag)).unwrap(),
+            "new contents"
+        );
+        assert!(trashed().is_empty(), "{:?}", trashed());
         let _ = fs::remove_dir_all(&d);
     }
 

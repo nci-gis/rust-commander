@@ -705,13 +705,28 @@ fn pid_alive(run: &str) -> bool {
 /// the part files, both names of each rename — is inside `policy`'s root. A file that is
 /// gone is judged by its directory.
 fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
-    let inside = |p: &Path| policy.allows(p) || p.parent().is_some_and(|d| policy.allows(d));
+    if policy.root.is_none() {
+        return true;
+    }
+    // A path that is gone may lean on its parent; one that exists answers for
+    // itself, so a link in the root that leads out of it is outside (RR03).
+    let inside = |p: &Path| {
+        policy.allows(p)
+            || (fs::symlink_metadata(p).is_err() && p.parent().is_some_and(|d| policy.allows(d)))
+    };
+    // Every path a line names, not only the ones tidy touches: a journal that
+    // reaches outside is left whole and not offered (RR02).
     text.lines().all(|line| {
         let mut w = line.split(' ');
-        match w.next() {
-            Some("dir" | "part" | "ren" | "swap") => w.filter_map(dec).all(|p| inside(&p)),
-            _ => true,
-        }
+        let paths = match w.next() {
+            Some(
+                "src" | "dest" | "dir" | "part" | "gone" | "unren" | "skip" | "replace" | "done",
+            ) => 1,
+            Some("ren" | "moved" | "swap") => 2,
+            Some("ckpt") => 3,
+            _ => 0,
+        };
+        w.take(paths).all(|t| dec(t).is_some_and(|p| inside(&p)))
     })
 }
 

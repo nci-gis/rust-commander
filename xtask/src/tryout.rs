@@ -1087,6 +1087,43 @@ mod tests {
         let _ = fs::remove_dir_all(&t);
     }
 
+    /// Red-team of the reset fix (P1, reproduced): `--tamper` checked only copy-to and
+    /// the file, so a folder link between them (copy-to/tree, or a folder in it) let it
+    /// zero a file outside the sandbox. Only a copy whose every folder is the sandbox's
+    /// own is tampered with.
+    #[cfg(unix)]
+    #[test]
+    fn tamper_never_writes_through_a_folder_link() {
+        use std::os::unix::fs::symlink;
+        let t = top("tamper-links");
+        let root = t.join(NAME);
+        make(&root, TINY, "test").unwrap();
+        let outside = t.join("outside");
+        copy_tree(&root.join("tree"), &outside.join("tree"));
+        symlink(outside.join("tree"), root.join("copy-to/tree")).unwrap();
+        assert!(tamper(&root).is_err(), "copy-to/tree a link");
+        fs::remove_file(root.join("copy-to/tree")).unwrap();
+        // A folder inside copy-to/tree a link.
+        fs::create_dir(root.join("copy-to/tree")).unwrap();
+        for e in fs::read_dir(outside.join("tree")).unwrap().flatten() {
+            symlink(e.path(), root.join("copy-to/tree").join(e.file_name())).unwrap();
+        }
+        assert!(tamper(&root).is_err(), "a folder in copy-to/tree a link");
+        let r = check(&root.clone()).unwrap();
+        assert!(!r.text().contains("FAIL"), "{}", r.text());
+        for e in fs::read_dir(outside.join("tree")).unwrap().flatten() {
+            for f in fs::read_dir(e.path()).unwrap().flatten() {
+                let b = fs::read(f.path()).unwrap();
+                assert!(
+                    b.iter().any(|&x| x != 0),
+                    "zeroed outside: {}",
+                    f.path().display()
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&t);
+    }
+
     /// A manifest cut, emptied or changed is an error: never a PASS for everything
     /// (red-team: an emptied one passed with replace-dst deleted).
     #[test]

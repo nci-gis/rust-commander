@@ -287,7 +287,9 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
 1. **Try the rules first** (nothing is built): Actions → release → Run workflow, with
    the tag to be (or `gh workflow run release --ref dev -f tag=v0.4.0-beta.1`). Before
    step 2 it fails on the version and the CHANGELOG, as it should; the branch rule is
-   what this tries. Locally: `scripts/release-check.sh v0.4.0-beta.1 origin/dev`.
+   what this tries. Locally, with `dev` checked out and pulled:
+   `scripts/release-check.sh v0.4.0-beta.1 HEAD` (another commit than the one checked
+   out is refused).
 2. **On `dev`**, the version and the dated notes, never published:
 
    ```bash

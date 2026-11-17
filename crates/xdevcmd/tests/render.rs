@@ -5565,3 +5565,83 @@ fn a_folder_copied_onto_a_link_to_a_folder_writes_nothing_through_it() {
     assert!(s.contains("1 skipped"), "the summary says so\n{s}");
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Plan A10's key table: the first day's tasks, each done by its keys on a fresh pair of
+/// folders, never needing more keys than beta.1 did (measured on the v0.4.0-beta.1 build
+/// with the same keys, 2026-11-17). `wait` lets a job finish and is not a key. The
+/// refusals' own round trips, and F8 while a folder opens, are in pty.rs.
+#[test]
+fn key_table_first_day_tasks_need_no_more_keys_than_beta_1() {
+    type Check = fn(&std::path::Path, &std::path::Path, &str) -> bool;
+    let rows: [(&str, &str, usize, Check); 5] = [
+        ("copy a file", "Down,F5,Enter,wait", 3, |_, b, _| {
+            b.join("victim.txt").exists()
+        }),
+        ("delete to the trash", "Down,F8,Enter,wait", 3, |a, _, _| {
+            !a.join("victim.txt").exists()
+        }),
+        (
+            "delete from a list (Alt+F7's results)",
+            "Alt+F7,v,i,c,*,Enter,End,F8,Enter,wait",
+            9,
+            |a, _, _| !a.join("victim.txt").exists(),
+        ),
+        (
+            "cd the shell here, its line empty",
+            "Alt+c",
+            1,
+            |_, _, s| !cfg!(unix) || status(s).contains("shell: cd"),
+        ),
+        (
+            "find a command and run it (F1)",
+            "F1,s,y,n,c,Enter",
+            6,
+            |_, _, s| s.contains("Synchronise \u{b7}"),
+        ),
+    ];
+    let mut table = String::new();
+    for (task, keys, beta1, check) in rows {
+        let (a, b) = fixture();
+        let s = shot_keys("110x24", keys, &a, &b);
+        let n = keys.split(',').filter(|k| *k != "wait").count();
+        table.push_str(&format!("{task}: {n} keys (beta.1: {beta1})\n"));
+        assert!(check(&a, &b, &s), "{task} not done by {keys}\n{s}");
+        assert!(n <= beta1, "{task}: {n} keys, beta.1 needed {beta1}");
+        let _ = fs::remove_dir_all(a.parent().unwrap());
+    }
+    eprintln!("{table}");
+}
+
+/// The key table's dead ends: a key that does nothing here names the one that does.
+/// Ctrl+O (mc's shell key) says F12. F8 while a folder opens is in pty.rs (the screenshot
+/// waits for slow folders, so it cannot refuse there).
+#[test]
+fn key_table_dead_ends_say_what_to_press() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Ctrl+o", &a, &b);
+    assert!(status(&s).contains("F12"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// The key table's footer row, Linux only: a click on the F-key bar's `8` does what F8
+/// does (its question, then Enter).
+#[cfg(target_os = "linux")]
+#[test]
+fn key_table_a_click_on_the_key_bar_does_what_the_key_does() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "", &a, &b);
+    let last = s.lines().count() - 1;
+    let bar = s.lines().nth(last).unwrap();
+    let x = bar[..bar.find("8 Del").expect("the key bar")]
+        .chars()
+        .count()
+        + 1;
+    let s = shot_keys(
+        "110x24",
+        &format!("Down,click:{x}:{last},Enter,wait"),
+        &a,
+        &b,
+    );
+    assert!(!a.join("victim.txt").exists(), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}

@@ -210,11 +210,13 @@ impl Event {
         self
     }
 
+    /// A short token: letters, digits and `_ . - +` (a key name such as `Ctrl+C`), at
+    /// most 40; anything else is dropped, so no quote or name gets in.
     pub fn word(mut self, k: &str, v: &str) -> Self {
         let clean: String = v
             .chars()
             .map(|c| if c == ' ' || c == ',' { '_' } else { c })
-            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '+'))
             .take(40)
             .collect();
         let _ = write!(self.line, ",\"{k}\":\"{clean}\"");
@@ -317,6 +319,17 @@ mod tests {
             e.line,
             ",\"w\":\"homesomeoneSecret_Report.pdf\",\"x\":\"CUserssomeonea.txt\""
         );
+    }
+
+    /// A refusal's next key keeps its `+`: the log names a key that can be pressed.
+    #[test]
+    fn a_word_keeps_a_key_name() {
+        let e = Event {
+            line: String::new(),
+        }
+        .word("next", "Ctrl+C")
+        .word("q", "a\"b");
+        assert_eq!(e.line, ",\"next\":\"Ctrl+C\",\"q\":\"ab\"");
     }
 
     #[test]

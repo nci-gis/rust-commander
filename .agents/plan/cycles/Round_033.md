@@ -1008,6 +1008,42 @@ A against itself moved up to 7 %, so only plan 10,000 stands out: about 1.6 ms m
 under the ±15 % block, inside the 5–15 % band. By plan A10's rule: "slower by" in the
 notes and an rc.1 issue. The gate is the owner's laptop run (D0), not this one.
 
+### 4b. D0 speed A/B, the owner's Windows 11 laptop, C:\tmp (2026-11-17) — the gate
+
+xtask at ad065d5 (A) and 5574138 (B), `--only` per case, one host name per case; pass 2
+with the sides swapped. Medians; "B vs A" positive = B slower.
+
+| Case | A | B | pass 1 | B (pass 2) | A (pass 2) | pass 2 |
+|---|---|---|---|---|---|---|
+| plan 10,000 | 18.7 ms | 13.6 ms | −27 % | 14.3 ms | 14.7 ms | −3 % |
+| plan 100,000 | 137 ms | 148 ms | +8 % | 134 ms | 132 ms | +2 % |
+| plan 200,000 | 291 ms | 264 ms | −9 % | 270 ms | 268 ms | +1 % |
+| list 10,000 | 215 ms | 219 ms | +2 % | 203 ms | 218 ms | −7 % |
+| list 100,000 | 4.49 s | 4.44 s | −1 % | 4.33 s | 4.23 s | +2 % |
+| mixed (large + small files) | 12.13 s | 12.15 s | 0 % | 11.29 s | 11.20 s | +1 % |
+
+**Gate: passes.** No case is slower past 15 % in both passes; the largest is plan 100,000
+(+8 %, then +2 %), inside run-to-run noise. Linux's plan 10,000 (+10 %, §4) is not seen
+here (−27 %, −3 %): no "slower by" line for Windows. Results: the owner's
+`C:\tmp\xdevcmd-d0\bench\` (each pass's results file was overwritten by the other side's
+run of the same host name and date; baselines kept both sides).
+
+### 4c. D0 speed A/B, the owner's Mac (Intel), ~/tmp (2026-11-17)
+
+Same method as §4b; xtask cross-built for x86_64 (bench runs 44024783112, 44024785855).
+
+| Case | A | B | pass 1 | B (pass 2) | A (pass 2) | pass 2 |
+|---|---|---|---|---|---|---|
+| plan 10,000 | 88.7 ms | 63.7 ms | −28 % | 68.5 ms | 65.7 ms | +4 % |
+| plan 100,000 | 667 ms | 700 ms | +5 % | 659 ms | 666 ms | −1 % |
+| plan 200,000 | 1.37 s | 1.29 s | −5 % | 1.32 s | 1.30 s | +2 % |
+| list 10,000 | 72.9 ms | 71.1 ms | −2 % | 69.4 ms | 76.3 ms | −9 % |
+| list 100,000 | 767 ms | 858 ms | +12 % | 774 ms | 832 ms | −7 % |
+| mixed (large + small files) | 2.75 s | 2.66 s | −4 % | 2.42 s | 2.50 s | −3 % |
+
+**Gate: passes.** No case is slower past 15 % in both passes; list 100,000 (+12 %, then
+−7 %) swings both ways, so it is noise, not a regression. No "slower by" line for macOS.
+
 ### 5. Flaky tests, for the cut
 
 | Test | Seen | State |
@@ -1029,8 +1065,7 @@ for sh/bash/zsh; plan 10,000 ≈ 10 % slower on Linux.
 
 ### 7. Still to do before the cut
 
-- **owner**: D0 speed A/B on the Windows laptop (side A: bench run 43885854166, side B:
-  bench run 44009694319), two passes.
+- **owner**: D0 done on Windows (§4b) and macOS Intel (§4c): both pass.
 - **owner**: manual cases, at least M-DS-01..07 on macOS and Windows, one line each here.
 - **owner**: read this Check, then the go for the cut (PR feat → dev, `cargo release`,
   tag, notes, verify the six `xdevcmd-bench-*` assets).

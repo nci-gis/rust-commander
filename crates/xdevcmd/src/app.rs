@@ -968,7 +968,7 @@ mod tests {
             path: dir.clone(),
             trusted: false,
         };
-        assert_eq!(words(Some(trusted)), "'a b' 'c' ");
+        assert_eq!(words(Some(trusted)), "a\\ b c ");
         let full = words(Some(reported));
         assert!(full.contains("xdevcmd-bare-names"), "{full}");
         assert_eq!(full, words(None));
@@ -990,7 +990,7 @@ mod tests {
         let paths = vec![link.join("a b")];
         assert_eq!(
             name_words("bash", &paths, Some(&shell_dir)).unwrap(),
-            "'a b' "
+            "a\\ b "
         );
         let elsewhere = name_words("bash", &paths, Some(&top)).unwrap();
         assert!(elsewhere.contains("link"), "{elsewhere}");

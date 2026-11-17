@@ -299,8 +299,11 @@ permissions, and xdevcmd says so when others can read it. A link, FIFO or device
 name is refused, and so is another user's file (Unix). Off in the read-only modes;
 nothing is logged unless you ask, per tab.
 
-**What is typed** is always quoted for the shell (`safety.rs`); a name with a control
-character, or one that shell cannot be given safely, is refused whole. Names are wrapped
+**What is typed** is always quoted for the shell (`safety.rs`): for sh, bash and zsh each
+character the shell acts on gets its own backslash, so a name stays text even inside a
+quote or here-doc left open on your line. A name with a control character, or one that
+shell cannot be given safely ([shell.md](shell.md#before-anything-is-typed-into-the-shell)),
+is refused whole. Names are wrapped
 in bracketed paste when the shell asks for it, so its line editor takes them as text.
 Only `cd` (Alt+C) and your own commands end with Enter.
 

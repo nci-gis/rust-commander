@@ -2628,11 +2628,13 @@ fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
 #[cfg(unix)]
 #[test]
 fn what_is_typed_into_an_open_quote_never_runs_a_name() {
-    let cases: [(&[u8], &str, &[u8], &[u8]); 4] = [
+    type Case<'a> = (&'a [u8], &'a str, &'a [u8], &'a [u8]);
+    let cases: [Case; 4] = [
         (b"echo \"\r", "$(touch PWNED)", ALT_C, b"\"\r"),
         (b"cat <<EOF\r", "$(touch PWNED)", ALT_C, b"EOF\r"),
         (b"echo \"\r", "d\";touch PWNED;\"", ALT_C, b"\"\r"),
-        (b"echo '\r", "q';touch PWNED;'", ALT_C, b"'\r"),
+        // The name's own `'` ends the quote; the rest of it is escaped, so no closer.
+        (b"echo '\r", "q';touch PWNED;'", ALT_C, b""),
     ];
     for (open, name, key, close) in cases {
         let s = Scratch::new("open-quote");
@@ -2954,8 +2956,8 @@ fn alt_enter_types_the_marked_names_quoted_without_running_them() {
     xdevcmd.send(INSERT);
     xdevcmd.send(INSERT);
     xdevcmd.send(ALT_ENTER);
-    // The shell is in the names' directory: bare names, quoted, a space after, no Enter.
-    xdevcmd.wait_for("$ 'a b' 'it'\\''s' ");
+    // The shell is in the names' directory: bare names, escaped, a space after, no Enter.
+    xdevcmd.wait_for("$ a\\ b it\\'s ");
     std::thread::sleep(Duration::from_millis(300));
     let screen = xdevcmd.screen();
     let prompts = screen.lines().filter(|l| l.contains("$ ")).count();
@@ -2968,7 +2970,7 @@ fn alt_enter_types_the_marked_names_quoted_without_running_them() {
     xdevcmd.send(b"\x1b[H"); // Home: the cursor on ..
     xdevcmd.send(DOWN); // on "a b", with the marks still on both
     xdevcmd.send(ALT_ENTER);
-    let full = format!("'{}' ", s.left().join("a b").display());
+    let full = format!("{} ", s.left().join("a b").display()).replace("a b", "a\\ b");
     xdevcmd.wait_for(&full);
     xdevcmd.send(F12);
     xdevcmd.send(b"\x15");
@@ -3001,8 +3003,8 @@ fn alt_enter_types_nothing_into_a_running_program() {
     xdevcmd.wait_for("[Enter] open a new shell");
     xdevcmd.send(ENTER);
     xdevcmd.wait_for("\u{2302} 2");
-    xdevcmd.wait_for("$ 'a b' ");
-    xdevcmd.wait_for("new shell: 'a b'");
+    xdevcmd.wait_for("$ a\\ b ");
+    xdevcmd.wait_for("new shell: a\\ b");
     let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
     assert!(typed.is_empty(), "cat got {typed:?}");
     xdevcmd.quit();
@@ -3020,7 +3022,7 @@ fn typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it() {
     let script = s.file(
         "paste.sh",
         &format!(
-            "#!/bin/sh\nprintf '\\033[?2004h'\nstty raw -echo\nhead -c 18 > '{}'\nsleep 30\n",
+            "#!/bin/sh\nprintf '\\033[?2004h'\nstty raw -echo\nhead -c 17 > '{}'\nsleep 30\n",
             out.display()
         ),
     );
@@ -3044,8 +3046,8 @@ fn typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it() {
     let start = Instant::now();
     loop {
         let got = std::fs::read(&out).unwrap_or_default();
-        if got.len() >= 18 {
-            assert_eq!(got, b"\x1b[200~'a b' \x1b[201~".to_vec());
+        if got.len() >= 17 {
+            assert_eq!(got, b"\x1b[200~a\\ b \x1b[201~".to_vec());
             break;
         }
         assert!(start.elapsed() < PATIENCE, "got {got:?}");

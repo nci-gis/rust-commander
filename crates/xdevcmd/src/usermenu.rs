@@ -107,8 +107,8 @@ mod tests {
         c.current = Some(PathBuf::from("/w/-rf"));
         c.selection = vec![PathBuf::from("/w/-n"), PathBuf::from("/w/c")];
         let sep = std::path::MAIN_SEPARATOR;
-        assert_eq!(expand("rm %f", &c).unwrap(), format!("rm '.{sep}-rf'"));
-        assert_eq!(expand("ls %s", &c).unwrap(), format!("ls '.{sep}-n' 'c'"));
+        assert_eq!(expand("rm %f", &c).unwrap(), format!("rm .{sep}-rf"));
+        assert_eq!(expand("ls %s", &c).unwrap(), format!("ls .{sep}-n c"));
         // As typed names do: the same rule, the same place.
         assert_eq!(
             expand("rm %f", &c).unwrap(),
@@ -133,11 +133,11 @@ mod tests {
     fn placeholders_are_quoted_for_the_shell() {
         assert_eq!(
             expand("cp %S %D", &cx("bash")).unwrap(),
-            "cp '/w/a b' '/w/c' '/x'"
+            "cp /w/a\\ b /w/c /x"
         );
         assert_eq!(
             expand("echo %f 100%%", &cx("bash")).unwrap(),
-            "echo 'it'\\''s.txt' 100%"
+            "echo it\\'s.txt 100%"
         );
         assert_eq!(expand("echo %f", &cx("pwsh")).unwrap(), "echo 'it''s.txt'");
     }

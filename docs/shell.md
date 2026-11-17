@@ -86,12 +86,16 @@ xdevcmd never types into a running program. Alt+C, Alt+Enter and your own comman
   seconds, the shell stays open and nothing is typed (the status line says so).
 - **"Typed and not run"** means any key since your last Enter or Ctrl+C (Linux, macOS);
   a line ending in `\` counts. After `q` in less, or erased text, press Enter once.
-  Not seen: an open quote or an unfinished `for … end` (the command lands inside it,
-  harmlessly).
+  Not seen: an open quote, a here-doc or an unfinished `for … end`: the command lands
+  inside it as text, and a name in it never runs (each character a shell acts on is
+  escaped). Nor is a program built into the shell that reads a line, such as bash's
+  `read -s`: the shell looks idle and Alt+C is typed as its answer; the prompt marks
+  ([below](#telling-xdevcmd-where-the-shell-is)) show it as busy.
 - **With every shell tab in use**, nothing is typed and the status line says to press
   Ctrl+C there.
 - **Refused before any question**: a name with a control character, or one your shell
-  cannot be given safely (`%` for cmd).
+  cannot be given safely: `%`, `"`, `!` or `^` for cmd; `$(` or `"` for fish; `$(` or a
+  typographic double quote for PowerShell.
 - **Over 4000 bytes** always asks first, even at an idle prompt: dash, sh and cmd drop a
   line longer than about 4 KB without a word.
 - **How xdevcmd knows**: from the system on Linux (`/proc`) and macOS (`ps`); a program

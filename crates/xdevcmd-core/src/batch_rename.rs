@@ -49,7 +49,8 @@ pub fn plan(paths: &[PathBuf], edited: &str) -> Result<Vec<(PathBuf, PathBuf)>, 
         }
         validate_name(line).map_err(|e| format!("{line:?}: {e}"))?;
         let dir = p.parent().unwrap_or(Path::new("."));
-        moves.push((p.clone(), dir.join(line)));
+        let name = crate::rename::keep_bytes(p.file_name().unwrap_or_default(), line);
+        moves.push((p.clone(), dir.join(name)));
     }
     // Two files given one name, compared without case: on Windows and macOS they
     // are the same file, and refusing everywhere keeps a plan meaning one thing.

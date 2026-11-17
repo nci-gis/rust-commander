@@ -5534,6 +5534,42 @@ fn a_copy_with_nothing_to_decide_is_the_dialog_it_always_was() {
     }
 }
 
+/// QA 2026-11-17 (P1): a name that is not UTF-8 is kept exactly (guide.md, "File
+/// names"), also through a rename that changes another part of it: F2 adding "X", and
+/// Shift+F2 with `[N]-new`. Before, the byte shown as `�` became U+FFFD on disk.
+/// Linux: macOS and Windows names are always text.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_rename_keeps_the_bytes_of_a_name_it_did_not_change() {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = |p: &std::path::Path| -> Vec<Vec<u8>> {
+        let mut v: Vec<_> = fs::read_dir(p)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().as_bytes().to_vec())
+            .collect();
+        v.sort();
+        v
+    };
+    let (a, b) = fixture();
+    fs::remove_file(a.join("victim.txt")).unwrap();
+    let odd = std::ffi::OsStr::from_bytes(b"a\xff");
+    fs::write(a.join(odd), "x").unwrap();
+    let s = shot_keys("110x24", "Down,F2,End,X,Enter", &a, &b);
+    assert_eq!(bytes(&a), vec![b"a\xffX".to_vec()], "F2\n{s}");
+
+    let (a, b) = fixture();
+    fs::remove_file(a.join("victim.txt")).unwrap();
+    fs::write(a.join(odd), "x").unwrap();
+    let s = shot_keys(
+        "110x24",
+        "Down,Insert,S-F2,Ctrl+u,[,N,],-,n,e,w,Enter,wait",
+        &a,
+        &b,
+    );
+    assert_eq!(bytes(&a), vec![b"a\xff-new".to_vec()], "Shift+F2\n{s}");
+}
+
 /// QA 2026-11-17 (P0): a folder copied onto a name that is a link to a folder elsewhere.
 /// The table says "⛔ folder where a file is: skipped, never replaced"; the copy went
 /// through the link anyway and wrote outside the destination. What the table shows is

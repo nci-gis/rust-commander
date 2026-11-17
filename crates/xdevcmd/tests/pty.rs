@@ -2629,12 +2629,15 @@ fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
 #[test]
 fn what_is_typed_into_an_open_quote_never_runs_a_name() {
     type Case<'a> = (&'a [u8], &'a str, &'a [u8], &'a [u8]);
-    let cases: [Case; 4] = [
+    let cases: [Case; 5] = [
         (b"echo \"\r", "$(touch PWNED)", ALT_C, b"\"\r"),
         (b"cat <<EOF\r", "$(touch PWNED)", ALT_C, b"EOF\r"),
         (b"echo \"\r", "d\";touch PWNED;\"", ALT_C, b"\"\r"),
         // The name's own `'` ends the quote; the rest of it is escaped, so no closer.
         (b"echo '\r", "q';touch PWNED;'", ALT_C, b""),
+        // Red-team: inside an open backtick a backslash is taken off, so a backtick in
+        // the name came alive. Such a name is refused: nothing typed, nothing runs.
+        (b"echo `echo\r", "a`touch$IFS.PWNED`", ALT_C, b"`\r"),
     ];
     for (open, name, key, close) in cases {
         let s = Scratch::new("open-quote");
@@ -2655,7 +2658,7 @@ fn what_is_typed_into_an_open_quote_never_runs_a_name() {
         x.wait_for("closed-42");
         let pwned: Vec<_> = walk(&s.0)
             .into_iter()
-            .filter(|p| p.file_name().is_some_and(|n| n == "PWNED"))
+            .filter(|p| p.file_name().is_some_and(|n| n == "PWNED" || n == ".PWNED"))
             .collect();
         assert!(pwned.is_empty(), "{name:?} ran:\n{}", x.screen());
         x.send(F12);

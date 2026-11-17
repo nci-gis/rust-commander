@@ -13,7 +13,10 @@ You need two terminal windows, about 4 GiB free disk, and no Rust.
 your system: this version's `xdevcmd-…` archive; the previous version's (the release
 just below it on that page: for 0.4.0-beta.2, 0.4.0-beta.1), to compare with; and this
 version's `xdevcmd-bench-…` (it holds `xtask`, the test tool; `xtask --help`). Unpack
-each into a folder of its own. The builds are not signed: the first start may need
+each into a folder of its own. No `xdevcmd-bench-…` for your system? Its build failed
+for that release, and the release notes say so. With Rust, build it from the release's
+tag: `git clone --branch <tag> https://github.com/nci-gis/rust-commander` then, in it,
+`cargo build --release --locked -p xtask`; it is `target/release/xtask`. The builds are not signed: the first start may need
 [a click or two](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md#macos) ([Windows](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md#windows)).
 
 **2. Turn the debug log on** for the week. It holds no file, folder, user or host name.

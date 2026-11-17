@@ -36,8 +36,9 @@ that heading and starts a new, empty one here. -->
   your machine); the guide says what a copy keeps, and what to use instead (rsync,
   robocopy, rclone).
 - **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
-- **A tester's kit ships with each release** (`xdevcmd-bench-<tag>-<target>`, every
-  target): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
+- **A tester's kit comes with each release** (`xdevcmd-bench-<tag>-<target>`, built
+  for every target; a kit that fails to build does not hold the release back, its notes
+  say which is missing, and it can be built from the tag: see How to test): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
   copy mid-job at the right moment (`--kill-when`), and checks every file against its
   manifest (PASS / FAIL); `--reset A|B|C` puts back a check's files, to do it again
   without making the sandbox again. No Rust needed; `xtask --help`, `xtask try --help`,

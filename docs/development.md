@@ -312,7 +312,10 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
 4. **The `release` workflow** checks the tag (`scripts/release-check.sh`: a pre-release
    on `dev` or `main`), waits for the `ci` run of the tag's commit (the one the push to
    `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
-   six archives and opens a **draft marked pre-release**. Read it, then Publish. Help →
+   six archives and opens a **draft marked pre-release**. Read it, then Publish. A
+   tester's kit (`xdevcmd-bench-…`) may be missing: its build never holds the release.
+   Count the six; for each one missing, say in the notes which target, and that it can
+   be built from the tag (How to test, step 1). Help →
    Documentation in that build links the tag's `docs/`.
 5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop (step 6). `release.toml` (`publish = false`) keeps every `cargo release` off crates.io.
 

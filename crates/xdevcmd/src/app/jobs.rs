@@ -304,8 +304,12 @@ impl App {
                 "It was {what} of {}{to}.",
                 Self::describe(&it.sources)
             ));
-            body.push("Continue it? What was done is skipped; a file cut short starts".into());
-            body.push("again; you are asked about any other file already there.".into());
+            if it.kind == "delete" {
+                body.push("Continue it? What is left goes to the trash.".into());
+            } else {
+                body.push("Continue it? What was done is skipped; a file cut short starts".into());
+                body.push("again; you are asked about any other file already there.".into());
+            }
             // B2 (owner, 2026-11-15): after a power cut a copied file can be short or
             // hold no data under its real name. Trusting is the default (Enter).
             if it.kind != "delete" {
@@ -330,16 +334,15 @@ impl App {
             // The owner, 2026-11-17: a way to say "never mind", not only "later". The
             // journal goes (and any part kept); what the run copied or moved stays where
             // it is, and Ctrl+Z, which does not outlive a run, cannot undo it.
-            body.push(if n > 0 {
-                "F forgets it: nothing more is done, the parts kept are removed; what it"
-                    .into()
-            } else {
-                "F forgets it: nothing more is done; what it".into()
+            body.push(match (it.kind.as_str(), n) {
+                ("delete", _) => "F forgets it: nothing more is done. What it moved to the trash".into(),
+                (_, 0) => "F forgets it: nothing more is done. What it did stays where it is,".into(),
+                _ => "F forgets it: nothing more is done, the parts kept are removed. What it".into(),
             });
-            body.push(if it.kind == "delete" {
-                "did stays in the trash, and Ctrl+Z cannot undo that.".into()
-            } else {
-                "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into()
+            body.push(match (it.kind.as_str(), n) {
+                ("delete", _) => "stays there, and Ctrl+Z cannot undo that.".into(),
+                (_, 0) => "and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
+                _ => "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
             });
             discard = Some((
                 'f',
@@ -348,6 +351,12 @@ impl App {
             ));
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
+        // The dialog draws a third key only after a second: a delete has no C, so F
+        // takes the second place, or it worked unshown (QA of #42, P1). With C and F,
+        // Esc is not on the key row; the body says what it does.
+        if check.is_none() {
+            check = discard.take();
+        }
         // Always said when a job is offered: its journal stays until it is answered (#3).
         // In the body: a footnote beside three buttons had no room and was never drawn
         // (the owner and QA, 2026-11-17).

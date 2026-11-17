@@ -207,6 +207,15 @@ impl Session {
         session
     }
 
+    /// Wait for `what` on the status line (the last two rows), not anywhere: since the
+    /// Interrupted dialog says "every copied file", "copied" on screen is not the end
+    /// of a job, and F10 pressed while the job's box is up is not seen (CI, ARM).
+    fn wait_for_status(&self, what: &str) {
+        self.until(what, |scr| {
+            scr.lines().rev().take(2).any(|l| l.contains(what))
+        });
+    }
+
     fn screen(&self) -> String {
         self.parser.lock().unwrap().screen().contents()
     }
@@ -1578,7 +1587,7 @@ fn a_planned_copy_killed_then_continued_keeps_every_decision() {
     let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
     x.wait_for("Interrupted");
     x.send(ENTER); // continue
-    x.wait_for("copied");
+    x.wait_for_status("copied");
     assert!(!x.screen().contains("Already exists"), "{}", x.screen());
     assert_eq!(
         std::fs::read_to_string(s.right().join("b-fresh.txt")).unwrap(),
@@ -1991,7 +2000,7 @@ fn a_checked_resume_repairs_a_file_the_journal_called_done() {
         c.as_deref() == Some("AAAA")
     });
     // The job box ignores q: wait for its summary on the status line.
-    x.wait_for("copied");
+    x.wait_for_status("copied");
     x.quit();
 }
 

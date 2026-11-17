@@ -2658,7 +2658,10 @@ impl Worker {
         let same = p.src == src
             && Ident::at(src) == Some(p.ident)
             && p.bytes <= fs::metadata(src).map(|m| m.len()).unwrap_or(0)
-            && fs::symlink_metadata(&p.part).is_ok_and(|m| m.is_file() && m.len() >= p.bytes);
+            && fs::symlink_metadata(&p.part).is_ok_and(|m| m.is_file() && m.len() >= p.bytes)
+            // C trusts nothing the run that died made: the kept bytes are read again
+            // with the source's (repo review RR01: a damaged part was finished whole).
+            && (!self.verify || same_start(src, &p.part, p.bytes).unwrap_or(false));
         if same && fs::rename(&p.part, target).is_ok() {
             return Some(p.bytes);
         }
@@ -3569,6 +3572,24 @@ fn percent_encode(s: &str) -> String {
         }
     }
     out
+}
+
+/// Whether the first `n` bytes of `a` and `b` are the same, read 1 MiB at a time: a
+/// checked continue's look at a big file's kept part (repo review RR01).
+fn same_start(a: &Path, b: &Path, n: u64) -> io::Result<bool> {
+    let (mut fa, mut fb) = (File::open(a)?, File::open(b)?);
+    let (mut ba, mut bb) = (vec![0u8; 1 << 20], vec![0u8; 1 << 20]);
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(ba.len() as u64) as usize;
+        fa.read_exact(&mut ba[..k])?;
+        fb.read_exact(&mut bb[..k])?;
+        if ba[..k] != bb[..k] {
+            return Ok(false);
+        }
+        left -= k as u64;
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

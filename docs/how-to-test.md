@@ -107,9 +107,11 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
 - **If `--kill-when` says the copy finished first**, the disk is fast and the sandbox
   small: `--reset` that check and try again; if it keeps finishing first, `--clean`,
   then `--make` without `--small`.
-- **`--small`** (0.8 GiB) is for a slow disk or little space.
-- **`--clean`** removes only what `--make` made, and refuses while anything else is in
-  the sandbox. What the checks sent to the trash stays there.
+- **`--small`** (0.6 GiB, about 1.1 GiB with the copies; 2.5 and 3.8 GiB without it) is
+  for a slow disk or little space.
+- **`--clean`** removes the whole sandbox, the copies in it included, and refuses only
+  when its top holds something `--make` did not make. Keep nothing of your own inside
+  it. What the checks sent to the trash stays there.
 - **The speed** on your own drives, unattended, any day: [Benchmarks](benchmark.md).
 - **With Rust 1.90+**: the automated tests at this version's tag,
   `cargo test --workspace --locked --no-fail-fast` ([Development](development.md)).

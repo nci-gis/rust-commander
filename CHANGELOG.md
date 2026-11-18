@@ -11,6 +11,8 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
+- **Known issues and limits** ([docs/known-issues.md](docs/known-issues.md)): what does
+  not work yet and what will not change, one line each, linked to the details.
 - **A big copy goes on from where it stopped**: with safe operations on, a file over
   256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`)
   resumes from there. Continue also skips the folders the first run finished. A power

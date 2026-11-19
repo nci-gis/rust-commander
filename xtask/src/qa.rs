@@ -30,8 +30,17 @@ pub const DATA_PATH: &[&str] = &[
     "crates/xdevcmd-core/src/paths.rs",
     "crates/xdevcmd-core/src/policy.rs",
     "crates/xdevcmd-core/src/protect.rs",
+    "crates/xdevcmd-core/src/faults.rs",
+    "crates/xdevcmd-core/src/compare.rs",
+    "crates/xdevcmd-core/src/rename.rs",
+    "crates/xdevcmd-core/src/attrs.rs",
+    "crates/xdevcmd-core/src/document.rs",
     "crates/xdevcmd/src/app/jobs.rs",
     "crates/xdevcmd/src/app/file_ops.rs",
+    "crates/xdevcmd/src/app/archives.rs",
+    "crates/xdevcmd/src/tempfiles.rs",
+    // A new trash or tempfile crate changes what a delete or a save does.
+    "Cargo.lock",
 ];
 
 /// The systems every data-safety case needs evidence from, or a waiver.
@@ -130,16 +139,6 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// `a` is `b` or an ancestor of it.
-fn is_ancestor(root: &Path, a: &str, b: &str) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["merge-base", "--is-ancestor", a, b])
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
 /// What the ledger found for one case on one system.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
@@ -200,14 +199,38 @@ fn short(sha: &str) -> &str {
     &sha[..sha.len().min(10)]
 }
 
-/// The case IDs of the data-safety file (`### M-DS-NN …`).
-pub fn case_ids(md: &str) -> Vec<String> {
-    md.lines()
-        .filter_map(|l| l.strip_prefix("### "))
-        .filter_map(|h| h.split_whitespace().next())
-        .filter(|id| id.starts_with("M-") && id.len() == 7)
-        .map(String::from)
-        .collect()
+/// The case IDs of the data-safety file (`### M-DS-NN Title`). A heading naming a case
+/// in any other shape is an error: a case left out would never need evidence.
+pub fn case_ids(md: &str) -> Result<Vec<String>, String> {
+    let mut ids = Vec::new();
+    for (n, line) in md.lines().enumerate() {
+        let line = line.trim_end_matches('\r');
+        if !(line.starts_with('#') && line.contains("M-DS-")) {
+            continue;
+        }
+        let id = line
+            .strip_prefix("### ")
+            .and_then(|h| h.split_once(' '))
+            .map(|(id, _)| id)
+            .filter(|id| {
+                id.len() == 7
+                    && id.starts_with("M-DS-")
+                    && id[5..].bytes().all(|b| b.is_ascii_digit())
+            });
+        match id {
+            Some(id) => ids.push(id.to_string()),
+            None => {
+                return Err(format!(
+                    "{CASES}:{}: not `### M-DS-NN Title`: {line}",
+                    n + 1
+                ))
+            }
+        }
+    }
+    if ids.is_empty() {
+        return Err(format!("{CASES}: no case"));
+    }
+    Ok(ids)
 }
 
 /// One row of `RUNS` as column → value; the header and blank or `#` lines skipped.
@@ -239,17 +262,17 @@ pub fn ledger(root: &Path, rev: &str) -> Result<Ledger, String> {
     let runs = git(root, &["show", &format!("{rev}:{RUNS}")]).unwrap_or_default();
     let runs = parse_runs(&runs);
     let mut rows = Vec::new();
-    for case in case_ids(&cases_md) {
+    for case in case_ids(&cases_md)? {
         for os in SYSTEMS {
-            // The newest row for the pair decides; rows are in the order written.
-            let row = runs
+            let mine: Vec<_> = runs
                 .iter()
-                .rfind(|r| r["case"] == case && r["os"].starts_with(os));
-            let v = match row {
-                None => Verdict::Missing,
-                Some(r) => judge(root, &last_data, &case, r),
-            };
-            rows.push((case.clone(), os.to_string(), v));
+                .filter(|r| r["case"] == case && r["os"].eq_ignore_ascii_case(os))
+                .collect();
+            rows.push((
+                case.clone(),
+                os.to_string(),
+                decide(root, &rev, &case, &mine),
+            ));
         }
     }
     Ok(Ledger {
@@ -259,44 +282,103 @@ pub fn ledger(root: &Path, rev: &str) -> Result<Ledger, String> {
     })
 }
 
-fn judge(root: &Path, last_data: &str, case: &str, r: &BTreeMap<&'static str, String>) -> Verdict {
-    let result = r["result"].to_ascii_uppercase();
-    if result == "WAIVED" {
-        return if r["note"].is_empty() {
-            Verdict::Unproven("a waiver needs its reason in note".into())
-        } else {
-            Verdict::Waived(r["note"].clone())
-        };
+/// One case on one system, from all its rows: any fresh FAIL decides; else a fresh,
+/// proven PASS; else a fresh waiver; else why not. Order in the file does not matter
+/// (two testers' rows merge in any order).
+fn decide(root: &Path, rev: &str, case: &str, rows: &[&BTreeMap<&'static str, String>]) -> Verdict {
+    if rows.is_empty() {
+        return Verdict::Missing;
     }
-    let built = r["built_from"].trim_end_matches("-dirty");
-    if built.is_empty() || built == "-" {
-        return Verdict::Stale("built_from not recorded".into());
-    }
-    if r["built_from"].ends_with("-dirty") {
-        return Verdict::Stale(format!(
-            "{} was built from uncommitted code",
-            r["built_from"]
-        ));
-    }
-    if !is_ancestor(root, last_data, built) {
-        return Verdict::Stale(format!(
-            "built from {} , before data-path commit {}",
-            short(built),
-            short(last_data)
-        ));
-    }
-    match result.as_str() {
-        "PASS" => {
-            if r["check"].eq_ignore_ascii_case("FAIL") {
-                Verdict::Unproven("PASS written, but --check said FAIL".into())
-            } else if DISK.contains(&case) && (r["evidence"].is_empty() || r["evidence"] == "-") {
-                Verdict::Unproven("a disk case needs --check output or a debug log named".into())
-            } else {
-                Verdict::Pass
-            }
+    let mut fresh = Vec::new();
+    let mut why_not = None;
+    for r in rows {
+        match fresh_build(root, rev, &r["built_from"]) {
+            Ok(()) => fresh.push(*r),
+            Err(e) => why_not = Some(Verdict::Stale(e)),
         }
+    }
+    if let Some(r) = fresh
+        .iter()
+        .find(|r| r["result"].eq_ignore_ascii_case("FAIL"))
+    {
+        return Verdict::Fail(format!("{} {}", r["issue"], r["note"]).trim().to_string());
+    }
+    let verdicts: Vec<Verdict> = fresh.iter().map(|r| one(case, r)).collect();
+    if verdicts.contains(&Verdict::Pass) {
+        return Verdict::Pass;
+    }
+    if let Some(w) = verdicts.iter().find(|v| matches!(v, Verdict::Waived(_))) {
+        return w.clone();
+    }
+    verdicts
+        .into_iter()
+        .find(|v| matches!(v, Verdict::Unproven(_)))
+        .or(why_not)
+        .unwrap_or(Verdict::Missing)
+}
+
+/// A fresh row's own verdict.
+fn one(case: &str, r: &BTreeMap<&'static str, String>) -> Verdict {
+    let result = r["result"].to_ascii_uppercase();
+    let has = |k: &str| !r[k].is_empty() && r[k] != "-";
+    let disk = DISK.contains(&case);
+    match result.as_str() {
+        "WAIVED" if has("note") => Verdict::Waived(r["note"].clone()),
+        "WAIVED" => Verdict::Unproven("a waiver needs its reason in note".into()),
+        "PASS" if r["check"].eq_ignore_ascii_case("FAIL") => {
+            Verdict::Unproven("PASS written, but --check said FAIL".into())
+        }
+        "PASS" if disk && !r["check"].eq_ignore_ascii_case("PASS") => {
+            Verdict::Unproven("a disk case needs `xtask try --check` to say PASS".into())
+        }
+        "PASS" if disk && !has("evidence") => {
+            Verdict::Unproven("a disk case needs its --check output or debug log named".into())
+        }
+        "PASS" => Verdict::Pass,
         "FAIL" => Verdict::Fail(format!("{} {}", r["issue"], r["note"]).trim().to_string()),
         other => Verdict::Unproven(format!("result {other:?} is not PASS, FAIL or WAIVED")),
+    }
+}
+
+/// `built_from` names a commit (a SHA, or `git describe`'s `…-g<sha>`), from committed
+/// code, whose data path is exactly the one at `rev`: not a name that moves (HEAD, a
+/// branch), not a side branch with other code (red-team of #51).
+fn fresh_build(root: &Path, rev: &str, built: &str) -> Result<(), String> {
+    if built.ends_with("-dirty") {
+        return Err(format!("{built} was built from uncommitted code"));
+    }
+    let hex = built.rsplit_once("-g").map_or(built, |(_, h)| h);
+    let is_hex = (7..=40).contains(&hex.len()) && hex.bytes().all(|b| b.is_ascii_hexdigit());
+    if !is_hex {
+        return Err(format!(
+            "built_from {built:?} is not a commit (a SHA or git describe)"
+        ));
+    }
+    let sha = git(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{hex}^{{commit}}"),
+        ],
+    )
+    .map_err(|_| format!("{hex} is not a commit of this repository"))?;
+    let mut args = vec!["diff", "--quiet", sha.as_str(), rev, "--"];
+    args.extend(DATA_PATH);
+    let same = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(&args)
+        .status()
+        .is_ok_and(|s| s.success());
+    if same {
+        Ok(())
+    } else {
+        Err(format!(
+            "built from {}, whose data path differs from this one",
+            short(&sha)
+        ))
     }
 }
 
@@ -375,10 +457,7 @@ pub fn defs(root: &Path) -> String {
                 continue;
             };
             // Tests are not implementations.
-            let body = text
-                .split("#[cfg(test)]\nmod tests")
-                .next()
-                .unwrap_or(&text);
+            let body = before_tests(&text);
             for (n, line) in body.lines().enumerate() {
                 if line.trim_start().starts_with("//") {
                     continue;
@@ -395,6 +474,21 @@ pub fn defs(root: &Path) -> String {
         }
     }
     s
+}
+
+/// The file up to its test module (`#[cfg(test)]` then `mod tests`, any indent, CRLF).
+fn before_tests(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(|l| l.trim_end_matches('\r')).collect();
+    let end = (0..lines.len())
+        .find(|&i| {
+            lines[i].trim() == "#[cfg(test)]"
+                && lines[i + 1..]
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .is_some_and(|l| l.trim_start().starts_with("mod tests"))
+        })
+        .unwrap_or(lines.len());
+    lines[..end].join("\n")
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -589,7 +683,15 @@ mod tests {
         assert!(!verdicts().pass(), "a waiver with no reason passed");
         // A fresh FAIL stays, whatever row comes after it.
         let mut rows = all(&new, "PASS", "");
-        rows += &row(&new, "linux", "M-DS-01", "FAIL", "FAIL", "log", "lost a file");
+        rows += &row(
+            &new,
+            "linux",
+            "M-DS-01",
+            "FAIL",
+            "FAIL",
+            "log",
+            "lost a file",
+        );
         rows += &row(&new, "linux", "M-DS-01", "PASS", "PASS", "check.txt", "");
         runs(&rows);
         assert!(!verdicts().pass(), "a fresh FAIL was hidden");
@@ -601,7 +703,11 @@ mod tests {
         runs(&rows);
         assert!(!verdicts().pass(), "WSL counted as Linux");
         // A case heading that does not parse is an error, never a case left out.
-        write(&d, CASES, "### M-DS-01 Kill a copy\n### M-DS-08: Pull a stick\n");
+        write(
+            &d,
+            CASES,
+            "### M-DS-01 Kill a copy\n### M-DS-08: Pull a stick\n",
+        );
         runs(&all(&new, "PASS", ""));
         assert!(ledger(&d, "HEAD").is_err(), "a case heading was dropped");
         let _ = fs::remove_dir_all(&d);
@@ -619,7 +725,7 @@ mod tests {
     #[test]
     fn the_real_cases_and_runs_files_parse() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let ids = case_ids(&fs::read_to_string(root.join(CASES)).unwrap());
+        let ids = case_ids(&fs::read_to_string(root.join(CASES)).unwrap()).unwrap();
         assert_eq!(ids.len(), 7, "{ids:?}");
         let runs = fs::read_to_string(root.join(RUNS)).unwrap();
         assert_eq!(runs.lines().next().unwrap(), COLUMNS.join("\t"));

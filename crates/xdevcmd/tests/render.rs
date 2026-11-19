@@ -2707,6 +2707,26 @@ fn a_config_written_by_an_older_xdevcmd_still_loads() {
 
 // ── session ────────────────────────────────────────────────────────────────────────
 
+/// `XDEVCMD_STATE` names the session file (config.md); a folder there is refused at the
+/// start, with what to set instead. Before, it was taken as the session's path, and the
+/// journal went to the folder *beside* it (cosf review 2026-11-19, plan v3 H-02).
+#[test]
+fn xdevcmd_state_naming_a_folder_is_refused() {
+    let top = scratch("state-folder");
+    let state = top.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let out = isolated()
+        .env("XDEVCMD_STATE", &state)
+        .arg("--screenshot=80x24")
+        .output()
+        .expect("xdevcmd should run");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{err}");
+    assert!(err.contains("XDEVCMD_STATE") && err.contains("session.toml"), "{err}");
+    assert!(!top.join("journal").exists(), "a journal beside the folder");
+    let _ = std::fs::remove_dir_all(&top);
+}
+
 /// xdevcmd with no directories, reading the session at `state`.
 fn shot_session(state: &std::path::Path, extra: &[&str]) -> String {
     let out = isolated()

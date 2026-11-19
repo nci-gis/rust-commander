@@ -63,7 +63,8 @@ sandbox.
 `xtask try --kill-when A`. In xdevcmd: in `replace-src`, Ctrl+A, F5; Space until the
 line says `[replace]`; Enter. The second window kills xdevcmd mid-job. Start xdevcmd
 again (same line as step 5): it says "ended in the middle of a job"; Enter. It finishes
-without asking again.
+without asking again. On macOS and Linux the kill can leave that window printing odd
+characters when the mouse moves: type `reset`, Enter (or just start xdevcmd again).
 
 **7. Check B, a big file killed mid-way.** On macOS and Linux, start xdevcmd with the
 sandbox's config, which turns the fast copy off: on APFS, Btrfs or XFS a copy is a

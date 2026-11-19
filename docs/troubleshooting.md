@@ -17,6 +17,7 @@ not xdevcmd: a key it never sends, a colour it cannot show.
 | "cannot be opened … developer cannot be verified" | macOS | [macOS](#macos): only for a download from this repository |
 | "Windows protected your PC" | Windows | [Windows](#windows): only for a download from this repository |
 | `o` says "no DISPLAY" | Linux | set `[commands] opener`, or F3 |
+| After xdevcmd was killed, odd characters appear when the mouse moves | Linux, macOS | `reset`, Enter ([Every system](#every-system)) |
 | A copy fails or is slow, or it crashed | all | [Reporting a problem](#reporting-a-problem) |
 
 **First, ask xdevcmd what it receives:** `xdevcmd --show-keys`. It prints your
@@ -40,6 +41,11 @@ screen to open it on, so xdevcmd views it and says why. An `[[open]]` rule with
 `terminal = true` opens programs that run in a terminal; `[commands] opener` is used for
 the rest ([config.md](config.md#opening-files)). Read-only mode opens nothing in another
 program.
+
+**After xdevcmd was killed, odd characters appear when the mouse moves** (`26M35`,
+`command not found`). A program killed with `kill -9`, or that crashed, cannot put the
+terminal back: it is still sending mouse moves. Type `reset` and Enter, even if you do
+not see what you type; or start xdevcmd again in that window and quit it with F10.
 
 **Colours look muted over SSH.** xdevcmd uses 24-bit colour only when it knows the
 terminal takes it, usually from `COLORTERM`, which SSH does not pass on. On the server:

@@ -125,7 +125,7 @@ To check a version yourself: [How to test](https://github.com/nci-gis/rust-comma
 | Used by hand by the maintainer | ✓ | not yet | ✓ (Windows 11) |
 | Shell reports (directory, prompt marks) | bash tested; zsh, fish not run | zsh not run | PowerShell, cmd not run; whether ConPTY passes them on is not checked |
 
-Known gaps are in [troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md).
+Known gaps are in [known issues and limits](https://github.com/nci-gis/rust-commander/blob/main/docs/known-issues.md).
 
 ## Configure
 
@@ -147,7 +147,8 @@ Keep only the lines you change. The steps for Windows, and how the file is chose
 - [Shell](https://github.com/nci-gis/rust-commander/blob/main/docs/shell.md): stay in the directory you were in when you quit
 - [Security](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md): what xdevcmd protects against, and safe modes
 - [Compatibility](https://github.com/nci-gis/rust-commander/blob/main/docs/compatibility.md): what stays the same from 0.4.0, and what is not promised
-- [Troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md): known problems on each system, and fixes
+- [Known issues and limits](https://github.com/nci-gis/rust-commander/blob/main/docs/known-issues.md): what does not work yet, and what will not change
+- [Troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md): a problem you see, and its fix
 - [Development](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md): build, test, contribute
 
 ## Transparency

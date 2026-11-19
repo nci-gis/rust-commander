@@ -73,9 +73,9 @@ A test that only matches the text the code prints **confirms**; it does not prov
    "later" decision that a user would see adds a line to `docs/known-issues.md`.
 8. **Report** to the owner: the audit table's counts, the bugs (fixed, known), the
    tests added, the manual cases, the **escape rate** (past-misses), and what is still
-   unproven. Before a cut, the evidence must be newer than the last commit touching a
-   data path (lesson L7; `evidence_ledger` once it exists). The owner decides
-   whether to cut.
+   unproven. Before a cut, `cargo xtask qa ledger` must say PASS: every data-safety
+   case on every system has a run in `tests/manual/runs.tsv` built after the last
+   commit on a data path, or a waiver (lesson L7). The owner decides whether to cut.
 
 ## Rules
 

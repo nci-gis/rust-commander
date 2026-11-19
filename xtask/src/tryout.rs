@@ -925,6 +925,37 @@ mod tests {
         big: 64 << 10,
     };
 
+    /// `--kill-when` kills the one xdevcmd `--launch` started, by its PID, and nothing
+    /// else (plan v3 H-01: by name, it killed every xdevcmd on the machine, the owner's
+    /// own sessions in the middle of a job included). A PID that is not the program
+    /// named is refused, and left running.
+    #[cfg(unix)]
+    #[test]
+    fn kill_when_kills_the_launched_pid_and_nothing_else() {
+        let t = top("pidkill");
+        let sleep = || std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (mut ours, mut other) = (sleep(), sleep());
+        let pidfile = t.join(PIDFILE);
+        fs::write(&pidfile, format!("{}\n", ours.id())).unwrap();
+        // Not the program named: refused, and it lives.
+        assert!(kill_from_pidfile(&pidfile, "xdevcmd").is_err());
+        assert!(ours.try_wait().unwrap().is_none(), "a refused kill killed it");
+        kill_from_pidfile(&pidfile, "sleep").unwrap();
+        let start = Instant::now();
+        while ours.try_wait().unwrap().is_none() {
+            assert!(start.elapsed() < Duration::from_secs(5), "the launched one lives");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(other.try_wait().unwrap().is_none(), "another one was killed too");
+        let _ = other.kill();
+        let _ = other.wait();
+        // No pidfile: an error that says how to launch, never a kill by name.
+        fs::remove_file(&pidfile).unwrap();
+        let e = kill_from_pidfile(&pidfile, "sleep").unwrap_err().to_string();
+        assert!(e.contains("--launch"), "{e}");
+        let _ = fs::remove_dir_all(&t);
+    }
+
     fn top(tag: &str) -> PathBuf {
         let t = std::env::temp_dir().join(format!("xtask-try-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&t);

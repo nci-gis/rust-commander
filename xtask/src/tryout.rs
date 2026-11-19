@@ -984,6 +984,14 @@ impl Launched {
                 self.pid
             )));
         }
+        // Its child, not only a process of that name: a PID given again to another
+        // xdevcmd is not the one this launcher started (red-team of #47, round 2).
+        if parent_of(self.pid).is_some_and(|pp| pp != self.launcher) {
+            return Err(io::Error::other(format!(
+                "PID {} was not started by this `xtask try --launch` (PID {}): nothing killed",
+                self.pid, self.launcher
+            )));
+        }
         match program_of(self.pid) {
             Some(p) if p == name => Ok(()),
             Some(p) => Err(io::Error::other(format!(
@@ -1029,9 +1037,10 @@ impl Launched {
     /// A launch still going here: its launcher runs.
     fn alive(pidfile: &Path) -> Option<Launched> {
         let l = Launched::read(pidfile).ok()?;
-        program_of(l.launcher)
-            .is_some_and(|p| p.starts_with("xtask"))
-            .then_some(l)
+        // Its launcher runs, or the xdevcmd it started does (the launcher killed).
+        (program_of(l.launcher).is_some_and(|p| p.starts_with("xtask"))
+            || program_of(l.pid).as_deref() == Some("xdevcmd"))
+        .then_some(l)
     }
 }
 
@@ -1062,6 +1071,14 @@ fn launch(root: &Path, bin: Option<&Path>, args: &[String]) -> io::Result<i32> {
         return Err(io::Error::other(format!(
             "--bin {}: no such file",
             exe.display()
+        )));
+    }
+    // --kill-when checks the name: one it would refuse is refused now, not mid-check.
+    if exe.file_stem().and_then(|n| n.to_str()) != Some("xdevcmd") {
+        return Err(io::Error::other(format!(
+            "--bin {}: the file must be named xdevcmd{} (--kill-when checks the name)",
+            exe.display(),
+            if cfg!(windows) { ".exe" } else { "" }
         )));
     }
     let version = std::process::Command::new(&exe)
@@ -1127,6 +1144,35 @@ fn put_terminal_back() {
     if io::stdin().is_terminal() {
         let _ = std::process::Command::new("stty").arg("sane").status();
     }
+}
+
+/// The parent process of `pid`; `None` if it cannot be told.
+fn parent_of(pid: u32) -> Option<u32> {
+    if cfg!(target_os = "linux") {
+        // /proc/PID/stat: "pid (comm) state ppid …"; comm may hold spaces and ")".
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        return stat
+            .rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(1)?
+            .parse()
+            .ok();
+    }
+    let out = if cfg!(windows) {
+        let q =
+            format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').ParentProcessId");
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &q])
+            .output()
+            .ok()?
+    } else {
+        std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "ppid="])
+            .output()
+            .ok()?
+    };
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
 /// The program running as `pid`, without its path or `.exe`; `None` if none is.
@@ -1215,6 +1261,13 @@ mod tests {
         );
         // A launcher that has ended (a closed window): its file names nothing to kill,
         // even a PID that is the program named (red-team of #47).
+        // The launcher alive but not the child's parent (a PID given again): refused.
+        // `ours` is this test's child; name init (PID 1) as its launcher.
+        let foreign = Launched {
+            pid: ours.id(),
+            launcher: 1,
+        };
+        assert!(foreign.kill_named("sleep").is_err());
         let stale = Launched {
             pid: other.id(),
             launcher: u32::MAX - 1,

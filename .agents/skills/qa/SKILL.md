@@ -43,7 +43,9 @@ A test that only matches the text the code prints **confirms**; it does not prov
 ## Procedure
 
 1. **Scope.** Pick the areas (data paths first). Write the list of doc files and the
-   date to the round's `Check`.
+   date to the round's `Check`. Cross each new feature with each mode it can meet:
+   verify (C), `--root`, read-only, resume, Copy As, a failed removal. Defects hide
+   where features meet (lesson L4).
 2. **Audit, one fresh agent per area, in parallel.** Give it the docs and the test
    files, **not** the source or the PR bodies. It lists every promise in its area as
    `doc:line → expectation`, then finds the tests for each, and marks each:
@@ -64,8 +66,15 @@ A test that only matches the text the code prints **confirms**; it does not prov
 6. **Close the gaps.** MISSING and CONFIRMS on a data path: a test that PROVES, if it
    can run in CI. MANUAL: a case in `crates/xdevcmd/tests/manual/` (ID, platform,
    steps, expected, what a fail looks like).
-7. **Report** to the owner: the audit table's counts, the bugs (fixed, known), the
-   tests added, the manual cases, and what is still unproven. The owner decides
+7. **Record** every defect in
+   [references/past-misses.md](references/past-misses.md), with its class, the layer
+   that found it and the layer that should have. A class that recurs moves up the
+   ladder ([reference/review-lessons.md](../../reference/review-lessons.md)). A
+   "later" decision that a user would see adds a line to `docs/known-issues.md`.
+8. **Report** to the owner: the audit table's counts, the bugs (fixed, known), the
+   tests added, the manual cases, the **escape rate** (past-misses), and what is still
+   unproven. Before a cut, the evidence must be newer than the last commit touching a
+   data path (lesson L7; `evidence_ledger` once it exists). The owner decides
    whether to cut.
 
 ## Rules

@@ -18,6 +18,12 @@ on:
   schedule:
     - cron: "0 3 * * 1"
 
+# A new push to a branch makes its older run worthless: cancel it, and the runners go to
+# the commit that matters (plan v3, H-00). The weekly schedule has a group of its own.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -97,7 +103,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         # xtask is never published, but --workspace would still package it.
         run: cargo package --workspace --exclude xtask --locked
-      - run: cargo build --release
+      # xtask too: with xdevcmd in the artifact, a pushed branch is a whole test kit
+      # (xtask try) for a Mac or Windows machine, with no bench/ branch built by hand.
+      - run: cargo build --release -p xdevcmd -p xtask
       # Now that there is a release build: its size, and that it holds no fault seam.
       - run: cargo test -p xdevcmd --test budgets
       # macos-latest is Apple Silicon, and an Intel Mac cannot run what it builds. Build
@@ -106,12 +114,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           rustup target add x86_64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin
-          lipo -create -output xdevcmd-universal \
-            target/release/xdevcmd target/x86_64-apple-darwin/release/xdevcmd
-          lipo xdevcmd-universal -verify_arch x86_64 arm64
-          mv xdevcmd-universal target/release/xdevcmd
-          lipo -info target/release/xdevcmd
+          cargo build --release --target x86_64-apple-darwin -p xdevcmd -p xtask
+          for b in xdevcmd xtask; do
+            lipo -create -output "$b-universal" \
+              "target/release/$b" "target/x86_64-apple-darwin/release/$b"
+            lipo "$b-universal" -verify_arch x86_64 arm64
+            mv "$b-universal" "target/release/$b"
+            lipo -info "target/release/$b"
+          done
       # "/" is not allowed in an artifact name, and branches have them (feat/topic), as
       # does a pull request's own ref ("1/merge"): name it after the source branch,
       # with "/" made "-".
@@ -130,6 +140,8 @@ jobs:
           path: |
             target/release/xdevcmd
             target/release/xdevcmd.exe
+            target/release/xtask
+            target/release/xtask.exe
           if-no-files-found: error
           retention-days: 14
 

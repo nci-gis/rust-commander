@@ -49,6 +49,14 @@ Check the disk, not only the screen: `cmp` / `fc.exe /b`, `ls -la`, the trash.
 
 ## Recording a run
 
+A data-safety run is also a row in [runs.tsv](runs.tsv): tab-separated, under its
+header. `built_from` is the commit the tested build came from (`git describe --always`
+of the build; a `-dirty` build counts as no evidence); `os` is `linux`, `macos` or
+`windows`; `result` is PASS, FAIL or WAIVED (a waiver says why in `note`); `check` is
+what `xtask try --check` said; `evidence` names the `--check` output or debug log kept.
+`cargo xtask qa ledger` reads it before a cut: every case on every system needs a row
+built from after the last commit on a data path, or a waiver.
+
 One line per case in the round's `Check` (`.agents/plan/cycles/Round_NNN.md`):
 
 ```text

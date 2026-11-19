@@ -540,6 +540,73 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// The ways a wrong PASS slipped in (red-team of #51): a side branch's build whose
+    /// data path differs, a symbolic `built_from`, a case heading that does not parse,
+    /// a waiver from an old build, a fresh FAIL hidden by a later PASS row, and an
+    /// `os` that only starts like a system.
+    #[test]
+    fn the_ledger_refuses_the_ways_a_wrong_pass_slipped_in() {
+        let d = std::env::temp_dir().join(format!("xtask-qa-slip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        sh(&d, &["init", "-q", "-b", "main"]);
+        write(&d, CASES, "### M-DS-01 Kill a copy\n");
+        write(&d, DATA_PATH[0], "v1\n");
+        sh(&d, &["add", "-A"]);
+        sh(&d, &["commit", "-qm", "one"]);
+        let base = sh(&d, &["rev-parse", "HEAD"]);
+        // A side branch after it, with another data path: not what main holds.
+        sh(&d, &["switch", "-q", "-c", "side"]);
+        write(&d, DATA_PATH[0], "side\n");
+        sh(&d, &["commit", "-qam", "side"]);
+        let side = sh(&d, &["rev-parse", "HEAD"]);
+        sh(&d, &["switch", "-q", "main"]);
+        let runs = |rows: &str| {
+            write(&d, RUNS, &(COLUMNS.join("\t") + "\n" + rows));
+            sh(&d, &["add", "-A"]);
+            sh(&d, &["commit", "-qm", "runs", "--allow-empty"]);
+        };
+        let all = |built: &str, result: &str, note: &str| {
+            SYSTEMS
+                .iter()
+                .map(|os| row(built, os, "M-DS-01", result, "PASS", "check.txt", note))
+                .collect::<String>()
+        };
+        let verdicts = || ledger(&d, "HEAD").unwrap();
+        runs(&all(&side, "PASS", ""));
+        assert!(!verdicts().pass(), "a side branch's data path passed");
+        runs(&all("HEAD", "PASS", ""));
+        assert!(!verdicts().pass(), "a symbolic built_from passed");
+        runs(&all(&base, "PASS", ""));
+        assert!(verdicts().pass(), "{}", verdicts().text());
+        // A waiver from a build before a data-path change goes stale.
+        write(&d, DATA_PATH[0], "v2\n");
+        sh(&d, &["commit", "-qam", "data path"]);
+        let new = sh(&d, &["rev-parse", "HEAD"]);
+        runs(&all(&base, "WAIVED", "no machine"));
+        assert!(!verdicts().pass(), "an old waiver passed");
+        runs(&all(&new, "WAIVED", "-"));
+        assert!(!verdicts().pass(), "a waiver with no reason passed");
+        // A fresh FAIL stays, whatever row comes after it.
+        let mut rows = all(&new, "PASS", "");
+        rows += &row(&new, "linux", "M-DS-01", "FAIL", "FAIL", "log", "lost a file");
+        rows += &row(&new, "linux", "M-DS-01", "PASS", "PASS", "check.txt", "");
+        runs(&rows);
+        assert!(!verdicts().pass(), "a fresh FAIL was hidden");
+        // Only the system's own name counts.
+        let mut rows = String::new();
+        for os in ["linux (WSL on Windows 11)", "macos", "windows"] {
+            rows += &row(&new, os, "M-DS-01", "PASS", "PASS", "check.txt", "");
+        }
+        runs(&rows);
+        assert!(!verdicts().pass(), "WSL counted as Linux");
+        // A case heading that does not parse is an error, never a case left out.
+        write(&d, CASES, "### M-DS-01 Kill a copy\n### M-DS-08: Pull a stick\n");
+        runs(&all(&new, "PASS", ""));
+        assert!(ledger(&d, "HEAD").is_err(), "a case heading was dropped");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_note_with_a_tab_does_not_shift_the_columns_it_is_cut() {
         let r = parse_runs("x\tabc\tv\tlinux\tt\ts\tM-DS-01\tPASS\tPASS\tlog\t-\tnote\twith tab\n");

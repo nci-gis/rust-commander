@@ -79,9 +79,9 @@ the 150 ms budget, which is for `cargo xtask bench` on a release build).
   the repository. The simplest for a developer.
 - **Without Rust, a release**: its `xdevcmd-bench-<tag>-<target>`, as testers do
   ([How to test](how-to-test.md), step 1).
-- **Without Rust, code not released yet** (maintainers only, before a cut): Actions →
-  bench → Run workflow on the branch; the run's artifacts `xtask-Linux`, `xtask-macOS`
-  (Apple Silicon only), `xtask-Windows`, bare binaries (`chmod +x`), kept 14 days.
+- **Without Rust, code not released yet** (maintainers only, before a cut): the ci run of
+  the branch has `xtask` beside `xdevcmd` in its artifacts (below; the macOS ones run on
+  Intel and Apple Silicon).
 
 `--dir PATH` makes the trees on the
 drive being measured instead of the temporary directory. Away from the source, results
@@ -218,8 +218,10 @@ and pick the branch, or
 gh workflow run ci --ref feat/topic
 ```
 
-The binaries are under that run's **Artifacts** (the macOS one runs on Intel and Apple
-Silicon). A draft pull request into `dev` gets the same builds.
+The binaries are under that run's **Artifacts**: `xdevcmd` and `xtask`, so the
+artifact is a whole test kit (`xtask try`); the macOS ones run on Intel and Apple
+Silicon. A draft pull request into `dev` gets the same builds. A new push to the branch
+cancels its run still going.
 
 ## Releasing
 

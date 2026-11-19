@@ -3538,7 +3538,9 @@ fn quit_writes_the_directory_for_the_shell_and_quit_without_cd_does_not() {
     let mut xdevcmd = Session::start_flags(&s, &[&flag]);
     xdevcmd.send(DOWN);
     xdevcmd.send(ENTER);
-    xdevcmd.wait_for("deeper ");
+    // The pane's title, not the row: "deeper " is on screen as soon as the list is,
+    // before Enter is taken (failed on CI, #47; the class of the "copied" wait).
+    xdevcmd.wait_for("/deeper");
     xdevcmd.quit();
     let got = std::fs::read_to_string(&out).expect("q writes it");
     assert_eq!(

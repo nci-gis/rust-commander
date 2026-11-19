@@ -342,6 +342,19 @@ fn main() -> Result<()> {
     crate::pane::files::set_fuzzy(files.filter == "fuzzy");
     xdevcmd_core::ops::set_safe(settings.config.general.safe_operations);
     xdevcmd_core::fastcopy::set_enabled(settings.config.general.fast_copy);
+    // XDEVCMD_STATE names the session file (config.md). A folder there would put the
+    // journal, crash logs and bookmarks beside that folder, not in it: refused before
+    // anything is written (plan v3 H-02).
+    if let Some(p) = std::env::var_os("XDEVCMD_STATE").filter(|p| !p.is_empty()) {
+        if std::path::Path::new(&p).is_dir() {
+            fail(&format!(
+                "XDEVCMD_STATE={} is a folder; it names the session file: \
+                 XDEVCMD_STATE={}",
+                std::path::Path::new(&p).display(),
+                std::path::Path::new(&p).join("session.toml").display()
+            ));
+        }
+    }
     // Safe operations' journal sits beside the session, in the state directory.
     if let Some(dir) = session::default_path()
         .as_deref()

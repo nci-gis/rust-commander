@@ -2722,7 +2722,10 @@ fn xdevcmd_state_naming_a_folder_is_refused() {
         .expect("xdevcmd should run");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "{err}");
-    assert!(err.contains("XDEVCMD_STATE") && err.contains("session.toml"), "{err}");
+    assert!(
+        err.contains("XDEVCMD_STATE") && err.contains("session.toml"),
+        "{err}"
+    );
     assert!(!top.join("journal").exists(), "a journal beside the folder");
     let _ = std::fs::remove_dir_all(&top);
 }

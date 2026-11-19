@@ -57,12 +57,13 @@ thought) to 5 (gave up), then quit (F10).
 
 **In checks A to C, start xdevcmd through `xtask try --launch`.** It keeps that
 xdevcmd's process number, and `--kill-when` kills that one and nothing else (`kill -9`,
-End task): an xdevcmd you have open elsewhere is safe. Put xdevcmd's arguments after
-`--`; xtask uses the xdevcmd in its own folder. When the killed xdevcmd ends, the
-window is put back; start it again with the same `--launch` line.
+End task): an xdevcmd you have open elsewhere is safe. `--bin` names the xdevcmd to
+try (the one from this release, as in step 5); its arguments go after `--`. It prints
+which xdevcmd it started, and its version: check it is this release. When the killed
+xdevcmd ends, the window is put back; start it again with the same `--launch` line.
 
 **6. Check A, a replace killed mid-way.** First window:
-`xtask try --launch -- xdevcmd-try xdevcmd-try/replace-dst`. Second window:
+`xtask try --launch --bin /path/to/xdevcmd -- xdevcmd-try xdevcmd-try/replace-dst`. Second window:
 `xtask try --kill-when A`. In xdevcmd: in `replace-src`, Ctrl+A, F5; Space until the
 line says `[replace]`; Enter. The second window kills xdevcmd mid-job. Start it again
 with the same `--launch` line: it says "ended in the middle of a job"; Enter. It
@@ -71,15 +72,15 @@ finishes without asking again.
 **7. Check B, a big file killed mid-way.** On macOS and Linux, start xdevcmd with the
 sandbox's config, which turns the fast copy off: on APFS, Btrfs or XFS a copy is a
 clone, done at once, with no checkpoint to stop at.
-`XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml xtask try --launch -- xdevcmd-try xdevcmd-try/copy-to`
-(on Windows: `xtask try --launch -- xdevcmd-try xdevcmd-try/copy-to`). In the second
+`XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml xtask try --launch --bin /path/to/xdevcmd -- xdevcmd-try xdevcmd-try/copy-to`
+(on Windows: `xtask try --launch --bin /path/to/xdevcmd -- xdevcmd-try xdevcmd-try/copy-to`). In the second
 window: `xtask try --kill-when B`. In xdevcmd: F5 on `big`, Enter. Start again with the
 same line: "kept part way"; Enter. The bar starts near where it stopped.
 
 **8. Check C, after a power cut.** First window: the `--launch` line of check B (or
 step 7's on Windows). Second window: `xtask try --kill-when C`; in xdevcmd: F5 on
-`tree`, Enter. Then `xtask try --tamper` (it spoils one finished copy, as a power cut can). Start
-again and press **C**: "1 found different … copied again".
+`tree`, Enter. Then `xtask try --tamper` (it spoils one finished copy, as a power cut can). Start it
+again with the same `--launch` line and press **C**: "1 found different … copied again".
 
 **9. Check every file**: `xtask try --check`. The last line must be
 **PASS: every copy whole, no file lost or wrong**. Then `xtask try --clean`.

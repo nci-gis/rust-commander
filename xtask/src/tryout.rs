@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! xtask try --make [--small] [--dir D]   make D/xdevcmd-try (D: here; it must exist)
-//! xtask try --kill-when A|B|C [--dir D]  wait, then kill xdevcmd at the right moment
+//! xtask try --launch [--bin P] [--dir D] -- ARGS   start xdevcmd, its PID in a file
+//! xtask try --kill-when A|B|C [--dir D]  wait, then kill that xdevcmd at the right moment
 //! xtask try --reset A|B|C [--dir D]      undo that check's copy, to run it again
 //! xtask try --check [--dir D]            PASS / FAIL / NOT DONE, from its manifest
 //! xtask try --tamper [--dir D]           one finished copy zeroed, size and date kept
@@ -13,7 +14,8 @@
 //! file it wrote, and how many). `--check` reads the tester's copies against it, so a
 //! lost, short or empty file is a FAIL printed by name, not something to spot by eye;
 //! a missing or cut manifest is an error, never a PASS. It never runs, looks for or
-//! asks an installed xdevcmd, except `--kill-when`, which kills it by name.
+//! asks an installed xdevcmd, except `--launch`, which starts it and writes its PID, and
+//! `--kill-when`, which kills that PID and no other process (plan v3 H-01).
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -36,7 +38,10 @@ const MADE: &[&str] = &[
     "copy-to",
     "no-fast-copy.toml",
     MANIFEST,
+    PIDFILE,
 ];
+/// `--launch` writes the PID of the xdevcmd it started here; `--kill-when` kills that.
+const PIDFILE: &str = ".xdevcmd-try-pid";
 /// The older date of replace-dst's files: what tells a replaced one apart.
 const OLD: u64 = 1_577_836_800; // 2020-01-01
 /// xdevcmd keeps a big file's progress every 256 MiB (ops.rs CHECKPOINT): check B kills
@@ -93,6 +98,8 @@ pub fn run(args: &[String], version: &str) -> i32 {
     let mut what = None;
     let mut sizes = Sizes::FULL;
     let mut when = None;
+    let mut bin: Option<PathBuf> = None;
+    let mut launch_args: Vec<String> = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -100,21 +107,39 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 // One thing per run: `--check --make` started a whole make (QA of #42).
                 if what.is_some() {
                     return usage(
-                        "one of --make, --kill-when, --reset, --check, --tamper, --clean",
+                        "one of --make, --launch, --kill-when, --reset, --check, --tamper, --clean",
                     );
                 }
                 what = Some(a.clone())
             }
-            "--kill-when" | "--reset" => match it.next().map(|c| c.to_ascii_uppercase()) {
-                _ if what.is_some() => {
-                    return usage("one of --make, --kill-when, --reset, --check, --tamper, --clean")
+            "--kill-when" | "--reset" => {
+                match it.next().map(|c| c.to_ascii_uppercase()) {
+                    _ if what.is_some() => return usage(
+                        "one of --make, --launch, --kill-when, --reset, --check, --tamper, --clean",
+                    ),
+                    Some(c) if ["A", "B", "C"].contains(&c.as_str()) => {
+                        what = Some(a.clone());
+                        when = Some(c);
+                    }
+                    _ => return usage(&format!("{a} needs A, B or C")),
                 }
-                Some(c) if ["A", "B", "C"].contains(&c.as_str()) => {
-                    what = Some(a.clone());
-                    when = Some(c);
+            }
+            "--launch" => {
+                if what.is_some() {
+                    return usage(
+                        "one of --make, --launch, --kill-when, --reset, --check, --tamper, --clean",
+                    );
                 }
-                _ => return usage(&format!("{a} needs A, B or C")),
+                what = Some(a.clone());
+            }
+            "--bin" => match it.next() {
+                Some(b) => bin = Some(PathBuf::from(b)),
+                None => return usage("--bin needs the path of xdevcmd"),
             },
+            // Everything after `--` is xdevcmd's own arguments.
+            "--" => {
+                launch_args = it.by_ref().cloned().collect();
+            }
             "--help" | "-h" => {
                 println!("{HELP}");
                 return 0;
@@ -138,6 +163,7 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 println!("zeroed, its size and date kept: {}", p.display());
                 0
             }),
+            "--launch" => launch(&root, bin.as_deref(), &launch_args),
             "--clean" => clean(&root).map(|()| {
                 println!("removed {}", root.display());
                 0
@@ -154,7 +180,11 @@ pub fn run(args: &[String], version: &str) -> i32 {
             }
             _ => kill_when(&root, when.as_deref().unwrap_or("A")),
         }),
-        None => return usage("one of --make, --kill-when, --reset, --check, --tamper, --clean"),
+        None => {
+            return usage(
+                "one of --make, --launch, --kill-when, --reset, --check, --tamper, --clean",
+            )
+        }
     };
     r.unwrap_or_else(|e| {
         eprintln!("try: {e}");
@@ -168,10 +198,13 @@ fn usage(why: &str) -> i32 {
 }
 
 pub const HELP: &str =
-    "usage: xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
+    "usage: xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
   --make        make D/xdevcmd-try (2.5 GiB, 3.8 with the copies; --small: 0.6 and 1.1)
-  --kill-when   run before Enter on check A, B or C: waits, kills xdevcmd mid-job (every
-                running xdevcmd, by name: quit the others first)
+  --launch      window 1: start xdevcmd with ARGS (after --) and keep its PID for
+                --kill-when; when it ends, the terminal is put back. xdevcmd is the one
+                beside xtask, else on PATH; --bin P names another
+  --kill-when   window 2, before Enter on check A, B or C: waits, then kills the xdevcmd
+                --launch started, mid-job; no other process is touched
   --reset       put back the files check A, B or C's copy changed, to do its steps again
   --check       every copy against the manifest: PASS, FAIL (a P0) or NOT DONE
   --tamper      check C: one finished copy zeroed, its size and date kept
@@ -869,6 +902,15 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
             "check {c} was already run here ({what}): xtask try --reset {c} to run it again"
         )));
     }
+    // The xdevcmd to kill is known before the wait, not found after it.
+    let pidfile = root.join(PIDFILE);
+    let pid = read_pid(&pidfile)?;
+    if program_of(pid).as_deref() != Some("xdevcmd") {
+        return Err(io::Error::other(format!(
+            "PID {pid} in {} is not a running xdevcmd: start it with `xtask try --launch -- …`",
+            pidfile.display()
+        )));
+    }
     println!("check {c}: waiting for the copy; press Enter on it in xdevcmd now");
     let start = Instant::now();
     loop {
@@ -886,28 +928,155 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
             None => std::thread::sleep(Duration::from_millis(5)),
         }
     }
-    let killed = if cfg!(windows) {
-        std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "xdevcmd.exe"])
-            .output()
-    } else {
-        std::process::Command::new("pkill")
-            .args(["-9", "-x", "xdevcmd"])
-            .output()
-    }
-    .map_err(|e| io::Error::other(format!("cannot kill xdevcmd: {e}")))?;
-    if !killed.status.success() {
-        return Err(io::Error::other("no xdevcmd was running to kill"));
-    }
+    kill_from_pidfile(&pidfile, "xdevcmd")?;
     println!(
-        "killed xdevcmd mid-job. Start it again{} and do as the check says.",
-        if cfg!(windows) {
-            ""
+        "killed xdevcmd mid-job. In window 1, start it again with the same \
+         `xtask try --launch` line and do as the check says."
+    );
+    Ok(0)
+}
+
+/// `--launch`: start xdevcmd in this terminal with `args`, write its PID to the
+/// sandbox's pidfile for `--kill-when`, wait for it, and put the terminal back when it
+/// ends (a killed xdevcmd cannot: mouse reports and raw mode were left on).
+fn launch(root: &Path, bin: Option<&Path>, args: &[String]) -> io::Result<i32> {
+    marked(root)?;
+    let exe = match bin {
+        Some(b) => b.to_path_buf(),
+        None => beside_xtask().unwrap_or_else(|| PathBuf::from("xdevcmd")),
+    };
+    let mut child = std::process::Command::new(&exe)
+        .args(args)
+        .spawn()
+        .map_err(|e| io::Error::other(format!("cannot start {}: {e}", exe.display())))?;
+    let pidfile = root.join(PIDFILE);
+    let written = fs::write(&pidfile, format!("{}\n", child.id())).map_err(at(&pidfile));
+    if let Err(e) = written {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e);
+    }
+    let status = child.wait();
+    let _ = fs::remove_file(&pidfile);
+    put_terminal_back();
+    let status = status.map_err(|e| io::Error::other(format!("waiting for xdevcmd: {e}")))?;
+    println!(
+        "xdevcmd ended ({}). To start it again, run the same `xtask try --launch` line.",
+        if status.success() {
+            "quit".to_string()
         } else {
-            " (type `reset` first if the terminal looks wrong)"
+            format!("{status}")
         }
     );
     Ok(0)
+}
+
+/// xdevcmd beside this xtask (a release's test kit, a ci artifact), if there is one.
+fn beside_xtask() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "xdevcmd.exe"
+    } else {
+        "xdevcmd"
+    };
+    let p = std::env::current_exe().ok()?.parent()?.join(name);
+    p.is_file().then_some(p)
+}
+
+/// After a kill: mouse reports off, the main screen back, the cursor shown, and the
+/// terminal's line mode back (`stty sane`). Windows' console needs none of it.
+fn put_terminal_back() {
+    if cfg!(windows) {
+        return;
+    }
+    let mut out = io::stdout();
+    let _ = out
+        .write_all(b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1049l\x1b[?25h");
+    let _ = out.flush();
+    let _ = std::process::Command::new("stty").arg("sane").status();
+}
+
+/// Kill the process whose PID `pidfile` holds, as a crash would (`kill -9`, End task),
+/// only if it is still the program `name`. Never anything else: no pidfile, a PID gone,
+/// or another program there is an error, and nothing is killed.
+fn kill_from_pidfile(pidfile: &Path, name: &str) -> io::Result<()> {
+    let pid = read_pid(pidfile)?;
+    match program_of(pid) {
+        Some(p) if p == name => {}
+        Some(p) => {
+            return Err(io::Error::other(format!(
+                "PID {pid} is {p}, not {name}: nothing killed"
+            )))
+        }
+        None => {
+            return Err(io::Error::other(format!(
+                "PID {pid} is not running: start xdevcmd again with `xtask try --launch`"
+            )))
+        }
+    }
+    let pid_s = pid.to_string();
+    let killed = if cfg!(windows) {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid_s])
+            .output()
+    } else {
+        std::process::Command::new("kill")
+            .args(["-9", &pid_s])
+            .output()
+    }
+    .map_err(|e| io::Error::other(format!("cannot kill PID {pid}: {e}")))?;
+    if killed.status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "PID {pid} was not killed: {}",
+            String::from_utf8_lossy(&killed.stderr).trim()
+        )))
+    }
+}
+
+fn read_pid(pidfile: &Path) -> io::Result<u32> {
+    let text = fs::read_to_string(pidfile).map_err(|_| {
+        io::Error::other(
+            "no xdevcmd started by `xtask try --launch -- …` in window 1: start it that way \
+             (--kill-when kills only the one it started)",
+        )
+    })?;
+    text.trim()
+        .parse()
+        .map_err(|_| io::Error::other(format!("{}: not a PID", pidfile.display())))
+}
+
+/// The program running as `pid`, without its path or `.exe`; `None` if none is.
+fn program_of(pid: u32) -> Option<String> {
+    let base = |s: &str| {
+        let s = s.trim();
+        let s = s.rsplit(['/', '\\']).next().unwrap_or(s);
+        s.strip_suffix(".exe").unwrap_or(s).to_string()
+    };
+    if cfg!(target_os = "linux") {
+        return fs::read_to_string(format!("/proc/{pid}/comm"))
+            .ok()
+            .map(|c| base(&c));
+    }
+    if cfg!(windows) {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+            .ok()?;
+        let line = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()?
+            .to_string();
+        let first = line.split(',').next()?.trim_matches('"').to_string();
+        // "INFO: No tasks are running…" has no quotes and no comma.
+        return line.starts_with('"').then(|| base(&first));
+    }
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    let c = String::from_utf8_lossy(&out.stdout).to_string();
+    (!c.trim().is_empty()).then(|| base(&c))
 }
 
 #[cfg(test)]
@@ -933,25 +1102,53 @@ mod tests {
     #[test]
     fn kill_when_kills_the_launched_pid_and_nothing_else() {
         let t = top("pidkill");
-        let sleep = || std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let sleep = || {
+            std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .unwrap()
+        };
         let (mut ours, mut other) = (sleep(), sleep());
+        // spawn can return before the child has become `sleep` (its name is still the
+        // test's for a moment): wait for that, as a tester's Enter waits for xdevcmd.
+        for c in [&ours, &other] {
+            let start = Instant::now();
+            while program_of(c.id()).as_deref() != Some("sleep") {
+                assert!(
+                    start.elapsed() < Duration::from_secs(5),
+                    "sleep never started"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
         let pidfile = t.join(PIDFILE);
         fs::write(&pidfile, format!("{}\n", ours.id())).unwrap();
         // Not the program named: refused, and it lives.
         assert!(kill_from_pidfile(&pidfile, "xdevcmd").is_err());
-        assert!(ours.try_wait().unwrap().is_none(), "a refused kill killed it");
+        assert!(
+            ours.try_wait().unwrap().is_none(),
+            "a refused kill killed it"
+        );
         kill_from_pidfile(&pidfile, "sleep").unwrap();
         let start = Instant::now();
         while ours.try_wait().unwrap().is_none() {
-            assert!(start.elapsed() < Duration::from_secs(5), "the launched one lives");
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "the launched one lives"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(other.try_wait().unwrap().is_none(), "another one was killed too");
+        assert!(
+            other.try_wait().unwrap().is_none(),
+            "another one was killed too"
+        );
         let _ = other.kill();
         let _ = other.wait();
         // No pidfile: an error that says how to launch, never a kill by name.
         fs::remove_file(&pidfile).unwrap();
-        let e = kill_from_pidfile(&pidfile, "sleep").unwrap_err().to_string();
+        let e = kill_from_pidfile(&pidfile, "sleep")
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("--launch"), "{e}");
         let _ = fs::remove_dir_all(&t);
     }

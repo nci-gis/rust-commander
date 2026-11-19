@@ -2727,6 +2727,21 @@ fn xdevcmd_state_naming_a_folder_is_refused() {
         "{err}"
     );
     assert!(!top.join("journal").exists(), "a journal beside the folder");
+    // A folder not made yet, named with a trailing separator, and a relative path (the
+    // journal would follow wherever xdevcmd was started): refused too (red-team of #48).
+    let sep = std::path::MAIN_SEPARATOR;
+    for bad in [format!("{}{sep}", top.join("not-yet").display()), "rel-state".to_string()] {
+        let out = isolated()
+            .env("XDEVCMD_STATE", &bad)
+            .current_dir(&top)
+            .arg("--screenshot=80x24")
+            .output()
+            .expect("xdevcmd should run");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{bad}: {err}");
+        assert!(err.contains("XDEVCMD_STATE"), "{bad}: {err}");
+    }
+    assert!(!top.join("journal").exists(), "a journal beside it");
     let _ = std::fs::remove_dir_all(&top);
 }
 

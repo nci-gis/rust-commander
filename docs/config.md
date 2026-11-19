@@ -374,8 +374,9 @@ file named with `--cwd-file`, on quit.
 | `xdevcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when xdevcmd ends; one left by a crash is removed at the next start, an hour on. |
 
 - `$XDG_STATE_HOME/xdevcmd/` replaces the state directory, and `XDEVCMD_STATE` names the
-  session file itself, such as `/tmp/x/session.toml`: the journal, crash logs and
-  bookmarks go beside it. A folder there is refused at the start.
+  session file itself, by its full path, such as `/tmp/x/session.toml`: the journal,
+  crash logs and bookmarks go beside it. A folder or a relative path is refused at the
+  start.
 - `restore_session = false` stops the session being saved.
 - `--read-only` and `--restricted` save no session, no bookmarks and no settings. They
   still write the file named with `--cwd-file`, and the temporary copy of a file viewed

@@ -55,28 +55,32 @@ thought) to 5 (gave up), then quit (F10).
 **5. The same five tasks with this version**, scored the same way:
 `/path/to/xdevcmd xdevcmd-try xdevcmd-try/replace-dst`. Then `xtask try --check`.
 
-**Before checks A to C, quit every other xdevcmd.** `--kill-when` kills every running
-program named xdevcmd on this machine (`kill -9`, End task), not only the one in the
-sandbox.
+**In checks A to C, start xdevcmd through `xtask try --launch`.** It keeps that
+xdevcmd's process number, and `--kill-when` kills that one and nothing else (`kill -9`,
+End task): an xdevcmd you have open elsewhere is safe. `--bin` names the xdevcmd to
+try (the one from this release, as in step 5); its arguments go after `--`. It prints
+which xdevcmd it started, and its version: check it is this release. When the killed
+xdevcmd ends, the window is put back; start it again with the same `--launch` line.
 
-**6. Check A, a replace killed mid-way.** In the second window:
+**6. Check A, a replace killed mid-way.** First window:
+`xtask try --launch --bin /path/to/xdevcmd -- xdevcmd-try xdevcmd-try/replace-dst`. Second window:
 `xtask try --kill-when A`. In xdevcmd: in `replace-src`, Ctrl+A, F5; Space until the
-line says `[replace]`; Enter. The second window kills xdevcmd mid-job. Start xdevcmd
-again (same line as step 5): it says "ended in the middle of a job"; Enter. It finishes
-without asking again. On macOS and Linux the kill can leave that window printing odd
-characters when the mouse moves: type `reset`, Enter (or just start xdevcmd again).
+line says `[replace]`; Enter. The second window kills xdevcmd mid-job. Start it again
+with the same `--launch` line: it says "ended in the middle of a job"; Enter. It
+finishes without asking again.
 
 **7. Check B, a big file killed mid-way.** On macOS and Linux, start xdevcmd with the
 sandbox's config, which turns the fast copy off: on APFS, Btrfs or XFS a copy is a
 clone, done at once, with no checkpoint to stop at.
-`XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml /path/to/xdevcmd xdevcmd-try xdevcmd-try/copy-to`
-(on Windows: `/path/to/xdevcmd xdevcmd-try xdevcmd-try/copy-to`). In the second window:
-`xtask try --kill-when B`. In xdevcmd: F5 on `big`, Enter. Start again with the same
-line: "kept part way"; Enter. The bar starts near where it stopped.
+`XDEVCMD_CONFIG=xdevcmd-try/no-fast-copy.toml xtask try --launch --bin /path/to/xdevcmd -- xdevcmd-try xdevcmd-try/copy-to`
+(on Windows: `xtask try --launch --bin /path/to/xdevcmd -- xdevcmd-try xdevcmd-try/copy-to`). In the second
+window: `xtask try --kill-when B`. In xdevcmd: F5 on `big`, Enter. Start again with the
+same line: "kept part way"; Enter. The bar starts near where it stopped.
 
-**8. Check C, after a power cut.** `xtask try --kill-when C`; in xdevcmd: F5 on `tree`,
-Enter. Then `xtask try --tamper` (it spoils one finished copy, as a power cut can). Start
-again and press **C**: "1 found different … copied again".
+**8. Check C, after a power cut.** First window: the `--launch` line of check B (or
+step 7's on Windows). Second window: `xtask try --kill-when C`; in xdevcmd: F5 on
+`tree`, Enter. Then `xtask try --tamper` (it spoils one finished copy, as a power cut can). Start it
+again with the same `--launch` line and press **C**: "1 found different … copied again".
 
 **9. Check every file**: `xtask try --check`. The last line must be
 **PASS: every copy whole, no file lost or wrong**. Then `xtask try --clean`.
@@ -113,7 +117,8 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
 - **On a Mac**: F-keys need Fn (or "Use F1, F2, etc. keys as standard function keys" in
   System Settings → Keyboard); End is Fn+→; for Alt+ keys, Terminal → Settings →
   Profiles → Keyboard → "Use Option as Meta key".
-- **After a kill**, on macOS and Linux the terminal may look wrong: type `reset`.
+- **After a kill**, `--launch` puts the window back. If xdevcmd was started another way,
+  on macOS and Linux the window may print odd characters: type `reset`, Enter.
 - **To do a check again**: `xtask try --reset A` (or `B`, `C`) puts back the files that
   check's copy changed, in seconds, with no new `--make`; then do its steps again. If
   xdevcmd still offers the job at its start, press **F** (forget it) first.

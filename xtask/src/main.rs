@@ -65,7 +65,7 @@ const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME]
                          [--only CASE] [--dir PATH]
        cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
        cargo xtask fuzz [--secs N] [TARGET...]
-       cargo xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]";
+       cargo xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]";
 /// `xtask --help`: what each task is for. It never runs, looks for or asks an installed
 /// xdevcmd: `bench --only` measures the engine built into this program, of the version
 /// `--version` prints (the release it came with).
@@ -82,7 +82,7 @@ const HELP: &str =
 Each task's options: xtask bench --help, xtask try --help.
 
 usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
-       xtask try --make [--small] | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
+       xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
        xtask sync-sweep [--files N] [--dir PATH] [--probe]
        xtask fuzz [--secs N] [TARGET...]
 (From the repository: cargo xtask …)";

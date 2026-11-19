@@ -1,5 +1,7 @@
 # QA hunt: COPY, MOVE, RESUME (xdevcmd 0.4.0-beta.1 prebuilt, /tmp/qa/bin)
 
+**Status**: Needs Review — line 9 describes `--kill-when` before plan v3 H-01 (#47): it now kills only the xdevcmd `xtask try --launch` started, by PID.
+
 Sandbox: /tmp/qa/hunt-copy (XDEVCMD_CONFIG/STATE, XDG_DATA_HOME, HOME all inside it).
 Helpers: `bin/x KEYS LEFT RIGHT [WxH]` = screenshot mode with the sandbox env + `--no-restore`;
 `bin/run SESSION CONFIG LEFT RIGHT` = same env in tmux; `slow.toml` = `[general] fast_copy = false`.

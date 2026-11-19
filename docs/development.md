@@ -113,9 +113,10 @@ every option. `--make` makes the folder that [How to test](how-to-test.md) uses,
 SHA-256 manifest of its files. The manifest counts its own lines: a cut one is an
 error, never a PASS. `--kill-when` waits until a tenth of the files are replaced (check
 A), the first checkpoint is past (B) or a fifth of the tree is copied (C), then kills
-every running xdevcmd by name, not only the one in the sandbox. `--clean` removes the
-sandbox only when `--make`'s marker is in it, and removes the marker last. Apart from
-`--kill-when`, `xtask try` never runs or looks for xdevcmd.
+the xdevcmd that `--launch` started, by the process number it wrote in the sandbox, and
+only if that process is still xdevcmd; no other process is touched. `--clean` removes
+the sandbox only when `--make`'s marker is in it, and removes the marker last. Apart
+from `--launch` and `--kill-when`, `xtask try` never runs or looks for xdevcmd.
 
 How a tester measures on macOS, Windows and Linux: [Benchmarks](benchmark.md).
 

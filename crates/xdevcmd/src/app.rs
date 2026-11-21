@@ -1371,6 +1371,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Read-only turns off every action that changes the disk or runs a program: Open
+    /// with…'s menu slipped through `_ => return None` (cosf #4, plan v3 H-05).
+    #[test]
+    fn read_only_refuses_open_with_menu_as_open_with() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-ro-menu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let settings = Settings {
+            mode: crate::config::Mode::ReadOnly,
+            ..Settings::default()
+        };
+        let app = App::new(&root, &root, settings, Outcome::NoFile);
+        assert!(app.refused(Action::OpenWith).is_some());
+        assert!(app.refused(Action::OpenWithMenu).is_some(), "the menu too");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn base64_matches_the_rfc_vectors() {
         for (input, want) in [

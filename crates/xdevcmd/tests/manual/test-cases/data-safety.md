@@ -8,7 +8,7 @@ removed before its copy is complete ([security.md](../../../../../docs/security.
 **Setup**: two folders with the same file names, the destination's files older.
 **Steps**: 1. F5, choose **replace** for the older ones. 2. While it runs, `kill -9`
 xdevcmd (Windows: Task Manager → End task). 3. Start it again.
-**Expected**: "The last run of xdevcmd ended in the middle of a job"; if it was between
+**Expected**: it says it "ended in the middle of a job"; if it was between
 the trash and the rename, "replacement finished … the old one is in the trash".
 Continue finishes without asking again what you chose.
 **Fail if**: a file empty, short or missing under its own name; an old file gone and
@@ -54,7 +54,7 @@ both are kept").
 **Platform**: SMB or NFS (unplug or stop the server); sshfs (kill the ssh connection) ·
 **Automated**: retry unit tests with injected errors
 **Steps**: 1. Copy a large file onto the share. 2. Take the share away.
-**Expected**: "network error — trying again in 1 s (1 of 5)", counting down. Back within
+**Expected**: "network error — trying again in … s (… of 5)", counting down. Back within
 about 30 s: the copy finishes by itself. Left down: after the fifth try, the Failed
 dialog (R retry, S skip, Esc abort), saying it tried 6 times. Esc during a wait stops at
 once.

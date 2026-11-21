@@ -7,8 +7,9 @@ file goes to the trash where the trash is on the same drive
 ### M-UT-01 Undo a copy
 **Platform**: all · **Automated**: render.rs undo tests (screenshot)
 **Steps**: 1. F5 a folder of a few files. 2. Ctrl+Z, Enter.
-**Expected**: "Undo the copy of …?" lists what it will remove; then the copies are gone,
-the originals untouched.
+**Expected**: it asks first, "after showing what it will do": what it will remove; then
+the copies are gone, the originals untouched.
+**Fail if**: an original touched; a copy left that was not changed since.
 
 ### M-UT-02 Undo keeps what you changed
 **Platform**: all · **Automated**: engine undo tests
@@ -21,7 +22,7 @@ the originals untouched.
 **Platform**: Linux any disk and a USB stick; macOS a local disk and a USB stick;
 Windows the system drive (C:) · **Automated**: Linux, in a sandboxed trash
 **Steps**: 1. Copy over an older file, choose replace. 2. Ctrl+Z.
-**Expected**: the table said "ℹ a file replaced goes to the trash"; after Ctrl+Z the new
+**Expected**: the table said ℹ "a file replaced goes to the trash"; after Ctrl+Z the new
 file is gone and the old one back, from the trash.
 **Fail if**: the old file is not in the trash, or Ctrl+Z leaves the new one.
 

@@ -8,21 +8,26 @@ The table itself is automated (render.rs); these cases need real drives.
 **Platform**: all · **Automated**: render.rs plan tests
 **Steps**: copy a folder onto one with some of the same files: newer, older, another size.
 **Expected**: one line per group, worst first; ↑↓ between groups; Space: skip / replace /
-ask each; the summary counts create, replace, skip and the space needed. All new files:
-the plain F5 dialog.
+ask each; the first line sums up "create · replace · skip · space needed and free". All
+new files: the plain F5 dialog.
+**Fail if**: a newer file in the destination is replaced without choosing **replace**; a
+group missing from the table; the counts do not match the folders.
 
 ### M-PT-02 Enter before the check ends
 **Platform**: all, a big folder on a slow disk · **Automated**: none (timing)
 **Steps**: F5, Enter at once.
-**Expected**: the copy starts and asks about each existing file as it meets it. Tab
-checks again for the other pane.
+**Expected**: the job starts "as before, asking as it goes": it asks about each existing
+file as it meets it. Tab checks again for the other pane.
+**Fail if**: an existing file replaced without a question.
 
 ### M-PT-03 A FAT32 stick
 **Platform**: all · **Automated**: none
 **Steps**: copy a file of 4 GiB or more, and a name with `:` or `?`, onto FAT32; then the
 4 GiB file onto exFAT.
-**Expected**: ⛔ "left out: 4 GiB or more, onto a FAT drive"; ⛔ "a name the destination
-cannot hold"; exFAT takes the 4 GiB file.
+**Expected**: both are ⛔ "cannot be done (left out, with the reason)": the drive cannot
+take that size, or that name; exFAT takes the 4 GiB file.
+**Fail if**: the 4 GiB file starts copying onto FAT32 and fails part way; a file with
+another name than its source appears on the stick.
 
 ### M-PT-04 A case-insensitive drive
 **Platform**: macOS default disk, Windows, a FAT stick · **Automated**: none
@@ -33,10 +38,14 @@ cannot hold"; exFAT takes the 4 GiB file.
 ### M-PT-05 Not enough free space
 **Platform**: Linux, macOS (Windows does not know free space yet) · **Automated**: none
 **Steps**: copy more than the destination's free space.
-**Expected**: ⛔ "it needs …, and only … is free there".
+**Expected**: the first line shows "space needed and free", and the copy is ⛔ "cannot
+be done (left out, with the reason)", the reason naming the space.
+**Fail if**: the copy starts and stops on a full disk.
 
 ### M-PT-06 A big tree
 **Platform**: all · **Automated**: bench `plan` cases
 **Steps**: F5 a tree of 100,000 files or more.
-**Expected**: the dialog opens at once, the count grows; memory in Help → Usage stays
-reasonable.
+**Expected**: the dialog "opens at once and checks the destination while you read it":
+the count grows; memory in Help → Usage stays reasonable.
+**Fail if**: the dialog waits for the whole check before it shows; the screen stops
+answering.

@@ -5,7 +5,10 @@ use super::*;
 /// The action whose refusal a command follows, or `None` for one that only reads or
 /// decides its own refusal where it runs. Every command named, no `_`: a new command
 /// does not build until it is sorted here (plan v3 H-05).
-#[deny(clippy::wildcard_enum_match_arm)]
+#[deny(
+    clippy::wildcard_enum_match_arm,
+    clippy::match_wildcard_for_single_variants
+)]
 fn cmd_action(c: &Cmd) -> Option<Action> {
     match c {
         Cmd::Transfer { .. } => Some(Action::Copy),
@@ -16,23 +19,22 @@ fn cmd_action(c: &Cmd) -> Option<Action> {
         Cmd::EditConfig(_) => Some(Action::Edit),
         Cmd::Undo => Some(Action::Undo),
         Cmd::ShellNew(_) | Cmd::ShellSendHere(_) => Some(Action::NewTerminal),
+        // Each also refused where it is reached; here too, so it stands if that screen
+        // changes (red-team F6): Save as and a tab's log write files, recovery acts on
+        // an interrupted job.
+        Cmd::SaveReplacing(_) | Cmd::TabLog(_) | Cmd::TabSaveHistory(_) => Some(Action::CopyAs),
+        Cmd::Resume(_) | Cmd::ResumeChecked(_) | Cmd::Discard(_) => Some(Action::Copy),
         // Asks `refused` itself (`perform`), or decides where it runs: per rule (view,
-        // edit, a program), a program in a terminal, Save as and the log (CopyAs), the
-        // clipboard (restricted), bookmarks (saved), recovery (not offered read-only).
+        // edit, a program), a program in a terminal, the clipboard (restricted),
+        // bookmarks (saved to a file: their own arm below).
         Cmd::Act(_)
         | Cmd::ApplyRule(..)
         | Cmd::RunInTerminal { .. }
-        | Cmd::TabSaveHistory(_)
-        | Cmd::TabLog(_)
-        | Cmd::SaveReplacing(_)
         | Cmd::CopyPath
         | Cmd::CopyRelativePath
         | Cmd::CopyText(_)
         | Cmd::AddBookmark(_)
-        | Cmd::RemoveBookmark(_)
-        | Cmd::Resume(_)
-        | Cmd::ResumeChecked(_)
-        | Cmd::Discard(_) => None,
+        | Cmd::RemoveBookmark(_) => None,
         // Read, move the view, or close.
         Cmd::GoTo(_)
         | Cmd::ShowList(_)
@@ -361,8 +363,13 @@ impl App {
             None if mode == Mode::Restricted && a.uses_terminal() => "the terminal",
             None => return None,
         };
+        // The next safe thing, where there is one: viewing is on in every mode.
+        let next = match a {
+            Action::OpenWith | Action::OpenWithMenu => " \u{2014} F3 views it",
+            _ => "",
+        };
         mode.read_only()
-            .then(|| format!("{} mode \u{2014} {what} is turned off", mode.label()))
+            .then(|| format!("{} mode \u{2014} {what} is turned off{next}", mode.label()))
     }
 
     /// Why `a` cannot run inside an archive, or `None`. Only reading and extracting
@@ -383,6 +390,7 @@ impl App {
                 | Action::Symlink
                 | Action::Permissions
                 | Action::OpenWith
+                | Action::OpenWithMenu
                 | Action::Checksum
                 | Action::Pack
                 | Action::Unpack
@@ -419,6 +427,7 @@ impl App {
                 | Action::Symlink
                 | Action::Permissions
                 | Action::OpenWith
+                | Action::OpenWithMenu
                 | Action::Checksum
                 | Action::Pack
                 | Action::Unpack

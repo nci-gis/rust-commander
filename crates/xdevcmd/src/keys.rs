@@ -101,36 +101,42 @@ pub enum Action {
 }
 
 impl Action {
-    /// What `self` changes on disk or runs, worded for a refusal ("copying and moving"),
-    /// or `None` for an action that only reads or moves the view. Every action is
-    /// named, no `_`: a new one does not build until it is sorted here (plan v3 H-05;
-    /// cosf #4, Open with…'s menu slipped through a `_`).
-    #[deny(clippy::wildcard_enum_match_arm)]
-    pub fn writes(self) -> Option<&'static str> {
+    /// What `self` does, for the modes that turn things off: it writes or runs (worded
+    /// for a refusal, "copying and moving"), it uses the terminal, or it only reads or
+    /// moves the view. Every action is named, no `_` (both clippy lints deny one, the
+    /// single-variant one included): a new action does not build until it is sorted
+    /// here (plan v3 H-05; cosf #4, Open with…'s menu slipped through a `_`).
+    #[deny(
+        clippy::wildcard_enum_match_arm,
+        clippy::match_wildcard_for_single_variants
+    )]
+    pub fn effect(self) -> Effect {
         use Action as A;
+        use Effect::{Reads, Terminal, Writes};
         match self {
-            A::Copy | A::Move => Some("copying and moving"),
-            A::Delete | A::DeletePermanent => Some("deleting"),
-            A::Rename | A::BulkRename => Some("renaming"),
-            A::NewFile | A::CopyAs | A::Symlink | A::Pack | A::Unpack => Some("creating files"),
-            A::SyncDirs => Some("synchronising"),
-            A::Permissions => Some("changing permissions"),
-            A::MkDir => Some("creating directories"),
-            A::Edit => Some("editing"),
-            A::OpenWith | A::OpenWithMenu => Some("opening files in other programs"),
-            A::Undo => Some("undoing"),
-            A::Quit
-            | A::Help
-            | A::Refresh
-            | A::ToggleHidden
-            | A::FocusNextPane
-            | A::FocusTerminal
+            A::Copy | A::Move => Writes("copying and moving"),
+            A::Delete | A::DeletePermanent => Writes("deleting"),
+            A::Rename | A::BulkRename => Writes("renaming"),
+            A::NewFile | A::CopyAs | A::Symlink | A::Pack | A::Unpack => Writes("creating files"),
+            A::SyncDirs => Writes("synchronising"),
+            A::Permissions => Writes("changing permissions"),
+            A::MkDir => Writes("creating directories"),
+            A::Edit => Writes("editing"),
+            A::OpenWith | A::OpenWithMenu => Writes("opening files in other programs"),
+            A::Undo => Writes("undoing"),
+            A::FocusTerminal
             | A::ToggleTerminal
             | A::TerminalHistory
             | A::CdTerminalHere
             | A::GoShellDir
             | A::TypeNames
             | A::NewTerminal
+            | A::UserMenu => Terminal,
+            A::Quit
+            | A::Help
+            | A::Refresh
+            | A::ToggleHidden
+            | A::FocusNextPane
             | A::NewTab
             | A::CloseTab
             | A::NextTab
@@ -183,29 +189,37 @@ impl Action {
             | A::FindFiles
             | A::QuickView
             | A::Checksum
-            | A::UserMenu
             | A::CompareDirs
             | A::MenuBar
             | A::Usage
             | A::Messages
-            | A::ContextMenu => None,
+            | A::ContextMenu => Reads,
+        }
+    }
+
+    /// What `self` changes on disk or runs, worded for a refusal, or `None`.
+    pub fn writes(self) -> Option<&'static str> {
+        match self.effect() {
+            Effect::Writes(what) => Some(what),
+            Effect::Terminal | Effect::Reads => None,
         }
     }
 
     /// Whether `self` uses the terminal: turned off in restricted mode.
     pub fn uses_terminal(self) -> bool {
-        matches!(
-            self,
-            Action::FocusTerminal
-                | Action::TerminalHistory
-                | Action::ToggleTerminal
-                | Action::CdTerminalHere
-                | Action::GoShellDir
-                | Action::TypeNames
-                | Action::NewTerminal
-                | Action::UserMenu
-        )
+        matches!(self.effect(), Effect::Terminal)
     }
+}
+
+/// What an [`Action`] does, for the modes that turn things off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    /// Changes the disk or runs a program; the words name it in a refusal.
+    Writes(&'static str),
+    /// Uses the terminal (restricted mode turns it off).
+    Terminal,
+    /// Only reads, or moves the view.
+    Reads,
 }
 
 /// One binding: its config name, where the help screen lists it, what it does, and its

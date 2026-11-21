@@ -1281,12 +1281,12 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     std::fs::write(
         journal.join("2147483646-0.journal"),
         format!(
-            "{}kind copy\nsrc {}\nsrc {}\ndest {}\npart {}\n",
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\ndir {}\n",
             host_line(),
             hex(&src.join("a.txt")),
             hex(&src.join("b.txt")),
             hex(&dst),
-            hex(&part)
+            hex(&dst)
         ),
     )
     .unwrap();

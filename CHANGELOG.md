@@ -67,6 +67,10 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **Continue after a kill never trusts a line cut short**: the journal's last line,
+  written only in part when the run died, could name another folder (`/w/proj` for
+  `/w/proj-x`), which Continue then skipped. Such a line is not read. Every line the
+  journal writes is read and checked against `--root` by one table.
 - **With `--root`, a file put back from the trash goes back**: it was always refused,
   as its free old name did not resolve. A new folder, Save as, a terminal log, a file put
   back and an undo are checked against the root one way, and an undo of a move or a

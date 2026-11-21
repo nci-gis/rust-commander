@@ -197,3 +197,20 @@ until beta.2 is cut (its step 9). 029–031 were already Complete (2026-11-13).
 **Source**: the owner, 2026-11-17 ("có thể tạo QA Skill để chạy các agents tương ứng để kiểm thử"), then the answers "Repo: .agents/skills/qa", "tests/manual/", "Data paths first".
 **What**: new skill `skills/qa/SKILL.md` (the user docs as the oracle; PROVES / CONFIRMS / MISSING / MANUAL; audit and hunt agents per area; verify before relaying; fix bugs only, red first). The hand-test list moved from `docs/development.md` to `crates/xdevcmd/tests/manual/` (README + one file per area, cases with IDs); development.md points there. First run's findings: `memory/2026-11-17-qa-beta2.md`.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-20: review lessons, past misses, and minimal QA and red-team rules (plan v3, step 3)
+
+**Source**: the owner, 2026-11-20 ("OK bước 3"), approving plan v3 of the beta.2
+hardening. The plan is in the owner's research notes (cosf), outside this repository.
+**What**:
+- new `reference/review-lessons.md`: lessons L1–L17, the ladder of controls, and the
+  escalation rule;
+- new `skills/qa/references/past-misses.md`: seeded with RR01–07, R01–R15, the 12
+  defects of the cosf study re-checked on eaee2d4, and two fragile waits (a recurrence);
+- `skills/qa/SKILL.md`: crossing features with modes, recording in past-misses,
+  escape rate, and fresh evidence before a cut;
+- `skills/red-team/SKILL.md`: one-agent review of a change, covering the diff,
+  siblings and callers, with "no sibling proof, no merge".
+
+`AGENTS.md` is unchanged: it is at 99 lines, so the two skills link the new files instead.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

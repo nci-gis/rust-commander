@@ -58,6 +58,21 @@ Skip it for small, reversible work: the cost is real (one round = 4 agents).
 8. **The human decides.** Agents propose; the owner approves the plan, merges,
    closes rounds and changes the rubric.
 
+## A change, not a plan (one agent)
+
+For a pull request on a data path, one fresh agent is enough. It gets the branch,
+not the PR body or the author's reasoning.
+
+- **Scope:** the diff, then every sibling (other copies of the same concept, found
+  by name and behaviour), then the callers. Lessons L1–L3 in
+  [reference/review-lessons.md](../../reference/review-lessons.md).
+- **No sibling proof, no merge:** a data-path fix shows each sibling either fixed or
+  not affected, with `file:line`.
+- **Evidence-anchored:** every finding carries a reproduction or `file:line`, labelled
+  REPRODUCED / READ / SUSPECT. A score with no evidence is dropped.
+- **Verdict:** SIGN / SIGN WITH AMENDMENTS / REFUSE. Amendments are fixed, then
+  checked again. What the round found goes into the QA skill's past-misses.
+
 ## Rules that came out of it
 
 - No proof, no merge: a fix whose proof step was skipped goes to the next

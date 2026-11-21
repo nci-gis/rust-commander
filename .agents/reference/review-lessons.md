@@ -40,7 +40,7 @@ L16 and L17 match it.
 | L8 | Every promise in the docs is checked against the code by someone other than its writer. Absolute words ("never", "every", "nothing") get a scope check. | R01–R15; cosf #7 (Alt+Y documented as Covered) | 4 → 3 | docs reviews; `docs_claims` (rc) | open |
 | L9 | Put what the reader must do where they do it. | R09; the `reset` hint at check A (#45) | 4 | the docs reference | open |
 | L10 | Every role is the same model family, so its blind spots are shared. | cosf 4.4 | 5 → 3 | Plan v3 P7 (cross-model review), P8 (planted faults with a known count) | open |
-| L11 | A test that waits for text must wait for text that appears for that reason only. | `wait_for("copied")` matched the dialog (2026-11-18); `wait_for("deeper ")` matched a row (#49) | 4 → 3 | pty tests; a lint is proposed | **recurred** |
+| L11 | A test that waits for text must wait for text that appears for that reason only. | `wait_for("copied")` matched the dialog (2026-11-18); `wait_for("deeper ")` matched a row (#49) | **3** | `tests/waits.rs`: a bare-word wait needs a `// wait:` reason; the 44 older ones may only go down (#58) | escalated |
 | L12 | An intent written to disk must hold every field a resume needs. | RR04 (Copy As name), RR05 (decisions) | 4 → 2 | One journal-line table (H-07, #53); a `Request` destructure test is still to do | partly |
 | L13 | A record cut short is not a record. A parser of stored lines fails closed. | cosf #6: a torn `done` line marks another folder done | **2** | `whole_lines`, test (H-07, #53) | fixed |
 | L14 | A pull request based on another one closes when that one merges. | #43 | 4 | Plan v3: every PR is based on the integration branch | held |

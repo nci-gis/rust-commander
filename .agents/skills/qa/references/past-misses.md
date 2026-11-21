@@ -33,8 +33,8 @@ a fixed row stays, with its control.
 | RR06 | 2026-11-17 | F reported removals that had failed | P2 | interaction | external-review | red-team | 2 | test (#44) | fixed | 0 | no |
 | RR07 | 2026-11-17 | `release-check.sh` read the working tree, not the commit | P2 | scope | external-review | red-team | 2 | refuses a tree that differs from the commit (#44) | fixed | 0 | no |
 | R01–R15 | 2026-11-17 | 15 docs claims wrong or misplaced (F's effects, kill scope, read-only promise, Windows paths, Undo, terminal close vs kill, Skip scope, shell) | P2 | docs-claim | external-review | QA | 4 | fixed in docs (#44); `docs_claims` planned | fixed | 0 | no |
-| W01 | 2026-11-18 | `wait_for("copied")` matched the Interrupted dialog, and F10 then went to the job | P3 | fragile-wait | CI | test | 4 | waits on the status line | fixed | 0 | no |
-| W02 | 2026-11-20 | `wait_for("deeper ")` matched a list row before Enter was taken | P3 | fragile-wait | CI | test | 4 | waits for the pane title (#49) | fixed | **1** | no |
+| W01 | 2026-11-18 | `wait_for("copied")` matched the Interrupted dialog, and F10 then went to the job | P3 | fragile-wait | CI | test | 3 | waits on the status line; `tests/waits.rs` (#58) | fixed | 0 | no |
+| W02 | 2026-11-20 | `wait_for("deeper ")` matched a list row before Enter was taken | P3 | fragile-wait | CI | test | 3 | waits for the pane title (#49); `tests/waits.rs` (#58) | fixed | **1** | no |
 | P01 | 2026-11-18 | #43 closed itself when its base PR (#42) merged | P3 | process | daily-use | (process) | 4 | no stacked PRs (plan v3) | held | 0 | no |
 | C01 | 2026-11-19 | Copy into itself through a link to a folder not made yet: stack overflow (copy, move, plan) | P1 | multi-definition | research | QA | 5 | H-04 (#52) | fixed | 0 | no |
 | C02 | 2026-11-19 | Pack's destination name is not checked for control characters | P1 | multi-definition | research | red-team | 5 | H-08 (#54) | fixed | 0 | no |

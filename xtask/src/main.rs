@@ -59,6 +59,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+mod manual;
 mod qa;
 mod tryout;
 
@@ -76,6 +77,7 @@ const HELP: &str =
   bench      measure copies, listing and the planner on your own drives
              (--only CASE: the engine built into this xtask, no Rust needed)
   try        the tester's sandbox: make it, kill a copy mid-job, check every file
+  manual     the data-safety hand tests: list, show one, log its result for runs.tsv
   sync-sweep how syncing many small files scales with threads (developers)
   fuzz       the fuzz targets (developers, with Rust)
   --version  the version this xtask was built from: measure with the same xdevcmd
@@ -84,6 +86,7 @@ Each task's options: xtask bench --help, xtask try --help.
 
 usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
        xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
+       xtask manual list | show M-DS-NN | log M-DS-NN PASS|FAIL|WAIVED [--check FILE] …
        xtask sync-sweep [--files N] [--dir PATH] [--probe]
        xtask fuzz [--secs N] [TARGET...]
 (From the repository: cargo xtask …)";
@@ -98,6 +101,7 @@ fn main() {
         Some("sync-sweep") => sync_sweep(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
         Some("try") => tryout::run(&args[1..], built_from().unwrap_or("unknown")),
+        Some("manual") => manual::run(&args[1..], built_from().unwrap_or("unknown")),
         // The maintainer's checks around a cut; not in --help (needs the repository).
         Some("qa") => qa::run(&args[1..]),
         Some("--help" | "-h" | "help") => {
@@ -105,7 +109,11 @@ fn main() {
             0
         }
         Some("--version" | "-V") => {
-            println!("xtask {}", built_from().unwrap_or("unknown"));
+            println!(
+                "xtask {} ({})",
+                built_from().unwrap_or("unknown"),
+                manual::COMMIT
+            );
             0
         }
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.

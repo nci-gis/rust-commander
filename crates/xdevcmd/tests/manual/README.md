@@ -50,7 +50,23 @@ Check the disk, not only the screen: `cmp` / `fc.exe /b`, `ls -la`, the trash.
 ## Recording a run
 
 A data-safety run is also a row in [runs.tsv](runs.tsv): tab-separated, under its
-header. `built_from` is the commit the tested build came from, as a SHA or
+header. The kit writes it for you, checked as the ledger will check it:
+
+```bash
+xtask manual list                       # the cases, and what xtask try does for each
+xtask manual show M-DS-01               # one case
+xtask try --check > check-a.txt         # after the run: keep what --check said
+xtask manual log M-DS-01 PASS --check check-a.txt
+xtask manual log M-DS-06 WAIVED --note "no NFS server"
+```
+
+It refuses a row that would not count (a disk case without `--check` saying PASS, a
+waiver without a reason, a build of uncommitted code) and appends it to this file
+inside the repository, else to `runs.tsv` in the current folder, to commit later. Use
+the xtask that came with the xdevcmd you test: `built_from` is the commit xtask was
+built from (`xtask --version` shows it).
+
+By hand: `built_from` is the commit the tested build came from, as a SHA or
 `git describe` (`…-g<sha>`), never a branch name or HEAD; a `-dirty` build counts as no
 evidence. `os` is exactly `linux`, `macos` or `windows` (the terminal and the rest go in
 their columns). `result` is PASS, FAIL or WAIVED (a waiver says why in `note`); `check`

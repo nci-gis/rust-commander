@@ -1923,7 +1923,9 @@ mod tests {
     fn a_torn_last_line_is_not_read() {
         let d = dir("torn");
         let whole = enc(&d.join("proj-x"));
-        let torn = &whole[..whole.len() - 2];
+        // One character cut off: a byte in hex on Unix, a UTF-16 unit on Windows.
+        let unit = if cfg!(windows) { 4 } else { 2 };
+        let torn = &whole[..whole.len() - unit];
         let text = format!("kind copy\nsrc {}\ndest {}\ndone {torn}", whole, enc(&d));
         let it = tidy(&text, "1");
         assert!(it.done.is_empty(), "{:?}", it.done);

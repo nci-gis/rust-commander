@@ -6434,6 +6434,36 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// cosf C01, reproduced: through `link -> d/inner` to a folder not made yet
+    /// (`link/new`), the check could not resolve the folder and said no; the copy
+    /// recursed and aborted on a stack overflow.
+    #[cfg(unix)]
+    #[test]
+    fn copying_into_itself_through_a_link_to_a_missing_folder_is_refused() {
+        let root = tmp("self-link-missing");
+        let d = root.join("d");
+        fs::create_dir_all(d.join("inner")).unwrap();
+        fs::write(d.join("f"), b"f").unwrap();
+        std::os::unix::fs::symlink(d.join("inner"), root.join("link")).unwrap();
+        for req in [
+            Request::copy(vec![d.clone()], root.join("link").join("new")),
+            Request::mv(vec![d.clone()], root.join("link").join("new")),
+            Request::copy(
+                vec![d.clone()],
+                root.join("link").join("new").join("deeper"),
+            ),
+        ] {
+            let s = run(req);
+            assert_eq!((s.failed, s.done), (1, 0), "refused: {s:?}");
+            assert!(
+                !d.join("inner").join("new").join("d").exists(),
+                "nothing made inside"
+            );
+            assert!(d.join("f").is_file(), "the source is untouched");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn copying_a_directory_into_itself_is_refused() {
         let root = tmp("self-copy");

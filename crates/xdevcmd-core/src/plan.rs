@@ -1526,6 +1526,34 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// Through a link into the source, to a folder not made yet: still into itself
+    /// (cosf C01: the folder could not be resolved, so the check said no, and the copy
+    /// recursed until the stack overflowed).
+    #[cfg(unix)]
+    #[test]
+    fn into_itself_through_a_link_to_a_folder_not_made_yet_is_blocked() {
+        let d = tmp("itself-missing");
+        fs::create_dir_all(d.join("a").join("inner")).unwrap();
+        std::os::unix::fs::symlink(d.join("a").join("inner"), d.join("down")).unwrap();
+        for dest in [
+            d.join("down").join("new"),
+            d.join("down").join("new").join("deeper"),
+        ] {
+            for kind in [Kind::Copy, Kind::Move] {
+                let p = plan(kind, &[d.join("a")], &dest);
+                assert_eq!(
+                    row(&p, "a").blocked,
+                    Some(Blocked::IntoItself),
+                    "{kind:?} {dest:?}"
+                );
+            }
+        }
+        // Not made yet and outside: fine.
+        let p = plan(Kind::Copy, &[d.join("a")], &d.join("elsewhere").join("new"));
+        assert_eq!(row(&p, "a").blocked, None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_rename_plans_the_one_source_under_its_new_name() {
         let d = tmp("rename");

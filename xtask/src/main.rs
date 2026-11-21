@@ -59,6 +59,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+mod qa;
 mod tryout;
 
 const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
@@ -97,6 +98,8 @@ fn main() {
         Some("sync-sweep") => sync_sweep(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
         Some("try") => tryout::run(&args[1..], built_from().unwrap_or("unknown")),
+        // The maintainer's checks around a cut; not in --help (needs the repository).
+        Some("qa") => qa::run(&args[1..]),
         Some("--help" | "-h" | "help") => {
             println!("{HELP}");
             0

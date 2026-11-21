@@ -631,7 +631,8 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
                     stack.extend(kids.into_iter().rev());
                 }
             } else if m.is_file() {
-                if p == dest {
+                // The archive being replaced, by its text or on disk (`..`, a link).
+                if p == dest || crate::paths::same_entry(&p, dest) {
                     continue;
                 }
                 files.push((p.clone(), rel, false));

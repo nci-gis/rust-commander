@@ -67,10 +67,12 @@ pub fn check(t: &Trashed) -> Result<(), String> {
 /// Put `t` back where it was. Refused if its old name is taken; never replaces.
 pub fn restore(t: &Trashed) -> io::Result<()> {
     crate::policy::guard_write()?;
+    // What is wrong with the old place first: a name taken again (by a link out, too)
+    // is said as such, not as the root.
+    check(t).map_err(io::Error::other)?;
     if !crate::policy::get().allows_at(&t.original) {
         return Err(io::Error::other("outside the root xdevcmd is confined to"));
     }
-    check(t).map_err(io::Error::other)?;
     match &t.place {
         Place::Freedesktop { file, info } => {
             crate::noreplace::rename_noreplace(file, &t.original)?;

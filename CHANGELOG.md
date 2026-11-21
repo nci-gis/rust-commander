@@ -68,9 +68,9 @@ that heading and starts a new, empty one here. -->
 
 ### Fixed
 - **With `--root`, a file put back from the trash goes back**: it was always refused,
-  as its free old name did not resolve. Every path xdevcmd makes, restores or opens to
-  write under `--root` is checked one way; a terminal log onto a link that leads out of
-  the root is refused.
+  as its free old name did not resolve. A new folder, Save as, a terminal log, a file put
+  back and an undo are checked against the root one way, and an undo of a move or a
+  rename whose place now leads out of the root is refused.
 - **Alt+F5 refuses an archive name with a control character**, as Save as, F7 and
   Rename do (the name is prefilled from one someone else chose), and says a folder that
   is not there before the job starts.

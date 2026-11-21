@@ -758,14 +758,14 @@ fn pid_alive(run: &str) -> bool {
 
 /// Undo what one journal, left by run `run`, says was left half done.
 /// Whether every place tidying would touch — the directories searched for part files,
-/// the part files, both names of each rename — is inside `policy`'s root. A file that is
-/// gone is judged by its directory.
+/// the part files, both names of each rename — is inside `policy`'s root, as
+/// `Policy::allows_at` judges a path that may be gone.
 fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
     if policy.root.is_none() {
         return true;
     }
-    // A path that is gone may lean on its parent; one that exists answers for
-    // itself, so a link in the root that leads out of it is outside (RR03).
+    // One that exists answers for itself, so a link in the root that leads out of
+    // it is outside (RR03); one that is gone by its nearest existing folder.
     let inside = |p: &Path| policy.allows_at(p);
     // Every path a line names, not only the ones tidy touches: a journal that
     // reaches outside is left whole and not offered (RR02).

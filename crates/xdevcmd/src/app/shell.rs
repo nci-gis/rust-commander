@@ -508,8 +508,8 @@ impl App {
     }
 
     /// Where the text typed in a Save as…-style prompt points, checked as Save as…
-    /// checks it: inside the root (no `..`), no control character, not a directory, in
-    /// a folder that exists. `Ok(None)` when nothing was typed.
+    /// checks it: no control character, inside the root (`Policy::allows_at`), a name
+    /// Rename would take, not a directory, in a folder that exists. `Ok(None)` when nothing was typed.
     pub(super) fn typed_destination(&self, i: &Input) -> Result<Option<PathBuf>, String> {
         let raw = i.edit.text();
         // The prefill comes from a file's name or the shell's directory, which someone

@@ -67,6 +67,11 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **A folder copied or moved into itself is refused however the destination is
+  reached**: through a link to a folder not made yet, it recursed until the stack
+  overflowed. Pack leaves out the archive it replaces whatever its path's text (`..`, a
+  link), in every format. Two hard links of one file are two files for F2, rename many,
+  Copy As and pack; changing only the case of a link's name is a rename on Windows too.
 - **Continue after a kill keeps what the job was asked to do**: C reads a big file's
   kept part again with its source before going on from it; a Copy As goes on under its
   new name; the table's skip and replace choices survive a second kill; and with

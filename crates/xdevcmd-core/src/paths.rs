@@ -31,38 +31,84 @@ const RESERVED: &[&str] = &[
 
 /// Whether `a` and `b` name one directory entry on disk, whatever the text of each: a
 /// link to a parent, `..`, or another case on a case-insensitive drive. Neither path's
-/// last part is followed if it is a link (a link and its target are two entries).
+/// last part is followed if it is a link (a link and its target are two entries), and
+/// two hard links of one file are two entries, as each name is a file of its own.
 /// False when either is missing.
 pub fn same_entry(a: &Path, b: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         match (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) {
-            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            (Ok(x), Ok(y)) => {
+                x.dev() == y.dev()
+                    && x.ino() == y.ino()
+                    // One inode with more names: only the same name in the same folder.
+                    && (x.is_dir() || x.nlink() < 2 || one_place(a, b))
+            }
             _ => false,
         }
     }
     #[cfg(not(unix))]
     {
         // std has no stable file index here. The final path names the entry with the
-        // case on disk, so two files in a case-sensitive folder stay two. A link is
-        // its own entry: its parent's final path and its name, as written.
-        let entry = |p: &Path| {
-            if std::fs::symlink_metadata(p).ok()?.file_type().is_symlink() {
-                let parent = p.parent().filter(|q| !q.as_os_str().is_empty());
-                Some(
-                    canonical(parent.unwrap_or(Path::new(".")))
-                        .ok()?
-                        .join(p.file_name()?),
-                )
-            } else {
-                canonical(p).ok()
-            }
+        // case on disk, so two files in a case-sensitive folder stay two. A link has
+        // no final path of its own: it is its folder and a name the folder lists once.
+        let link = |p: &Path| {
+            std::fs::symlink_metadata(p)
+                .ok()
+                .map(|m| m.file_type().is_symlink())
         };
-        match (entry(a), entry(b)) {
-            (Some(x), Some(y)) => x == y,
+        match (link(a), link(b)) {
+            (Some(true), Some(true)) => one_place(a, b),
+            (Some(false), Some(false)) => {
+                matches!((canonical(a), canonical(b)), (Ok(x), Ok(y)) if x == y)
+            }
             _ => false,
         }
+    }
+}
+
+/// Whether `a` and `b`, two names that differ at most in case, are one entry of one
+/// folder: the same folder on disk, and that folder lists no more than one of the two
+/// spellings (it lists both only where case counts). How a link, or another name on
+/// the same inode, is told apart from the entry itself.
+fn one_place(a: &Path, b: &Path) -> bool {
+    let (Some(na), Some(nb)) = (a.file_name(), b.file_name()) else {
+        return false;
+    };
+    if na.to_string_lossy().to_lowercase() != nb.to_string_lossy().to_lowercase() {
+        return false;
+    }
+    let parent = |p: &Path| {
+        canonical(
+            p.parent()
+                .filter(|q| !q.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+        )
+    };
+    match (parent(a), parent(b)) {
+        (Ok(x), Ok(y)) if x == y => one_name_in(&x, na, nb),
+        _ => false,
+    }
+}
+
+/// Whether the folder `dir` lists at most one of the names `a` and `b`.
+fn one_name_in(dir: &Path, a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
+    if a == b {
+        return true;
+    }
+    match std::fs::read_dir(dir) {
+        Ok(entries) => {
+            entries
+                .flatten()
+                .filter(|e| {
+                    let n = e.file_name();
+                    n == a || n == b
+                })
+                .count()
+                <= 1
+        }
+        Err(_) => false,
     }
 }
 
@@ -270,6 +316,27 @@ mod tests {
             same_entry(&a, &root.join("d").join("..").join("a.txt")),
             "the same name"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Two spellings in one folder are one entry unless the folder lists both: how a
+    /// link is compared on Windows, where its own final path cannot be asked for.
+    #[test]
+    fn two_spellings_are_one_entry_unless_the_folder_lists_both() {
+        let root = scratch("spell");
+        std::fs::write(root.join("ln"), b"").unwrap();
+        let (low, up) = (root.join("ln"), root.join("LN"));
+        assert!(one_place(&low, &root.join("d").join("..").join("ln")));
+        assert!(one_place(&low, &up), "only one is listed");
+        assert!(!one_place(&low, &root.join("other")), "another name");
+        assert!(
+            !one_place(&low, &root.join("d").join("ln")),
+            "another folder"
+        );
+        if !up.exists() {
+            std::fs::write(&up, b"").unwrap();
+            assert!(!one_place(&low, &up), "both are listed");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

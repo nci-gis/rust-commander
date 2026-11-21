@@ -214,3 +214,19 @@ hardening. The plan is in the owner's research notes (cosf), outside this reposi
 
 `AGENTS.md` is unchanged: it is at 99 lines, so the two skills link the new files instead.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-21: lessons of the beta.2 consolidation (plan v3, step 7)
+
+**Source**: the owner, 2026-11-21 ("I approved, go ahead"), after step 5 (H-03,
+H-04, H-05, H-07, H-08: #52–#56) and two P8 rounds.
+**What**:
+- `skills/qa/references/past-misses.md`: rows RR06–C02 that #50 listed twice are now
+  listed once; C01–C07, C09, C10 and C13 marked fixed with their PRs; new rows X01–X10
+  (defects found by red-team, blind QA, ChatGPT and CI during step 5), S1–S2 (the P8
+  rounds, seeded) and E01–E06 (older P3 bugs found on the way, open); two classes
+  added (`validate-raw`, `os-format`).
+- `reference/review-lessons.md`: L6, L13, L17 and L20 now held at rung 1–2; L12, L15
+  updated; new lessons L18 (check before normalising), L19 (pin a stored format with a
+  hand-spelled fixture), L20 (identity), L21 (OS encoding in hand-built test data),
+  L22 (P8 seeds inside the diff hit a ceiling).
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

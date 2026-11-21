@@ -1385,6 +1385,16 @@ mod tests {
         let app = App::new(&root, &root, settings, Outcome::NoFile);
         assert!(app.refused(Action::OpenWith).is_some());
         assert!(app.refused(Action::OpenWithMenu).is_some(), "the menu too");
+        // A command is refused as the action it does: the config file opened in the
+        // editor from the "config has a mistake" question is editing.
+        let mut app = app;
+        app.perform_cmd(crate::menu::Cmd::EditConfig(root.join("config.toml")));
+        assert!(
+            app.status.contains("editing is turned off"),
+            "{}",
+            app.status
+        );
+        assert!(app.pending_edit.is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 

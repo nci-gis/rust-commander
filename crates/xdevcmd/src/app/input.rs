@@ -2,6 +2,59 @@
 
 use super::*;
 
+/// The action whose refusal a command follows, or `None` for one that only reads or
+/// decides its own refusal where it runs. Every command named, no `_`: a new command
+/// does not build until it is sorted here (plan v3 H-05).
+#[deny(clippy::wildcard_enum_match_arm)]
+fn cmd_action(c: &Cmd) -> Option<Action> {
+    match c {
+        Cmd::Transfer { .. } => Some(Action::Copy),
+        Cmd::OpenFile(_) => Some(Action::OpenWith),
+        Cmd::BatchRename(_) | Cmd::BatchRenameAnyway { .. } => Some(Action::BulkRename),
+        Cmd::Sync(_) => Some(Action::SyncDirs),
+        Cmd::UserCommand(_) => Some(Action::UserMenu),
+        Cmd::EditConfig(_) => Some(Action::Edit),
+        Cmd::Undo => Some(Action::Undo),
+        Cmd::ShellNew(_) | Cmd::ShellSendHere(_) => Some(Action::NewTerminal),
+        // Asks `refused` itself (`perform`), or decides where it runs: per rule (view,
+        // edit, a program), a program in a terminal, Save as and the log (CopyAs), the
+        // clipboard (restricted), bookmarks (saved), recovery (not offered read-only).
+        Cmd::Act(_)
+        | Cmd::ApplyRule(..)
+        | Cmd::RunInTerminal { .. }
+        | Cmd::TabSaveHistory(_)
+        | Cmd::TabLog(_)
+        | Cmd::SaveReplacing(_)
+        | Cmd::CopyPath
+        | Cmd::CopyRelativePath
+        | Cmd::CopyText(_)
+        | Cmd::AddBookmark(_)
+        | Cmd::RemoveBookmark(_)
+        | Cmd::Resume(_)
+        | Cmd::ResumeChecked(_)
+        | Cmd::Discard(_) => None,
+        // Read, move the view, or close.
+        Cmd::GoTo(_)
+        | Cmd::ShowList(_)
+        | Cmd::AddToList(_)
+        | Cmd::TabHistory(_)
+        | Cmd::TabStopLog(_)
+        | Cmd::TabList(_)
+        | Cmd::TabClose(_)
+        | Cmd::QuitAnyway
+        | Cmd::QuitNow
+        | Cmd::Note(_)
+        | Cmd::About
+        | Cmd::Commands
+        | Cmd::ConfigInUse
+        | Cmd::Documentation
+        | Cmd::ViewFile(_)
+        | Cmd::ThemeMenu
+        | Cmd::Settings
+        | Cmd::SetTheme(_) => None,
+    }
+}
+
 impl App {
     /// Feed a key as if it had been typed. Used by `--keys` so a dialog can be put on
     /// screen and asserted on without a terminal or a human.
@@ -303,35 +356,10 @@ impl App {
     /// here, and the engine in xdevcmd-core refuses writes again behind it.
     pub(super) fn refused(&self, a: Action) -> Option<String> {
         let mode = self.settings.mode;
-        let what = match a {
-            Action::Copy | Action::Move => "copying and moving",
-            Action::Delete | Action::DeletePermanent => "deleting",
-            Action::Rename | Action::BulkRename => "renaming",
-            Action::NewFile | Action::CopyAs | Action::Symlink | Action::Pack | Action::Unpack => {
-                "creating files"
-            }
-            Action::SyncDirs => "synchronising",
-            Action::Permissions => "changing permissions",
-            Action::MkDir => "creating directories",
-            Action::Edit => "editing",
-            Action::OpenWith => "opening files in other programs",
-            Action::Undo => "undoing",
-            _ if mode == Mode::Restricted
-                && matches!(
-                    a,
-                    Action::FocusTerminal
-                        | Action::TerminalHistory
-                        | Action::ToggleTerminal
-                        | Action::CdTerminalHere
-                        | Action::GoShellDir
-                        | Action::TypeNames
-                        | Action::NewTerminal
-                        | Action::UserMenu
-                ) =>
-            {
-                "the terminal"
-            }
-            _ => return None,
+        let what = match a.writes() {
+            Some(what) => what,
+            None if mode == Mode::Restricted && a.uses_terminal() => "the terminal",
+            None => return None,
         };
         mode.read_only()
             .then(|| format!("{} mode \u{2014} {what} is turned off", mode.label()))
@@ -675,25 +703,18 @@ impl App {
     }
 
     pub(super) fn perform_cmd(&mut self, c: Cmd) {
+        // The action a command does, refused as that action is (plan v3 H-05).
+        if let Some(why) = cmd_action(&c).and_then(|a| self.refused(a)) {
+            self.status = why;
+            return;
+        }
         match c {
             Cmd::Act(a) => self.perform(a),
             Cmd::CopyPath | Cmd::CopyRelativePath if self.settings.mode == Mode::Restricted => {
                 self.status = "restricted mode \u{2014} the clipboard is turned off".into();
             }
-            Cmd::Transfer { .. } if self.settings.mode.read_only() => {
-                self.status = format!(
-                    "{} mode \u{2014} copying and moving is turned off",
-                    self.settings.mode.label()
-                );
-            }
-            Cmd::AddBookmark(_)
-            | Cmd::RemoveBookmark(_)
-            | Cmd::OpenFile(_)
-            | Cmd::BatchRename(_)
-            | Cmd::BatchRenameAnyway { .. }
-            | Cmd::Sync(_)
-                if self.settings.mode.read_only() =>
-            {
+            // Bookmarks are saved to a file: "saves anything" is off in read-only.
+            Cmd::AddBookmark(_) | Cmd::RemoveBookmark(_) if self.settings.mode.read_only() => {
                 self.status = format!(
                     "{} mode \u{2014} that is turned off",
                     self.settings.mode.label()

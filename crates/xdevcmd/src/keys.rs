@@ -100,6 +100,114 @@ pub enum Action {
     ContextMenu,
 }
 
+impl Action {
+    /// What `self` changes on disk or runs, worded for a refusal ("copying and moving"),
+    /// or `None` for an action that only reads or moves the view. Every action is
+    /// named, no `_`: a new one does not build until it is sorted here (plan v3 H-05;
+    /// cosf #4, Open with…'s menu slipped through a `_`).
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub fn writes(self) -> Option<&'static str> {
+        use Action as A;
+        match self {
+            A::Copy | A::Move => Some("copying and moving"),
+            A::Delete | A::DeletePermanent => Some("deleting"),
+            A::Rename | A::BulkRename => Some("renaming"),
+            A::NewFile | A::CopyAs | A::Symlink | A::Pack | A::Unpack => Some("creating files"),
+            A::SyncDirs => Some("synchronising"),
+            A::Permissions => Some("changing permissions"),
+            A::MkDir => Some("creating directories"),
+            A::Edit => Some("editing"),
+            A::OpenWith | A::OpenWithMenu => Some("opening files in other programs"),
+            A::Undo => Some("undoing"),
+            A::Quit
+            | A::Help
+            | A::Refresh
+            | A::ToggleHidden
+            | A::FocusNextPane
+            | A::FocusTerminal
+            | A::ToggleTerminal
+            | A::TerminalHistory
+            | A::CdTerminalHere
+            | A::GoShellDir
+            | A::TypeNames
+            | A::NewTerminal
+            | A::NewTab
+            | A::CloseTab
+            | A::NextTab
+            | A::PrevTab
+            | A::GoTab
+            | A::NextSplit
+            | A::SplitRight
+            | A::SplitDown
+            | A::ClosePane
+            | A::ResizeLeft
+            | A::ResizeRight
+            | A::ResizeUp
+            | A::ResizeDown
+            | A::Zoom
+            | A::CursorUp
+            | A::CursorDown
+            | A::PageUp
+            | A::PageDown
+            | A::Top
+            | A::Bottom
+            | A::Open
+            | A::EnterDir
+            | A::Parent
+            | A::GoHome
+            | A::GoRoot
+            | A::Mark
+            | A::MarkAndNext
+            | A::InvertMarks
+            | A::MarkAll
+            | A::UnmarkAll
+            | A::View
+            | A::SortName
+            | A::SortExt
+            | A::SortSize
+            | A::SortModified
+            | A::QuickSearch
+            | A::Filter
+            | A::GoToPath
+            | A::Back
+            | A::Forward
+            | A::History
+            | A::ShowList
+            | A::Hotlist
+            | A::QuitNoCd
+            | A::SwapPanes
+            | A::MirrorPane
+            | A::MarkPattern
+            | A::UnmarkPattern
+            | A::CalcSizes
+            | A::FindFiles
+            | A::QuickView
+            | A::Checksum
+            | A::UserMenu
+            | A::CompareDirs
+            | A::MenuBar
+            | A::Usage
+            | A::Messages
+            | A::ContextMenu => None,
+        }
+    }
+
+    /// Whether `self` uses the terminal: turned off in restricted mode.
+    pub fn uses_terminal(self) -> bool {
+        matches!(
+            self,
+            Action::FocusTerminal
+                | Action::TerminalHistory
+                | Action::ToggleTerminal
+                | Action::CdTerminalHere
+                | Action::GoShellDir
+                | Action::TypeNames
+                | Action::NewTerminal
+                | Action::UserMenu
+        )
+    }
+}
+
 /// One binding: its config name, where the help screen lists it, what it does, and its
 /// default keys. Everything about a binding lives in this one row, so the config parser,
 /// the defaults and the help screen cannot disagree.

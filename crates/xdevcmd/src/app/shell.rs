@@ -520,8 +520,8 @@ impl App {
         if dest.is_relative() {
             dest = i.dir.join(dest);
         }
-        // Under --root, as F7 and Alt+F5: no `..`, and the directory it goes in must be
-        // inside, links resolved.
+        // Under --root, as F7: no `..`, and the directory it goes in must be inside,
+        // links resolved.
         let climbs = Path::new(typed)
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir));
@@ -536,7 +536,7 @@ impl App {
         // name could later be typed into a shell or pasted.
         if let Some(c) = crate::safety::control_char(typed) {
             return Err(format!(
-                "the name contains a control character (U+{:04X}) \u{2014} not saved",
+                "a control character (U+{:04X}) in the name \u{2014} not written",
                 c as u32
             ));
         }

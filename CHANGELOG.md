@@ -67,6 +67,9 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **Alt+F5 refuses an archive name with a control character**, as Save as, F7 and
+  Rename do (the name is prefilled from one someone else chose), and says a folder that
+  is not there before the job starts.
 - **A folder copied or moved into itself is refused however the destination is
   reached**: through a link to a folder not made yet, it recursed until the stack
   overflowed. Pack leaves out the archive it replaces whatever its path's text (`..`, a

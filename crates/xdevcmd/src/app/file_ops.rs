@@ -469,26 +469,20 @@ impl App {
                 };
             }
             InputKind::Pack { sources } => {
-                let typed = text.trim();
-                if typed.is_empty() {
-                    return;
-                }
-                let mut dest = expand_tilde(typed);
-                if dest.is_relative() {
-                    dest = i.dir.join(dest);
-                }
-                // Under --root, as F7: no `..`, and the directory it goes in must be
-                // inside, links resolved.
-                let climbs = Path::new(typed)
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir));
-                let inside = dest
-                    .parent()
-                    .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
-                if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
-                    self.status = "outside the root xdevcmd is confined to".into();
-                    return;
-                }
+                // The one check of a typed file to make: inside the root, no control
+                // character (the name is prefilled from one someone else chose), not a
+                // directory, in a folder that exists.
+                let dest = match self.typed_destination(&i) {
+                    Ok(Some(d)) => d,
+                    Ok(None) => return,
+                    Err(why) => {
+                        self.modal = Some(Modal::Input(Input {
+                            error: Some(why),
+                            ..i
+                        }));
+                        return;
+                    }
+                };
                 if xdevcmd_core::archive::format_of(&dest).is_none() {
                     self.modal = Some(Modal::Input(Input {
                         error: Some("the name must end in .zip, .tar, .tar.gz or .tgz".into()),

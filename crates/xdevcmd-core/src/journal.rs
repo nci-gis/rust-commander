@@ -766,10 +766,7 @@ fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
     }
     // A path that is gone may lean on its parent; one that exists answers for
     // itself, so a link in the root that leads out of it is outside (RR03).
-    let inside = |p: &Path| {
-        policy.allows(p)
-            || (fs::symlink_metadata(p).is_err() && p.parent().is_some_and(|d| policy.allows(d)))
-    };
+    let inside = |p: &Path| policy.allows_at(p);
     // Every path a line names, not only the ones tidy touches: a journal that
     // reaches outside is left whole and not offered (RR02).
     text.lines().all(|line| {

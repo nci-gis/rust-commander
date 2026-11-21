@@ -67,6 +67,10 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **With `--root`, a file put back from the trash goes back**: it was always refused,
+  as its free old name did not resolve. Every path xdevcmd makes, restores or opens to
+  write under `--root` is checked one way; a terminal log onto a link that leads out of
+  the root is refused.
 - **Alt+F5 refuses an archive name with a control character**, as Save as, F7 and
   Rename do (the name is prefilled from one someone else chose), and says a folder that
   is not there before the job starts.

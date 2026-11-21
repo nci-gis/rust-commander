@@ -60,6 +60,36 @@ impl Policy {
         }
     }
 
+    /// Whether `path`, which may not exist yet, is inside the root: what every write
+    /// that makes, restores, opens or removes `path` asks. An existing path answers for
+    /// itself, links resolved, so a link in the root that leads out is outside. A path
+    /// not made yet answers by its nearest folder that exists, and a `..` in the part
+    /// still to make is outside: once made, it would be followed out (plan v3 H-03).
+    pub fn allows_at(&self, path: &Path) -> bool {
+        if self.root.is_none() {
+            return true;
+        }
+        if std::fs::symlink_metadata(path).is_ok() {
+            return self.allows(path);
+        }
+        let mut cur = path;
+        loop {
+            if matches!(
+                cur.components().next_back(),
+                Some(std::path::Component::ParentDir)
+            ) {
+                return false;
+            }
+            let Some(parent) = cur.parent().filter(|p| !p.as_os_str().is_empty()) else {
+                return false;
+            };
+            if std::fs::symlink_metadata(parent).is_ok() {
+                return self.allows(parent);
+            }
+            cur = parent;
+        }
+    }
+
     /// `path` if it is allowed, otherwise the root itself.
     pub fn clamp(&self, path: &Path) -> PathBuf {
         match &self.root {
@@ -102,7 +132,10 @@ mod tests {
             root: Some(r.join("inside")),
         };
         assert!(p.allows_at(&r.join("inside/new.txt")));
-        assert!(p.allows_at(&r.join("inside/new/deeper/x")), "folders to make");
+        assert!(
+            p.allows_at(&r.join("inside/new/deeper/x")),
+            "folders to make"
+        );
         assert!(p.allows_at(&r.join("inside/deeper")), "an existing one");
         assert!(!p.allows_at(&r.join("outside/new.txt")));
         assert!(!p.allows_at(&r.join("inside/new/../../outside/x")), "..");
@@ -111,7 +144,10 @@ mod tests {
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(r.join("outside"), r.join("inside/door")).unwrap();
-            assert!(!p.allows_at(&r.join("inside/door")), "a link that leads out");
+            assert!(
+                !p.allows_at(&r.join("inside/door")),
+                "a link that leads out"
+            );
             assert!(!p.allows_at(&r.join("inside/door/new.txt")), "under it");
             std::os::unix::fs::symlink(r.join("outside/none"), r.join("inside/loose")).unwrap();
             assert!(!p.allows_at(&r.join("inside/loose")), "a dangling link");

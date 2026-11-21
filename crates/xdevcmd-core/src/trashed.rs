@@ -67,7 +67,7 @@ pub fn check(t: &Trashed) -> Result<(), String> {
 /// Put `t` back where it was. Refused if its old name is taken; never replaces.
 pub fn restore(t: &Trashed) -> io::Result<()> {
     crate::policy::guard_write()?;
-    if !crate::policy::get().allows(&t.original) {
+    if !crate::policy::get().allows_at(&t.original) {
         return Err(io::Error::other("outside the root xdevcmd is confined to"));
     }
     check(t).map_err(io::Error::other)?;

@@ -1055,15 +1055,40 @@ mod tests {
     /// written (sibling of cosf C05, plan v3 H-04: it was compared by text only).
     #[test]
     fn pack_leaves_out_the_archive_it_replaces_whatever_its_text() {
-        let d = scratch("pack-self-text");
+        for ext in ["zip", "tar", "tar.gz", "tgz"] {
+            let d = scratch(&format!("pack-self-text-{}", ext.replace('.', "-")));
+            fs::create_dir_all(d.join("proj")).unwrap();
+            fs::write(d.join("proj/a.txt"), "a").unwrap();
+            let old = format!("old.{ext}");
+            fs::write(d.join("proj").join(&old), "the archive being replaced").unwrap();
+            let dest = d.join("proj").join("..").join("proj").join(&old);
+            let mut log = Log::default();
+            pack(&[d.join("proj")], &dest, &mut log).unwrap();
+            let l = list(&d.join("proj").join(&old)).unwrap();
+            let names: Vec<_> = l.items.iter().map(|i| i.path.as_str()).collect();
+            assert!(
+                !names.contains(&format!("proj/{old}").as_str()),
+                "{ext}: {names:?}"
+            );
+            assert!(names.contains(&"proj/a.txt"), "{ext}: {names:?}");
+            let _ = fs::remove_dir_all(&d);
+        }
+    }
+
+    /// A hard link of the archive being replaced is a file of its own in the tree: it
+    /// is packed, not dropped without a word (P8 H-04, red-team).
+    #[cfg(unix)]
+    #[test]
+    fn pack_keeps_a_hard_link_of_the_archive_it_replaces() {
+        let d = scratch("pack-self-hard");
         fs::create_dir_all(d.join("proj")).unwrap();
-        fs::write(d.join("proj/a.txt"), "a").unwrap();
         fs::write(d.join("proj/old.zip"), "the archive being replaced").unwrap();
-        let dest = d.join("proj").join("..").join("proj").join("old.zip");
+        fs::hard_link(d.join("proj/old.zip"), d.join("proj/kept.zip")).unwrap();
         let mut log = Log::default();
-        pack(&[d.join("proj")], &dest, &mut log).unwrap();
+        pack(&[d.join("proj")], &d.join("proj/old.zip"), &mut log).unwrap();
         let l = list(&d.join("proj/old.zip")).unwrap();
         let names: Vec<_> = l.items.iter().map(|i| i.path.as_str()).collect();
+        assert!(names.contains(&"proj/kept.zip"), "{names:?}");
         assert!(!names.contains(&"proj/old.zip"), "{names:?}");
         let _ = fs::remove_dir_all(&d);
     }

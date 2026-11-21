@@ -223,6 +223,49 @@ mod tests {
         d
     }
 
+    /// A link renamed to another case of its own name is renamed, not refused as a
+    /// taken name (P8 H-04: Windows compared a link by its name as written). Runs where
+    /// the drive ignores case: Windows, and macOS by default.
+    #[test]
+    fn a_link_renamed_to_another_case_of_its_name_is_renamed() {
+        let d = dir();
+        fs::write(d.join("t"), b"x").unwrap();
+        crate::attrs::symlink(&d.join("t"), &d.join("ln")).unwrap();
+        if !d.join("LN").exists() {
+            let _ = fs::remove_dir_all(&d);
+            return; // a case-sensitive file system: two names, two entries
+        }
+        let new = rename(&d.join("ln"), "LN").unwrap();
+        assert!(fs::symlink_metadata(&new).unwrap().file_type().is_symlink());
+        let names: Vec<_> = fs::read_dir(&d)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(names.iter().any(|n| n == "LN"), "{names:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Where case counts, a hard link named in another case is another file: refused
+    /// as taken, not "renamed" by a rename onto its own inode that changes nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_link_in_another_case_is_a_taken_name() {
+        let d = dir();
+        fs::write(d.join("a"), b"x").unwrap();
+        if d.join("A").exists() {
+            let _ = fs::remove_dir_all(&d);
+            return; // case is ignored: there cannot be two
+        }
+        fs::hard_link(d.join("a"), d.join("A")).unwrap();
+        assert!(matches!(
+            rename(&d.join("a"), "A"),
+            Err(RenameError::Exists(_))
+        ));
+        assert!(d.join("a").exists() && d.join("A").exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn renames_a_file_and_returns_where_it_went() {
         let d = dir();

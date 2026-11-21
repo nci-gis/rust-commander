@@ -284,6 +284,32 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// Rename many: a link to another case of its own name is a rename (P8 H-04, QA
+    /// D7: Windows refused it). Runs where the drive ignores case.
+    #[test]
+    fn rename_many_changes_the_case_of_a_link() {
+        let (d, _) = dir("link-case", &["t"]);
+        crate::attrs::symlink(&d.join("t"), &d.join("ln")).unwrap();
+        if !d.join("LN").exists() {
+            let _ = fs::remove_dir_all(&d);
+            return; // a case-sensitive file system
+        }
+        assert!(plan(&[d.join("ln")], "LN\n").is_ok());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Rename many onto another hard link of the same file is refused at plan: two
+    /// names, two entries, and apply would refuse it half-way.
+    #[cfg(unix)]
+    #[test]
+    fn rename_many_onto_a_hard_link_is_refused_at_plan() {
+        let (d, paths) = dir("hard", &["a"]);
+        fs::hard_link(d.join("a"), d.join("b")).unwrap();
+        let e = plan(&paths, "b\n").unwrap_err();
+        assert!(e.contains("already exists"), "{e}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_swap_works_because_of_the_two_steps() {
         let (d, paths) = dir("swap", &["a", "b"]);

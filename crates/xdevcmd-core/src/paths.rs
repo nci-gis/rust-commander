@@ -256,6 +256,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Two hard links are two entries, as the guide says each name is a file of its
+    /// own: one inode is not one entry (P8 H-04, found blind by QA and red-team).
+    #[cfg(unix)]
+    #[test]
+    fn two_hard_links_are_two_entries() {
+        let root = scratch("hard");
+        let a = root.join("a.txt");
+        std::fs::write(&a, b"x").unwrap();
+        std::fs::hard_link(&a, root.join("b.txt")).unwrap();
+        assert!(!same_entry(&a, &root.join("b.txt")), "another name");
+        assert!(
+            same_entry(&a, &root.join("d").join("..").join("a.txt")),
+            "the same name"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Another case names the same folder where the drive ignores case: Windows always,
     /// macOS when the volume is case-insensitive (the default), checked here first.
     #[test]

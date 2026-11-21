@@ -24,7 +24,7 @@ your permissions. This page says what it guards against, and where the limits ar
 
 | Risk | What xdevcmd does |
 |---|---|
-| **File names that try to run commands** | A name with control characters is never typed into a shell or put on the clipboard. |
+| **File names that try to run commands** | A name with control characters is never typed into a shell or put on the clipboard, and is refused where you type a name for something new: a file, folder or archive, Save as, Log to file, Copy As and every rename (a copy or an extract keeps the names it is given). |
 | **Files that hang a program** | FIFOs and devices are refused before they are opened. |
 | **Hostile archives** | Names that point outside the target folder are never written, and a link already at a file's name is replaced, not followed. Links inside archives are not created. Set-id bits are dropped. An entry bigger than it claims is stopped. An archive is refused if it would not fit, would unpack to over 1 GB at more than 1000 times its own size, or to more than a million files. |
 | **Losing a file half-way** | A file being replaced is written under a temporary name and swapped in once complete. A move across drives removes each source only after its own copy is done, so what you skipped stays. Shift+F8 needs **Y**, not Enter. |

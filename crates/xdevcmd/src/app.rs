@@ -1277,6 +1277,100 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Alt+F5's name is prefilled from a file or folder someone else named: a control
+    /// character in it is refused as Save as and F7 refuse it, the box kept open with the
+    /// reason and no job started (cosf #2, plan v3 H-08).
+    #[test]
+    fn pack_refuses_a_destination_with_a_control_character() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-pack-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        let input = |text: &str| Input {
+            title: "Pack".into(),
+            label: String::new(),
+            edit: crate::line_edit::LineEdit::new(text),
+            kind: InputKind::Pack {
+                sources: vec![root.join("a.txt")],
+            },
+            dir: root.clone(),
+            buttons: Vec::new(),
+            error: None,
+        };
+        app.apply_input(input("bad\u{15}x.zip"));
+        let Some(Modal::Input(i)) = app.modal.take() else {
+            panic!("the box closed, or a job started");
+        };
+        let why = i.error.unwrap_or_default();
+        assert!(why.contains("control character (U+0015)"), "{why}");
+        assert_eq!(
+            std::fs::read_dir(&root).unwrap().count(),
+            1,
+            "nothing written"
+        );
+        // Into a folder that is not there: said before a job, as Save as says it.
+        app.apply_input(input("missing/x.zip"));
+        let Some(Modal::Input(i)) = app.modal.take() else {
+            panic!("the box closed, or a job started");
+        };
+        assert_eq!(i.error.as_deref(), Some("that folder does not exist"));
+        // On Windows, a name the system refuses is said before the job, as Rename says
+        // it (red-team F4).
+        #[cfg(windows)]
+        {
+            app.apply_input(input("a?.zip"));
+            let Some(Modal::Input(i)) = app.modal.take() else {
+                panic!("the box closed, or a job started");
+            };
+            assert!(i.error.is_some(), "a?.zip");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A control character at either end of a typed name is refused too, not trimmed
+    /// away with the spaces into another name (T5 on H-08: `trim` dropped a leading tab
+    /// or newline before the check). Every box that names something new.
+    #[test]
+    fn a_control_character_at_either_end_of_a_name_is_refused_not_trimmed() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-trim-ctl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        let kind = |n: usize| match n {
+            0 => InputKind::Pack {
+                sources: vec![root.join("a.txt")],
+            },
+            1 => InputKind::MkDir,
+            2 => InputKind::NewFile,
+            _ => InputKind::CopyAs {
+                from: root.join("a.txt"),
+            },
+        };
+        for (n, name) in ["pack", "mkdir", "new file", "copy as"].iter().enumerate() {
+            for text in ["\tx.zip", "x.zip\n"] {
+                let what = format!("{name} {text:?}");
+                app.apply_input(Input {
+                    title: String::new(),
+                    label: String::new(),
+                    edit: crate::line_edit::LineEdit::new(text),
+                    kind: kind(n),
+                    dir: root.clone(),
+                    buttons: Vec::new(),
+                    error: None,
+                });
+                let Some(Modal::Input(i)) = app.modal.take() else {
+                    panic!("{what}: the box closed, or a job started");
+                };
+                let why = i.error.unwrap_or_default();
+                assert!(why.contains("control character"), "{what}: {why}");
+            }
+        }
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing made");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn base64_matches_the_rfc_vectors() {
         for (input, want) in [

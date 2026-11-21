@@ -67,6 +67,11 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **Read-only turns off Open with…'s menu too** (F3 still views the file), and a
+  command from a menu is refused as the action it does. What read-only and restricted
+  turn off is sorted once, for every action and command, and a new one does not build
+  until it is. Open with…'s menu waits while a folder opens, and is not offered inside
+  an archive, as Open with.
 - **Continue after a kill never trusts a line cut short**: the journal's last line,
   written only in part when the run died, could name another folder (`/w/proj` for
   `/w/proj-x`), which Continue then skipped. Such a line is not read. Every line the

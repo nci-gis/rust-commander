@@ -100,6 +100,128 @@ pub enum Action {
     ContextMenu,
 }
 
+impl Action {
+    /// What `self` does, for the modes that turn things off: it writes or runs (worded
+    /// for a refusal, "copying and moving"), it uses the terminal, or it only reads or
+    /// moves the view. Every action is named, no `_` (both clippy lints deny one, the
+    /// single-variant one included): a new action does not build until it is sorted
+    /// here (plan v3 H-05; cosf #4, Open with…'s menu slipped through a `_`).
+    #[deny(
+        clippy::wildcard_enum_match_arm,
+        clippy::match_wildcard_for_single_variants
+    )]
+    pub fn effect(self) -> Effect {
+        use Action as A;
+        use Effect::{Reads, Terminal, Writes};
+        match self {
+            A::Copy | A::Move => Writes("copying and moving"),
+            A::Delete | A::DeletePermanent => Writes("deleting"),
+            A::Rename | A::BulkRename => Writes("renaming"),
+            A::NewFile | A::CopyAs | A::Symlink | A::Pack | A::Unpack => Writes("creating files"),
+            A::SyncDirs => Writes("synchronising"),
+            A::Permissions => Writes("changing permissions"),
+            A::MkDir => Writes("creating directories"),
+            A::Edit => Writes("editing"),
+            A::OpenWith | A::OpenWithMenu => Writes("opening files in other programs"),
+            A::Undo => Writes("undoing"),
+            A::FocusTerminal
+            | A::ToggleTerminal
+            | A::TerminalHistory
+            | A::CdTerminalHere
+            | A::GoShellDir
+            | A::TypeNames
+            | A::NewTerminal
+            | A::UserMenu => Terminal,
+            A::Quit
+            | A::Help
+            | A::Refresh
+            | A::ToggleHidden
+            | A::FocusNextPane
+            | A::NewTab
+            | A::CloseTab
+            | A::NextTab
+            | A::PrevTab
+            | A::GoTab
+            | A::NextSplit
+            | A::SplitRight
+            | A::SplitDown
+            | A::ClosePane
+            | A::ResizeLeft
+            | A::ResizeRight
+            | A::ResizeUp
+            | A::ResizeDown
+            | A::Zoom
+            | A::CursorUp
+            | A::CursorDown
+            | A::PageUp
+            | A::PageDown
+            | A::Top
+            | A::Bottom
+            | A::Open
+            | A::EnterDir
+            | A::Parent
+            | A::GoHome
+            | A::GoRoot
+            | A::Mark
+            | A::MarkAndNext
+            | A::InvertMarks
+            | A::MarkAll
+            | A::UnmarkAll
+            | A::View
+            | A::SortName
+            | A::SortExt
+            | A::SortSize
+            | A::SortModified
+            | A::QuickSearch
+            | A::Filter
+            | A::GoToPath
+            | A::Back
+            | A::Forward
+            | A::History
+            | A::ShowList
+            | A::Hotlist
+            | A::QuitNoCd
+            | A::SwapPanes
+            | A::MirrorPane
+            | A::MarkPattern
+            | A::UnmarkPattern
+            | A::CalcSizes
+            | A::FindFiles
+            | A::QuickView
+            | A::Checksum
+            | A::CompareDirs
+            | A::MenuBar
+            | A::Usage
+            | A::Messages
+            | A::ContextMenu => Reads,
+        }
+    }
+
+    /// What `self` changes on disk or runs, worded for a refusal, or `None`.
+    pub fn writes(self) -> Option<&'static str> {
+        match self.effect() {
+            Effect::Writes(what) => Some(what),
+            Effect::Terminal | Effect::Reads => None,
+        }
+    }
+
+    /// Whether `self` uses the terminal: turned off in restricted mode.
+    pub fn uses_terminal(self) -> bool {
+        matches!(self.effect(), Effect::Terminal)
+    }
+}
+
+/// What an [`Action`] does, for the modes that turn things off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    /// Changes the disk or runs a program; the words name it in a refusal.
+    Writes(&'static str),
+    /// Uses the terminal (restricted mode turns it off).
+    Terminal,
+    /// Only reads, or moves the view.
+    Reads,
+}
+
 /// One binding: its config name, where the help screen lists it, what it does, and its
 /// default keys. Everything about a binding lives in this one row, so the config parser,
 /// the defaults and the help screen cannot disagree.

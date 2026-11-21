@@ -274,6 +274,20 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// A link to the file is another entry: renaming the file onto it is refused at
+    /// the plan, not discovered by apply as "appeared meanwhile" (cosf C05: the plan
+    /// followed links, apply did not).
+    #[cfg(unix)]
+    #[test]
+    fn rename_many_onto_a_link_to_itself_is_refused_at_plan() {
+        let (d, paths) = dir("link-self", &["a"]);
+        std::os::unix::fs::symlink(d.join("a"), d.join("b")).unwrap();
+        let e = plan(&paths, "b\n").unwrap_err();
+        assert!(e.contains("already exists"), "{e}");
+        assert_eq!(body(&d.join("a")), "a");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_swap_works_because_of_the_two_steps() {
         let (d, paths) = dir("swap", &["a", "b"]);

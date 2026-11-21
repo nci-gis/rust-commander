@@ -1328,6 +1328,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A control character at either end of a typed name is refused too, not trimmed
+    /// away with the spaces into another name (T5 on H-08: `trim` dropped a leading tab
+    /// or newline before the check). Every box that names something new.
+    #[test]
+    fn a_control_character_at_either_end_of_a_name_is_refused_not_trimmed() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-trim-ctl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        let kind = |n: usize| match n {
+            0 => InputKind::Pack {
+                sources: vec![root.join("a.txt")],
+            },
+            1 => InputKind::MkDir,
+            2 => InputKind::NewFile,
+            _ => InputKind::CopyAs {
+                from: root.join("a.txt"),
+            },
+        };
+        for (n, name) in ["pack", "mkdir", "new file", "copy as"].iter().enumerate() {
+            for text in ["\tx.zip", "x.zip\n"] {
+                let what = format!("{name} {text:?}");
+                app.apply_input(Input {
+                    title: String::new(),
+                    label: String::new(),
+                    edit: crate::line_edit::LineEdit::new(text),
+                    kind: kind(n),
+                    dir: root.clone(),
+                    buttons: Vec::new(),
+                    error: None,
+                });
+                let Some(Modal::Input(i)) = app.modal.take() else {
+                    panic!("{what}: the box closed, or a job started");
+                };
+                let why = i.error.unwrap_or_default();
+                assert!(why.contains("control character"), "{what}: {why}");
+            }
+        }
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing made");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn base64_matches_the_rfc_vectors() {
         for (input, want) in [

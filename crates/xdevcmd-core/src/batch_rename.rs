@@ -63,7 +63,10 @@ pub fn plan(paths: &[PathBuf], edited: &str) -> Result<Vec<(PathBuf, PathBuf)>, 
         }
         // Moving onto something that exists is only fine when that something is itself
         // being renamed away, or is this very file (a change of case).
-        if fs::symlink_metadata(to).is_ok() && !sources.contains(to) && !same_file(from, to) {
+        if fs::symlink_metadata(to).is_ok()
+            && !sources.contains(to)
+            && !crate::paths::same_entry(from, to)
+        {
             return Err(format!(
                 "{} already exists \u{2014} nothing renamed",
                 show(to)
@@ -78,13 +81,6 @@ fn show(p: &Path) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned()
-}
-
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => false,
-    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]

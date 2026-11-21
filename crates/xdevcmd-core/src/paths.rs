@@ -69,10 +69,19 @@ pub fn same_entry(a: &Path, b: &Path) -> bool {
 /// Whether the directory `dir` is `src_dir` or below it on disk, following links: what
 /// a copy or move of `src_dir` into `dir` must refuse, as it would recurse into its own
 /// copy. The text of the paths does not matter (a link into `src_dir`, `..`, another
-/// case). False when `dir` cannot be resolved.
+/// case). A `dir` not made yet is judged by the nearest folder above it that exists: it
+/// will be made there (cosf C01: it was judged not inside, and the copy recursed until
+/// the stack overflowed). False when nothing above `dir` resolves.
 pub fn within(dir: &Path, src_dir: &Path) -> bool {
-    let Ok(mut at) = canonical(dir) else {
-        return false;
+    let mut probe = dir;
+    let mut at = loop {
+        match canonical(probe) {
+            Ok(c) => break c,
+            Err(_) => match probe.parent() {
+                Some(p) if !p.as_os_str().is_empty() => probe = p,
+                _ => return false,
+            },
+        }
     };
     #[cfg(unix)]
     let target = {

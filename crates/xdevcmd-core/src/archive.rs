@@ -1050,6 +1050,23 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// The archive being replaced is never packed into itself, however its path is
+    /// written (sibling of cosf C05, plan v3 H-04: it was compared by text only).
+    #[test]
+    fn pack_leaves_out_the_archive_it_replaces_whatever_its_text() {
+        let d = scratch("pack-self-text");
+        fs::create_dir_all(d.join("proj")).unwrap();
+        fs::write(d.join("proj/a.txt"), "a").unwrap();
+        fs::write(d.join("proj/old.zip"), "the archive being replaced").unwrap();
+        let dest = d.join("proj").join("..").join("proj").join("old.zip");
+        let mut log = Log::default();
+        pack(&[d.join("proj")], &dest, &mut log).unwrap();
+        let l = list(&d.join("proj/old.zip")).unwrap();
+        let names: Vec<_> = l.items.iter().map(|i| i.path.as_str()).collect();
+        assert!(!names.contains(&"proj/old.zip"), "{names:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn pack_then_list_then_extract_round_trips_for_every_format() {
         for ext in ["zip", "tar", "tar.gz"] {

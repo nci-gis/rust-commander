@@ -162,7 +162,7 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, RenameError> {
     let case_only = new_name.to_lowercase() == old_name.to_lowercase();
     if case_only && target.symlink_metadata().is_ok() {
         // On a file system that ignores case the "other" name is this file itself.
-        if !same_file(path, &target) {
+        if !crate::paths::same_entry(path, &target) {
             return Err(RenameError::Exists(new_name.to_string()));
         }
         fs::rename(path, &target).map_err(|e| RenameError::Io(e.to_string()))?;
@@ -176,11 +176,6 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, RenameError> {
         }
         Err(e) => Err(RenameError::Io(e.to_string())),
     }
-}
-
-/// Whether two paths name the same file on disk (not merely equal contents).
-fn same_file(a: &Path, b: &Path) -> bool {
-    crate::paths::same_entry(a, b)
 }
 
 impl From<io::Error> for RenameError {

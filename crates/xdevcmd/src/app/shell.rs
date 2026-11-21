@@ -511,8 +511,18 @@ impl App {
     /// checks it: inside the root (no `..`), no control character, not a directory, in
     /// a folder that exists. `Ok(None)` when nothing was typed.
     pub(super) fn typed_destination(&self, i: &Input) -> Result<Option<PathBuf>, String> {
-        let typed = i.edit.text();
-        let typed = typed.trim();
+        let raw = i.edit.text();
+        // The prefill comes from a file's name or the shell's directory, which someone
+        // else may have chosen: a control character in it is refused, as everywhere a
+        // name could later be typed into a shell or pasted. In the whole text, before
+        // the trim: a tab or a newline at either end is not a space to drop (T5, H-08).
+        if let Some(c) = crate::safety::control_char(&raw) {
+            return Err(format!(
+                "a control character (U+{:04X}) in the name \u{2014} remove it",
+                c as u32
+            ));
+        }
+        let typed = raw.trim();
         if typed.is_empty() {
             return Ok(None);
         }
@@ -530,15 +540,6 @@ impl App {
             .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
         if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
             return Err("outside the root xdevcmd is confined to".into());
-        }
-        // The prefill comes from a file's name or the shell's directory, which someone
-        // else may have chosen: a control character in it is refused, as everywhere a
-        // name could later be typed into a shell or pasted.
-        if let Some(c) = crate::safety::control_char(typed) {
-            return Err(format!(
-                "a control character (U+{:04X}) in the name \u{2014} remove it",
-                c as u32
-            ));
         }
         // The name itself as Rename checks one: on Windows `<>:"|?*` and a trailing dot
         // or space, which the system would refuse in its own words once the job ran.

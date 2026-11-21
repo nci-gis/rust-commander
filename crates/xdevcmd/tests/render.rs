@@ -896,7 +896,7 @@ fn save_as_refuses_a_name_with_a_control_character() {
     let (a, b) = with_file("bad\u{15}x.txt", b"one\ntwo\n");
     let s = shot_keys("110x20", "Down,F3,F2,Enter", &a, &b);
     assert!(
-        s.contains("control character (U+0015) in the name") && s.contains("not written"),
+        s.contains("control character (U+0015) in the name") && s.contains("remove it"),
         "{s}"
     );
     let names: Vec<_> = fs::read_dir(&a)

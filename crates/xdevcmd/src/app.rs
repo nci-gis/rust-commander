@@ -1315,6 +1315,16 @@ mod tests {
             panic!("the box closed, or a job started");
         };
         assert_eq!(i.error.as_deref(), Some("that folder does not exist"));
+        // On Windows, a name the system refuses is said before the job, as Rename says
+        // it (red-team F4).
+        #[cfg(windows)]
+        {
+            app.apply_input(input("a?.zip"));
+            let Some(Modal::Input(i)) = app.modal.take() else {
+                panic!("the box closed, or a job started");
+            };
+            assert!(i.error.is_some(), "a?.zip");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

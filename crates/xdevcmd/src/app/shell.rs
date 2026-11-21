@@ -536,9 +536,16 @@ impl App {
         // name could later be typed into a shell or pasted.
         if let Some(c) = crate::safety::control_char(typed) {
             return Err(format!(
-                "a control character (U+{:04X}) in the name \u{2014} not written",
+                "a control character (U+{:04X}) in the name \u{2014} remove it",
                 c as u32
             ));
+        }
+        // The name itself as Rename checks one: on Windows `<>:"|?*` and a trailing dot
+        // or space, which the system would refuse in its own words once the job ran.
+        if let Some(name) = dest.file_name().and_then(|n| n.to_str()) {
+            if let Err(e) = xdevcmd_core::rename::validate_name(name) {
+                return Err(e.to_string());
+            }
         }
         if dest.is_dir() {
             return Err("that is a directory \u{2014} add a file name".into());

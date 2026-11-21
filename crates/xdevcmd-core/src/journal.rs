@@ -1800,4 +1800,59 @@ mod tests {
         }
         let _ = fs::remove_dir_all(&d);
     }
+
+    /// A last line with no newline was cut short as it was written (a kill, a power
+    /// cut) and is not read: a `done` line for `/w/proj-x` cut two bytes short named
+    /// `/w/proj`, and the resume skipped that other folder (cosf #6, plan v3 H-07).
+    #[test]
+    fn a_torn_last_line_is_not_read() {
+        let d = dir("torn");
+        let whole = enc(&d.join("proj-x"));
+        let torn = &whole[..whole.len() - 2];
+        let text = format!("kind copy\nsrc {}\ndest {}\ndone {torn}", whole, enc(&d));
+        let it = tidy(&text, "1");
+        assert!(it.done.is_empty(), "{:?}", it.done);
+        assert_eq!(it.sources, vec![d.join("proj-x")], "whole lines are read");
+        // The same line, whole, is read.
+        assert_eq!(tidy(&format!("{text}\n"), "1").done.len(), 1);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// `part` and `gone` lines were read but no version ever wrote them (cosf #9): a
+    /// journal holding one removes nothing. Part files are found by their directory and
+    /// run.
+    #[test]
+    fn a_part_line_no_version_writes_removes_nothing() {
+        let d = dir("part-line");
+        let part = d.join(".a.txt.xdevcmd-part-99-0");
+        fs::write(&part, "half").unwrap();
+        let it = tidy(&format!("kind copy\npart {}\n", enc(&part)), "2147483646");
+        assert_eq!(it.cleaned, 0);
+        assert!(part.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// An interrupted Alt+Y sync is tidied up and not offered (its journal names no
+    /// one destination to resume into); a checkpointed part of it is not kept for a
+    /// resume that will not come (cosf #7, checked on HEAD: kind is "sync").
+    #[test]
+    fn an_interrupted_sync_is_tidied_up_and_not_offered() {
+        let d = dir("sync");
+        let part = d.join(".big.xdevcmd-part-2147483646-0");
+        fs::write(&part, vec![0u8; 8]).unwrap();
+        let id = crate::ops::Ident::of(&fs::metadata(&part).unwrap()).encode();
+        let text = format!(
+            "kind sync\nsrc {}\ndir {}\nckpt {} {} {} {id} 4\n",
+            enc(&d.join("big")),
+            enc(&d),
+            enc(&part),
+            enc(&d.join("big")),
+            enc(&d.join("out/big")),
+        );
+        let it = tidy(&text, "2147483646");
+        assert!(!it.offered());
+        assert!(it.partial.is_empty());
+        assert!(!part.exists(), "removed with the rest");
+        let _ = fs::remove_dir_all(&d);
+    }
 }

@@ -48,6 +48,10 @@
 //! (the confirmed plan's decisions) and `done` (a source finished) with `v 3` (Round
 //! 030), for Resume to carry out exactly what is left. All are unknown tags to 0.3.0's
 //! tidy-up, which skips them, and this version reads older journals as before.
+//!
+//! Every line's tag, and how many of its words are paths, is in `Tag`: the writer, the
+//! reader and the root check go by it alone. A last line with no newline was cut short
+//! as it was written and is not read.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -312,26 +316,38 @@ impl Journal {
             broken: None,
             dirty: false,
         };
-        j.line(&format!("host {}", enc(Path::new(&hostname()))), about)?;
-        j.line("v 3", about)?;
-        j.line(&format!("kind {kind}"), about)?;
+        j.put(Tag::Host, &[&enc(Path::new(&hostname()))], about)?;
+        j.put(Tag::V, &["3"], about)?;
+        j.put(Tag::Kind, &[kind], about)?;
         for s in sources {
-            j.line(&format!("src {}", enc(s)), about)?;
+            j.put(Tag::Src, &[&enc(s)], about)?;
         }
         if let Some(d) = dest {
-            j.line(&format!("dest {}", enc(d)), about)?;
+            j.put(Tag::Dest, &[&enc(d)], about)?;
         }
         if let Some(n) = rename_to {
-            j.line(&format!("as {}", enc(Path::new(n))), about)?;
+            j.put(Tag::As, &[&enc(Path::new(n))], about)?;
         }
         if to_trash {
-            j.line("trash", about)?;
+            j.put(Tag::Trash, &[], about)?;
         }
         // The file, then the name it has in its directory: without the second, a power
         // cut can lose the journal itself (SQLite syncs the directory for this).
         j.commit(about)?;
         crate::faults::sync_dir(dir)?;
         Ok(j)
+    }
+
+    /// Write the line `tag` with its words, about `about`. Every line goes through here,
+    /// so the writer spells a line as [`Tag`] says, as the reader reads it.
+    fn put(&mut self, tag: Tag, words: &[&str], about: &Path) -> std::io::Result<()> {
+        debug_assert!(words.len() >= tag.paths(), "{tag:?}: {words:?}");
+        let mut s = tag.word().to_string();
+        for w in words {
+            s.push(' ');
+            s.push_str(w);
+        }
+        self.line(&s, about)
     }
 
     /// Write one line about `about` (a path, for the fault seam). A journal that has
@@ -392,7 +408,7 @@ impl Journal {
     pub fn part(&mut self, p: &Path) -> std::io::Result<()> {
         if let Some(dir) = p.parent() {
             if !self.dirs.contains(dir) {
-                self.line(&format!("dir {}", enc(dir)), p)?;
+                self.put(Tag::Dir, &[&enc(dir)], p)?;
                 self.dirs.insert(dir.to_path_buf());
             }
         }
@@ -401,18 +417,18 @@ impl Journal {
 
     /// About to rename `orig` to the temporary name `tmp` (rename many).
     pub fn renamed(&mut self, tmp: &Path, orig: &Path) -> std::io::Result<()> {
-        self.line(&format!("ren {} {}", enc(tmp), enc(orig)), orig)
+        self.put(Tag::Ren, &[&enc(tmp), &enc(orig)], orig)
     }
 
     /// `tmp` has been renamed on: nothing to put back.
     pub fn unrenamed(&mut self, tmp: &Path) -> std::io::Result<()> {
-        self.line(&format!("unren {}", enc(tmp)), tmp)
+        self.put(Tag::Unren, &[&enc(tmp)], tmp)
     }
 
     /// A move across devices: `dst`, a complete copy of `src`, is on disk, and `src` is
     /// about to be removed. Synced by the [`Journal::commit`] before the removal.
     pub fn moved(&mut self, src: &Path, dst: &Path) -> std::io::Result<()> {
-        self.line(&format!("moved {} {}", enc(src), enc(dst)), src)
+        self.put(Tag::Moved, &[&enc(src), &enc(dst)], src)
     }
 
     /// The confirmed plan's word on `dst` (Round 030): left, or replaced while it is the
@@ -421,8 +437,8 @@ impl Journal {
     pub fn decided(&mut self, dst: &Path, e: &crate::ops::Expect) -> std::io::Result<()> {
         use crate::ops::Expect;
         match e {
-            Expect::Skip => self.line(&format!("skip {}", enc(dst)), dst),
-            Expect::Replace(id) => self.line(&format!("replace {} {}", enc(dst), id.encode()), dst),
+            Expect::Skip => self.put(Tag::Skip, &[&enc(dst)], dst),
+            Expect::Replace(id) => self.put(Tag::Replace, &[&enc(dst), &id.encode()], dst),
             Expect::Absent => Ok(()),
         }
     }
@@ -432,29 +448,29 @@ impl Journal {
     /// rename: the new file is the one that was confirmed, and the old one is in the
     /// trash. Synced by the commit before the trash step.
     pub fn swap(&mut self, tmp: &Path, dst: &Path) -> std::io::Result<()> {
-        self.line(&format!("swap {} {}", enc(tmp), enc(dst)), dst)
+        self.put(Tag::Swap, &[&enc(tmp), &enc(dst)], dst)
     }
 
     /// `p.bytes` of `p.part`, the copy of `p.src` that is to become `p.dst`, are on
     /// disk (synced just before): kept for a resume. Not synced on its own: lost, the
     /// copy goes on from the checkpoint before, or from the start.
     pub fn checkpoint(&mut self, p: &Partial) -> std::io::Result<()> {
-        self.line(
-            &format!(
-                "ckpt {} {} {} {} {}",
-                enc(&p.part),
-                enc(&p.src),
-                enc(&p.dst),
-                p.ident.encode(),
-                p.bytes
-            ),
+        self.put(
+            Tag::Ckpt,
+            &[
+                &enc(&p.part),
+                &enc(&p.src),
+                &enc(&p.dst),
+                &p.ident.encode(),
+                &p.bytes.to_string(),
+            ],
             &p.part,
         )
     }
 
     /// The job has finished with `src`, one of its sources: a resume leaves it.
     pub fn done(&mut self, src: &Path) -> std::io::Result<()> {
-        self.line(&format!("done {}", enc(src)), src)
+        self.put(Tag::Done, &[&enc(src)], src)
     }
 }
 
@@ -769,16 +785,9 @@ fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
     let inside = |p: &Path| policy.allows_at(p);
     // Every path a line names, not only the ones tidy touches: a journal that
     // reaches outside is left whole and not offered (RR02).
-    text.lines().all(|line| {
+    whole_lines(text).all(|line| {
         let mut w = line.split(' ');
-        let paths = match w.next() {
-            Some(
-                "src" | "dest" | "dir" | "part" | "gone" | "unren" | "skip" | "replace" | "done",
-            ) => 1,
-            Some("ren" | "moved" | "swap") => 2,
-            Some("ckpt") => 3,
-            _ => 0,
-        };
+        let paths = w.next().and_then(Tag::of).map_or(0, Tag::paths);
         w.take(paths).all(|t| dec(t).is_some_and(|p| inside(&p)))
     })
 }
@@ -806,67 +815,89 @@ fn tidy(text: &str, run: &str) -> Interrupted {
     let mut parts: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut renames: Vec<(PathBuf, PathBuf)> = Vec::new();
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("ckpt ") {
-            let w: Vec<&str> = rest.split(' ').collect();
-            if let [part, src, dst, id, bytes] = w[..] {
-                if let (Some(part), Some(src), Some(dst), Some(ident), Ok(bytes)) = (
-                    dec(part),
-                    dec(src),
-                    dec(dst),
-                    crate::ops::Ident::decode(id),
-                    bytes.parse(),
-                ) {
-                    // The last word on a file wins.
-                    ckpts.retain(|c| c.part != part);
-                    ckpts.push(Partial {
-                        part,
-                        src,
-                        dst,
-                        ident,
-                        bytes,
-                    });
-                }
-            }
-            continue;
-        }
+    for line in whole_lines(text) {
         let mut w = line.split(' ');
-        let tag = w.next().unwrap_or_default();
-        let a = w.next().and_then(dec);
-        let b = w.next().and_then(dec);
-        match (tag, a, b) {
+        let Some(tag) = w.next().and_then(Tag::of) else {
+            continue; // a tag this version does not know: a newer one's, or junk
+        };
+        let words: Vec<&str> = w.collect();
+        let path = |i: usize| words.get(i).and_then(|t| dec(t));
+        // Every tag, no `_`: a line the writer learns to write is read here too.
+        match tag {
+            Tag::Host | Tag::V => {}
             // Not `line[5..]`: a journal cut short after "kind" panicked every start.
-            ("kind", _, _) => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
-            ("src", Some(p), _) => it.sources.push(p),
-            ("dest", Some(p), _) => it.dest = Some(p),
-            ("as", None, _) => bad_name = true,
+            Tag::Kind => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
+            Tag::Src => it.sources.extend(path(0)),
+            Tag::Dest => it.dest = path(0).or(it.dest.take()),
             // One plain name, or the job is not trusted (RR04).
-            ("as", Some(p), _) => {
-                let mut c = p.components();
-                match (c.next(), c.next()) {
-                    (Some(std::path::Component::Normal(n)), None) => {
-                        it.rename_to = Some(n.to_os_string())
+            Tag::As => match path(0) {
+                None => bad_name = true,
+                Some(p) => {
+                    let mut c = p.components();
+                    match (c.next(), c.next()) {
+                        (Some(std::path::Component::Normal(n)), None) => {
+                            it.rename_to = Some(n.to_os_string())
+                        }
+                        _ => bad_name = true,
                     }
-                    _ => bad_name = true,
+                }
+            },
+            Tag::Trash => it.to_trash = true,
+            Tag::Dir => dirs.extend(path(0)),
+            Tag::Ren => {
+                if let (Some(t), Some(o)) = (path(0), path(1)) {
+                    renames.push((t, o));
                 }
             }
-            ("trash", _, _) => it.to_trash = true,
-            ("dir", Some(d), _) => dirs.push(d),
-            ("part", Some(p), _) => parts.push(p),
-            ("gone", Some(p), _) => parts.retain(|x| *x != p),
-            ("ren", Some(t), Some(o)) => renames.push((t, o)),
-            ("unren", Some(t), _) => renames.retain(|(x, _)| *x != t),
-            ("moved", Some(s), Some(d)) => it.moved.push((s, d)),
-            ("skip", Some(p), _) => it.decided.push((p, crate::ops::Expect::Skip)),
-            ("replace", Some(p), _) => {
-                // The third word is the file's identity, not a path.
-                if let Some(id) = line.split(' ').nth(2).and_then(crate::ops::Ident::decode) {
+            Tag::Unren => {
+                if let Some(t) = path(0) {
+                    renames.retain(|(x, _)| *x != t);
+                }
+            }
+            Tag::Moved => {
+                if let (Some(s), Some(d)) = (path(0), path(1)) {
+                    it.moved.push((s, d));
+                }
+            }
+            Tag::Skip => {
+                if let Some(p) = path(0) {
+                    it.decided.push((p, crate::ops::Expect::Skip));
+                }
+            }
+            Tag::Replace => {
+                // The word after the path is the file's identity, not a path.
+                let id = words.get(1).and_then(|t| crate::ops::Ident::decode(t));
+                if let (Some(p), Some(id)) = (path(0), id) {
                     it.decided.push((p, crate::ops::Expect::Replace(id)));
                 }
             }
-            ("done", Some(p), _) => it.done.push(p),
-            ("swap", Some(t), Some(d)) => swaps.push((t, d)),
-            _ => {}
+            Tag::Swap => {
+                if let (Some(t), Some(d)) = (path(0), path(1)) {
+                    swaps.push((t, d));
+                }
+            }
+            Tag::Ckpt => {
+                if let [part, src, dst, id, bytes] = words[..] {
+                    if let (Some(part), Some(src), Some(dst), Some(ident), Ok(bytes)) = (
+                        dec(part),
+                        dec(src),
+                        dec(dst),
+                        crate::ops::Ident::decode(id),
+                        bytes.parse(),
+                    ) {
+                        // The last word on a file wins.
+                        ckpts.retain(|c| c.part != part);
+                        ckpts.push(Partial {
+                            part,
+                            src,
+                            dst,
+                            ident,
+                            bytes,
+                        });
+                    }
+                }
+            }
+            Tag::Done => it.done.extend(path(0)),
         }
     }
     // A Copy As whose name is not one plain name: its leftovers are tidied as any,
@@ -940,6 +971,96 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         }
     }
     it
+}
+
+/// Every line a journal holds: its first word, and how many of the words after it name
+/// a place on disk. The writer ([`Journal::put`]), the reader ([`tidy`]) and the root
+/// check ([`may_tidy`]) all go by this one table (plan v3 H-07: a `part` and a `gone`
+/// line had a reader and no writer).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tag {
+    Host,
+    V,
+    Kind,
+    Src,
+    Dest,
+    As,
+    Trash,
+    Dir,
+    Ren,
+    Unren,
+    Moved,
+    Skip,
+    Replace,
+    Swap,
+    Ckpt,
+    Done,
+}
+
+impl Tag {
+    const ALL: [Tag; 16] = [
+        Tag::Host,
+        Tag::V,
+        Tag::Kind,
+        Tag::Src,
+        Tag::Dest,
+        Tag::As,
+        Tag::Trash,
+        Tag::Dir,
+        Tag::Ren,
+        Tag::Unren,
+        Tag::Moved,
+        Tag::Skip,
+        Tag::Replace,
+        Tag::Swap,
+        Tag::Ckpt,
+        Tag::Done,
+    ];
+
+    fn spec(self) -> (&'static str, usize) {
+        match self {
+            // The machine's name, encoded as a path is, but no place.
+            Tag::Host => ("host", 0),
+            Tag::V => ("v", 0),
+            Tag::Kind => ("kind", 0),
+            Tag::Src => ("src", 1),
+            Tag::Dest => ("dest", 1),
+            // One plain name for Copy As, no place.
+            Tag::As => ("as", 0),
+            Tag::Trash => ("trash", 0),
+            Tag::Dir => ("dir", 1),
+            Tag::Ren => ("ren", 2),
+            Tag::Unren => ("unren", 1),
+            Tag::Moved => ("moved", 2),
+            Tag::Skip => ("skip", 1),
+            // Then the file's identity.
+            Tag::Replace => ("replace", 1),
+            Tag::Swap => ("swap", 2),
+            // Then the source's identity and the bytes on disk.
+            Tag::Ckpt => ("ckpt", 3),
+            Tag::Done => ("done", 1),
+        }
+    }
+
+    fn word(self) -> &'static str {
+        self.spec().0
+    }
+
+    fn paths(self) -> usize {
+        self.spec().1
+    }
+
+    fn of(word: &str) -> Option<Tag> {
+        Tag::ALL.into_iter().find(|t| t.word() == word)
+    }
+}
+
+/// The lines of a journal written whole. A last line with no newline was cut short as
+/// it was written (a kill, a power cut) and is not read: its last path could name
+/// another file (cosf #6).
+fn whole_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split_inclusive('\n')
+        .filter_map(|l| l.strip_suffix('\n'))
 }
 
 /// A path as hex of its bytes (UTF-16 units on Windows): any name, no escaping rules.
@@ -1291,7 +1412,7 @@ mod tests {
         };
         let journal = |at: &Path| {
             format!(
-                "kind copy\ndir {}\npart {}\nren {} {}\n",
+                "kind copy\ndir {}\ndone {}\nren {} {}\n",
                 enc(at),
                 enc(&at.join(".a.xdevcmd-part-9-0")),
                 enc(&at.join(".xdevcmd-rename-9-0")),
@@ -1331,26 +1452,25 @@ mod tests {
             root: Some(crate::paths::canonical(&inside).unwrap()),
         };
         let (i, o) = (inside.join("a"), outside.join("a"));
-        let one = ["src", "dest", "gone", "unren", "skip", "done"];
-        for kind in one {
-            let line = |p: &Path| format!("kind copy\n{kind} {}\n", enc(p));
-            assert!(may_tidy(&line(&i), &root), "{kind} inside");
-            assert!(!may_tidy(&line(&o), &root), "{kind} outside");
-        }
-        let replace = format!("kind copy\nreplace {} 7\n", enc(&o));
-        assert!(!may_tidy(&replace, &root), "replace outside");
-        let moved = format!("kind move\nmoved {} {}\n", enc(&i), enc(&o));
-        assert!(!may_tidy(&moved, &root), "moved to outside");
-        for at in 0..3 {
-            let mut ps = [i.clone(), i.clone(), i.clone()];
-            ps[at] = o.clone();
-            let ckpt = format!(
-                "kind copy\nckpt {} {} {} 7 4\n",
-                enc(&ps[0]),
-                enc(&ps[1]),
-                enc(&ps[2])
-            );
-            assert!(!may_tidy(&ckpt, &root), "ckpt path {at} outside");
+        // Every tag that names a place, each of its places in turn (plan v3 H-07: by
+        // the table, not a list kept by hand), with the words after them as written.
+        for tag in Tag::ALL.into_iter().filter(|t| t.paths() > 0) {
+            let tail = match tag {
+                Tag::Replace => " 7",
+                Tag::Ckpt => " 7 4",
+                _ => "",
+            };
+            let line = |ps: &[PathBuf]| {
+                let words: Vec<String> = ps.iter().map(|p| enc(p)).collect();
+                format!("kind copy\n{} {}{tail}\n", tag.word(), words.join(" "))
+            };
+            let all_in = vec![i.clone(); tag.paths()];
+            assert!(may_tidy(&line(&all_in), &root), "{tag:?} inside");
+            for at in 0..tag.paths() {
+                let mut ps = all_in.clone();
+                ps[at] = o.clone();
+                assert!(!may_tidy(&line(&ps), &root), "{tag:?} place {at} outside");
+            }
         }
         let _ = fs::remove_dir_all(&d);
     }
@@ -1374,14 +1494,14 @@ mod tests {
         let text = format!("kind copy\ndir {}\n", enc(&link));
         assert!(!may_tidy(&text, &root), "a dir that leads outside");
         let gone = format!(
-            "kind copy\npart {}\n",
+            "kind copy\ndone {}\n",
             enc(&inside.join(".a.xdevcmd-part-9-0"))
         );
         assert!(may_tidy(&gone, &root), "a gone file inside still may");
         // Pinned from the red-team: a gone file under the escaping link, and a dangling
         // link (it exists, so it answers for itself, and it does not resolve).
         let under = format!(
-            "kind copy\npart {}\n",
+            "kind copy\ndone {}\n",
             enc(&link.join(".a.xdevcmd-part-9-0"))
         );
         assert!(!may_tidy(&under, &root), "a gone file under the link");
@@ -1441,7 +1561,7 @@ mod tests {
             "copy",
             &[d.join("a.txt")],
             Some(&d),
-            Some(std::ffi::OsStr::new("b c.txt")),
+            Some(std::ffi::OsStr::new(" b c.txt ")),
             false,
         )
         .unwrap();
@@ -1449,7 +1569,7 @@ mod tests {
         let it = tidy(&text, "x");
         assert_eq!(
             it.rename_to.as_deref(),
-            Some(std::ffi::OsStr::new("b c.txt"))
+            Some(std::ffi::OsStr::new(" b c.txt "))
         );
         let t = format!("{text}as zz-not-hex\n");
         assert!(tidy(&t, "x").kind.is_empty(), "a name that does not decode");
@@ -1470,8 +1590,7 @@ mod tests {
         let d = dir("dead");
         let jdir = d.join("journal");
         fs::create_dir_all(&jdir).unwrap();
-        let part = d.join(".big.iso.xdevcmd-part-99-0");
-        let done = d.join(".ok.txt.xdevcmd-part-99-1");
+        let part = d.join(".big.iso.xdevcmd-part-2147483646-0");
         // Found by its directory and the dead pid in its name, with no line of its own;
         // another live run's part file in the same directory is left alone.
         let by_dir = d.join(".c.bin.xdevcmd-part-2147483646-5");
@@ -1485,14 +1604,10 @@ mod tests {
         let tmp = d.join(".xdevcmd-rename-99-0");
         fs::write(&tmp, "photo").unwrap();
         let text = format!(
-            "kind copy\nsrc {}\ndest {}\ndir {}\npart {}\npart {}\ngone {}\npart {}\nren {} {}\n",
+            "kind copy\nsrc {}\ndest {}\ndir {}\nren {} {}\n",
             enc(&d.join("src/big.iso")),
             enc(&d),
             enc(&d),
-            enc(&part),
-            enc(&done),
-            enc(&done),
-            enc(&user),
             enc(&tmp),
             enc(&d.join("photo.jpg")),
         );
@@ -1798,6 +1913,109 @@ mod tests {
         ] {
             assert_eq!(Ident::decode(junk), None, "{junk}");
         }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A last line with no newline was cut short as it was written (a kill, a power
+    /// cut) and is not read: a `done` line for `/w/proj-x` cut two bytes short named
+    /// `/w/proj`, and the resume skipped that other folder (cosf #6, plan v3 H-07).
+    #[test]
+    fn a_torn_last_line_is_not_read() {
+        let d = dir("torn");
+        let whole = enc(&d.join("proj-x"));
+        // One character cut off: a byte in hex on Unix, a UTF-16 unit on Windows.
+        let unit = if cfg!(windows) { 4 } else { 2 };
+        let torn = &whole[..whole.len() - unit];
+        let text = format!("kind copy\nsrc {}\ndest {}\ndone {torn}", whole, enc(&d));
+        let it = tidy(&text, "1");
+        assert!(it.done.is_empty(), "{:?}", it.done);
+        assert_eq!(it.sources, vec![d.join("proj-x")], "whole lines are read");
+        // The same line, whole, is read.
+        assert_eq!(tidy(&format!("{text}\n"), "1").done.len(), 1);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// `part` and `gone` lines were read but no version ever wrote them (cosf #9): a
+    /// journal holding one removes nothing. Part files are found by their directory and
+    /// run.
+    #[test]
+    fn a_part_line_no_version_writes_removes_nothing() {
+        let d = dir("part-line");
+        let part = d.join(".a.txt.xdevcmd-part-99-0");
+        fs::write(&part, "half").unwrap();
+        let it = tidy(&format!("kind copy\npart {}\n", enc(&part)), "2147483646");
+        assert_eq!(it.cleaned, 0);
+        assert!(part.exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// An interrupted Alt+Y sync is tidied up and not offered (its journal names no
+    /// one destination to resume into); a checkpointed part of it is not kept for a
+    /// resume that will not come (cosf #7, checked on HEAD: kind is "sync").
+    #[test]
+    fn an_interrupted_sync_is_tidied_up_and_not_offered() {
+        let d = dir("sync");
+        let part = d.join(".big.xdevcmd-part-2147483646-0");
+        fs::write(&part, vec![0u8; 8]).unwrap();
+        let id = crate::ops::Ident::of(&fs::metadata(&part).unwrap()).encode();
+        let text = format!(
+            "kind sync\nsrc {}\ndir {}\nckpt {} {} {} {id} 4\n",
+            enc(&d.join("big")),
+            enc(&d),
+            enc(&part),
+            enc(&d.join("big")),
+            enc(&d.join("out/big")),
+        );
+        let it = tidy(&text, "2147483646");
+        assert!(!it.offered());
+        assert!(it.partial.is_empty());
+        assert!(!part.exists(), "removed with the rest");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The words older versions wrote, spelled here by hand and not through `Tag`: a
+    /// word changed in the table would change the writer, the reader and the root
+    /// check together, so no round trip could see it (P8 round 2, blind QA and
+    /// red-team). A journal written by 0.4.0-beta.1 reads back whole.
+    #[test]
+    fn the_words_older_versions_wrote_are_read_as_before() {
+        for (word, paths) in [
+            ("host", 0),
+            ("v", 0),
+            ("kind", 0),
+            ("src", 1),
+            ("dest", 1),
+            ("as", 0),
+            ("trash", 0),
+            ("dir", 1),
+            ("ren", 2),
+            ("unren", 1),
+            ("moved", 2),
+            ("skip", 1),
+            ("replace", 1),
+            ("swap", 2),
+            ("ckpt", 3),
+            ("done", 1),
+        ] {
+            assert_eq!(Tag::of(word).map(Tag::paths), Some(paths), "{word}");
+        }
+        let d = dir("older");
+        let (a, out) = (enc(&d.join("a")), enc(&d.join("out")));
+        let kept = enc(&d.join("out/a"));
+        let id = crate::ops::Ident::of(&fs::metadata(&d).unwrap()).encode();
+        let text = format!(
+            "host 6f6c64\nv 3\nkind copy\nsrc {a}\ndest {out}\nas {}\nskip {kept}\nreplace {kept} {id}\ndone {a}\n",
+            enc(Path::new(" b c.txt ")),
+        );
+        let it = tidy(&text, "1");
+        assert_eq!((it.kind.as_str(), it.sources.len()), ("copy", 1));
+        assert_eq!(it.dest, Some(d.join("out")));
+        assert_eq!(
+            it.rename_to.as_deref(),
+            Some(std::ffi::OsStr::new(" b c.txt "))
+        );
+        assert_eq!(it.decided.len(), 2, "skip and replace: {:?}", it.decided);
+        assert_eq!(it.done, vec![d.join("a")]);
         let _ = fs::remove_dir_all(&d);
     }
 }

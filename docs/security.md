@@ -51,7 +51,7 @@ before release.
 
 | What ends the run | With safe operations on |
 |---|---|
-| **A kill** (`kill -9`, a crash; on Windows, the terminal's close button too) | No file is ever cut short under its real name: it holds the old file or the complete new one. The next start tidies up and offers to continue. |
+| **A kill** (`kill -9`, a crash; on Windows, the terminal's close button too) | No file is ever cut short under its real name: it holds the old file or the complete new one. The next start tidies up, and offers to continue a copy, a move or a delete to the trash (a sync, an extract, a pack and rename many are tidied up only). |
 | **A power cut** | A file replaced is the old one or the complete new one; a source moved across drives is never gone before its copy is on disk. But a **new** file copied just before the cut can be short or empty under its real name: continue with **C** (below). |
 
 **Covered**: F5 copy, F6 move, Shift+F5 copy as, Alt+Y sync, extracting (F5 inside an

@@ -432,12 +432,16 @@ pub const CONCEPTS: &[(&str, &[&str])] = &[
     ),
     (
         "journal kinds",
+        // A line's word spelled outside the table (`journal::Tag`), as the writer and
+        // the reader each spelled it before H-07, and the table itself: 1 is one place.
         &[
             "format!(\"src ",
             "format!(\"dest ",
             "format!(\"ckpt ",
+            "format!(\"skip ",
             "Some(\"ckpt\")",
-            "(\"done\"",
+            "(\"done\", Some",
+            "Tag::Ckpt => (\"ckpt\"",
         ],
     ),
 ];

@@ -1561,7 +1561,7 @@ mod tests {
             "copy",
             &[d.join("a.txt")],
             Some(&d),
-            Some(std::ffi::OsStr::new("b c.txt")),
+            Some(std::ffi::OsStr::new(" b c.txt ")),
             false,
         )
         .unwrap();
@@ -1569,7 +1569,7 @@ mod tests {
         let it = tidy(&text, "x");
         assert_eq!(
             it.rename_to.as_deref(),
-            Some(std::ffi::OsStr::new("b c.txt"))
+            Some(std::ffi::OsStr::new(" b c.txt "))
         );
         let t = format!("{text}as zz-not-hex\n");
         assert!(tidy(&t, "x").kind.is_empty(), "a name that does not decode");
@@ -1970,6 +1970,52 @@ mod tests {
         assert!(!it.offered());
         assert!(it.partial.is_empty());
         assert!(!part.exists(), "removed with the rest");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The words older versions wrote, spelled here by hand and not through `Tag`: a
+    /// word changed in the table would change the writer, the reader and the root
+    /// check together, so no round trip could see it (P8 round 2, blind QA and
+    /// red-team). A journal written by 0.4.0-beta.1 reads back whole.
+    #[test]
+    fn the_words_older_versions_wrote_are_read_as_before() {
+        for (word, paths) in [
+            ("host", 0),
+            ("v", 0),
+            ("kind", 0),
+            ("src", 1),
+            ("dest", 1),
+            ("as", 0),
+            ("trash", 0),
+            ("dir", 1),
+            ("ren", 2),
+            ("unren", 1),
+            ("moved", 2),
+            ("skip", 1),
+            ("replace", 1),
+            ("swap", 2),
+            ("ckpt", 3),
+            ("done", 1),
+        ] {
+            assert_eq!(Tag::of(word).map(Tag::paths), Some(paths), "{word}");
+        }
+        let d = dir("older");
+        let (a, out) = (enc(&d.join("a")), enc(&d.join("out")));
+        let kept = enc(&d.join("out/a"));
+        let id = crate::ops::Ident::of(&fs::metadata(&d).unwrap()).encode();
+        let text = format!(
+            "host 6f6c64\nv 3\nkind copy\nsrc {a}\ndest {out}\nas {}\nskip {kept}\nreplace {kept} {id}\ndone {a}\n",
+            enc(Path::new(" b c.txt ")),
+        );
+        let it = tidy(&text, "1");
+        assert_eq!((it.kind.as_str(), it.sources.len()), ("copy", 1));
+        assert_eq!(it.dest, Some(d.join("out")));
+        assert_eq!(
+            it.rename_to.as_deref(),
+            Some(std::ffi::OsStr::new(" b c.txt "))
+        );
+        assert_eq!(it.decided.len(), 2, "skip and replace: {:?}", it.decided);
+        assert_eq!(it.done, vec![d.join("a")]);
         let _ = fs::remove_dir_all(&d);
     }
 }

@@ -508,8 +508,8 @@ impl App {
     }
 
     /// Where the text typed in a Save as…-style prompt points, checked as Save as…
-    /// checks it: inside the root (no `..`), no control character, not a directory, in
-    /// a folder that exists. `Ok(None)` when nothing was typed.
+    /// checks it: no control character, inside the root (`Policy::allows_at`), a name
+    /// Rename would take, not a directory, in a folder that exists. `Ok(None)` when nothing was typed.
     pub(super) fn typed_destination(&self, i: &Input) -> Result<Option<PathBuf>, String> {
         let raw = i.edit.text();
         // The prefill comes from a file's name or the shell's directory, which someone
@@ -530,15 +530,9 @@ impl App {
         if dest.is_relative() {
             dest = i.dir.join(dest);
         }
-        // Under --root, as F7: no `..`, and the directory it goes in must be inside,
-        // links resolved.
-        let climbs = Path::new(typed)
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir));
-        let inside = dest
-            .parent()
-            .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
-        if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+        // Under --root: the one check of a path to make (links resolved, a link left
+        // there that leads out is outside, no `..` in what is still to make).
+        if !xdevcmd_core::policy::get().allows_at(&dest) {
             return Err("outside the root xdevcmd is confined to".into());
         }
         // The name itself as Rename checks one: on Windows `<>:"|?*` and a trailing dot

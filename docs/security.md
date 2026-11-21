@@ -262,6 +262,12 @@ The read-only modes still write the file named with `--cwd-file`, and a temporar
 of a file viewed inside an archive ([Files xdevcmd keeps](config.md#files-xdevcmd-keeps)).
 In read-only mode, a command you run in the shell panel can change files as anywhere.
 
+With `--root`, a path you name for xdevcmd to make or write (a new folder, an archive,
+Save as, a terminal log), a file put back from the trash, and an undo are checked
+the same way: one that exists answers for itself, links resolved, so a link left inside
+that leads out is outside; one not made yet answers by the nearest folder above it, and
+a `..` in the part still to make is refused.
+
 The config has the same settings (`[security] mode` and `root`). A command-line flag can
 make the config stricter, never looser.
 

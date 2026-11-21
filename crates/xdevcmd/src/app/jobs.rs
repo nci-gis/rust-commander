@@ -748,6 +748,21 @@ impl App {
                 return;
             }
         };
+        // Under --root: the places an undo writes to (red-team on H-03: a folder
+        // replaced by a link out between the job and the undo took the files out).
+        let policy = xdevcmd_core::policy::get();
+        let outside = match &plan {
+            Plan::Rename(moves) => moves
+                .iter()
+                .any(|(a, b)| !policy.allows_at(a) || !policy.allows_at(b)),
+            Plan::Move { into, .. } => !policy.allows_at(into),
+            _ => false,
+        };
+        if outside {
+            self.status =
+                "nothing undone: that place is outside the root xdevcmd is confined to".into();
+            return;
+        }
         match plan {
             Plan::Rename(moves) => {
                 self.undo_rename(moves, xdevcmd_core::ops::safe());

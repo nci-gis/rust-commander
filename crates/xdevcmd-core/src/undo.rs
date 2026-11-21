@@ -256,7 +256,7 @@ pub fn unmake(made: Vec<crate::ops::Made>) -> crate::ops::Handle {
                 sum.errors.push(e.to_string());
                 break;
             }
-            if !crate::policy::get().allows(&m.path) {
+            if !crate::policy::get().allows_at(&m.path) {
                 note(&mut sum, &m.path, "outside the root xdevcmd is confined to");
                 continue;
             }
@@ -319,7 +319,7 @@ pub fn unmake(made: Vec<crate::ops::Made>) -> crate::ops::Handle {
 /// here, and refused in read-only mode, as every write in the engine is.
 pub fn remove(p: &Path) -> io::Result<()> {
     crate::policy::guard_write()?;
-    if !crate::policy::get().allows(p) {
+    if !crate::policy::get().allows_at(p) {
         return Err(io::Error::other("outside the root xdevcmd is confined to"));
     }
     let m = fs::symlink_metadata(p)?;

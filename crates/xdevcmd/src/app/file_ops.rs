@@ -334,15 +334,9 @@ impl App {
                     return;
                 }
                 let first = xdevcmd_core::undo::first_missing(&target);
-                // Under --root: no `..` (create_dir_all would follow it out), and the
-                // directory it is made in must be inside, links resolved.
-                let climbs = Path::new(name)
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir));
-                let inside = first
-                    .parent()
-                    .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
-                if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+                // Under --root: the one check of a path to make (no `..` in what is still
+                // to make: create_dir_all would follow it out).
+                if !xdevcmd_core::policy::get().allows_at(&target) {
                     self.status = "outside the root xdevcmd is confined to".into();
                     return;
                 }

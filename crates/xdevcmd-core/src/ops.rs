@@ -508,6 +508,10 @@ pub struct Summary {
     pub replaced_for_good: u64,
     /// Files replaced whose old version went to the trash (Round 031).
     pub replaced_to_trash: u64,
+    /// The job's worker stopped on an internal error (a panic) and never said how it
+    /// ended: what it did is not all listed here (`made` among it). Set by the side
+    /// that saw it go; a worker never sets it.
+    pub stopped: bool,
     /// A move: each source that went, and where it is now (the sources the request
     /// named, not what is under them). Lists kept in the app follow them (Round 031).
     pub relocated: Vec<(PathBuf, PathBuf)>,

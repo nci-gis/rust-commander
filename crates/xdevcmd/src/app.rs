@@ -1398,6 +1398,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A copy whose worker stopped on an internal error made files that its summary
+    /// does not list: undo says it cannot, not "nothing to undo" (red-team on H-10).
+    #[test]
+    fn a_copy_that_stopped_inside_cannot_be_undone() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-stopped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.expect_copy_undo("the copy of a".into());
+        let s = ops::Summary {
+            failed: 1,
+            stopped: true,
+            ..ops::Summary::default()
+        };
+        app.note_copied(ops::Kind::Copy, &s);
+        assert!(
+            matches!(&app.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(_))),
+            "{:?}",
+            app.last_undo
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn base64_matches_the_rfc_vectors() {
         for (input, want) in [

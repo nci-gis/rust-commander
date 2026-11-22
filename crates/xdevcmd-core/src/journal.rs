@@ -1203,6 +1203,34 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// A job whose thread panics keeps its journal: unwinding drops the journal, and
+    /// the drop of a job that ended normally removes it, which took the crash's record
+    /// with it (red-team on H-10). The next start offers it as a dead run's.
+    #[test]
+    fn a_job_that_panics_keeps_its_journal_for_the_next_start() {
+        let d = dir("panic");
+        let path = {
+            let d = d.clone();
+            std::thread::spawn(move || {
+                let j = Journal::begin_in(&d, "copy", &[d.join("a")], Some(&d), false).unwrap();
+                let p = j.path.clone();
+                let _keep = j;
+                std::panic::panic_any(p);
+            })
+            .join()
+            .unwrap_err()
+            .downcast::<PathBuf>()
+            .unwrap()
+        };
+        assert!(path.exists(), "kept");
+        let other = d.join(format!("{DEAD}-0.journal"));
+        fs::rename(&*path, &other).unwrap();
+        let got = recover_in(&d);
+        assert_eq!(got.len(), 1, "offered at the next start");
+        let _ = discard(&got[0]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_journal_held_by_a_running_job_is_left_alone_whatever_pid_it_names() {
         let d = dir("held");

@@ -67,6 +67,10 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **A job whose worker stops on an internal error ends as failed and says so**, instead
+  of "working" for ever (the next start offers to continue it); the terminal is put
+  back on every early error at start. F1's recent list keeps Copy path, Copy relative
+  path, Documentation, Log to file and Stop logging when it is read back.
 - **Read-only turns off Open with…'s menu too** (F3 still views the file), and a
   command from a menu is refused as the action it does. What read-only and restricted
   turn off is sorted once, for every action and command, and a new one does not build

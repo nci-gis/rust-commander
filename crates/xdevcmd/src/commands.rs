@@ -35,6 +35,36 @@ pub enum Extra {
     StopLog,
 }
 
+impl Extra {
+    pub const ALL: [Extra; 9] = [
+        Extra::Settings,
+        Extra::Theme,
+        Extra::About,
+        Extra::ConfigInUse,
+        Extra::CopyPath,
+        Extra::CopyRelativePath,
+        Extra::Documentation,
+        Extra::LogTab,
+        Extra::StopLog,
+    ];
+
+    /// Its name in the recent list (`commands.toml`): one place, so a row F1 lists is
+    /// a row the list keeps when read back (cosf #8).
+    pub fn id(self) -> &'static str {
+        match self {
+            Extra::Settings => "settings",
+            Extra::Theme => "theme",
+            Extra::About => "about",
+            Extra::ConfigInUse => "config_in_use",
+            Extra::CopyPath => "copy_path",
+            Extra::CopyRelativePath => "copy_relative_path",
+            Extra::Documentation => "documentation",
+            Extra::LogTab => "log_tab",
+            Extra::StopLog => "stop_log",
+        }
+    }
+}
+
 /// What Enter on a row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Run {
@@ -170,18 +200,16 @@ pub fn rows(
             });
         }
         if group == "Files" {
-            for (title, about, extra, id) in [
+            for (title, about, extra) in [
                 (
                     "Copy path",
                     "The selected paths (or this folder's), whole, to the clipboard",
                     Extra::CopyPath,
-                    "copy_path",
                 ),
                 (
                     "Copy relative path",
                     "The same, from the repository's root, or from this folder outside one",
                     Extra::CopyRelativePath,
-                    "copy_relative_path",
                 ),
             ] {
                 let run = Run::Extra(extra);
@@ -197,7 +225,7 @@ pub fn rows(
                     run,
                     rebound: false,
                     keys_name: None,
-                    id: id.into(),
+                    id: extra.id().into(),
                     name: format!("{group}: {title}"),
                     parsed: Vec::new(),
                     hay: String::new(),
@@ -205,36 +233,31 @@ pub fn rows(
             }
         }
         if group == "General" {
-            for (title, about, extra, id) in [
+            for (title, about, extra) in [
                 (
                     "Settings\u{2026}",
                     "The common settings, saved to config.toml",
                     Extra::Settings,
-                    "settings",
                 ),
                 (
                     "Theme\u{2026}",
                     "Try a theme now; Settings saves it",
                     Extra::Theme,
-                    "theme",
                 ),
                 (
                     "Config in use",
                     "The loaded config file and the settings in effect, read-only",
                     Extra::ConfigInUse,
-                    "config_in_use",
                 ),
                 (
                     "Documentation",
                     "The docs for this version: the copy beside xdevcmd, and the link",
                     Extra::Documentation,
-                    "documentation",
                 ),
                 (
                     "About xdevcmd",
                     "Version, licence, where releases are",
                     Extra::About,
-                    "about",
                 ),
             ] {
                 let run = Run::Extra(extra);
@@ -250,7 +273,7 @@ pub fn rows(
                     run,
                     rebound: false,
                     keys_name: None,
-                    id: id.into(),
+                    id: extra.id().into(),
                     name: format!("{group}: {title}"),
                     parsed: Vec::new(),
                     hay: String::new(),
@@ -262,18 +285,16 @@ pub fn rows(
     // The terminal tab menu's own commands, which have no key: acting on the active tab.
     if let Some(at) = out.iter().rposition(|r| r.group == "Terminal") {
         let mut rows = Vec::new();
-        for (title, about, extra, id) in [
+        for (title, about, extra) in [
             (
                 "Log tab to file\u{2026}",
                 "Everything the active terminal tab prints, to a file you name (text or raw); \u{25cf} on the tab",
                 Extra::LogTab,
-                "log_tab",
             ),
             (
                 "Stop logging tab",
                 "End the active terminal tab's log; the file is flushed and closed",
                 Extra::StopLog,
-                "stop_log",
             ),
         ] {
             let run = Run::Extra(extra);
@@ -289,7 +310,7 @@ pub fn rows(
                 run,
                 rebound: false,
                 keys_name: None,
-                id: id.into(),
+                id: extra.id().into(),
                 name: format!("Terminal: {title}"),
                 parsed: Vec::new(),
                 hay: String::new(),
@@ -690,7 +711,7 @@ fn recent_path() -> Option<std::path::PathBuf> {
 /// command, or one of `menu`'s entries by label.
 fn known(id: &str, menu: &[MenuItem]) -> bool {
     keys::BINDINGS.iter().any(|b| b.name == id)
-        || matches!(id, "settings" | "theme" | "about" | "config_in_use")
+        || Extra::ALL.iter().any(|e| e.id() == id)
         || id
             .strip_prefix("menu:")
             .is_some_and(|l| menu.iter().any(|m| m.label == l))
@@ -2015,7 +2036,15 @@ mod tests {
             command: "make".into(),
         }];
         for r in rows(&Keymap::default(), &menu, |_| None) {
-            assert!(known(&r.id, &menu), "{} ({}) is dropped on reload", r.id, r.title);
+            if r.id.is_empty() {
+                continue; // a row that is read, never run, is never remembered
+            }
+            assert!(
+                known(&r.id, &menu),
+                "{} ({}) is dropped on reload",
+                r.id,
+                r.title
+            );
         }
     }
 

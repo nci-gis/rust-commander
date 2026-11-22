@@ -43,10 +43,10 @@ a fixed row stays, with its control.
 | C05 | 2026-11-19 | `same_file` and `same_entry` differ on links: rename-many plans what apply refuses | P2 | multi-definition | research | test | 5 | H-04 (#52) | fixed | 0 | no |
 | C06 | 2026-11-19 | A torn last `done` journal line marks a different folder done | P1 | persisted-intent | research | test | 5 | H-07 (#53): `whole_lines` | fixed | 0 | no |
 | C07 | 2026-11-19 | An interrupted sync (Alt+Y) is offered, then dropped with its kept parts; the docs say "Covered" | P2 | docs-claim | research | QA | 5 | H-07 (#53): misread (a sync's journal is `kind sync`, not offered); the docs claim was wrong, fixed | fixed | 0 | no |
-| C08 | 2026-11-19 | `known()` drops 5 newer commands when the list is reloaded | P3 | multi-definition | research | test | 5 | H-10 | open | 0 | no |
+| C08 | 2026-11-19 | `known()` drops 5 newer commands when the list is reloaded | P3 | multi-definition | research | test | 5 | H-10 (#61): `Extra::id`, exhaustive | fixed | 0 | no |
 | C09 | 2026-11-19 | Journal kinds `part` and `gone` are read but never written | P3 | multi-definition | research | red-team | 5 | H-07 (#53): both readers removed (no version wrote them) | fixed | 0 | no |
 | C10 | 2026-11-19 | `--kill-when` killed every xdevcmd by name | P2 | tool-hazard | research | red-team | 1 | `--launch` and a PID file (#47) | fixed | 0 | no |
-| C11 | 2026-11-19 | A worker panic leaves the job "working"; two early returns skip restoring the terminal | P2 | scope | research | test | 5 | H-10 | open | 0 | no |
+| C11 | 2026-11-19 | A worker panic leaves the job "working"; two early returns skip restoring the terminal | P2 | scope | research | test | 5 | H-10 (#61): the job ends as failed; terminal guards | fixed | 0 | no |
 | C12 | 2026-11-19 | The result of setting the journal folder to 0700 is ignored | P3 | deny-default | research | red-team | 5 | H-10 | open | 0 | no |
 | C13 | 2026-11-19 | `XDEVCMD_STATE`: a file to the code, a folder to the man page; a folder put the journal beside it | P2 | docs-claim | research | QA | 2 | refused at start, docs agree (#48) | fixed | 0 | no |
 | C14 | 2026-11-19 | Manual-case Expected lines quote text that is not in `docs/` | P3 | oracle-missing | research | QA | 2 | `tests/manual_cases.rs`: fields and quotes checked against `docs/` (P4) | fixed | 0 | no |
@@ -68,3 +68,8 @@ a fixed row stays, with its control.
 | E04 | 2026-11-21 | Unknown journal tags are skipped, where compatibility.md says a journal it cannot read is left alone | P3 | docs-claim | xmodel | QA | 5 | — | open | 0 | no |
 | E05 | 2026-11-21 | F7 under `--root` closes its box on refusal; the other name boxes keep it open | P3 | interaction | red-team | QA | 5 | — | open | 0 | no |
 | E06 | 2026-11-21 | Context-menu rows can look enabled and then refuse (`cmd_action` not used for enablement) | P3 | interaction | red-team | QA | 5 | — | open | 0 | no |
+| X11 | 2026-11-22 | The fix for a worker panic: unwinding dropped the `Journal`, whose `Drop` removed it, so the crash erased its own record and "the next start offers to continue" was false | P1 | persisted-intent | red-team | author | 2 | `Drop` keeps it while panicking; a real-panic test (#61) | fixed | 0 | no |
+| X12 | 2026-11-22 | The synthetic end of a panicked copy went down the real end's path: Ctrl+Z said "nothing to undo" after a copy that had copied | P2 | interaction | red-team | author | 2 | `Summary::stopped`; undo says it cannot (#61) | fixed | 0 | no |
+| X13 | 2026-11-22 | The panic message promised "offers to continue" for every job; sync, extract, pack and rename many are only tidied up | P3 | docs-claim | xmodel | red-team | 4 | message says "tidies up" (#61) | fixed | 0 | no |
+| W03 | 2026-11-22 | `syntax::scan::a_file_changed_while_scanned_loses_its_checkpoints` failed once on ARM CI on an unrelated PR (#59), passed on re-run | P3 | fragile-wait | CI | test | 4 | — | open | **2** (W01, W02) | no |
+| E07 | 2026-11-22 | Other workers whose panic leaves their screen waiting: the planner's "counting…", the size count, the image decode, the hash (not on a data path) | P3 | scope | red-team | test | 5 | — | open | 0 | no |

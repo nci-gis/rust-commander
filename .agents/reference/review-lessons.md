@@ -52,3 +52,5 @@ L16 and L17 match it.
 | L20 | One inode is not one entry, and one name is not one entry on another OS. Identity is "the same name in the same folder", told by the folder's own listing. | X05, X06 | **1** | `paths::same_entry` / `one_place` (H-04, #52) | fixed |
 | L21 | A test that builds stored data by hand follows each OS's encoding (bytes on Unix, UTF-16 units on Windows). | X07 | 4 | tests of journals and paths | open |
 | L22 | Planting faults inside the diff under review measures "reads every changed line", not "finds what the change left out". | S1, S2: every layer 7–8 of 7–8 | 5 | a later P8 plants omissions (a sibling reverted) | open |
+| L23 | A panic unwinds: every `Drop` on the way runs. A `Drop` that tidies up (removes a journal, a temp file, a lock) erases the crash's record unless it checks `std::thread::panicking()`. | X11 | 2 | the journal (#61); termlog already did | open (audit other tidying `Drop`s) |
+| L24 | A made-up result goes down the real result's path. Mark it, and check what each consumer does with it (undo, status, counts). | X12 | 4 | — | open |

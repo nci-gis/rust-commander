@@ -97,6 +97,7 @@ pub fn run(args: &[String], version: &str) -> i32 {
     let mut dir = std::env::current_dir().unwrap_or_default();
     let mut what = None;
     let mut sizes = Sizes::FULL;
+    let mut big: Option<u64> = None;
     let mut when = None;
     let mut bin: Option<PathBuf> = None;
     let mut launch_args: Vec<String> = Vec::new();
@@ -144,7 +145,20 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 println!("{HELP}");
                 return 0;
             }
-            "--small" => sizes = Sizes::SMALL,
+            "--small" => {
+                sizes = Sizes {
+                    big: sizes.big,
+                    ..Sizes::SMALL
+                }
+            }
+            // A fast disk copies 1 GiB in well under a second: a bigger file leaves the
+            // kill time to land past check B's checkpoint (the owner, 2026-11-22).
+            "--big" => match it.next().and_then(|n| n.parse::<u64>().ok()) {
+                Some(n @ 1..=16) => {
+                    big = Some(n << 30);
+                }
+                _ => return usage("--big needs a size in GiB, 1 to 16"),
+            },
             "--dir" => match it.next() {
                 Some(d) => dir = PathBuf::from(d),
                 None => return usage("--dir needs a folder"),
@@ -154,6 +168,12 @@ pub fn run(args: &[String], version: &str) -> i32 {
     }
     if what.as_deref() != Some("--launch") && (bin.is_some() || !launch_args.is_empty()) {
         return usage("--bin and -- go with --launch only");
+    }
+    if let Some(b) = big {
+        if what.as_deref() != Some("--make") {
+            return usage("--big goes with --make only");
+        }
+        sizes.big = b;
     }
     let r = match what.as_deref() {
         Some("--make") => make(&dir.join(NAME), sizes, version).map(|()| 0),
@@ -202,7 +222,8 @@ fn usage(why: &str) -> i32 {
 
 pub const HELP: &str =
     "usage: xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
-  --make        make D/xdevcmd-try (2.5 GiB, 3.8 with the copies; --small: 0.6 and 1.1)
+  --make        make D/xdevcmd-try (2.5 GiB, 3.8 with the copies; --small: 0.6 and 1.1;
+                --big N: the big file of check B is N GiB, for a fast disk)
   --launch      window 1: start xdevcmd with ARGS (after --) and keep its PID for
                 --kill-when; after a kill, the terminal is put back. The xdevcmd beside
                 xtask, or --bin P (never one found on PATH); the file must be named
@@ -926,7 +947,7 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
             Some(false) => {
                 return Err(io::Error::other(
                     "the copy finished before its point: --reset that check and try again (a fast disk: \
-                     --clean, then --make without --small)",
+                     --clean, then --make --big 4)",
                 ))
             }
             None if start.elapsed() > Duration::from_secs(600) => {
@@ -935,7 +956,19 @@ fn kill_when(root: &Path, c: &str) -> io::Result<i32> {
             None => std::thread::sleep(Duration::from_millis(5)),
         }
     }
-    target.kill()?;
+    // Checked in full before the wait; at the point only its name, then the kill: on
+    // Windows the full check asks PowerShell (seconds), long enough for a fast disk to
+    // finish the copy first (the owner, 2026-11-22).
+    target.kill_quick()?;
+    // A kill that landed after the copy ended proves nothing: say so, not "mid-job".
+    std::thread::sleep(Duration::from_millis(300));
+    if progress(root, c, &lines) == Some(false) {
+        return Err(io::Error::other(format!(
+            "xdevcmd was killed, but the copy had already ended: this run of check {c} \
+             proves nothing. --reset {c} and try again; on a fast disk, --clean, then \
+             --make --big 4"
+        )));
+    }
     println!(
         "killed xdevcmd mid-job. In window 1, start it again with the same \
          `xtask try --launch` line and do as the check says."
@@ -1005,13 +1038,31 @@ impl Launched {
         }
     }
 
-    /// Checked again, then killed as a crash would be.
-    fn kill(&self) -> io::Result<()> {
-        self.kill_named("xdevcmd")
+    /// For a target checked in full just before: its name only, then killed. The full
+    /// check's parent lookup takes seconds on Windows (PowerShell).
+    fn kill_quick(&self) -> io::Result<()> {
+        self.kill_quick_named("xdevcmd")
     }
 
+    fn kill_quick_named(&self, name: &str) -> io::Result<()> {
+        if program_of(self.pid).as_deref() != Some(name) {
+            return Err(io::Error::other(format!(
+                "PID {} is no longer xdevcmd: nothing killed",
+                self.pid
+            )));
+        }
+        self.terminate()
+    }
+
+    /// Checked again, then killed as a crash would be (the tests' way: a test child is
+    /// not named xdevcmd).
+    #[cfg(test)]
     fn kill_named(&self, name: &str) -> io::Result<()> {
         self.check_named(name)?;
+        self.terminate()
+    }
+
+    fn terminate(&self) -> io::Result<()> {
         let pid_s = self.pid.to_string();
         let killed = if cfg!(windows) {
             std::process::Command::new("taskkill")
@@ -1273,7 +1324,14 @@ mod tests {
             launcher: u32::MAX - 1,
         };
         assert!(stale.kill_named("sleep").is_err());
-        l.kill_named("sleep").unwrap();
+        // The quick kill at check B's point: its name only (checked in full before
+        // the wait), so another program under that PID is refused, never killed.
+        assert!(l.kill_quick_named("xdevcmd").is_err());
+        assert!(
+            ours.try_wait().unwrap().is_none(),
+            "a refused quick kill killed it"
+        );
+        l.kill_quick_named("sleep").unwrap();
         let start = Instant::now();
         while ours.try_wait().unwrap().is_none() {
             assert!(

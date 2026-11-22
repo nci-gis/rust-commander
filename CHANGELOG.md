@@ -70,6 +70,9 @@ that heading and starts a new, empty one here. -->
 - **The job box counts files as well as bytes** ("503 of 50000 files · 2.7 M of 195 M"),
   and a long network error no longer hides which try it is: the line is cut at the end
   of the error, "(3 of 5)" kept.
+- **Check C says how many it found different, first**: "3 found different and copied
+  again; 2001 copied …". The count sat in the middle of the line, which the status line
+  elides on a terminal of usual width, so several tampered copies read as "(…)".
 - **`xtask try --kill-when` lands mid-copy on a fast disk**: it kills at the point after
   a name check only (the full check, which asked PowerShell for seconds on Windows, runs
   before the wait), says so when the copy had ended before the kill, and `--make --big N`

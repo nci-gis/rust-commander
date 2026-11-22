@@ -67,7 +67,7 @@ pub const COLUMNS: &[&str] = &[
 ];
 /// Cases judged on disk by `xtask try --check`: a PASS needs evidence (its output or a
 /// debug log) named.
-const DISK: &[&str] = &["M-DS-01", "M-DS-03", "M-DS-04"];
+pub(crate) const DISK: &[&str] = &["M-DS-01", "M-DS-03", "M-DS-04"];
 
 pub fn run(args: &[String]) -> i32 {
     let root = match repo_root() {
@@ -111,7 +111,7 @@ fn usage() -> i32 {
     2
 }
 
-fn repo_root() -> Option<PathBuf> {
+pub(crate) fn repo_root() -> Option<PathBuf> {
     let out = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()
@@ -318,7 +318,7 @@ fn decide(root: &Path, rev: &str, case: &str, rows: &[&BTreeMap<&'static str, St
 }
 
 /// A fresh row's own verdict.
-fn one(case: &str, r: &BTreeMap<&'static str, String>) -> Verdict {
+pub(crate) fn one(case: &str, r: &BTreeMap<&'static str, String>) -> Verdict {
     let result = r["result"].to_ascii_uppercase();
     let has = |k: &str| !r[k].is_empty() && r[k] != "-";
     let disk = DISK.contains(&case);

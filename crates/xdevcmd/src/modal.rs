@@ -581,6 +581,29 @@ impl Job {
         self.question = None;
     }
 
+    /// The retry line cut to `width` columns at the end of the error, never in the
+    /// middle: which try it is stays in sight (the owner, 2026-11-23: a long Windows
+    /// error took "(3 of 5)" out of the box).
+    pub fn retrying_line_fit(&self, now: std::time::Instant, width: usize) -> Option<String> {
+        use unicode_width::UnicodeWidthChar;
+        let line = self.retrying_line(now)?;
+        if unicode_width::UnicodeWidthStr::width(line.as_str()) <= width {
+            return Some(line);
+        }
+        let mut out = String::new();
+        let mut w = 0;
+        for c in line.chars() {
+            let cw = c.width().unwrap_or(0);
+            if w + cw + 1 > width {
+                break;
+            }
+            out.push(c);
+            w += cw;
+        }
+        out.push('\u{2026}');
+        Some(out)
+    }
+
     /// "network error — trying again in 4 s (3 of 5): Connection timed out", while a
     /// file waits for its next try.
     pub fn retrying_line(&self, now: std::time::Instant) -> Option<String> {
@@ -1147,8 +1170,11 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 inner,
                 1,
                 &{
+                    // How many files, as well as how many bytes (the owner, 2026-11-23:
+                    // 50,000 small files moved the bar by bytes only).
                     let mut s = format!(
-                        "{} files · {} of {}",
+                        "{} of {} files · {} of {}",
+                        j.files_done,
                         j.total_files,
                         human_size(j.bytes_done),
                         human_size(j.total_bytes)
@@ -1163,7 +1189,8 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 },
                 Style::new().fg(th.fg_dim),
             );
-            if let Some(line) = j.retrying_line(std::time::Instant::now()) {
+            if let Some(line) = j.retrying_line_fit(std::time::Instant::now(), inner.width as usize)
+            {
                 put(frame, inner, 2, &line, Style::new().fg(th.mark));
             }
         }
@@ -1286,6 +1313,17 @@ mod tests {
             "network error \u{2014} trying again in 4 s (3 of 5): Connection timed out"
         );
         assert!(j.retrying_line(at).unwrap().contains("trying again now"));
+        // A long error is cut at its end, so the try's number stays (the owner's
+        // Windows screenshot: "(3 of 5)" went with the middle).
+        let long = "network error \u{2014} trying again in 4 s (3 of 5): Connection timed out";
+        let fit = j
+            .retrying_line_fit(at - std::time::Duration::from_millis(3500), 60)
+            .unwrap();
+        assert!(
+            fit.contains("(3 of 5)") && fit.ends_with('\u{2026}'),
+            "{fit}"
+        );
+        assert!(long.starts_with(fit.trim_end_matches('\u{2026}')), "{fit}");
         tx.send(ops::Event::Progress {
             bytes_done: 1,
             files_done: 0,

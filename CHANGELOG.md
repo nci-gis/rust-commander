@@ -67,6 +67,10 @@ that heading and starts a new, empty one here. -->
 - **F1's own row, chosen in F1**, switches between the small and the large window.
 
 ### Fixed
+- **`xtask try --kill-when` lands mid-copy on a fast disk**: it kills at the point after
+  a name check only (the full check, which asked PowerShell for seconds on Windows, runs
+  before the wait), says so when the copy had ended before the kill, and `--make --big N`
+  makes check B's file N GiB.
 - **A job whose worker stops on an internal error ends as failed and says so**, instead
   of "working" for ever (the next start offers to continue it); the terminal is put
   back on every early error at start. F1's recent list keeps Copy path, Copy relative

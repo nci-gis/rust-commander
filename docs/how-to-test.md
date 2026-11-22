@@ -122,9 +122,10 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
 - **To do a check again**: `xtask try --reset A` (or `B`, `C`) puts back the files that
   check's copy changed, in seconds, with no new `--make`; then do its steps again. If
   xdevcmd still offers the job at its start, press **F** (forget it) first.
-- **If `--kill-when` says the copy finished first**, the disk is fast and the sandbox
-  small: `--reset` that check and try again; if it keeps finishing first, `--clean`,
-  then `--make` without `--small`.
+- **If `--kill-when` says the copy finished first**, or that xdevcmd was killed after
+  the copy had ended, the disk is fast: `--reset` that check and try again; if it
+  keeps happening, `--clean`, then `--make --big 4` (check B's file of 4 GiB, so the
+  kill lands mid-way; an NVMe disk copies 1 GiB in well under a second).
 - **`--small`** (0.6 GiB, about 1.1 GiB with the copies; 2.5 and 3.8 GiB without it) is
   for a slow disk or little space.
 - **`--clean`** removes the whole sandbox, the copies in it included, and refuses only

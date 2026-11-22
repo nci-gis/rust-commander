@@ -453,6 +453,10 @@ fn main() -> Result<()> {
     // init() for what it sets up (raw mode, the alternate screen, a panic hook that
     // undoes them); then our own Terminal, whose backend stays quiet when idle.
     drop(ratatui::init());
+    // From here every way out puts the terminal back, a `?` included (cosf #11: an
+    // error making the Terminal or turning the mouse on returned with raw mode and the
+    // alternate screen still on).
+    let restore = Restore;
     // What the terminal can draw, asked before anything reads its replies; over SSH the
     // environment rarely says. Not inside tmux or screen (`graphics::multiplexer`).
     #[cfg(unix)]
@@ -504,8 +508,7 @@ fn main() -> Result<()> {
 
     let result = app.run(&mut terminal);
 
-    let _ = execute!(stdout(), DisableMouseCapture);
-    ratatui::restore();
+    drop(restore);
     if timings {
         if let Some(json) = startup::last_json() {
             eprintln!("xdevcmd startup {json}");
@@ -919,6 +922,8 @@ fn show_keys(keymap: &keys::Keymap, depth: xdevcmd_core::color::Depth) -> Result
     let does = |k: KeyEvent| keymap.action_for(k).map_or("-", name_of);
 
     terminal::enable_raw_mode()?;
+    // Put back on every way out, the `?` just below included (cosf #11).
+    let _raw = RawOff;
     execute!(stdout(), EnableMouseCapture)?;
     let mut out = stdout();
     let mut last_esc = false;
@@ -972,9 +977,34 @@ fn show_keys(keymap: &keys::Keymap, depth: xdevcmd_core::color::Depth) -> Result
             out.flush()?;
         }
     })();
-    let _ = execute!(stdout(), DisableMouseCapture);
-    let _ = terminal::disable_raw_mode();
     run
+}
+
+/// Puts the terminal back when dropped: mouse reporting off, then what
+/// `ratatui::init` set up (raw mode, the alternate screen).
+struct Restore;
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        // A panic on the main thread: the panic hook has already put the terminal back
+        // and said where the crash log is; a second restore would move the cursor back
+        // over that message (red-team on H-10).
+        if std::thread::panicking() {
+            return;
+        }
+        let _ = execute!(stdout(), DisableMouseCapture);
+        ratatui::restore();
+    }
+}
+
+/// Raw mode off when dropped, and mouse reporting with it (`--show-keys`).
+struct RawOff;
+
+impl Drop for RawOff {
+    fn drop(&mut self) {
+        let _ = execute!(stdout(), DisableMouseCapture);
+        let _ = ratatui::crossterm::terminal::disable_raw_mode();
+    }
 }
 
 fn fail(msg: &str) -> ! {

@@ -88,6 +88,22 @@ Not for 0.4 (the review agrees): mmap, a trie, a custom arena, Tokio, a batch WA
 
 **Releasing stays the owner's call**; the flow is in `docs/development.md`.
 
+## After beta.2: 0.4.x
+
+Found during the beta.2 hardening and its hand tests, and deferred by the owner, so
+that the hand-test evidence of the freeze would not go stale (2026-11-22). None of them
+blocks the cut. Each has its row in `skills/qa/references/past-misses.md` where one
+exists.
+
+| Item | From | Note |
+|---|---|---|
+| Several interrupted jobs: offer the next one once the first is done (Continue ended, F, C ended), in the same session, never while a job runs | Owner's hand test, 2026-11-22 | Today one per start, as security.md says; rare, little friction |
+| Atomic write in one place (`save_bytes`) | Plan v3 H-06 | Consolidation, no known bug |
+| The journal folder's 0700: report a failure | cosf #12 | Each journal file is 0600 already |
+| Older P3s found on the way | past-misses E01–E07 | `..` walk-up, a move onto its own hard link, a torn `host` line, unknown tags, F7 under `--root`, context-menu rows, workers other than jobs after a panic |
+| Fragile timing waits outside `pty.rs` (core unit tests) | past-misses W03 | `tests/waits.rs` reads `wait_for` only |
+| P8 with omissions (a sibling reverted), and the cross-model review reading the repo | Plan v3 P8, T5 | Both P8 rounds hit a ceiling (L22); T5 is bounded by the diff file |
+
 ## Later: 0.5 and after
 
 Steered by launch feedback. Not started before 0.4.0 ships.

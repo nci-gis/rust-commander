@@ -247,3 +247,11 @@ flaky core test on ARM; fragile-wait recurs a third time, now outside `pty.rs`),
 (open); review-lessons L23 (unwinding runs `Drop`), L24 (a made-up result goes down the
 real path).
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-22: a 0.4.x backlog in ROADMAP.md
+
+**Source**: the owner, 2026-11-22: "please add it to backlog (consider it is rare, thus
+not much inconvenient now)", after the hand test of two interrupted jobs; and the
+deferrals the owner chose before the freeze (H-06, cosf #12, E01–E07).
+**What**: `plan/ROADMAP.md` gets a section "After beta.2: 0.4.x" with those items.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

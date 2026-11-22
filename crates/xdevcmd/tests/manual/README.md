@@ -45,6 +45,10 @@ checks use the real trash.
 **Fail if**: what counts as a bug (✗)
 ```
 
+Every field is there, and text in quotes on the **Expected** line is quoted from
+`docs/` (`…` for a part that varies): the docs are the oracle, not the code.
+`cargo test --test manual_cases` checks both.
+
 Check the disk, not only the screen: `cmp` / `fc.exe /b`, `ls -la`, the trash.
 
 ## Recording a run

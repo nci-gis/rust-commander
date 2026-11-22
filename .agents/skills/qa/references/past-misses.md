@@ -49,7 +49,7 @@ a fixed row stays, with its control.
 | C11 | 2026-11-19 | A worker panic leaves the job "working"; two early returns skip restoring the terminal | P2 | scope | research | test | 5 | H-10 | open | 0 | no |
 | C12 | 2026-11-19 | The result of setting the journal folder to 0700 is ignored | P3 | deny-default | research | red-team | 5 | H-10 | open | 0 | no |
 | C13 | 2026-11-19 | `XDEVCMD_STATE`: a file to the code, a folder to the man page; a folder put the journal beside it | P2 | docs-claim | research | QA | 2 | refused at start, docs agree (#48) | fixed | 0 | no |
-| C14 | 2026-11-19 | Manual-case Expected lines quote text that is not in `docs/` | P3 | oracle-missing | research | QA | 4 | lint planned (plan v3 P4) | open | 0 | no |
+| C14 | 2026-11-19 | Manual-case Expected lines quote text that is not in `docs/` | P3 | oracle-missing | research | QA | 2 | `tests/manual_cases.rs`: fields and quotes checked against `docs/` (P4) | fixed | 0 | no |
 | X01 | 2026-11-21 | A typed name was trimmed before its control-character check: a tab or newline at either end went into another name (Pack, Save as, Log to, F7, Shift+F4, Copy As) | P3 | validate-raw | xmodel | red-team | 2 | checked on the raw text; test `a_control_character_at_either_end_of_a_name_is_refused_not_trimmed` (#54) | fixed | 0 | no |
 | X02 | 2026-11-21 | The new clippy gate let a `_` over one variant through (`match_wildcard_for_single_variants` is a separate lint) | P2 | deny-default | red-team | red-team | 1 | both lints denied, shown to fire (#56) | fixed | **1** (C04) | no |
 | X03 | 2026-11-21 | `matches!` hid an implicit `_` from clippy in `uses_terminal` | P2 | deny-default | red-team | red-team | 1 | `Action::effect`, one exhaustive match (#56) | fixed | **2** (C04, X02) | no |

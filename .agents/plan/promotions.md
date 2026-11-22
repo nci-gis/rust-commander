@@ -230,3 +230,10 @@ H-04, H-05, H-07, H-08: #52–#56) and two P8 rounds.
   hand-spelled fixture), L20 (identity), L21 (OS encoding in hand-built test data),
   L22 (P8 seeds inside the diff hit a ceiling).
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-21: C14 and L16 fixed by the manual-case check (plan v3, step 7, P4)
+
+**Source**: the owner's approval of step 7's `.agents/` changes (2026-11-21).
+**What**: past-misses C14 and review-lessons L16 marked fixed, held at rung 2 by
+`crates/xdevcmd/tests/manual_cases.rs`.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

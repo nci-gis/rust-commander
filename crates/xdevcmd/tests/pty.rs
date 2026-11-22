@@ -1482,6 +1482,72 @@ fn c_at_the_interrupted_dialog_checks_what_was_copied_and_copies_again_what_diff
     x.quit();
 }
 
+/// Hand test of check C (2026-11): after several `xtask try --tamper`, the result did not
+/// say how many were found different. The line put that in its middle, which the status
+/// line elides on a terminal of usual width. It now comes first, whole.
+#[cfg(unix)]
+#[test]
+fn c_says_how_many_it_found_different_where_the_status_line_keeps_it() {
+    let s = Scratch::new("resume-check3");
+    let (src, dst) = (s.left(), s.right());
+    let tree = src.join("tree");
+    let mut done = String::new();
+    for d in 0..3 {
+        std::fs::create_dir_all(tree.join(format!("d{d}"))).unwrap();
+        std::fs::create_dir_all(dst.join(format!("tree/d{d}"))).unwrap();
+        for f in 0..4 {
+            let rel = format!("d{d}/f{f}");
+            std::fs::write(tree.join(&rel), vec![b'x'; 3000 + f]).unwrap();
+            if d < 2 {
+                let len = 3000 + f;
+                let content = if d == 0 && f < 3 {
+                    vec![0u8; len]
+                } else {
+                    vec![b'x'; len]
+                };
+                std::fs::write(dst.join("tree").join(&rel), content).unwrap();
+                let date = std::fs::metadata(tree.join(&rel))
+                    .unwrap()
+                    .modified()
+                    .unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(dst.join("tree").join(&rel))
+                    .unwrap()
+                    .set_modified(date)
+                    .unwrap();
+            }
+        }
+        if d < 2 {
+            done.push_str(&format!("done {}\n", hex(&tree.join(format!("d{d}")))));
+        }
+    }
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\ndest {}\n{done}",
+            host_line(),
+            hex(&tree),
+            hex(&dst)
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("check (slow)");
+    x.send(b"c");
+    x.wait_for("3 found different and copied again");
+    x.quit();
+    for f in 0..3 {
+        assert_eq!(
+            std::fs::read(dst.join(format!("tree/d0/f{f}"))).unwrap(),
+            vec![b'x'; 3000 + f]
+        );
+    }
+}
+
 /// A directory on another file system than the temporary directory, for a move across
 /// devices: `XDEVCMD_TEST_OTHER_DEV` (CI mounts one), else /dev/shm. None, and said,
 /// where there is none.

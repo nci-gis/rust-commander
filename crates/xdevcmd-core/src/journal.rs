@@ -476,6 +476,12 @@ impl Journal {
 
 impl Drop for Journal {
     fn drop(&mut self) {
+        // A job whose thread panics keeps its journal: it is the record the next start
+        // tidies up and offers to continue from, as after a kill (red-team on H-10).
+        // The file still closes, so the lock goes and a later start may recover it.
+        if std::thread::panicking() {
+            return;
+        }
         // Removed while still locked (the file closes after this): a start that finds
         // it must never get the lock of a job that ended normally while the name is
         // still there. One that opened it just before is told by its link count.

@@ -986,6 +986,12 @@ struct Restore;
 
 impl Drop for Restore {
     fn drop(&mut self) {
+        // A panic on the main thread: the panic hook has already put the terminal back
+        // and said where the crash log is; a second restore would move the cursor back
+        // over that message (red-team on H-10).
+        if std::thread::panicking() {
+            return;
+        }
         let _ = execute!(stdout(), DisableMouseCapture);
         ratatui::restore();
     }

@@ -516,7 +516,10 @@ impl App {
         if !matches!(&self.last_undo, Some(Undo::Cannot(w)) if w == COPY_RUNNING) {
             return;
         }
-        self.last_undo = Some(if s.made_over {
+        self.last_undo = Some(if s.stopped {
+            // What it made before it stopped is not listed (red-team on H-10).
+            Undo::Cannot("a copy that stopped on an internal error".into())
+        } else if s.made_over {
             Undo::Cannot(format!(
                 "a copy of more than {} items",
                 xdevcmd_core::ops::MADE_CAP

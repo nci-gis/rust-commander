@@ -518,13 +518,15 @@ impl Job {
                     if self.done.is_none() {
                         self.question = None;
                         self.retrying = None;
+                        // Short enough for the job box; what it did so far is what
+                        // its progress said (red-team on H-10).
                         self.done = Some(Summary {
+                            done: self.files_done,
+                            bytes: self.bytes_done,
                             failed: 1,
+                            stopped: true,
                             errors: vec![
-                                "the job stopped: an error inside xdevcmd (the debug log has it; \
-                                 please report it). With safe operations on, the next start \
-                                 offers to continue"
-                                    .into(),
+                                "stopped: an internal error (crash log written); the next start tidies up".into(),
                             ],
                             ..Summary::default()
                         });

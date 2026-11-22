@@ -102,6 +102,7 @@ exists.
 | The journal folder's 0700: report a failure | cosf #12 | Each journal file is 0600 already |
 | Older P3s found on the way | past-misses E01–E07 | `..` walk-up, a move onto its own hard link, a torn `host` line, unknown tags, F7 under `--root`, context-menu rows, workers other than jobs after a panic |
 | Fragile timing waits outside `pty.rs` (core unit tests) | past-misses W03 | `tests/waits.rs` reads `wait_for` only |
+| A big file's checkpoint by time, not only size: every `clamp(speed × 30 s, 16 MiB, 256 MiB)`, and files that take over ~30 s get one even under 256 MiB | Owner, 2026-11-22 | On a slow share 256 MiB is minutes lost after a kill; each checkpoint costs a sync and a journal line, so the floor stays 16 MiB. The journal keeps bytes, not a count: older versions read it unchanged |
 | P8 with omissions (a sibling reverted), and the cross-model review reading the repo | Plan v3 P8, T5 | Both P8 rounds hit a ceiling (L22); T5 is bounded by the diff file |
 
 ## Later: 0.5 and after

@@ -530,7 +530,14 @@ impl Summary {
             Kind::Extract => "extracted",
             Kind::Pack => "packed",
         };
-        let mut s = format!("{} {verb}", self.done);
+        // What check C found comes first and whole: the status line elides the middle
+        // of a long line, and the job box cuts its end (hand test, 2026-11).
+        let mut s = if self.repaired > 0 {
+            format!("{} found different and copied again; ", self.repaired)
+        } else {
+            String::new()
+        };
+        s.push_str(&format!("{} {verb}", self.done));
         // The engine that ran (item 22), when it was not xdevcmd's own loop: named
         // alone when it did every file, counted when engines were mixed.
         let fast = match (self.cloned, self.by_kernel) {
@@ -543,13 +550,6 @@ impl Summary {
         };
         if let Some(f) = fast {
             s.push_str(&format!(" ({f})"));
-        }
-        if self.repaired > 0 {
-            s.push_str(&format!(
-                " ({} found different from {} source and copied again)",
-                self.repaired,
-                if self.repaired == 1 { "its" } else { "their" }
-            ));
         }
         if self.skipped > 0 {
             s.push_str(&format!(", {} skipped", self.skipped));
@@ -4617,7 +4617,8 @@ mod tests {
             "fine"
         );
         assert!(
-            s.describe(Kind::Copy).contains("2 found different"),
+            s.describe(Kind::Copy)
+                .starts_with("2 found different and copied again; "),
             "{}",
             s.describe(Kind::Copy)
         );

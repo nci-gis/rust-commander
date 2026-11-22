@@ -505,9 +505,33 @@ impl Job {
         }
     }
 
-    /// Take everything the worker has sent without blocking.
+    /// Take everything the worker has sent without blocking. A worker gone without
+    /// its Done (a panic: crash.rs logs it and xdevcmd goes on) ends the job as
+    /// failed, not "working" for ever; the journal it left is the next start's to
+    /// offer, as after a kill (cosf #11).
     pub fn pump(&mut self) {
-        while let Ok(ev) = self.handle.events.try_recv() {
+        loop {
+            let ev = match self.handle.events.try_recv() {
+                Ok(ev) => ev,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if self.done.is_none() {
+                        self.question = None;
+                        self.retrying = None;
+                        self.done = Some(Summary {
+                            failed: 1,
+                            errors: vec![
+                                "the job stopped: an error inside xdevcmd (the debug log has it; \
+                                 please report it). With safe operations on, the next start \
+                                 offers to continue"
+                                    .into(),
+                            ],
+                            ..Summary::default()
+                        });
+                    }
+                    break;
+                }
+            };
             match ev {
                 ops::Event::Scanned { files, bytes } => {
                     self.total_files = files;
@@ -1205,6 +1229,38 @@ mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    /// A worker that ends without a word (a panic) ends its job as failed and says
+    /// so, instead of "working" for ever; the journal it left is the next start's to
+    /// offer (cosf #11, plan v3 H-10).
+    #[test]
+    fn a_job_whose_worker_ends_without_a_word_ends_as_failed() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Progress {
+            bytes_done: 1,
+            files_done: 0,
+        })
+        .unwrap();
+        j.pump();
+        assert!(j.done.is_none(), "still running");
+        drop(tx);
+        j.pump();
+        let s = j.done.as_ref().expect("ended");
+        assert_eq!(s.failed, 1);
+        assert!(
+            s.errors.iter().any(|e| e.contains("stopped")),
+            "{:?}",
+            s.errors
+        );
+        // A worker that said Done and then went is not a failure.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Done(ops::Summary::default())).unwrap();
+        drop(tx);
+        j.pump();
+        assert_eq!(j.done.as_ref().unwrap().failed, 0);
+    }
 
     /// Round 031: a job waiting to try a file again says so, counting down, and the
     /// line goes once the work moves on.

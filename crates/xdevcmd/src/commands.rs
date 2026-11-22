@@ -2005,6 +2005,20 @@ mod tests {
         assert!(best.0.as_millis() < 16, "{:?}", best.0);
     }
 
+    /// Every row F1 can list is a name the recent list keeps when it is read back:
+    /// five newer commands were dropped on reload (cosf #8, plan v3 H-10).
+    #[test]
+    fn every_row_is_known_to_the_recent_list() {
+        let menu = [MenuItem {
+            key: "b".into(),
+            label: "Build".into(),
+            command: "make".into(),
+        }];
+        for r in rows(&Keymap::default(), &menu, |_| None) {
+            assert!(known(&r.id, &menu), "{} ({}) is dropped on reload", r.id, r.title);
+        }
+    }
+
     #[test]
     fn a_recent_file_keeps_each_name_once_and_a_huge_one_is_ignored() {
         let t = "recent = [\"copy\", \"move\", \"copy\", \"nope\", \"move\", \"view\"]\n";

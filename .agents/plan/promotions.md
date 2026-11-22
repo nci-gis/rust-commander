@@ -237,3 +237,13 @@ H-04, H-05, H-07, H-08: #52–#56) and two P8 rounds.
 **What**: past-misses C14 and review-lessons L16 marked fixed, held at rung 2 by
 `crates/xdevcmd/tests/manual_cases.rs`.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-22: lessons of H-10 (plan v3, step 7 follow-up)
+
+**Source**: the owner's approval of step 7's `.agents/` changes (2026-11-21), applied to
+the last fix before freeze (#61).
+**What**: past-misses C08, C11 fixed; X11–X13 (red-team and ChatGPT on #61), W03 (a
+flaky core test on ARM; fragile-wait recurs a third time, now outside `pty.rs`), E07
+(open); review-lessons L23 (unwinding runs `Drop`), L24 (a made-up result goes down the
+real path).
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

@@ -50,27 +50,9 @@ pub fn save(list: &[PathBuf]) -> std::io::Result<()> {
     session::write_private(&p, text.as_bytes())
 }
 
-/// The home directory: `HOME`, then `USERPROFILE`, the first that is an absolute path
-/// here. On Windows a `HOME` left by Cygwin or an old MSYS (`/home/ann`) is not one, so
-/// `USERPROFILE` is used, rather than "no home directory".
-pub fn home_dir() -> Option<PathBuf> {
-    pick_home(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
-}
-
-fn pick_home(
-    home: Option<std::ffi::OsString>,
-    profile: Option<std::ffi::OsString>,
-) -> Option<PathBuf> {
-    [home, profile]
-        .into_iter()
-        .flatten()
-        .map(PathBuf::from)
-        .find(|p| p.is_absolute())
-}
-
 /// `~` and `~/…` are the home directory; anything else is taken as written.
 pub fn expand_tilde(s: &str) -> PathBuf {
-    let home = home_dir;
+    let home = xdevcmd_core::dirs::home;
     if s == "~" {
         if let Some(h) = home() {
             return h;
@@ -86,7 +68,7 @@ pub fn expand_tilde(s: &str) -> PathBuf {
 
 /// A path for a person to read: the home directory shortened to `~`.
 pub fn tidy(p: &Path) -> String {
-    let home = home_dir();
+    let home = xdevcmd_core::dirs::home();
     match home.as_deref().and_then(|h| p.strip_prefix(h).ok()) {
         Some(rest) if rest.as_os_str().is_empty() => "~".into(),
         Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
@@ -96,6 +78,18 @@ pub fn tidy(p: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The rule as it was tested here, now [`xdevcmd_core::dirs::home_from`].
+    fn pick_home(
+        home: Option<std::ffi::OsString>,
+        profile: Option<std::ffi::OsString>,
+    ) -> Option<PathBuf> {
+        xdevcmd_core::dirs::home_from(&|k| match k {
+            "HOME" => home.clone(),
+            "USERPROFILE" => profile.clone(),
+            _ => None,
+        })
+    }
+
     use super::*;
 
     #[test]

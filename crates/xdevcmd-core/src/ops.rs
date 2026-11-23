@@ -3492,11 +3492,7 @@ pub(crate) fn volume_trash_usable(dir: &Path) -> Option<bool> {
 
 /// Where deleted files go on Linux: `$XDG_DATA_HOME/Trash`, per the freedesktop spec.
 pub fn default_trash_base() -> Option<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("Trash"))
+    crate::dirs::data_home().map(|d| d.join("Trash"))
 }
 
 /// Move one entry into a freedesktop trash directory, with the `.trashinfo` that

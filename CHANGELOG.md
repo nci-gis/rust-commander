@@ -20,6 +20,11 @@ that heading and starts a new, empty one here. -->
   0.4.0-beta.2): it holds `xtask`, for the tests by hand and the benchmark.
 
 ### Fixed
+- **One rule for xdevcmd's folders**: the config, the state (session, journal, crash
+  logs) and Linux's trash are found the same way. A relative `HOME` or XDG folder is
+  skipped instead of pointing into the folder xdevcmd started from, `USERPROFILE` is
+  the home when `HOME` is not a full path, and a crash log writes `~` for the same
+  home as the rest.
 - **Links in a release's notes open**: they point at the tag's files, where the
   CHANGELOG's relative links did not resolve on the release page.
 

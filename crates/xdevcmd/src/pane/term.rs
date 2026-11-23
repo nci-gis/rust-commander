@@ -1312,7 +1312,7 @@ fn foreground_of(_pid: u32) -> Fg {
 
 #[cfg(target_os = "linux")]
 fn short_dir(p: &Path) -> String {
-    if std::env::var_os("HOME").is_some_and(|h| Path::new(&h) == p) {
+    if xdevcmd_core::dirs::home().is_some_and(|h| h == p) {
         return "~".into();
     }
     p.file_name()

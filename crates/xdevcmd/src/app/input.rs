@@ -635,7 +635,7 @@ impl App {
             Action::Bottom => self.with_files(|f| f.go_end()),
             Action::Parent => self.with_files(|f| f.go_up()),
             Action::GoHome => {
-                if let Some(home) = crate::bookmarks::home_dir() {
+                if let Some(home) = xdevcmd_core::dirs::home() {
                     self.with_files(|f| f.set_cwd(&home));
                 } else {
                     self.status =

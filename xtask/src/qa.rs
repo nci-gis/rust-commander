@@ -810,7 +810,13 @@ mod tests {
         let got = sizes(&root, &files);
         assert!(got.contains("struct App fields: 3\n"), "{got}");
         assert!(
-            got.contains(&format!("crates/xdevcmd/src/big.rs: {}", BIG_FILE + 1)),
+            // The path as it was built and as this system writes it (Windows mixes `/`
+            // from the join above with its own `\`): CI run 45252575167.
+            got.contains(&format!(
+                "{}: {}",
+                src.join("big.rs").strip_prefix(&root).unwrap().display(),
+                BIG_FILE + 1
+            )),
             "{got}"
         );
         assert!(!got.contains("small.rs"), "{got}");

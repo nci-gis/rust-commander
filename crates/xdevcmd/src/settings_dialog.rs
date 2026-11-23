@@ -12,6 +12,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
+use xdevcmd_core::format::Cells;
 
 use crate::config::Config;
 use crate::config_edit::Value;
@@ -626,7 +627,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
     d.row_hits.clear();
     let mut x = inner.x;
     for (i, t) in TABS.iter().enumerate() {
-        let w = t.chars().count() as u16 + 2;
+        let w = t.cells() as u16 + 2;
         d.tab_hits
             .push(Rect::new(x, inner.y, w, 1).intersection(inner));
         x += w + 1;
@@ -693,7 +694,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             put(frame, inner, y, &line, style);
             // The value starts after the mark (2) and the label and its space.
             let vx = inner.x + 2 + label_w as u16 + 1;
-            let vw = shown.chars().count() as u16;
+            let vw = shown.cells() as u16;
             let value = Rect::new(vx, row.y, vw, 1).intersection(row);
             let back = match f.kind {
                 Kind::Bool => Rect::default(),

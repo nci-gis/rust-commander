@@ -435,9 +435,11 @@ pub const CONCEPTS: &[(&str, &[&str])] = &[
         // Text turned into columns: one module is the target (Round 035, W2).
         &[
             "fn text_cells(",
-            "fn cells(c: char)",
+            "fn char_cells(",
+            "fn cells(",
             "fn width(s: &str)",
-            "fn fit(&self, width",
+            "fn cut(s: &str",
+            "fn cut_end(",
             "fn elide_middle(",
             "fn elided(",
             "fn fit_start(",

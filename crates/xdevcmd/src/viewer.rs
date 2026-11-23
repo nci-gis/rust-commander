@@ -11,6 +11,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Clear;
 use ratatui::Frame;
+use xdevcmd_core::format::Cells;
 
 use xdevcmd_core::document::{Document, Mode, HEX_COLS};
 use xdevcmd_core::format::{display_line, elide_middle, human_size};
@@ -1128,7 +1129,7 @@ impl Viewer {
         let width = |n: usize| -> usize {
             keys[..n]
                 .iter()
-                .map(|(k, l)| k.chars().count() + l.chars().count() + 3)
+                .map(|(k, l)| k.cells() + l.cells() + 3)
                 .sum()
         };
         let room = area.width as usize;
@@ -1140,7 +1141,7 @@ impl Viewer {
         let said = if message.is_empty() {
             0
         } else {
-            message.chars().count() + 2
+            message.cells() + 2
         };
         let mut shown = keys.len();
         while shown > 1 && width(shown) + said > room {

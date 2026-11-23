@@ -5,6 +5,7 @@
 //! does exactly what its key does, through the same code path.
 
 use std::path::PathBuf;
+use xdevcmd_core::format::Cells;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
@@ -309,16 +310,11 @@ impl Menu {
         let label_w = self
             .items
             .iter()
-            .map(|i| i.label.chars().count())
+            .map(|i| i.label.cells())
             .max()
             .unwrap_or(0);
-        let hint_w = self
-            .items
-            .iter()
-            .map(|i| i.hint.chars().count())
-            .max()
-            .unwrap_or(0);
-        let title_w = self.title.as_ref().map_or(0, |t| t.chars().count() + 4);
+        let hint_w = self.items.iter().map(|i| i.hint.cells()).max().unwrap_or(0);
+        let title_w = self.title.as_ref().map_or(0, |t| t.cells() + 4);
         let inner_w = (label_w + hint_w + 5).max(title_w).max(22) as u16;
         let w = (inner_w + 2).min(screen.width);
         let h = (self.items.len() as u16 + 2).min(screen.height);
@@ -385,8 +381,8 @@ impl Menu {
                 (false, false) => (th.fg_dim, th.bg_panel),
             };
             buf.set_style(row, Style::new().bg(bg));
-            let gap = (inner.width as usize)
-                .saturating_sub(item.label.chars().count() + item.hint.chars().count() + 2);
+            let gap =
+                (inner.width as usize).saturating_sub(item.label.cells() + item.hint.cells() + 2);
             let line = Line::from(vec![
                 Span::styled(format!(" {}", item.label), Style::new().fg(fg)),
                 Span::raw(" ".repeat(gap)),

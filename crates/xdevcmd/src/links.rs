@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use xdevcmd_core::format::Cells;
 
 /// A path in a line, that exists.
 #[derive(Debug, Clone, PartialEq)]
@@ -246,7 +247,7 @@ impl Said {
     /// path gives up its middle, as much as the whole needs and never below half the
     /// line; what still does not fit is cut at the end as before.
     pub fn fit(&self, width: usize) -> String {
-        let n = |s: &str| s.chars().count();
+        let n = |s: &str| s.cells();
         let total = n(&self.before) + n(&self.path) + n(&self.after);
         if total <= width {
             return self.text();

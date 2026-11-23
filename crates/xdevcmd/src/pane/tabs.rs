@@ -6,6 +6,7 @@
 //! is why almost nothing outside this file had to change.
 
 use std::path::Path;
+use xdevcmd_core::format::Cells;
 
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
@@ -174,7 +175,7 @@ impl FileTabs {
                     right - x,
                 );
             }
-            text.chars().count() as u16
+            text.cells() as u16
         };
         for (i, tab) in self.tabs.iter().enumerate() {
             let style = match (i == self.active, active) {

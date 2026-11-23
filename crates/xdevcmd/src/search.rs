@@ -14,6 +14,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
+use xdevcmd_core::format::Cells;
 
 use xdevcmd_core::glob::{has_wildcards, Pattern};
 use xdevcmd_core::Entry;
@@ -118,7 +119,7 @@ pub fn render(frame: &mut Frame, area: Rect, s: &Search, count: usize) {
     } else {
         " no match ".to_string()
     };
-    let room = (w as usize).saturating_sub(label.chars().count() + tail.chars().count() + 1);
+    let room = (w as usize).saturating_sub(label.cells() + tail.cells() + 1);
     let chars = s.edit.chars();
     let start = chars.len().saturating_sub(room.saturating_sub(1));
     let typed: String = chars[start..].iter().collect();
@@ -139,8 +140,8 @@ pub fn render(frame: &mut Frame, area: Rect, s: &Search, count: usize) {
         ),
         Span::styled(" ", Style::new().fg(th.bg).bg(th.fg)),
     ];
-    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-    let pad = (w as usize).saturating_sub(used + tail.chars().count());
+    let used: usize = spans.iter().map(|s| s.content.cells()).sum();
+    let pad = (w as usize).saturating_sub(used + tail.cells());
     spans.push(Span::styled(" ".repeat(pad), Style::new().bg(th.bg_bar)));
     spans.push(Span::styled(
         tail,

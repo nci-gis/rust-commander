@@ -233,15 +233,12 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
             .into_owned();
         let new = d.names.as_ref().ok().and_then(|v| v.get(i)).cloned();
         let changed = new.as_ref().is_some_and(|n| *n != old);
+        // In columns: `{:<w$}` and a count of characters let a CJK name outgrow it.
         let fit = |s: &str, w: usize| -> String {
-            let count = s.chars().count();
-            if count <= w {
-                format!("{s:<w$}")
-            } else {
-                let mut t: String = s.chars().take(w.saturating_sub(1)).collect();
-                t.push('\u{2026}');
-                t
-            }
+            let mut t = xdevcmd_core::format::cut_end(s, w);
+            let pad = w.saturating_sub(xdevcmd_core::format::text_cells(&t));
+            t.extend(std::iter::repeat_n(' ', pad));
+            t
         };
         let dim = Style::new().fg(th.fg_dim);
         let line = Line::from(vec![

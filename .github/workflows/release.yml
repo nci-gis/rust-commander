@@ -128,18 +128,19 @@ jobs:
       - name: smoke test
         shell: bash
         run: scripts/smoke.sh xdevcmd-${GITHUB_REF_NAME}-*.* "$GITHUB_REF_NAME"
-      # The benchmark and the tester's sandbox tool (docs/benchmark.md,
-      # docs/how-to-test.md), built here with the binary it measures, in an archive
-      # of its own: xdevcmd's stays lean, and an Actions artifact would go after 14 days.
+      # The test kit: xtask, for the benchmark and the tester's sandbox
+      # (docs/benchmark.md, docs/how-to-test.md); named xdevcmd-bench up to
+      # 0.4.0-beta.2. Built here with the binary it measures, in an archive of its own:
+      # xdevcmd's stays lean, and an Actions artifact would go after 14 days.
       # It never holds the release: a failure here leaves it out of the draft, where the
       # person who publishes sees it missing.
-      - name: bench tool
+      - name: test kit
         id: bench
         continue-on-error: true
         shell: bash
         run: |
           cargo build --release --locked -p xtask --target ${{ matrix.target }}
-          name="xdevcmd-bench-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="xdevcmd-testkit-${GITHUB_REF_NAME}-${{ matrix.target }}"
           # Made apart, and moved where the upload looks only once it has run.
           mkdir -p bench-stage/"$name"
           cp LICENSE docs/how-to-test.md docs/benchmark.md bench-stage/"$name"/
@@ -161,7 +162,7 @@ jobs:
           if [[ "$archive" == *.zip ]]; then 7z x "../$archive" > /dev/null; else tar xzf "../$archive"; fi
           cd "$name"
           if [[ "${{ matrix.target }}" == x86_64-apple-darwin && "$(uname -m)" == arm64 ]]; then
-            echo "bench tool: not run on this runner's CPU (arm64)"
+            echo "test kit: not run on this runner's CPU (arm64)"
           else
             ./xtask --help > /dev/null
             ./xtask bench --only "plan 10,000" --runs 1 --host smoke
@@ -202,7 +203,8 @@ jobs:
         with:
           subject-path: dist/xdevcmd-*
       # Notes: this version's section of CHANGELOG.md. A release page, unlike a file,
-      # keeps every line break, so each wrapped list item is joined back into one line.
+      # keeps every line break, so each wrapped list item is joined back into one line;
+      # and it does not resolve a relative link, so each one points at the tag's file.
       - name: notes
         run: |
           awk -v v="${GITHUB_REF_NAME#v}" '
@@ -210,7 +212,8 @@ jobs:
             on' CHANGELOG.md |
             awk '/^  [^ ]/ && n { sub(/^ +/, ""); line = line " " $0; next }
                  { if (n) print line; line = $0; n = 1 }
-                 END { if (n) print line }' > notes.md
+                 END { if (n) print line }' |
+            sed -E "s#\]\(([^)#:][^):]*)\)#](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/\1)#g" > notes.md
           test -s notes.md || echo "See CHANGELOG.md." > notes.md
       - name: draft
         env:

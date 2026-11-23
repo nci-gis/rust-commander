@@ -77,11 +77,21 @@ the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
 - **With Rust**, any commit: `cargo xtask bench --only …` (and `cargo xtask try …`) in
   the repository. The simplest for a developer.
-- **Without Rust, a release**: its `xdevcmd-bench-<tag>-<target>`, as testers do
-  ([How to test](how-to-test.md), step 1).
+- **Without Rust, a release**: its `xdevcmd-testkit-<tag>-<target>`
+  (`xdevcmd-bench-…` in 0.4.0-beta.2), as testers do ([How to test](how-to-test.md),
+  step 1).
 - **Without Rust, code not released yet** (maintainers only, before a cut): the ci run of
   the branch has `xtask` beside `xdevcmd` in its artifacts (below; the macOS ones run on
-  Intel and Apple Silicon).
+  Intel and Apple Silicon). With `gh`, the newest run of a branch:
+
+  ```bash
+  gh run list -R nci-gis/rust-commander -w ci -b <branch> -L 1        # its run id
+  gh run download <run id> -R nci-gis/rust-commander -n xdevcmd-Windows-dev
+  ```
+
+  The artifact is named `xdevcmd-<Windows|macOS|Linux|Linux-ARM64>-<branch>`, each `/`
+  of the branch written `-`, and kept 14 days. `xtask --version` names the commit, which
+  a hand-test row records.
 
 `--dir PATH` makes the trees on the
 drive being measured instead of the temporary directory. Away from the source, results
@@ -316,7 +326,7 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    on `dev` or `main`), waits for the `ci` run of the tag's commit (the one the push to
    `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
    six archives and opens a **draft marked pre-release**. Read it, then Publish. A
-   tester's kit (`xdevcmd-bench-…`) may be missing: its build never holds the release.
+   tester's kit (`xdevcmd-testkit-…`) may be missing: its build never holds the release.
    Count the six; for each one missing, say in the notes which target, and that it can
    be built from the tag (How to test, step 1). Help →
    Documentation in that build links the tag's `docs/`.

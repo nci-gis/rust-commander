@@ -30,8 +30,8 @@ and prints how long each copy took and how much memory it used.
 
 ## Get it
 
-The same download as [How to test](how-to-test.md), step 1: `xdevcmd-bench-<tag>-<target>`
-from Releases (from 0.4.0-beta.2), built from that release's code, so it measures that
+The same download as [How to test](how-to-test.md), step 1: `xdevcmd-testkit-<tag>-<target>`
+from Releases (named `xdevcmd-bench-…` in 0.4.0-beta.2), built from that release's code, so it measures that
 release. Every option: `xtask bench --help`. With Rust, any commit: `cargo xtask bench …`
 in the repository ([Development](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#benchmarks)).
 
@@ -42,8 +42,8 @@ The lines below that unblock it are only for an archive from this repository's R
 
 ```bash
 cd ~/Downloads
-tar xzf xdevcmd-bench-v0.4.0-beta.2-aarch64-apple-darwin.tar.gz
-cd xdevcmd-bench-v0.4.0-beta.2-aarch64-apple-darwin
+tar xzf xdevcmd-testkit-v0.4.0-beta.3-aarch64-apple-darwin.tar.gz
+cd xdevcmd-testkit-v0.4.0-beta.3-aarch64-apple-darwin
 xattr -d com.apple.quarantine xtask 2>/dev/null   # this repository's download only
 export XDEVCMD_DEBUG=jobs
 ./xtask bench --only mixed --host mbp-m2-apfs
@@ -61,8 +61,8 @@ XDEVCMD_BENCH_FAST=0 ./xtask bench --only mixed --host mbp-m2-apfs-own
 
 ```powershell
 cd $HOME\Downloads
-Expand-Archive xdevcmd-bench-v0.4.0-beta.2-x86_64-pc-windows-msvc.zip -DestinationPath .
-cd xdevcmd-bench-v0.4.0-beta.2-x86_64-pc-windows-msvc
+Expand-Archive xdevcmd-testkit-v0.4.0-beta.3-x86_64-pc-windows-msvc.zip -DestinationPath .
+cd xdevcmd-testkit-v0.4.0-beta.3-x86_64-pc-windows-msvc
 Unblock-File .\xtask.exe                           # this repository's download only
 $env:XDEVCMD_DEBUG = "jobs"
 .\xtask.exe bench --only mixed --host win11-ssd-ntfs
@@ -75,8 +75,8 @@ $env:XDEVCMD_DEBUG = "jobs"
 ## Linux
 
 ```bash
-tar xzf xdevcmd-bench-v0.4.0-beta.2-x86_64-unknown-linux-musl.tar.gz
-cd xdevcmd-bench-v0.4.0-beta.2-x86_64-unknown-linux-musl
+tar xzf xdevcmd-testkit-v0.4.0-beta.3-x86_64-unknown-linux-musl.tar.gz
+cd xdevcmd-testkit-v0.4.0-beta.3-x86_64-unknown-linux-musl
 export XDEVCMD_DEBUG=jobs
 ./xtask bench --only mixed --host thinkpad-ext4
 ./xtask bench --only mixed --dir /media/$USER/STICK/xdevcmd-bench --host thinkpad-usb-exfat

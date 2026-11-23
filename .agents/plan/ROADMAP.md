@@ -104,6 +104,7 @@ exists.
 | Fragile timing waits outside `pty.rs` (core unit tests) | past-misses W03 | `tests/waits.rs` reads `wait_for` only |
 | A big file's checkpoint by time, not only size: every `clamp(speed × 30 s, 16 MiB, 256 MiB)`, and files that take over ~30 s get one even under 256 MiB | Owner, 2026-11-22 | On a slow share 256 MiB is minutes lost after a kill; each checkpoint costs a sync and a journal line, so the floor stays 16 MiB. The journal keeps bytes, not a count: older versions read it unchanged |
 | A resumed job's bar and count start where the run stopped ("201 of 2k files"), counting what is already there as done | Owner's hand test, 2026-11-23 | Today the resumed job counts what is left (1.8k) from 0; true, not wrong. On the data path (`ops.rs`) |
+| A failed file's question offers "skip all": every later failure of this job is skipped and listed, not asked again | Owner's hand test, 2026-11-23 | With a share down, each Skip meets the same error on the next file after ~30 s of tries, so for 50k files only Esc helps today. The question now says what R and S do and warns of this (`feat/log-guided`); a skip-all must still let Esc stop at once, and the summary must name every skipped file. On the data path (`ops.rs`) |
 | P8 with omissions (a sibling reverted), and the cross-model review reading the repo | Plan v3 P8, T5 | Both P8 rounds hit a ceiling (L22); T5 is bounded by the diff file |
 
 ## Later: 0.5 and after

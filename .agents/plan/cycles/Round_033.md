@@ -1,14 +1,15 @@
 # Round 033: 0.4.0-beta.2: Smart Planner v2 and pillar 2
 
-**Status**: Do (kickoff 2026-11-13; the owner: "bro start r032 nhé", meaning the
-next round, since 032 is the beta.1 cut and is waiting on the owner's tests)
+**Status**: Complete (closed by the owner, 2026-11-23: "Close 033"; 0.4.0-beta.2
+published that day as a GitHub pre-release. Kickoff 2026-11-13: "bro start r032 nhé",
+meaning the next round, since 032 was the beta.1 cut)
 **Part of**: v0.4.0, step 6 of `ROADMAP.md`, the row for **0.4.0-beta.2**: item 43
 (Smart Planner v2, its scope set by beta.1's measurements), pillar 2 (responsive and
 bounded), and items 45 and 46
 **Branch**: `feat/v0.4.0-beta.2`, from `dev` at cf79d7b (`feat/v0.4.0` is merged into
 `dev` and can be deleted)
 **Date started**: 2026-11-13
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-23
 
 ## Goal
 
@@ -1232,3 +1233,37 @@ debug log (`XDEVCMD_DEBUG=all`): [Reporting a problem](https://github.com/nci-gi
 ```
 
 ## Act
+
+**The cut (2026-11-23)**: #68 merged `feat/v0.4.0-beta.2` into `dev`; `e3e528e`
+"Release 0.4.0-beta.2" on `dev` (a pre-release is cut from `dev`, as
+`scripts/release-check.sh` says; no `main`); the owner tagged `v0.4.0-beta.2` (annotated)
+and the `release` workflow built the draft (10 jobs green, 13 assets). Checked: the 12
+archives against `SHA256SUMS`, `--version` = 0.4.0-beta.2, an attestation per archive
+(API; `gh attestation verify` could not reach Sigstore from the session). Published as
+a pre-release with the tester header of Check §11; "Latest" stays v0.3.0.
+
+**Learnings**:
+
+- Planted faults inside the diff only measure "reads every changed line": every
+  reviewer reached 7/7 (P8 round 2). The next P8 plants omissions.
+- A second model on the diff found one real issue Claude missed (H-08) and missed a P1
+  because the file was not in its excerpt (H-10): give it the repository, not a diff.
+- The hand tests found no data loss; they found what the user reads: a result line cut
+  in its middle, a fixed-width box, Retry and Skip that felt the same. Text that matters
+  goes first, and the box follows the terminal.
+- A row says the system it was logged on, so a result relayed from another machine sat
+  under the wrong one. Log on the machine that ran the test.
+- A decision that reached the owner's notes and the handoff but not `ROADMAP.md` (the
+  languages, 2026-11-15) was nearly lost: a release decision goes into ROADMAP the same
+  day.
+- On a cloud VM the disk drifts between passes (A against itself +14 %): interleave A
+  and B before reading a 5–15 % gap.
+- Fuzzing does not need nightly: the stable compiler with `RUSTC_BOOTSTRAP=1` builds
+  cargo-fuzz's ASan targets.
+
+**Promotions**:
+
+- [ ] → `tests/manual/README.md` (docs, beta.3): log a row on the machine that ran it
+- [ ] → `reference/` (owner's call): interleave A/B on a noisy machine before a speed
+  verdict; fuzz on stable with `RUSTC_BOOTSTRAP` when nightly is out of reach
+- [ ] → ROADMAP rule (owner's call): a release decision is written there the same day

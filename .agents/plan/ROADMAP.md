@@ -52,7 +52,7 @@ start at 0.4.0; winget is item 48 [draft] (owner, 2026-11-15).
 | Release | Contents | Status |
 |---|---|---|
 | **0.4.0-beta.1** | Items 21, 30a, 30b, 31–33, 35, 37 (light), 38, 40 (Rounds 018–028); pillar 1 (data correct) and **Smart Planner v1**, item 42 (Rounds 029–031); the pre-release plumbing (032) | Released 2026-11-13. Rounds 018–028 at Review until the owner's hand tests; 029–031 Complete; 032 open |
-| **0.4.0-beta.2** | **Smart Planner v2**, item 43: group commit for copies and replaces, the platform's fast copy (22), checkpointed resume, finished folders skipped; pillar 2 (responsive and bounded); items 45, 46; and rc.1's planned work, moved here by the owner (2026-11-14): pillars 3 and 4 (compatibility promise, what a copy keeps, fuzzing, smoke test and provenance, the hand-test matrix, the benchmark protocol) | Round 033, code done, CI green. Left: the owner's hand tests (macOS first); Windows and macOS bench numbers, which decide **lanes** (else 0.5); the cut |
+| **0.4.0-beta.2** | **Smart Planner v2**, item 43: group commit for copies and replaces, the platform's fast copy (22), checkpointed resume, finished folders skipped; pillar 2 (responsive and bounded); items 45, 46; and rc.1's planned work, moved here by the owner (2026-11-14): pillars 3 and 4 (compatibility promise, what a copy keeps, fuzzing, smoke test and provenance, the hand-test matrix, the benchmark protocol) | Round 033: code done and hardened (plan v3, #42–#65), CI green, speed gate passed (Windows, macOS 2026-11-17; Linux again 2026-11-23). Hand-test ledger PASS (2026-11-23, #66). Left: a fuzz run, then the cut (Round 033 Check §7). Lanes: the owner's call on the D0 numbers; else 0.5, as planned |
 | **0.4.0-rc.1** | Fixes only (feature freeze) | — |
 | **0.4.0** | All tests and the owner's week green; then packages, then the launch (item 10) | — |
 
@@ -106,6 +106,7 @@ exists.
 | A resumed job's bar and count start where the run stopped ("201 of 2k files"), counting what is already there as done | Owner's hand test, 2026-11-23 | Today the resumed job counts what is left (1.8k) from 0; true, not wrong. On the data path (`ops.rs`) |
 | A failed file's question offers **Skip all**: this file and every later failure of this job are skipped without asking again, and the summary names each one | Owner's hand test, 2026-11-23 | For scattered failures (a locked file, no access) with the share alive: the rest is copied. Not for a share that is down: each file is still tried ~30 s first, so Esc or Pause is the answer there. Kept apart: **R** this file five more tries; **S** this file only, asked again at the next failure; **Skip all** every failure from now; **Pause** stop now, continue later from the list; **Esc** stop the job (its journal goes). Esc must still stop at once. On the data path (`ops.rs`) |
 | P8 with omissions (a sibling reverted), and the cross-model review reading the repo | Plan v3 P8, T5 | Both P8 rounds hit a ceiling (L22); T5 is bounded by the diff file |
+| A fuzz target for the journal reader | Round 033 Check §10 | H-07 rewrote it; it reads xdevcmd's own files, so the release bar does not ask for it |
 
 ## Later: 0.5 and after
 

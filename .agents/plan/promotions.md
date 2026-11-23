@@ -266,3 +266,12 @@ jobs" widened into **Pending tasks** (pause, a list of jobs not finished, manual
 the owner's design; the list also shows background jobs, to bring one back (the owner
 chose this over a separate command before the cut).
 **Promoted by**: XDevTeam (approval = merging this branch). Written by Claude Code.
+
+## 2026-11-23: ROADMAP's beta.2 row brought up to date; a journal fuzz target in 0.4.x
+
+**Source**: the owner, 2026-11-23, approving the cut preparation ("duyệt đề xuất nhé"),
+which named this edit.
+**What**: `plan/ROADMAP.md`: the 0.4.0-beta.2 row says what is left (a fuzz run,
+the cut; lanes the owner's call, else 0.5); one 0.4.x row, a fuzz target for
+the journal reader.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

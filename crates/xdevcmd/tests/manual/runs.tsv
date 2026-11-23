@@ -12,3 +12,5 @@ date_utc	built_from	version	os	terminal	shell	case	result	check	evidence	issue	n
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	macos	-	-	M-DS-07	WAIVED	-	-	-	NFS client tested on Linux only
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	windows	-	-	M-DS-07	WAIVED	-	-	-	NFS client tested on Linux only
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	windows	-	-	M-DS-05	WAIVED	-	-	-	USB storage not allowed on this Windows machine; tested on macOS (FAT32)
+2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	linux	-	-	M-DS-02	WAIVED	-	-	-	not tested on Linux this round; covered on Windows/macOS, same code path
+2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	linux	-	-	M-DS-05	WAIVED	-	-	-	not tested on Linux this round; covered on Windows/macOS, same code path

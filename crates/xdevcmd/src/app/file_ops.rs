@@ -308,7 +308,7 @@ impl App {
             i.kind,
             InputKind::MkDir | InputKind::NewFile | InputKind::CopyAs { .. }
         ) {
-            if let Some(c) = crate::safety::control_char(&text) {
+            if let Some(c) = xdevcmd_core::controls::first(&text, &[]) {
                 let e = xdevcmd_core::rename::RenameError::BadChar(c);
                 self.modal = Some(Modal::Input(Input {
                     error: Some(e.to_string()),

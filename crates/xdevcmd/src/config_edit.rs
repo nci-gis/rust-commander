@@ -28,7 +28,9 @@ impl Value {
                         '\\' => out.push_str("\\\\"),
                         '\n' => out.push_str("\\n"),
                         '\t' => out.push_str("\\t"),
-                        c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+                        c if xdevcmd_core::controls::is(c) => {
+                            out.push_str(&format!("\\u{:04X}", c as u32));
+                        }
                         c => out.push(c),
                     }
                 }

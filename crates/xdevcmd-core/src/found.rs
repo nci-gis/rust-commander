@@ -56,7 +56,7 @@ fn delimits(c: char) -> bool {
 /// Every candidate path in `line`, left to right, none overlapping.
 pub fn paths_in(line: &str) -> Vec<Found> {
     let mut out = Vec::new();
-    if line.chars().any(|c| c.is_control() && c != '\t') {
+    if crate::controls::first(line, &['\t']).is_some() {
         return out;
     }
     // Quoted names first: `'a b'` and `"x y.py"` may hold spaces.

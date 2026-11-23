@@ -500,11 +500,11 @@ impl App {
             let start = shown_left.cells() + 1;
             let end = (lw + gap).saturating_sub(1);
             let lane = end.saturating_sub(start);
-            let held = !self.status.is_empty();
+            let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
             let mut w = self.walker.borrow_mut();
-            w.tick(Instant::now(), lane, held);
+            let held = w.tick(Instant::now(), lane, &self.status, hold);
             if lane >= crate::walker::WIDTH {
-                // While a message shows, just before it; else where it walked to.
+                // Before a new message for the hold, else where it walked to.
                 let at = if held {
                     end - crate::walker::WIDTH
                 } else {

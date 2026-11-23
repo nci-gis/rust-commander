@@ -47,7 +47,7 @@ pub fn save(list: &[PathBuf]) -> std::io::Result<()> {
             .collect(),
     };
     let text = toml::to_string_pretty(&f).map_err(std::io::Error::other)?;
-    session::write_private(&p, text.as_bytes())
+    xdevcmd_core::document::save_state(&p, text.as_bytes())
 }
 
 /// `~` and `~/…` are the home directory; anything else is taken as written.

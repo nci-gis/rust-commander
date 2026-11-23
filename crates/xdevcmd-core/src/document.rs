@@ -557,6 +557,24 @@ pub fn save_bytes(path: &Path, bytes: &[u8], replace: bool, private: bool) -> io
     if !replace {
         return write_new(path, bytes, private);
     }
+    replace_whole(path, bytes, private)
+}
+
+/// xdevcmd's own state (the session, bookmarks, the config Settings saves, a list of
+/// names): its folder made if missing, then replaced whole as [`save_bytes`] does, and
+/// readable by its owner only. Not behind the read-only wall: what is state is the
+/// caller's call (read-only saves none of it). One way to replace a file (Round 035,
+/// W6): before it, the app had its own (`session::write_private`).
+pub fn save_state(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    replace_whole(path, bytes, true)
+}
+
+/// `bytes` to a hidden temporary name beside `path`, synced, then renamed over it: the
+/// old file stays whole if anything fails on the way, and the temporary name goes.
+fn replace_whole(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
     let part = crate::ops::part_name(path);
     let f = match create(&part, bytes, private) {
         Ok(f) => f,

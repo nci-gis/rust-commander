@@ -85,7 +85,7 @@ impl App {
                 return;
             }
         };
-        if let Err(e) = session::write_private(&path, text.as_bytes()) {
+        if let Err(e) = xdevcmd_core::document::save_state(&path, text.as_bytes()) {
             self.status = format!("cannot save {}: {e}", path.display());
             return;
         }

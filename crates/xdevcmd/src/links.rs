@@ -291,6 +291,23 @@ pub fn describe(l: &Link) -> Said {
 mod tests {
     use super::*;
 
+    /// Round 035, W2: `fit` counted characters, so a path of wide (CJK) letters
+    /// outgrew the line it was fitted to.
+    #[test]
+    fn a_wide_path_is_fitted_to_columns() {
+        let said = Said {
+            before: "→ ".into(),
+            path: "/home/ユーザー/プロジェクト/ドキュメント/設計書.md:12".into(),
+            after: "  Enter opens".into(),
+        };
+        // Wide enough that the path, not the end of the line, gives up the rest.
+        for width in [32, 40, 50, 60] {
+            let got = said.fit(width);
+            let cells = xdevcmd_core::format::text_cells(&got);
+            assert!(cells <= width, "{width} columns, got {cells}: {got}");
+        }
+    }
+
     /// A small tree of its own for each test: they run at once.
     fn tree(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("xdevcmd-links-{name}-{}", std::process::id()));

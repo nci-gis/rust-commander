@@ -423,6 +423,30 @@ mod tests {
         )
     }
 
+    /// Round 035, W2: the box was sized by counting characters, so a wide (CJK) label
+    /// outgrew it and its hint was cut. It is sized in columns, as the terminal draws.
+    #[test]
+    fn a_wide_label_fits_its_box_with_its_hint() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let label = "ファイルを表示する名前の長い項目";
+        let mut m = Menu::new(
+            None,
+            vec![Item::act(label, "F3", Action::View, true)],
+            (0, 0),
+        );
+        let mut t = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        let frame = t.draw(|f| m.render(f, f.area())).unwrap();
+        let b = &frame.buffer;
+        let row: String = (0..80).map(|x| b.cell((x, 1)).unwrap().symbol()).collect();
+        assert!(row.contains("F3"), "{row}");
+        let label_cells = xdevcmd_core::format::text_cells(label) as u16;
+        let right = (0..80u16)
+            .rev()
+            .find(|&x| b.cell((x, 1)).unwrap().symbol() == "│")
+            .unwrap();
+        assert!(right >= label_cells + 2 + 2, "the box (right edge {right}) is narrower than its label ({label_cells} columns): {row}");
+    }
+
     #[test]
     fn arrows_skip_separators_and_disabled_items() {
         let mut m = menu();

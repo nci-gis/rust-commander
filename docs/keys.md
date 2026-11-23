@@ -9,15 +9,16 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 
 | Keys | Does |
 |---|---|
-| `Ctrl+q` `F10` `q` | Quit xdevcmd |
+| `Ctrl+q` `F10` | Quit xdevcmd |
 | `F1` `Alt+x F1` | Every command, found by typing, with its key; Enter runs it |
 | `Ctrl+r` | Re-read the active pane |
 | `Ctrl+h` | Show or hide hidden files |
-| `Q` | Quit, leaving the shell where it was (with --cwd-file) |
+| `Alt+x q` | Quit, leaving the shell where it was (with --cwd-file) |
 | `Shift+F9` `Alt+x F9` | Your commands from [[menu]], run in the terminal |
 | `F9` | The menu bar: File, View, Help |
 | `Menu` `Shift+F10` `Alt+x F10` | The right-click menu, for the row under the cursor |
 | `Shift+F1` | What xdevcmd is using: memory and its trend, CPU, threads, draw time |
+| `Alt+m` | The status line's last 50 messages, each whole, with the time |
 
 ## Navigate
 
@@ -69,7 +70,7 @@ In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is th
 | `Shift+F8` `Alt+x F8` | Delete permanently |
 | `o` | Open with the system's default application |
 | `O` | Open with…: your [[open]] rules, the system's program, view, edit |
-| `Ctrl+z` | Undo the last rename, move, new directory or new file (asks first) |
+| `Ctrl+z` | Undo the last copy, move, rename, sync, new item or F8 delete (asks first) |
 | `Ctrl+Space` | Work out the size of every directory shown |
 | `Alt+F7` | Find files by name and content; results open in a new tab |
 | `Shift+F2` `Alt+x F2` | Rename the selection with a pattern ([N], [C], find and replace), or in $EDITOR |

@@ -63,7 +63,7 @@ fn nothing_writes_once_read_only_is_installed() {
     let part = d.join(".f.txt.xdevcmd-part-2147483646-0");
     fs::write(&part, b"half").unwrap();
     let journal = jdir.join("2147483646-0.journal");
-    fs::write(&journal, format!("kind copy\npart {}\n", hex(&part))).unwrap();
+    fs::write(&journal, format!("kind copy\ndir {}\n", hex(&d))).unwrap();
     xdevcmd_core::journal::init(jdir.clone());
     assert!(xdevcmd_core::journal::recover().is_empty());
     assert!(

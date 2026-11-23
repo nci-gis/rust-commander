@@ -398,6 +398,9 @@ pub const BAR: &[&str] = &["File", "View", "Help"];
 /// What quick view has open: the file, and a viewer on it.
 type Preview = (PathBuf, Box<Viewer>);
 
+/// How many status messages Messages (Alt+M) keeps.
+const MESSAGES: usize = 50;
+
 pub struct App {
     tree: Node,
     panes: BTreeMap<PaneId, Pane>,
@@ -407,12 +410,20 @@ pub struct App {
     term_id: Option<PaneId>,
     term_shown: bool,
     status: String,
+    /// The status line's past (item 46): each message as it was first shown, with its
+    /// time, the newest last; at most [`MESSAGES`].
+    messages: std::collections::VecDeque<(std::time::SystemTime, String)>,
+    /// The status as last recorded in `messages`, so a message is kept once.
+    noted: String,
     quit: bool,
     last_click: Option<(Instant, u16, u16)>,
     modal: Option<Modal>,
     /// Set by F4. Handled in `run`, which is the only place that can hand the real
     /// terminal over to another program and take it back.
     pending_edit: Option<PathBuf>,
+    /// The config file opened by the dialog about a config that failed (item 49): read
+    /// again when the editor closes.
+    recheck_config: Option<PathBuf>,
     /// The line (and column) F4 on a path in a shell's history asks the editor for.
     edit_at: Option<(u32, Option<u32>)>,
     settings: Settings,
@@ -467,7 +478,7 @@ pub struct App {
     search: Option<Search>,
     /// `--cwd-file`: where to write the directory on quit, for a shell to cd to.
     pub cwd_file: Option<PathBuf>,
-    /// Whether this quit should write it: `q` does, `Q` does not.
+    /// Whether this quit should write it: Quit does, Quit without cd does not.
     quit_cd: bool,
     /// Bookmarks added from inside xdevcmd; the config's own are in `settings`.
     bookmarks: Vec<PathBuf>,
@@ -552,6 +563,9 @@ pub struct App {
     /// the status line too (`--timings`).
     pub startup: crate::startup::Clock,
     pub timings: bool,
+    /// What start-up says about the debug log (`XDEVCMD_DEBUG`): shown first, and kept
+    /// in Messages either way.
+    pub debug_note: Option<String>,
     /// Quitting with jobs running: they were cancelled, and until this moment xdevcmd
     /// waits for them to clean up, drawing as usual and taking no keys ([`App::stop_step`]).
     stopping: Option<Instant>,
@@ -632,10 +646,13 @@ impl App {
             term_id: None,
             term_shown: false,
             status: notice.unwrap_or_default(),
+            messages: std::collections::VecDeque::new(),
+            noted: String::new(),
             quit: false,
             last_click: None,
             modal: None,
             pending_edit: None,
+            recheck_config: None,
             edit_at: None,
             settings,
             config_outcome: outcome,
@@ -697,6 +714,7 @@ impl App {
             boot_note: None,
             startup: Default::default(),
             timings: false,
+            debug_note: None,
             stopping: None,
             graphic_want: None,
             graphic_shown: None,
@@ -950,7 +968,7 @@ mod tests {
             path: dir.clone(),
             trusted: false,
         };
-        assert_eq!(words(Some(trusted)), "'a b' 'c' ");
+        assert_eq!(words(Some(trusted)), "a\\ b c ");
         let full = words(Some(reported));
         assert!(full.contains("xdevcmd-bare-names"), "{full}");
         assert_eq!(full, words(None));
@@ -972,7 +990,7 @@ mod tests {
         let paths = vec![link.join("a b")];
         assert_eq!(
             name_words("bash", &paths, Some(&shell_dir)).unwrap(),
-            "'a b' "
+            "a\\ b "
         );
         let elsewhere = name_words("bash", &paths, Some(&top)).unwrap();
         assert!(elsewhere.contains("link"), "{elsewhere}");
@@ -1086,7 +1104,12 @@ mod tests {
         let req = Request::copy(vec![a.join("new.txt")], b.clone());
         app.jobs.push(Job::new(ops::Kind::Copy, ops::start(req)));
         wait_until(&mut app, "the job to finish", |a| a.jobs.is_empty());
-        assert_eq!(app.status, "background: 1 copied");
+        // "(by the kernel)" or "(cloned)" after it where the platform's copy ran.
+        assert!(
+            app.status.starts_with("background: 1 copied"),
+            "{}",
+            app.status
+        );
         assert!(app.modal.is_none(), "a clean finish stays out of the way");
         assert!(b.join("new.txt").exists());
 
@@ -1108,6 +1131,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// C after an interruption checks the files the journal calls done as well: after a
+    /// power cut one can hold the wrong bytes with its source's size and date (#3).
+    /// Here on every system; pty.rs has the same through the keys, on Unix.
+    #[test]
+    fn a_checked_resume_repairs_a_file_the_journal_called_done() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-rcheck-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("one.txt"), "AAAA").unwrap();
+        std::fs::write(a.join("two.txt"), "b").unwrap();
+        std::fs::write(b.join("one.txt"), "ZZZZ").unwrap();
+        let date = std::fs::metadata(a.join("one.txt"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(b.join("one.txt"))
+            .unwrap()
+            .set_modified(date)
+            .unwrap();
+        let it = xdevcmd_core::journal::Interrupted {
+            kind: "copy".into(),
+            sources: vec![a.join("one.txt"), a.join("two.txt")],
+            dest: Some(b.clone()),
+            rename_to: None,
+            to_trash: false,
+            cleaned: 0,
+            restored: 0,
+            stranded: Vec::new(),
+            moved: Vec::new(),
+            decided: Vec::new(),
+            swapped: Vec::new(),
+            done: vec![a.join("one.txt")],
+            partial: Vec::new(),
+            journal: None,
+        };
+        let mut app = App::new(&a, &b, Settings::default(), Outcome::NoFile);
+        app.resume(it, true);
+        wait_until(&mut app, "two.txt copied", |_| b.join("two.txt").exists());
+        let repaired = || std::fs::read_to_string(b.join("one.txt")).unwrap() == "AAAA";
+        wait_until(&mut app, "one.txt repaired", |_| repaired());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Copy As found again after a kill finishes under the name it was given, not
+    /// the source's (repo review RR04): beside its source, the source's name is the
+    /// source itself, and the copy was skipped.
+    #[test]
+    fn a_resumed_copy_as_writes_the_name_it_was_given() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-rcas-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "AAAA").unwrap();
+        let it = xdevcmd_core::journal::Interrupted {
+            kind: "copy".into(),
+            sources: vec![root.join("a.txt")],
+            dest: Some(root.clone()),
+            rename_to: Some("b.txt".into()),
+            to_trash: false,
+            cleaned: 0,
+            restored: 0,
+            stranded: Vec::new(),
+            moved: Vec::new(),
+            decided: Vec::new(),
+            swapped: Vec::new(),
+            done: Vec::new(),
+            partial: Vec::new(),
+            journal: None,
+        };
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.resume(it, false);
+        wait_until(&mut app, "b.txt copied", |_| {
+            std::fs::read_to_string(root.join("b.txt")).is_ok_and(|t| t == "AAAA")
+        });
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "AAAA");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn quitting_with_jobs_running_asks_first() {
         let root = std::env::temp_dir().join(format!("xdevcmd-bgq-{}", std::process::id()));
@@ -1122,6 +1226,198 @@ mod tests {
         app.perform(Action::Quit);
         assert!(!app.quit, "not straight out");
         assert!(matches!(&app.modal, Some(Modal::Ask(a)) if a.title == "Quit?"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn quitting_with_a_program_in_a_shell_asks_first() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-bgp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        assert!(
+            !app.ask_before_quitting_with(Vec::new()),
+            "an idle shell: straight out"
+        );
+        assert!(app.ask_before_quitting_with(vec!["vim".into()]));
+        assert!(
+            matches!(&app.modal, Some(Modal::Ask(a)) if a.title == "Quit?"
+                && a.body.iter().any(|l| l.contains("vim"))),
+            "it names the program"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// MkDir refuses a control character, as Rename does, and keeps the box open with
+    /// the reason (the release bar, item 1); a plain nested name is made.
+    #[test]
+    fn mkdir_refuses_a_control_character() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-mkdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.begin_mkdir();
+        let Some(Modal::Input(mut i)) = app.modal.take() else {
+            panic!("no MkDir box");
+        };
+        i.edit = crate::line_edit::LineEdit::new("bad\nname");
+        app.apply_input(i);
+        let Some(Modal::Input(mut i)) = app.modal.take() else {
+            panic!("the box closed");
+        };
+        assert_eq!(
+            i.error.as_deref(),
+            Some("a name cannot contain a control character (U+000A)"),
+            "kept open with the reason"
+        );
+        assert!(!root.join("bad\nname").exists());
+        i.edit = crate::line_edit::LineEdit::new("a/b");
+        app.apply_input(i);
+        assert!(root.join("a/b").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Alt+F5's name is prefilled from a file or folder someone else named: a control
+    /// character in it is refused as Save as and F7 refuse it, the box kept open with the
+    /// reason and no job started (cosf #2, plan v3 H-08).
+    #[test]
+    fn pack_refuses_a_destination_with_a_control_character() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-pack-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        let input = |text: &str| Input {
+            title: "Pack".into(),
+            label: String::new(),
+            edit: crate::line_edit::LineEdit::new(text),
+            kind: InputKind::Pack {
+                sources: vec![root.join("a.txt")],
+            },
+            dir: root.clone(),
+            buttons: Vec::new(),
+            error: None,
+        };
+        app.apply_input(input("bad\u{15}x.zip"));
+        let Some(Modal::Input(i)) = app.modal.take() else {
+            panic!("the box closed, or a job started");
+        };
+        let why = i.error.unwrap_or_default();
+        assert!(why.contains("control character (U+0015)"), "{why}");
+        assert_eq!(
+            std::fs::read_dir(&root).unwrap().count(),
+            1,
+            "nothing written"
+        );
+        // Into a folder that is not there: said before a job, as Save as says it.
+        app.apply_input(input("missing/x.zip"));
+        let Some(Modal::Input(i)) = app.modal.take() else {
+            panic!("the box closed, or a job started");
+        };
+        assert_eq!(i.error.as_deref(), Some("that folder does not exist"));
+        // On Windows, a name the system refuses is said before the job, as Rename says
+        // it (red-team F4).
+        #[cfg(windows)]
+        {
+            app.apply_input(input("a?.zip"));
+            let Some(Modal::Input(i)) = app.modal.take() else {
+                panic!("the box closed, or a job started");
+            };
+            assert!(i.error.is_some(), "a?.zip");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A control character at either end of a typed name is refused too, not trimmed
+    /// away with the spaces into another name (T5 on H-08: `trim` dropped a leading tab
+    /// or newline before the check). Every box that names something new.
+    #[test]
+    fn a_control_character_at_either_end_of_a_name_is_refused_not_trimmed() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-trim-ctl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        let kind = |n: usize| match n {
+            0 => InputKind::Pack {
+                sources: vec![root.join("a.txt")],
+            },
+            1 => InputKind::MkDir,
+            2 => InputKind::NewFile,
+            _ => InputKind::CopyAs {
+                from: root.join("a.txt"),
+            },
+        };
+        for (n, name) in ["pack", "mkdir", "new file", "copy as"].iter().enumerate() {
+            for text in ["\tx.zip", "x.zip\n"] {
+                let what = format!("{name} {text:?}");
+                app.apply_input(Input {
+                    title: String::new(),
+                    label: String::new(),
+                    edit: crate::line_edit::LineEdit::new(text),
+                    kind: kind(n),
+                    dir: root.clone(),
+                    buttons: Vec::new(),
+                    error: None,
+                });
+                let Some(Modal::Input(i)) = app.modal.take() else {
+                    panic!("{what}: the box closed, or a job started");
+                };
+                let why = i.error.unwrap_or_default();
+                assert!(why.contains("control character"), "{what}: {why}");
+            }
+        }
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing made");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Read-only turns off every action that changes the disk or runs a program: Open
+    /// with…'s menu slipped through `_ => return None` (cosf #4, plan v3 H-05).
+    #[test]
+    fn read_only_refuses_open_with_menu_as_open_with() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-ro-menu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let settings = Settings {
+            mode: crate::config::Mode::ReadOnly,
+            ..Settings::default()
+        };
+        let app = App::new(&root, &root, settings, Outcome::NoFile);
+        assert!(app.refused(Action::OpenWith).is_some());
+        assert!(app.refused(Action::OpenWithMenu).is_some(), "the menu too");
+        // A command is refused as the action it does: the config file opened in the
+        // editor from the "config has a mistake" question is editing.
+        let mut app = app;
+        app.perform_cmd(crate::menu::Cmd::EditConfig(root.join("config.toml")));
+        assert!(
+            app.status.contains("editing is turned off"),
+            "{}",
+            app.status
+        );
+        assert!(app.pending_edit.is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A copy whose worker stopped on an internal error made files that its summary
+    /// does not list: undo says it cannot, not "nothing to undo" (red-team on H-10).
+    #[test]
+    fn a_copy_that_stopped_inside_cannot_be_undone() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-stopped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.expect_copy_undo("the copy of a".into());
+        let s = ops::Summary {
+            failed: 1,
+            stopped: true,
+            ..ops::Summary::default()
+        };
+        app.note_copied(ops::Kind::Copy, &s);
+        assert!(
+            matches!(&app.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(_))),
+            "{:?}",
+            app.last_undo
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

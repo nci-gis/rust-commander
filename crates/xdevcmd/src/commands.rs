@@ -25,11 +25,44 @@ pub enum Extra {
     Theme,
     About,
     ConfigInUse,
+    /// The right-click menu's Copy path and Copy relative path (item 48).
+    CopyPath,
+    CopyRelativePath,
     Documentation,
     /// The active terminal tab's menu: Log to file….
     LogTab,
     /// The active terminal tab's menu: Stop logging.
     StopLog,
+}
+
+impl Extra {
+    pub const ALL: [Extra; 9] = [
+        Extra::Settings,
+        Extra::Theme,
+        Extra::About,
+        Extra::ConfigInUse,
+        Extra::CopyPath,
+        Extra::CopyRelativePath,
+        Extra::Documentation,
+        Extra::LogTab,
+        Extra::StopLog,
+    ];
+
+    /// Its name in the recent list (`commands.toml`): one place, so a row F1 lists is
+    /// a row the list keeps when read back (cosf #8).
+    pub fn id(self) -> &'static str {
+        match self {
+            Extra::Settings => "settings",
+            Extra::Theme => "theme",
+            Extra::About => "about",
+            Extra::ConfigInUse => "config_in_use",
+            Extra::CopyPath => "copy_path",
+            Extra::CopyRelativePath => "copy_relative_path",
+            Extra::Documentation => "documentation",
+            Extra::LogTab => "log_tab",
+            Extra::StopLog => "stop_log",
+        }
+    }
 }
 
 /// What Enter on a row does.
@@ -166,37 +199,65 @@ pub fn rows(
                 hay: String::new(),
             });
         }
+        if group == "Files" {
+            for (title, about, extra) in [
+                (
+                    "Copy path",
+                    "The selected paths (or this folder's), whole, to the clipboard",
+                    Extra::CopyPath,
+                ),
+                (
+                    "Copy relative path",
+                    "The same, from the repository's root, or from this folder outside one",
+                    Extra::CopyRelativePath,
+                ),
+            ] {
+                let run = Run::Extra(extra);
+                out.push(Row {
+                    title: title.into(),
+                    group: group.into(),
+                    keys: Vec::new(),
+                    key_text: String::new(),
+                    about: about.into(),
+                    note: None,
+                    place: Place::Files,
+                    refused: refuse(&run),
+                    run,
+                    rebound: false,
+                    keys_name: None,
+                    id: extra.id().into(),
+                    name: format!("{group}: {title}"),
+                    parsed: Vec::new(),
+                    hay: String::new(),
+                });
+            }
+        }
         if group == "General" {
-            for (title, about, extra, id) in [
+            for (title, about, extra) in [
                 (
                     "Settings\u{2026}",
                     "The common settings, saved to config.toml",
                     Extra::Settings,
-                    "settings",
                 ),
                 (
                     "Theme\u{2026}",
                     "Try a theme now; Settings saves it",
                     Extra::Theme,
-                    "theme",
                 ),
                 (
                     "Config in use",
                     "The loaded config file and the settings in effect, read-only",
                     Extra::ConfigInUse,
-                    "config_in_use",
                 ),
                 (
                     "Documentation",
                     "The docs for this version: the copy beside xdevcmd, and the link",
                     Extra::Documentation,
-                    "documentation",
                 ),
                 (
                     "About xdevcmd",
                     "Version, licence, where releases are",
                     Extra::About,
-                    "about",
                 ),
             ] {
                 let run = Run::Extra(extra);
@@ -212,7 +273,7 @@ pub fn rows(
                     run,
                     rebound: false,
                     keys_name: None,
-                    id: id.into(),
+                    id: extra.id().into(),
                     name: format!("{group}: {title}"),
                     parsed: Vec::new(),
                     hay: String::new(),
@@ -224,18 +285,16 @@ pub fn rows(
     // The terminal tab menu's own commands, which have no key: acting on the active tab.
     if let Some(at) = out.iter().rposition(|r| r.group == "Terminal") {
         let mut rows = Vec::new();
-        for (title, about, extra, id) in [
+        for (title, about, extra) in [
             (
                 "Log tab to file\u{2026}",
                 "Everything the active terminal tab prints, to a file you name (text or raw); \u{25cf} on the tab",
                 Extra::LogTab,
-                "log_tab",
             ),
             (
                 "Stop logging tab",
                 "End the active terminal tab's log; the file is flushed and closed",
                 Extra::StopLog,
-                "stop_log",
             ),
         ] {
             let run = Run::Extra(extra);
@@ -251,7 +310,7 @@ pub fn rows(
                 run,
                 rebound: false,
                 keys_name: None,
-                id: id.into(),
+                id: extra.id().into(),
                 name: format!("Terminal: {title}"),
                 parsed: Vec::new(),
                 hay: String::new(),
@@ -652,7 +711,7 @@ fn recent_path() -> Option<std::path::PathBuf> {
 /// command, or one of `menu`'s entries by label.
 fn known(id: &str, menu: &[MenuItem]) -> bool {
     keys::BINDINGS.iter().any(|b| b.name == id)
-        || matches!(id, "settings" | "theme" | "about" | "config_in_use")
+        || Extra::ALL.iter().any(|e| e.id() == id)
         || id
             .strip_prefix("menu:")
             .is_some_and(|l| menu.iter().any(|m| m.label == l))
@@ -931,6 +990,21 @@ impl Commands {
         }
         if let Some(why) = &r.refused {
             self.message = Some(why.clone());
+            return Outcome::Stay;
+        }
+        // F1's own row, chosen inside F1: the other size, not F1 closed and opened again
+        // (which would only start over at the small size).
+        if r.run == Run::Act(Action::Help) {
+            let to = match self.size {
+                Size::Small if self.can_grow() => Size::Large,
+                Size::Small => {
+                    self.message = Some("the screen is too small for the large size".into());
+                    return Outcome::Stay;
+                }
+                Size::Large => Size::Small,
+            };
+            self.size = to;
+            self.refresh(Some(row));
             return Outcome::Stay;
         }
         Outcome::Run(row)
@@ -1812,6 +1886,39 @@ mod tests {
         }
     }
 
+    /// The owner's question (Round 033): F1 opened from inside F1 never loops. F1's own
+    /// row switches the size and stays; F1 the key grows, then closes; nothing opens a
+    /// second window.
+    #[test]
+    fn f1_inside_f1_switches_size_and_never_runs_itself() {
+        use ratatui::crossterm::event::KeyCode;
+        let help_item = |c: &Commands| {
+            c.items
+                .iter()
+                .position(|it| {
+                    matches!(it, Item::Row { row, .. } if c.rows[*row].run == Run::Act(Action::Help))
+                })
+                .expect("F1's row is listed")
+        };
+        let mut c = palette((118, 34));
+        assert!(matches!(press(&mut c, KeyCode::F(1)), Outcome::Stay));
+        assert_eq!(c.size, Size::Large);
+        let i = help_item(&c);
+        assert!(matches!(c.choose(i), Outcome::Stay));
+        assert_eq!(c.size, Size::Small);
+        let i = help_item(&c);
+        assert!(matches!(c.choose(i), Outcome::Stay));
+        assert_eq!(c.size, Size::Large);
+        assert!(matches!(press(&mut c, KeyCode::F(1)), Outcome::Close));
+
+        // Too small a screen for the large size: it says so and stays.
+        let mut c = palette((60, 16));
+        let i = help_item(&c);
+        assert!(matches!(c.choose(i), Outcome::Stay));
+        assert_eq!(c.size, Size::Small);
+        assert!(c.message.as_deref().unwrap_or("").contains("too small"));
+    }
+
     #[test]
     fn digits_are_text_and_alt_digits_run_that_row() {
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1917,6 +2024,28 @@ mod tests {
         eprintln!("opening F1 with {} rows: {:?}", best.1, best.0);
         assert!(best.1 >= 140, "{}", best.1);
         assert!(best.0.as_millis() < 16, "{:?}", best.0);
+    }
+
+    /// Every row F1 can list is a name the recent list keeps when it is read back:
+    /// five newer commands were dropped on reload (cosf #8, plan v3 H-10).
+    #[test]
+    fn every_row_is_known_to_the_recent_list() {
+        let menu = [MenuItem {
+            key: "b".into(),
+            label: "Build".into(),
+            command: "make".into(),
+        }];
+        for r in rows(&Keymap::default(), &menu, |_| None) {
+            if r.id.is_empty() {
+                continue; // a row that is read, never run, is never remembered
+            }
+            assert!(
+                known(&r.id, &menu),
+                "{} ({}) is dropped on reload",
+                r.id,
+                r.title
+            );
+        }
     }
 
     #[test]

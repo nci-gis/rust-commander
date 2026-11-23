@@ -210,8 +210,14 @@ impl Viewer {
             return self;
         }
         let mut h = Highlighter::new(lang);
-        if scan && self.doc.line_count() > syntax::scan::EVERY {
-            h.scan_file(&self.doc.path.clone(), self.doc.line_count());
+        // Still indexing: the scan reads to the file's end itself, up to the index's cap.
+        if scan && (self.doc.indexing() || self.doc.line_count() > syntax::scan::EVERY) {
+            let lines = if self.doc.indexing() {
+                xdevcmd_core::document::MAX_LINES
+            } else {
+                self.doc.line_count()
+            };
+            h.scan_file(&self.doc.path.clone(), lines);
         }
         self.syntax = Some(h);
         self
@@ -396,6 +402,18 @@ impl Viewer {
         self.to_end = true;
     }
 
+    /// Take in what the background index found (A03): true when the frame should be
+    /// drawn again. An index stopped by the cap on lines says so, as at open.
+    pub fn index_moved(&mut self) -> bool {
+        if !self.doc.poll_index() {
+            return false;
+        }
+        if !self.doc.indexing() && !self.doc.fully_indexed && self.message.is_empty() {
+            self.message = "very large file \u{2014} showing the first part".into();
+        }
+        true
+    }
+
     /// The selected lines, first to last.
     fn selected(&self) -> Option<(usize, usize)> {
         self.selection.map(|(a, b)| (a.min(b), a.max(b)))
@@ -535,6 +553,13 @@ impl Viewer {
             Some(i) => {
                 self.top = i;
                 self.message = format!("/{n}");
+            }
+            None if self.doc.indexing() => {
+                // The rest is not indexed yet: said, not "no more matches".
+                self.message = format!(
+                    "/{n} \u{2014} not in the {} lines indexed so far; still indexing, try again",
+                    self.doc.line_count()
+                )
             }
             None if !self.doc.fully_indexed => {
                 // "no more matches" would be a lie: we never looked at the rest.
@@ -751,9 +776,20 @@ impl Viewer {
             Mode::Text => "text",
             Mode::Hex => "hex",
         };
+        self.index_moved();
+        // While the rest is indexed, the count is what is known so far (A03).
+        let lines = if self.doc.indexing() {
+            format!(
+                "{} lines so far, indexing {}%",
+                self.doc.line_count(),
+                self.doc.indexed_percent()
+            )
+        } else {
+            format!("{} lines", self.doc.line_count())
+        };
         let scale = match (self.mode, self.language()) {
-            (Mode::Text, Some(lang)) => format!("{lang} \u{b7} {} lines", self.doc.line_count()),
-            (Mode::Text, None) => format!("{} lines", self.doc.line_count()),
+            (Mode::Text, Some(lang)) => format!("{lang} \u{b7} {lines}"),
+            (Mode::Text, None) => lines,
             (Mode::Hex, _) => human_size(self.doc.len),
         };
         let title = Line::from(vec![

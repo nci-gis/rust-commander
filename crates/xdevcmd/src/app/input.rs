@@ -2,6 +2,61 @@
 
 use super::*;
 
+/// The action whose refusal a command follows, or `None` for one that only reads or
+/// decides its own refusal where it runs. Every command named, no `_`: a new command
+/// does not build until it is sorted here (plan v3 H-05).
+#[deny(
+    clippy::wildcard_enum_match_arm,
+    clippy::match_wildcard_for_single_variants
+)]
+fn cmd_action(c: &Cmd) -> Option<Action> {
+    match c {
+        Cmd::Transfer { .. } => Some(Action::Copy),
+        Cmd::OpenFile(_) => Some(Action::OpenWith),
+        Cmd::BatchRename(_) | Cmd::BatchRenameAnyway { .. } => Some(Action::BulkRename),
+        Cmd::Sync(_) => Some(Action::SyncDirs),
+        Cmd::UserCommand(_) => Some(Action::UserMenu),
+        Cmd::EditConfig(_) => Some(Action::Edit),
+        Cmd::Undo => Some(Action::Undo),
+        Cmd::ShellNew(_) | Cmd::ShellSendHere(_) => Some(Action::NewTerminal),
+        // Each also refused where it is reached; here too, so it stands if that screen
+        // changes (red-team F6): Save as and a tab's log write files, recovery acts on
+        // an interrupted job.
+        Cmd::SaveReplacing(_) | Cmd::TabLog(_) | Cmd::TabSaveHistory(_) => Some(Action::CopyAs),
+        Cmd::Resume(_) | Cmd::ResumeChecked(_) | Cmd::Discard(_) => Some(Action::Copy),
+        // Asks `refused` itself (`perform`), or decides where it runs: per rule (view,
+        // edit, a program), a program in a terminal, the clipboard (restricted),
+        // bookmarks (saved to a file: their own arm below).
+        Cmd::Act(_)
+        | Cmd::ApplyRule(..)
+        | Cmd::RunInTerminal { .. }
+        | Cmd::CopyPath
+        | Cmd::CopyRelativePath
+        | Cmd::CopyText(_)
+        | Cmd::AddBookmark(_)
+        | Cmd::RemoveBookmark(_) => None,
+        // Read, move the view, or close.
+        Cmd::GoTo(_)
+        | Cmd::ShowList(_)
+        | Cmd::AddToList(_)
+        | Cmd::TabHistory(_)
+        | Cmd::TabStopLog(_)
+        | Cmd::TabList(_)
+        | Cmd::TabClose(_)
+        | Cmd::QuitAnyway
+        | Cmd::QuitNow
+        | Cmd::Note(_)
+        | Cmd::About
+        | Cmd::Commands
+        | Cmd::ConfigInUse
+        | Cmd::Documentation
+        | Cmd::ViewFile(_)
+        | Cmd::ThemeMenu
+        | Cmd::Settings
+        | Cmd::SetTheme(_) => None,
+    }
+}
+
 impl App {
     /// Feed a key as if it had been typed. Used by `--keys` so a dialog can be put on
     /// screen and asserted on without a terminal or a human.
@@ -223,6 +278,19 @@ impl App {
             }
         }
         let action = self.settings.keymap.action_for(k);
+        // Ctrl+O is the shell in Midnight Commander: unbound here, it said nothing, a
+        // dead end for the first thing an mc user tries (plan A10, UX).
+        if action.is_none()
+            && !self.focus_is_term()
+            && k.code == KeyCode::Char('o')
+            && k.modifiers == KeyModifiers::CONTROL
+        {
+            let key = self
+                .footer_key(Action::FocusTerminal)
+                .unwrap_or_else(|| "F12".into());
+            self.status = format!("the shell is {key} (Ctrl+O in mc)");
+            return;
+        }
         // Esc in a filtered pane shows everything again: a filter left on is files you
         // cannot see, so taking it off should be the most obvious key there is.
         if action.is_none() && k.code == KeyCode::Esc && !self.focus_is_term() {
@@ -290,38 +358,18 @@ impl App {
     /// here, and the engine in xdevcmd-core refuses writes again behind it.
     pub(super) fn refused(&self, a: Action) -> Option<String> {
         let mode = self.settings.mode;
-        let what = match a {
-            Action::Copy | Action::Move => "copying and moving",
-            Action::Delete | Action::DeletePermanent => "deleting",
-            Action::Rename | Action::BulkRename => "renaming",
-            Action::NewFile | Action::CopyAs | Action::Symlink | Action::Pack | Action::Unpack => {
-                "creating files"
-            }
-            Action::SyncDirs => "synchronising",
-            Action::Permissions => "changing permissions",
-            Action::MkDir => "creating directories",
-            Action::Edit => "editing",
-            Action::OpenWith => "opening files in other programs",
-            Action::Undo => "undoing",
-            _ if mode == Mode::Restricted
-                && matches!(
-                    a,
-                    Action::FocusTerminal
-                        | Action::TerminalHistory
-                        | Action::ToggleTerminal
-                        | Action::CdTerminalHere
-                        | Action::GoShellDir
-                        | Action::TypeNames
-                        | Action::NewTerminal
-                        | Action::UserMenu
-                ) =>
-            {
-                "the terminal"
-            }
-            _ => return None,
+        let what = match a.writes() {
+            Some(what) => what,
+            None if mode == Mode::Restricted && a.uses_terminal() => "the terminal",
+            None => return None,
+        };
+        // The next safe thing, where there is one: viewing is on in every mode.
+        let next = match a {
+            Action::OpenWith | Action::OpenWithMenu => " \u{2014} F3 views it",
+            _ => "",
         };
         mode.read_only()
-            .then(|| format!("{} mode \u{2014} {what} is turned off", mode.label()))
+            .then(|| format!("{} mode \u{2014} {what} is turned off{next}", mode.label()))
     }
 
     /// Why `a` cannot run inside an archive, or `None`. Only reading and extracting
@@ -342,6 +390,7 @@ impl App {
                 | Action::Symlink
                 | Action::Permissions
                 | Action::OpenWith
+                | Action::OpenWithMenu
                 | Action::Checksum
                 | Action::Pack
                 | Action::Unpack
@@ -357,12 +406,66 @@ impl App {
         ))
     }
 
+    /// Why a write action waits (#4): the focused pane is still opening a folder, and
+    /// the listing on screen, whose cursor and marks it would act on, is the old one.
+    /// Copy too, though it changes nothing here: it would copy what the user left.
+    pub(super) fn loading_refused(&self, a: Action) -> Option<String> {
+        let writes = matches!(
+            a,
+            Action::Copy
+                | Action::UserMenu
+                | Action::SyncDirs
+                | Action::Delete
+                | Action::DeletePermanent
+                | Action::Move
+                | Action::Rename
+                | Action::BulkRename
+                | Action::MkDir
+                | Action::Edit
+                | Action::NewFile
+                | Action::CopyAs
+                | Action::Symlink
+                | Action::Permissions
+                | Action::OpenWith
+                | Action::OpenWithMenu
+                | Action::Checksum
+                | Action::Pack
+                | Action::Unpack
+                | Action::TypeNames
+        );
+        if !writes {
+            return None;
+        }
+        let to = self
+            .panes
+            .get(&self.focus)
+            .and_then(Pane::as_files)
+            .and_then(|f| f.moving_to())?;
+        let r = crate::refusal::Refusal::Loading(crate::keys::action_name(a));
+        r.log();
+        let key = self
+            .settings
+            .keymap
+            .keys_for(a)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "it".into());
+        let dir = xdevcmd_core::format::elide_middle(&tidy(to), 20);
+        Some(format!(
+            "{key} again when shown \u{2014} {dir} still opening"
+        ))
+    }
+
     pub(super) fn perform(&mut self, a: Action) {
         if let Some(why) = self.refused(a) {
             self.status = why;
             return;
         }
         if let Some(why) = self.archive_refused(a) {
+            self.status = why;
+            return;
+        }
+        if let Some(why) = self.loading_refused(a) {
             self.status = why;
             return;
         }
@@ -431,6 +534,7 @@ impl App {
             Action::Pack => self.begin_pack(),
             Action::MenuBar => self.open_bar(0),
             Action::Usage => self.modal = Some(Modal::Usage),
+            Action::Messages => self.show_messages(),
             Action::ContextMenu => self.context_menu_at_cursor(),
             Action::CompareDirs => self.compare_panes(),
             Action::SyncDirs => self.begin_sync(),
@@ -532,11 +636,11 @@ impl App {
             Action::Bottom => self.with_files(|f| f.go_end()),
             Action::Parent => self.with_files(|f| f.go_up()),
             Action::GoHome => {
-                let home = crate::bookmarks::expand_tilde("~");
-                if home.is_absolute() {
+                if let Some(home) = crate::bookmarks::home_dir() {
                     self.with_files(|f| f.set_cwd(&home));
                 } else {
-                    self.status = "no home directory: neither HOME nor USERPROFILE is set".into();
+                    self.status =
+                        "no home directory: neither HOME nor USERPROFILE is a full path".into();
                 }
             }
             Action::GoRoot => self.with_files(|f| {
@@ -608,31 +712,25 @@ impl App {
     }
 
     pub(super) fn perform_cmd(&mut self, c: Cmd) {
+        // The action a command does, refused as that action is (plan v3 H-05).
+        if let Some(why) = cmd_action(&c).and_then(|a| self.refused(a)) {
+            self.status = why;
+            return;
+        }
         match c {
             Cmd::Act(a) => self.perform(a),
-            Cmd::CopyPath if self.settings.mode == Mode::Restricted => {
+            Cmd::CopyPath | Cmd::CopyRelativePath if self.settings.mode == Mode::Restricted => {
                 self.status = "restricted mode \u{2014} the clipboard is turned off".into();
             }
-            Cmd::Transfer { .. } if self.settings.mode.read_only() => {
-                self.status = format!(
-                    "{} mode \u{2014} copying and moving is turned off",
-                    self.settings.mode.label()
-                );
-            }
-            Cmd::AddBookmark(_)
-            | Cmd::RemoveBookmark(_)
-            | Cmd::OpenFile(_)
-            | Cmd::BatchRename(_)
-            | Cmd::BatchRenameAnyway { .. }
-            | Cmd::Sync(_)
-                if self.settings.mode.read_only() =>
-            {
+            // Bookmarks are saved to a file: "saves anything" is off in read-only.
+            Cmd::AddBookmark(_) | Cmd::RemoveBookmark(_) if self.settings.mode.read_only() => {
                 self.status = format!(
                     "{} mode \u{2014} that is turned off",
                     self.settings.mode.label()
                 );
             }
-            Cmd::CopyPath => self.copy_path(),
+            Cmd::CopyPath => self.copy_path(false),
+            Cmd::CopyRelativePath => self.copy_path(true),
             Cmd::ShowList(id) => self.show_list(Some(id)),
             Cmd::AddToList(id) => self.add_to_list(id),
             Cmd::GoTo(p) => {
@@ -680,7 +778,13 @@ impl App {
             Cmd::ShellNew(s) => self.open_shell_for(*s),
             Cmd::ShellSendHere(s) => self.send_here(*s),
             Cmd::ApplyRule(i, p) => self.apply_rule(i, p),
-            Cmd::UserCommand(i) => self.run_user_command(i),
+            Cmd::UserCommand(i) => {
+                // `%s` and `%f` would name the old listing's files (red-team of #4).
+                match self.loading_refused(Action::UserMenu) {
+                    Some(why) => self.status = why,
+                    None => self.run_user_command(i),
+                }
+            }
             Cmd::About => {
                 self.modal = Some(Modal::Ask(modal::Ask {
                     title: format!("xdevcmd {}", env!("CARGO_PKG_VERSION")),
@@ -705,6 +809,7 @@ impl App {
                     yes: None,
                     buttons: Vec::new(),
                     also: None,
+                    more: None,
                     footnote: Some(format!(
                         "Developed by {}",
                         env!("CARGO_PKG_AUTHORS").replace(':', ", ")
@@ -734,7 +839,28 @@ impl App {
                 self.quit = true;
                 self.quit_cd = true;
             }
-            Cmd::Resume(it) => self.resume(*it),
+            Cmd::Resume(it) => self.resume(*it, false),
+            Cmd::ResumeChecked(it) => self.resume(*it, true),
+            Cmd::Discard(it) => {
+                let f = xdevcmd_core::journal::discard(&it);
+                let s = |n: usize| if n == 1 { "" } else { "s" };
+                self.status = match (f.removed, f.left.len()) {
+                    (_, l) if l > 0 => format!(
+                        "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
+                        s(l),
+                    ),
+                    (0, _) => "the interrupted job forgotten: nothing more is done".into(),
+                    (n, _) => format!(
+                        "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
+                        s(n),
+                    ),
+                };
+            }
+            Cmd::EditConfig(p) => {
+                self.recheck_config = Some(p.clone());
+                self.pending_edit = Some(p);
+            }
+            Cmd::Note(n) => self.status = n,
             Cmd::Sync(pairs) => {
                 let pairs_len = pairs.len();
                 let req = Request::sync(pairs);
@@ -817,6 +943,30 @@ impl App {
                 kind,
                 sources,
                 dest,
+            } if self.file_panes().iter().any(|id| {
+                self.panes
+                    .get(id)
+                    .and_then(Pane::as_files)
+                    .is_some_and(|f| f.moving_to().is_some())
+            }) =>
+            {
+                // A drop while a pane is still opening a folder: what was dragged or
+                // where it lands may be the old listing's (#4).
+                let _ = (sources, dest);
+                let action = if kind == ops::Kind::Move {
+                    "move"
+                } else {
+                    "copy"
+                };
+                crate::refusal::Refusal::Loading(action).log();
+                self.status = "drop again when shown \u{2014} a folder is still opening".into();
+            }
+            Cmd::Transfer { kind, sources, .. }
+                if kind == ops::Kind::Move && self.guard_refused(&sources) => {}
+            Cmd::Transfer {
+                kind,
+                sources,
+                dest,
             } => {
                 let request = match kind {
                     ops::Kind::Move => Request::mv(sources, dest),
@@ -859,22 +1009,27 @@ impl App {
     /// are sitting at — including across SSH, which nothing running on the server could
     /// do any other way. Whether it works is the terminal's call: Windows Terminal,
     /// iTerm2, kitty and WezTerm allow it; tmux needs `set-clipboard on`.
-    pub(super) fn copy_path(&mut self) {
+    /// Copy path, or with `relative` Copy relative path (item 48): from the
+    /// repository's root, else from the pane's folder, and the status line says which.
+    pub(super) fn copy_path(&mut self, relative: bool) {
         let mut paths = self.selection();
+        let cwd = self.focused_cwd();
         if paths.is_empty() {
-            paths.push(self.focused_cwd());
+            paths.push(cwd.clone());
         }
-        let text = paths
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let (texts, base) = if relative {
+            let (t, b) = crate::relpath::relative(&paths, &cwd);
+            (t, Some(b))
+        } else {
+            (
+                paths.iter().map(|p| p.display().to_string()).collect(),
+                None,
+            )
+        };
+        let text = texts.join("\n");
         // Pasted into a terminal, a control character in a path runs commands just as
         // typing it would. Refuse rather than strip: a stripped path is a wrong path.
-        if let Some(why) = paths
-            .iter()
-            .find_map(|p| crate::safety::unsafe_to_type(&p.display().to_string()))
-        {
+        if let Some(why) = texts.iter().find_map(|t| crate::safety::unsafe_to_type(t)) {
             self.status = why;
             return;
         }
@@ -884,9 +1039,10 @@ impl App {
             let _ = out.write_all(seq.as_bytes());
             let _ = out.flush();
         }
-        self.status = match paths.as_slice() {
-            [one] => format!("sent {} to the clipboard", one.display()),
-            many => format!("sent {} paths to the clipboard", many.len()),
+        self.status = match (&base, texts.as_slice()) {
+            (Some(b), _) => crate::relpath::said(&texts, b),
+            (None, [one]) => format!("sent {one} to the clipboard"),
+            (None, many) => format!("sent {} paths to the clipboard", many.len()),
         };
     }
 

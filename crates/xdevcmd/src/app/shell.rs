@@ -508,11 +508,21 @@ impl App {
     }
 
     /// Where the text typed in a Save as…-style prompt points, checked as Save as…
-    /// checks it: inside the root (no `..`), no control character, not a directory, in
-    /// a folder that exists. `Ok(None)` when nothing was typed.
+    /// checks it: no control character, inside the root (`Policy::allows_at`), a name
+    /// Rename would take, not a directory, in a folder that exists. `Ok(None)` when nothing was typed.
     pub(super) fn typed_destination(&self, i: &Input) -> Result<Option<PathBuf>, String> {
-        let typed = i.edit.text();
-        let typed = typed.trim();
+        let raw = i.edit.text();
+        // The prefill comes from a file's name or the shell's directory, which someone
+        // else may have chosen: a control character in it is refused, as everywhere a
+        // name could later be typed into a shell or pasted. In the whole text, before
+        // the trim: a tab or a newline at either end is not a space to drop (T5, H-08).
+        if let Some(c) = crate::safety::control_char(&raw) {
+            return Err(format!(
+                "a control character (U+{:04X}) in the name \u{2014} remove it",
+                c as u32
+            ));
+        }
+        let typed = raw.trim();
         if typed.is_empty() {
             return Ok(None);
         }
@@ -520,25 +530,17 @@ impl App {
         if dest.is_relative() {
             dest = i.dir.join(dest);
         }
-        // Under --root, as F7 and Alt+F5: no `..`, and the directory it goes in must be
-        // inside, links resolved.
-        let climbs = Path::new(typed)
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir));
-        let inside = dest
-            .parent()
-            .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
-        if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+        // Under --root: the one check of a path to make (links resolved, a link left
+        // there that leads out is outside, no `..` in what is still to make).
+        if !xdevcmd_core::policy::get().allows_at(&dest) {
             return Err("outside the root xdevcmd is confined to".into());
         }
-        // The prefill comes from a file's name or the shell's directory, which someone
-        // else may have chosen: a control character in it is refused, as everywhere a
-        // name could later be typed into a shell or pasted.
-        if let Some(c) = crate::safety::control_char(typed) {
-            return Err(format!(
-                "the name contains a control character (U+{:04X}) \u{2014} not saved",
-                c as u32
-            ));
+        // The name itself as Rename checks one: on Windows `<>:"|?*` and a trailing dot
+        // or space, which the system would refuse in its own words once the job ran.
+        if let Some(name) = dest.file_name().and_then(|n| n.to_str()) {
+            if let Err(e) = xdevcmd_core::rename::validate_name(name) {
+                return Err(e.to_string());
+            }
         }
         if dest.is_dir() {
             return Err("that is a directory \u{2014} add a file name".into());
@@ -588,6 +590,7 @@ impl App {
                         yes: Some(("Replace".into(), Cmd::SaveReplacing(dest))),
                         buttons: Vec::new(),
                         also: None,
+                        more: None,
                         footnote: None,
                         pictures: Vec::new(),
                     }));
@@ -700,6 +703,12 @@ impl App {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;
         };
+        // A line that ends in Enter (Alt+C's cd, a user-menu command) never goes after
+        // text typed and not run: that text would run with it as more arguments (#1).
+        // Names typed for the user to finish do: adding to the line is what they are for.
+        if self.onto_typed_text(&s) && matches!(state, ShellState::Idle | ShellState::Unknown) {
+            return self.cd_beside_typed_text(s);
+        }
         let long = s.here.len() > crate::pane::term::LONG_LINE;
         let decision = crate::pane::term::decide_for(
             &state,
@@ -778,13 +787,65 @@ impl App {
             yes: Some(yes),
             also,
             buttons: Vec::new(),
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
     }
 
+    /// Whether `s` runs a line (ends in Enter) and its shell holds text typed and not run.
+    fn onto_typed_text(&self, s: &ShellSend) -> bool {
+        s.here.ends_with('\r')
+            && self
+                .panel_ref()
+                .and_then(|p| p.shell(s.target))
+                .is_some_and(crate::pane::TermPane::dirty)
+    }
+
+    /// A line to run, with text typed in the target shell: done in a new shell in the
+    /// directory (`new_shell`'s text typed there, if any), the typed text left where it
+    /// is; with no room for one, nothing, and the key that clears the line (#1).
+    fn cd_beside_typed_text(&mut self, s: ShellSend) {
+        let (n, before, room) = match self.panel_ref() {
+            Some(p) => (
+                p.tab_number(s.target).unwrap_or(1),
+                p.tab_count(),
+                p.shell_count() < self.settings.config.terminal.max_terminals,
+            ),
+            None => return,
+        };
+        if !room {
+            let r = crate::refusal::Refusal::Busy;
+            r.log();
+            self.status = if cfg!(unix) {
+                format!("Ctrl+C clears shell {n}'s line \u{2014} all shell tabs in use")
+            } else {
+                "close a shell tab \u{2014} all in use".into()
+            };
+            return;
+        }
+        let dir = xdevcmd_core::format::elide_middle(&tidy(&s.dir), 20);
+        let mut s = s;
+        if s.new_shell.is_some() {
+            // Said again when its text is typed there, which replaces this status.
+            s.what = format!("{} \u{2014} shell {n} keeps its typed text", s.what);
+        }
+        self.open_shell_for(s);
+        let after = self.panel_ref().map_or(before, TermPanel::tab_count);
+        if after > before {
+            crate::refusal::Refusal::DirtyLine.log();
+            self.status =
+                format!("new shell {after} in {dir} \u{2014} shell {n} keeps its typed text");
+        }
+    }
+
     /// Type `s` into its shell now, if that shell is still there.
     pub(super) fn send_here(&mut self, s: ShellSend) {
+        // Again here: text may have been typed while a question was open (S, "send to
+        // this shell", comes here too).
+        if self.onto_typed_text(&s) {
+            return self.cd_beside_typed_text(s);
+        }
         let Some(t) = self.panel_ref().and_then(|p| p.shell(s.target)) else {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;

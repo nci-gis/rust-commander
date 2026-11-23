@@ -78,7 +78,7 @@ pub fn file_name(shell: &str) -> String {
 pub fn open(path: &Path) -> io::Result<(File, bool)> {
     crate::policy::guard_write()?;
     let policy = crate::policy::get();
-    if policy.root.is_some() && !path.parent().is_some_and(|p| policy.allows(p)) {
+    if !policy.allows_at(path) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "outside the root xdevcmd is confined to",

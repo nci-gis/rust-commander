@@ -108,3 +108,4 @@ memory. Mouse tests locate what they click in a first screenshot, never hard-cod
 | [reference/platforms.md](../reference/platforms.md) | `#[cfg]`, Windows or macOS behaviour |
 | [reference/config.md](../reference/config.md) | adding or changing a setting |
 | [reference/gotchas.md](../reference/gotchas.md) | ratatui, crossterm, vt100 or the test harness surprises you |
+| [reference/docs.md](../reference/docs.md) | writing or editing `docs/`, the README or the CHANGELOG |

@@ -263,6 +263,7 @@ impl App {
             yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));

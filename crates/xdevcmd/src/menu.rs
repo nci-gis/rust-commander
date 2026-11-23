@@ -21,6 +21,8 @@ pub enum Cmd {
     Act(Action),
     /// Put the selected paths on the clipboard through the terminal (OSC 52).
     CopyPath,
+    /// The same, written from the repository's root or the pane's folder (item 48).
+    CopyRelativePath,
     /// The end of a drag-and-drop: the sources and destination are already known.
     Transfer {
         kind: ops::Kind,
@@ -78,8 +80,18 @@ pub enum Cmd {
     QuitAnyway,
     /// Quit now, though cancelled jobs have not finished stopping (a hung drive).
     QuitNow,
+    /// A config file that failed to load, opened in the editor (item 49); checked
+    /// again when the editor closes.
+    EditConfig(PathBuf),
+    /// Only a message for the status line.
+    Note(String),
     /// Run an interrupted job again (safe operations' journal), "replace only if older".
     Resume(Box<xdevcmd_core::journal::Interrupted>),
+    /// As [`Cmd::Resume`], trusting nothing the interrupted run made (B2): finished
+    /// folders walked again, every file already there read with its source.
+    ResumeChecked(Box<xdevcmd_core::journal::Interrupted>),
+    /// Not to be resumed: the big files it kept part of, and its journal, go.
+    Discard(Box<xdevcmd_core::journal::Interrupted>),
     /// Help → About.
     About,
     /// Help → Commands…: F1, opened at its large size.

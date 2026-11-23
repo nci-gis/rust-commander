@@ -47,12 +47,27 @@ impl App {
         // temporary names above all) is put right even if safe operations were turned
         // off since. Without journals this finds nothing.
         self.recover_interrupted();
+        // What a killed run left comes first; a config that failed is said on the status
+        // line then, as before, and kept in Messages.
+        if self.modal.is_none() {
+            self.ask_about_config();
+        }
         let size = terminal.size()?;
         self.boot(Rect::new(0, 0, size.width, size.height));
         // What a killed run left, tidied up, and the shell panel started, if it was open.
         self.startup.mark("shell");
         // Said once, unless start-up had something to say: where xdevcmd is running. It
         // gives way at the first key or click to the line it covers (the pane's own).
+        // The debug log first: it is why the user started xdevcmd this way.
+        if let Some(note) = self.debug_note.take() {
+            if self.status.is_empty() && self.modal.is_none() {
+                self.status = note;
+                self.boot_note = Some(self.status.clone());
+            } else {
+                self.messages
+                    .push_back((std::time::SystemTime::now(), note));
+            }
+        }
         if self.status.is_empty() && self.modal.is_none() {
             self.status = format!("running in {}", self.usage.terminal);
             self.boot_note = Some(self.status.clone());
@@ -143,6 +158,7 @@ impl App {
                 yes: Some(("quit anyway".into(), Cmd::QuitNow)),
                 buttons: Vec::new(),
                 also: None,
+                more: None,
                 footnote: None,
                 pictures: Vec::new(),
             }));
@@ -234,6 +250,10 @@ impl App {
                 input.quiet()?;
             }
             self.edit_externally(terminal, &path)?;
+            if self.recheck_config.as_deref() == Some(path.as_path()) {
+                self.recheck_config = None;
+                self.config_checked_again(&path);
+            }
             // F4 from a shell's history: the history is still up, over the status line.
             if let Some(Modal::View(v)) = self.modal.as_mut() {
                 v.note(&self.status);
@@ -251,8 +271,13 @@ impl App {
     pub(super) fn background(&mut self) -> bool {
         let mut changed = self.pump_pending_type();
         // The viewer drew lines plain while its scan was behind them; it has moved on.
-        if let Some(Modal::View(v)) = &self.modal {
+        if let Some(Modal::View(v)) = &mut self.modal {
             changed |= v.syntax_moved();
+            // The rest of a big file indexed in the background (A03).
+            changed |= v.index_moved();
+        }
+        if let Some((_, Some((_, v)))) = &mut self.quick_view {
+            changed |= v.index_moved();
         }
         changed |= self.follow_shell();
         // A thread other than this one panicked: xdevcmd goes on, and says where the
@@ -327,9 +352,13 @@ impl App {
             .pending_view
             .as_ref()
             .and_then(|(rx, ..)| rx.try_recv().ok());
-        if let (Some(out), Some((_, tmp, name, _))) = (viewed, self.pending_view.take()) {
-            self.show_extracted(out, tmp, name);
-            changed = true;
+        // Taken only once its result is in: a tuple would take it on every tick, and a
+        // result that came after the first tick would never be read (#6).
+        if let Some(out) = viewed {
+            if let Some((_, tmp, name, _)) = self.pending_view.take() {
+                self.show_extracted(out, tmp, name);
+                changed = true;
+            }
         }
         // The plan for the open confirmation: how far it has got, or the plan itself.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
@@ -359,11 +388,14 @@ impl App {
         // A count for the open confirmation, if it has come in.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
             let got = c.counting.as_ref().and_then(|(n, _)| n.rx.try_recv().ok());
-            if let (Some((files, bytes)), Some((_, line))) = (got, c.counting.take()) {
-                if let Some(l) = c.body.get_mut(line) {
-                    *l = Self::count_label(files, bytes);
+            // Taken only once the count is in, as the view above (#6).
+            if let Some((files, bytes)) = got {
+                if let Some((_, line)) = c.counting.take() {
+                    if let Some(l) = c.body.get_mut(line) {
+                        *l = Self::count_label(files, bytes);
+                    }
+                    changed = true;
                 }
-                changed = true;
             }
         }
         changed |= self.poll_comparing();

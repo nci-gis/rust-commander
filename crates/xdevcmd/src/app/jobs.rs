@@ -16,11 +16,27 @@ impl App {
     /// A plan is being made for the open confirmation (`--screenshot` lets it finish
     /// before the next key, so a test sees the same dialog however fast the disk).
     pub fn planning(&self) -> bool {
-        matches!(&self.modal, Some(Modal::Confirm(c)) if c.planning.is_some())
+        // Counting too (a delete's "counting…"): on a slow Windows runner the frame was
+        // taken before the count came (a_confirmation_counts_one_file_in_the_singular,
+        // run 43715312082). Only `--screenshot` asks.
+        matches!(&self.modal, Some(Modal::Confirm(c)) if c.planning.is_some() || c.counting.is_some())
     }
 
     /// The viewer has lines on screen drawn plain until its scan reaches them
     /// (`--screenshot` waits for it, as for a job).
+    /// A file pane on show is still reading its directory: one slower than
+    /// [`crate::pane::files::SLOW`], such as `C:\` on a busy Windows runner after Ctrl+\.
+    /// `--screenshot` waits for it, so a frame never shows the old directory under a key
+    /// that left it.
+    pub fn reading_dir(&self) -> bool {
+        self.file_panes().iter().any(|id| {
+            self.panes
+                .get(id)
+                .and_then(Pane::as_files)
+                .is_some_and(|f| f.is_reading())
+        })
+    }
+
     pub fn syntax_waiting(&self) -> bool {
         matches!(&self.modal, Some(Modal::View(v)) if v.syntax_waiting())
     }
@@ -112,24 +128,63 @@ impl App {
 
     /// Jobs still running: ask first. True when the question is now on screen.
     pub(super) fn ask_before_quitting(&mut self) -> bool {
-        if self.jobs.is_empty() {
+        let programs = self
+            .panel_ref()
+            .map(|p| p.busy_programs())
+            .unwrap_or_default();
+        self.ask_before_quitting_with(programs)
+    }
+
+    /// [`ask_before_quitting`](Self::ask_before_quitting), given the programs running
+    /// in the shells: asks when jobs run or a program does, as quitting ends both. An
+    /// idle shell does not ask.
+    pub(super) fn ask_before_quitting_with(&mut self, programs: Vec<String>) -> bool {
+        let n = self.jobs.len();
+        if n == 0 && programs.is_empty() {
             return false;
         }
-        let n = self.jobs.len();
-        self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Quit?".into(),
-            body: vec![
-                format!(
-                    "{n} job{} still running in the background.",
-                    if n == 1 { " is" } else { "s are" }
-                ),
+        let mut body = Vec::new();
+        if n > 0 {
+            body.push(format!(
+                "{n} job{} still running in the background.",
+                if n == 1 { " is" } else { "s are" }
+            ));
+            body.push(
                 "Quitting cancels them; a file being written is removed, not left half done."
                     .into(),
-            ],
+            );
+        }
+        if !programs.is_empty() {
+            let shown = programs
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = programs.len().saturating_sub(3);
+            body.push(format!(
+                "Running in the terminal: {shown}{}. Quitting ends {}.",
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                },
+                if programs.len() == 1 { "it" } else { "them" }
+            ));
+        }
+        let yes = if n > 0 {
+            "cancel them and quit"
+        } else {
+            "quit anyway"
+        };
+        self.modal = Some(Modal::Ask(modal::Ask {
+            title: "Quit?".into(),
+            body,
             danger: true,
-            yes: Some(("cancel them and quit".into(), Cmd::QuitAnyway)),
+            yes: Some((yes.into(), Cmd::QuitAnyway)),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -222,16 +277,17 @@ impl App {
                 tidy(orig)
             ));
         }
-        // A permanent delete is not offered again: it would go on with one Enter, where
-        // Shift+F8 itself takes only Y.
-        let resumable = found.into_iter().find(|i| {
-            let kind_ok = match i.kind.as_str() {
-                "copy" | "move" => true,
-                "delete" => i.to_trash,
-                _ => false,
-            };
-            kind_ok && !i.sources.is_empty()
-        });
+        // A permanent delete is not offered again (`offered`). One job at a time: any
+        // other keeps its journal and is offered at the next start.
+        // Newest first (journal::recover): the job just interrupted. The others wait.
+        let waiting = found
+            .iter()
+            .filter(|i| i.offered())
+            .count()
+            .saturating_sub(1);
+        let resumable = found.into_iter().find(|i| i.offered());
+        let mut discard = None;
+        let mut check = None;
         let yes = resumable.map(|it| {
             let what = match it.kind.as_str() {
                 "copy" => "a copy",
@@ -248,17 +304,88 @@ impl App {
                 "It was {what} of {}{to}.",
                 Self::describe(&it.sources)
             ));
-            body.push("Continue it? What was done is skipped; a file cut short starts".into());
-            body.push("again; you are asked about any other file already there.".into());
+            if it.kind == "delete" {
+                body.push("Continue it? What is left goes to the trash.".into());
+            } else {
+                body.push("Continue it? What was done is skipped; a file cut short starts".into());
+                body.push("again; you are asked about any other file already there.".into());
+            }
+            // B2 (owner, 2026-11-15): after a power cut a copied file can be short or
+            // hold no data under its real name. Trusting is the default (Enter).
+            if it.kind != "delete" {
+                // The owner, 2026-11-17: what C is for, not one cause of it.
+                body.push("C reads every copied file again against its source (slow): for".into());
+                body.push("when a copy may be damaged, as after a power cut or a drive pulled out.".into());
+                check = Some((
+                    'c',
+                    "check (slow)".to_string(),
+                    Cmd::ResumeChecked(Box::new(it.clone())),
+                ));
+            }
+            let n = it.partial.len();
+            if n > 0 {
+                let kept: u64 = it.partial.iter().map(|p| p.bytes).sum();
+                body.push(format!(
+                    "{n} big file{} kept part way ({}): continued from there, unless the source changed.",
+                    plural(n),
+                    xdevcmd_core::format::human_size(kept),
+                ));
+            }
+            // The owner, 2026-11-17: a way to say "never mind", not only "later". The
+            // journal goes (and any part kept); what the run copied or moved stays where
+            // it is, and Ctrl+Z, which does not outlive a run, cannot undo it.
+            body.push(match (it.kind.as_str(), n) {
+                ("delete", _) => "F forgets it: nothing more is done. What it moved to the trash".into(),
+                (_, 0) => "F forgets it: nothing more is done. What it did stays where it is,".into(),
+                _ => "F forgets it: nothing more is done, the parts kept are removed. What it".into(),
+            });
+            body.push(match (it.kind.as_str(), n) {
+                ("delete", _) => "stays there, and Ctrl+Z cannot undo that.".into(),
+                (_, 0) => "and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
+                _ => "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
+            });
+            discard = Some((
+                'f',
+                "forget it".to_string(),
+                Cmd::Discard(Box::new(it.clone())),
+            ));
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
         });
+        // The dialog draws a third key only after a second: a delete has no C, so F
+        // takes the second place, or it worked unshown (QA of #42, P1). With C and F,
+        // Esc is not on the key row; the body says what it does.
+        if check.is_none() {
+            check = discard.take();
+        }
+        // Always said when a job is offered: its journal stays until it is answered (#3).
+        // In the body: a footnote beside three buttons had no room and was never drawn
+        // (the owner and QA, 2026-11-17).
+        if yes.is_some() {
+            body.push(String::new());
+            let kept = yes
+                .as_ref()
+                .is_some_and(|(_, c)| matches!(c, Cmd::Resume(it) if !it.partial.is_empty()));
+            body.push(if kept {
+                "Esc: asked again at the next start, the kept parts left as they are.".into()
+            } else {
+                "Esc: asked again at the next start.".into()
+            });
+            if waiting > 0 {
+                body.push(format!(
+                    "{waiting} older interrupted job{} wait{}: each is asked at a later start.",
+                    plural(waiting),
+                    if waiting == 1 { "s" } else { "" }
+                ));
+            }
+        }
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Interrupted".into(),
             body,
             danger: false,
             yes,
             buttons: Vec::new(),
-            also: None,
+            also: check,
+            more: discard,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -267,28 +394,50 @@ impl App {
     /// Run an interrupted job again: what it finished (identical at the destination) is
     /// skipped and anything else already there is asked about, never decided; a move or
     /// delete on the sources still there.
-    pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted) {
-        // What it finished is left; what is gone cannot be done again.
+    /// `verify`: trust nothing the run made ([`ops::Request::verify`]).
+    pub(super) fn resume(&mut self, it: xdevcmd_core::journal::Interrupted, verify: bool) {
+        // What it finished is left, unless C asked to check it (#3); what is gone cannot
+        // be done again. A set, not `Vec::contains`: 30,000 sources took 21 s.
+        let done: HashSet<&PathBuf> = it.done.iter().collect();
         let still: Vec<PathBuf> = it
             .sources
             .iter()
-            .filter(|p| !it.done.contains(p) && std::fs::symlink_metadata(p).is_ok())
+            .filter(|p| (verify || !done.contains(p)) && std::fs::symlink_metadata(p).is_ok())
             .cloned()
             .collect();
         if still.is_empty() {
-            self.status = "nothing left to do: every source has gone".into();
+            let f = xdevcmd_core::journal::discard(&it);
+            self.status = match f.left.len() {
+                0 => "nothing left to do: every source has gone".into(),
+                l => format!(
+                    "nothing left to do: every source has gone; {l} kept part{} could not be removed, offered again at the next start",
+                    if l == 1 { "" } else { "s" },
+                ),
+            };
             return;
         }
-        let mut req = match (it.kind.as_str(), it.dest) {
+        let mut req = match (it.kind.as_str(), it.dest.clone()) {
             ("copy", Some(d)) => Request::copy(still, d),
             ("move", Some(d)) => Request::mv(still, d),
             ("delete", _) if it.to_trash => Request::delete(still, true),
-            _ => return,
+            _ => {
+                let _ = xdevcmd_core::journal::discard(&it);
+                self.status = "nothing to resume: the job's journal is incomplete".into();
+                return;
+            }
         };
         req.existing = ops::Existing::Resume;
+        // Copy As: the name it was given, not the source's (repo review RR04).
+        req.rename_to = it.rename_to.clone();
         // The plan's decisions stand (Round 030): what the user chose to leave is left,
         // what they chose to replace is replaced while it is still that file.
         req.expect = it.decided.iter().cloned().collect();
+        // Big files cut short after a checkpoint go on from there (Round 033).
+        req.partial = it.partial.clone();
+        req.resumed = it.journal.clone();
+        // Folders it finished are not walked again (Round 033).
+        req.done_dirs = it.done.iter().cloned().collect();
+        req.verify = verify;
         let kind = req.kind;
         self.remember_job(&req);
         self.modal = Some(Modal::Job(Job::new(kind, ops::start(req))));
@@ -367,7 +516,10 @@ impl App {
         if !matches!(&self.last_undo, Some(Undo::Cannot(w)) if w == COPY_RUNNING) {
             return;
         }
-        self.last_undo = Some(if s.made_over {
+        self.last_undo = Some(if s.stopped {
+            // What it made before it stopped is not listed (red-team on H-10).
+            Undo::Cannot("a copy that stopped on an internal error".into())
+        } else if s.made_over {
             Undo::Cannot(format!(
                 "a copy of more than {} items",
                 xdevcmd_core::ops::MADE_CAP
@@ -458,6 +610,7 @@ impl App {
             yes: Some(("undo".into(), Cmd::Undo)),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -465,13 +618,19 @@ impl App {
 
     /// Rename many: `moves`, with safe operations' journal when `safe`. `None` when its
     /// journal could not be written: nothing was renamed, and a dialog says why and
-    /// offers to rename without it (`undoing`: this is an undo).
+    /// offers to rename without it (`undoing`: this is an undo); `None` too when a name
+    /// is guarded (#2), said on the status line.
     fn rename_many(
         &mut self,
         moves: Vec<(PathBuf, PathBuf)>,
         safe: bool,
         undoing: bool,
     ) -> Option<xdevcmd_core::batch_rename::Outcome> {
+        let from: Vec<PathBuf> = moves.iter().map(|(f, _)| f.clone()).collect();
+        // A guarded name (#2): nothing renamed, the status says why.
+        if self.guard_refused(&from) {
+            return None;
+        }
         let out = xdevcmd_core::batch_rename::apply(&moves, safe);
         let Some(why) = out.no_journal else {
             self.reload_all();
@@ -495,6 +654,7 @@ impl App {
             )),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -591,12 +751,30 @@ impl App {
                 return;
             }
         };
+        // Under --root: the places an undo writes to (red-team on H-03: a folder
+        // replaced by a link out between the job and the undo took the files out).
+        let policy = xdevcmd_core::policy::get();
+        let outside = match &plan {
+            Plan::Rename(moves) => moves
+                .iter()
+                .any(|(a, b)| !policy.allows_at(a) || !policy.allows_at(b)),
+            Plan::Move { into, .. } => !policy.allows_at(into),
+            _ => false,
+        };
+        if outside {
+            self.status =
+                "nothing undone: that place is outside the root xdevcmd is confined to".into();
+            return;
+        }
         match plan {
             Plan::Rename(moves) => {
                 self.undo_rename(moves, xdevcmd_core::ops::safe());
                 return;
             }
             Plan::Move { back, into } => {
+                if self.guard_refused(&back) {
+                    return;
+                }
                 let request = Request::mv(back, into);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
                 self.status = format!("undoing the {}", u.describe());

@@ -61,10 +61,72 @@ impl App {
         }
     }
 
+    /// #2: whether a target is never deleted, moved or renamed — a root, the home or a
+    /// folder above it, a path with `.`/`..` (core's [`xdevcmd_core::protect`]), or the
+    /// folder the focused pane shows or one above it. Said on the status line; true when
+    /// refused. The engine checks the first kinds again before a delete or a move.
+    pub(super) fn guard_refused(&mut self, targets: &[PathBuf]) -> bool {
+        use crate::refusal::{Guard, Refusal};
+        use xdevcmd_core::protect::{self, Guarded};
+        let homes = protect::homes();
+        // Every folder something is in now: each file pane's (a list's own root
+        // included) and each shell's (red-team of #2: not the focused pane's alone).
+        let mut inside: Vec<PathBuf> = self
+            .panes
+            .values()
+            .filter_map(Pane::as_files)
+            .map(|f| f.cwd.clone())
+            .collect();
+        inside.extend(self.panel_ref().map(|p| p.shell_dirs()).unwrap_or_default());
+        let real: Vec<PathBuf> = inside
+            .iter()
+            .filter_map(|d| xdevcmd_core::paths::canonical(d).ok())
+            .collect();
+        // Resolved only when a target's name is one of those folders' names: a link on
+        // the way can make it one of them; any other name cannot be.
+        let names: Vec<std::ffi::OsString> = inside
+            .iter()
+            .chain(&real)
+            .flat_map(|d| d.ancestors())
+            .filter_map(|p| p.file_name().map(|n| n.to_os_string()))
+            .collect();
+        for t in targets {
+            let guard = match protect::protected(t, &homes) {
+                Some(Guarded::Root) => Some(Guard::Root),
+                Some(Guarded::Home) => Some(Guard::Home),
+                Some(Guarded::NotPlain) => Some(Guard::NotPlain),
+                None => {
+                    let holds = inside.iter().any(|d| d.starts_with(t))
+                        || t.file_name().is_some_and(|n| names.iter().any(|m| m == n))
+                            && xdevcmd_core::paths::canonical(t)
+                                .is_ok_and(|rt| real.iter().any(|d| d.starts_with(&rt)));
+                    holds.then_some(Guard::Cwd)
+                }
+            };
+            let Some(guard) = guard else {
+                continue;
+            };
+            Refusal::Protected(guard).log();
+            let name = xdevcmd_core::format::elide_middle(&tidy(t), 20);
+            self.status = match guard {
+                Guard::Cwd => {
+                    format!("{name} holds a folder shown or in a shell \u{2014} not removed")
+                }
+                Guard::NotPlain => format!("{name} names a folder by . or .. \u{2014} not touched"),
+                Guard::Root | Guard::Home => format!("{name} is never deleted or moved"),
+            };
+            return true;
+        }
+        false
+    }
+
     pub(super) fn begin_transfer(&mut self, kind: ops::Kind) {
         let sources = self.selection();
         if sources.is_empty() {
             self.status = "nothing selected".into();
+            return;
+        }
+        if kind == ops::Kind::Move && self.guard_refused(&sources) {
             return;
         }
         let choices = self.transfer_targets();
@@ -130,6 +192,9 @@ impl App {
         let targets = self.selection();
         if targets.is_empty() {
             self.status = "nothing selected".into();
+            return;
+        }
+        if self.guard_refused(&targets) {
             return;
         }
         let mut body = vec![Self::describe(&targets), String::new(), COUNTING.into()];
@@ -212,18 +277,22 @@ impl App {
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return;
         };
-        let Some(e) = f.current().filter(|e| !e.is_parent()) else {
+        let Some(e) = f.current().filter(|e| !e.is_parent()).cloned() else {
             self.status = "nothing to rename here".into();
             return;
         };
+        let (label, dir) = (format!("in {}", f.cwd.display()), f.cwd.clone());
+        if self.guard_refused(std::slice::from_ref(&e.path)) {
+            return;
+        }
         self.modal = Some(Modal::Input(Input {
             title: "Rename".into(),
-            label: format!("in {}", f.cwd.display()),
+            label,
             edit: LineEdit::for_rename(&e.name, e.is_dir()),
             kind: InputKind::Rename {
                 from: e.path.clone(),
             },
-            dir: f.cwd.clone(),
+            dir,
             buttons: Vec::new(),
             error: None,
         }));
@@ -231,6 +300,23 @@ impl App {
 
     pub(super) fn apply_input(&mut self, i: Input) {
         let text = i.edit.text();
+        // A name for something new: a control character anywhere in what was typed is
+        // refused before the spaces are trimmed, or a tab or a newline at either end
+        // would go with them into another name (T5 on H-08). Pack, Save as and Log to
+        // file check the same in `typed_destination`.
+        if matches!(
+            i.kind,
+            InputKind::MkDir | InputKind::NewFile | InputKind::CopyAs { .. }
+        ) {
+            if let Some(c) = crate::safety::control_char(&text) {
+                let e = xdevcmd_core::rename::RenameError::BadChar(c);
+                self.modal = Some(Modal::Input(Input {
+                    error: Some(e.to_string()),
+                    ..i
+                }));
+                return;
+            }
+        }
         match &i.kind {
             InputKind::SaveAs => self.apply_save_as(i),
             InputKind::LogTo { .. } => self.apply_log_to(i),
@@ -240,21 +326,17 @@ impl App {
                     self.status = "no name given".into();
                     return;
                 }
+                // Folders may be nested (`a/b`): control characters were refused above,
+                // in the whole text.
                 let target = i.dir.join(name);
                 if let Err(e) = xdevcmd_core::policy::guard_write() {
                     self.status = e.to_string();
                     return;
                 }
                 let first = xdevcmd_core::undo::first_missing(&target);
-                // Under --root: no `..` (create_dir_all would follow it out), and the
-                // directory it is made in must be inside, links resolved.
-                let climbs = Path::new(name)
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir));
-                let inside = first
-                    .parent()
-                    .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
-                if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
+                // Under --root: the one check of a path to make (no `..` in what is still
+                // to make: create_dir_all would follow it out).
+                if !xdevcmd_core::policy::get().allows_at(&target) {
                     self.status = "outside the root xdevcmd is confined to".into();
                     return;
                 }
@@ -391,26 +473,20 @@ impl App {
                 };
             }
             InputKind::Pack { sources } => {
-                let typed = text.trim();
-                if typed.is_empty() {
-                    return;
-                }
-                let mut dest = expand_tilde(typed);
-                if dest.is_relative() {
-                    dest = i.dir.join(dest);
-                }
-                // Under --root, as F7: no `..`, and the directory it goes in must be
-                // inside, links resolved.
-                let climbs = Path::new(typed)
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir));
-                let inside = dest
-                    .parent()
-                    .is_some_and(|p| xdevcmd_core::policy::get().allows(p));
-                if xdevcmd_core::policy::get().root.is_some() && (climbs || !inside) {
-                    self.status = "outside the root xdevcmd is confined to".into();
-                    return;
-                }
+                // The one check of a typed file to make: inside the root, no control
+                // character (the name is prefilled from one someone else chose), not a
+                // directory, in a folder that exists.
+                let dest = match self.typed_destination(&i) {
+                    Ok(Some(d)) => d,
+                    Ok(None) => return,
+                    Err(why) => {
+                        self.modal = Some(Modal::Input(Input {
+                            error: Some(why),
+                            ..i
+                        }));
+                        return;
+                    }
+                };
                 if xdevcmd_core::archive::format_of(&dest).is_none() {
                     self.modal = Some(Modal::Input(Input {
                         error: Some("the name must end in .zip, .tar, .tar.gz or .tgz".into()),
@@ -524,6 +600,7 @@ impl App {
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));
@@ -688,6 +765,7 @@ impl App {
             yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
             buttons: Vec::new(),
             also: None,
+            more: None,
             footnote: None,
             pictures: Vec::new(),
         }));

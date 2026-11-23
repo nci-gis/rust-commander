@@ -96,7 +96,130 @@ pub enum Action {
     SyncDirs,
     MenuBar,
     Usage,
+    Messages,
     ContextMenu,
+}
+
+impl Action {
+    /// What `self` does, for the modes that turn things off: it writes or runs (worded
+    /// for a refusal, "copying and moving"), it uses the terminal, or it only reads or
+    /// moves the view. Every action is named, no `_` (both clippy lints deny one, the
+    /// single-variant one included): a new action does not build until it is sorted
+    /// here (plan v3 H-05; cosf #4, Open with…'s menu slipped through a `_`).
+    #[deny(
+        clippy::wildcard_enum_match_arm,
+        clippy::match_wildcard_for_single_variants
+    )]
+    pub fn effect(self) -> Effect {
+        use Action as A;
+        use Effect::{Reads, Terminal, Writes};
+        match self {
+            A::Copy | A::Move => Writes("copying and moving"),
+            A::Delete | A::DeletePermanent => Writes("deleting"),
+            A::Rename | A::BulkRename => Writes("renaming"),
+            A::NewFile | A::CopyAs | A::Symlink | A::Pack | A::Unpack => Writes("creating files"),
+            A::SyncDirs => Writes("synchronising"),
+            A::Permissions => Writes("changing permissions"),
+            A::MkDir => Writes("creating directories"),
+            A::Edit => Writes("editing"),
+            A::OpenWith | A::OpenWithMenu => Writes("opening files in other programs"),
+            A::Undo => Writes("undoing"),
+            A::FocusTerminal
+            | A::ToggleTerminal
+            | A::TerminalHistory
+            | A::CdTerminalHere
+            | A::GoShellDir
+            | A::TypeNames
+            | A::NewTerminal
+            | A::UserMenu => Terminal,
+            A::Quit
+            | A::Help
+            | A::Refresh
+            | A::ToggleHidden
+            | A::FocusNextPane
+            | A::NewTab
+            | A::CloseTab
+            | A::NextTab
+            | A::PrevTab
+            | A::GoTab
+            | A::NextSplit
+            | A::SplitRight
+            | A::SplitDown
+            | A::ClosePane
+            | A::ResizeLeft
+            | A::ResizeRight
+            | A::ResizeUp
+            | A::ResizeDown
+            | A::Zoom
+            | A::CursorUp
+            | A::CursorDown
+            | A::PageUp
+            | A::PageDown
+            | A::Top
+            | A::Bottom
+            | A::Open
+            | A::EnterDir
+            | A::Parent
+            | A::GoHome
+            | A::GoRoot
+            | A::Mark
+            | A::MarkAndNext
+            | A::InvertMarks
+            | A::MarkAll
+            | A::UnmarkAll
+            | A::View
+            | A::SortName
+            | A::SortExt
+            | A::SortSize
+            | A::SortModified
+            | A::QuickSearch
+            | A::Filter
+            | A::GoToPath
+            | A::Back
+            | A::Forward
+            | A::History
+            | A::ShowList
+            | A::Hotlist
+            | A::QuitNoCd
+            | A::SwapPanes
+            | A::MirrorPane
+            | A::MarkPattern
+            | A::UnmarkPattern
+            | A::CalcSizes
+            | A::FindFiles
+            | A::QuickView
+            | A::Checksum
+            | A::CompareDirs
+            | A::MenuBar
+            | A::Usage
+            | A::Messages
+            | A::ContextMenu => Reads,
+        }
+    }
+
+    /// What `self` changes on disk or runs, worded for a refusal, or `None`.
+    pub fn writes(self) -> Option<&'static str> {
+        match self.effect() {
+            Effect::Writes(what) => Some(what),
+            Effect::Terminal | Effect::Reads => None,
+        }
+    }
+
+    /// Whether `self` uses the terminal: turned off in restricted mode.
+    pub fn uses_terminal(self) -> bool {
+        matches!(self.effect(), Effect::Terminal)
+    }
+}
+
+/// What an [`Action`] does, for the modes that turn things off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    /// Changes the disk or runs a program; the words name it in a refusal.
+    Writes(&'static str),
+    /// Uses the terminal (restricted mode turns it off).
+    Terminal,
+    /// Only reads, or moves the view.
+    Reads,
 }
 
 /// One binding: its config name, where the help screen lists it, what it does, and its
@@ -130,7 +253,9 @@ pub const BINDINGS: &[Binding] = &[
         title: "Quit",
         group: "General",
         about: "Quit xdevcmd",
-        keys: &["F10", "q", "Ctrl+q"],
+        // No plain `q`: one stray key in a file pane ended every shell (review,
+        // 2026-11-14). `quit = ["F10", "q", "Ctrl+q"]` under [keys] brings it back.
+        keys: &["F10", "Ctrl+q"],
     },
     Binding {
         action: Action::Help,
@@ -577,7 +702,8 @@ pub const BINDINGS: &[Binding] = &[
         title: "Quit without cd",
         group: "General",
         about: "Quit, leaving the shell where it was (with --cwd-file)",
-        keys: &["Q"],
+        // Two keys, never one: a stray Shift+q quit at once (B4), as q did before.
+        keys: &["Alt+x q"],
     },
     Binding {
         action: Action::QuickSearch,
@@ -665,7 +791,7 @@ pub const BINDINGS: &[Binding] = &[
         name: "undo",
         title: "Undo",
         group: "Files",
-        about: "Undo the last rename, move, new directory or new file (asks first)",
+        about: "Undo the last copy, move, rename, sync, new item or F8 delete (asks first)",
         keys: &["Ctrl+z"],
     },
     Binding {
@@ -838,6 +964,14 @@ pub const BINDINGS: &[Binding] = &[
         // 2026-11-12), and Usage is a row in F1 and in the Help menu.
         keys: &["Shift+F1"],
     },
+    Binding {
+        action: Action::Messages,
+        name: "messages",
+        title: "Messages",
+        group: "General",
+        about: "The status line's last 50 messages, each whole, with the time",
+        keys: &["Alt+m"],
+    },
 ];
 
 /// The order groups are shown in, F1 and `--print-keys` alike. A group not listed here
@@ -993,6 +1127,7 @@ impl Action {
             | A::Help
             | A::MenuBar
             | A::Usage
+            | A::Messages
             | A::UserMenu
             | A::SplitRight
             | A::SplitDown
@@ -1157,7 +1292,8 @@ impl Default for Keymap {
     }
 }
 
-fn action_name(a: Action) -> &'static str {
+/// The `[keys]` name of `a` ("delete", "copy"), as config.toml writes it.
+pub fn action_name(a: Action) -> &'static str {
     BINDINGS
         .iter()
         .find(|b| b.action == a)
@@ -1598,6 +1734,7 @@ mod tests {
             Action::SyncDirs,
             Action::MenuBar,
             Action::Usage,
+            Action::Messages,
             Action::ContextMenu,
         ];
         for a in all {
@@ -1936,11 +2073,11 @@ mod tests {
             .apply(&km.to_table())
             .expect("what we print must parse");
         for b in BINDINGS {
-            let chord = parse_key(b.keys[0]).unwrap();
-            assert_eq!(
-                fresh.action_for(KeyEvent::new(chord.0, chord.1)),
-                Some(b.action)
-            );
+            let got = match parse_binding(b.keys[0]).unwrap() {
+                Keys::One(c) => fresh.action_for(KeyEvent::new(c.0, c.1)),
+                Keys::Two(first, c) => fresh.in_group(first, KeyEvent::new(c.0, c.1)),
+            };
+            assert_eq!(got, Some(b.action), "{}", b.keys[0]);
         }
     }
 }

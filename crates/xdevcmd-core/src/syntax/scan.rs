@@ -571,6 +571,8 @@ mod tests {
         f.push_str("fn tail() {}\n");
         let path = temp("long-jump.rs", f.as_bytes());
         let mut doc = Document::open(&path).unwrap();
+        // 6 MiB: past what open indexes itself (A03).
+        doc.wait_indexed();
         let mut h = Highlighter::new(Lang::Rust);
         let t = Instant::now();
         assert_eq!(
@@ -578,11 +580,9 @@ mod tests {
             None,
             "6 MiB before it: plain for now"
         );
-        assert!(
-            t.elapsed() < Duration::from_millis(100),
-            "{:?}",
-            t.elapsed()
-        );
+        // Lexing 6 MiB on the spot takes seconds; a loaded CI runner can take more than
+        // 100 ms for the plain answer (windows-latest, 2026-11-16): the bound is 1 s.
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
         h.scan_file(&path, doc.line_count());
         wait(&h);
         let got = h.spans(&mut doc, 200).expect("from a checkpoint");

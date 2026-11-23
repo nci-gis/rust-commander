@@ -21,8 +21,28 @@ const BUF: usize = 256 * 1024;
 /// [`MOVE_BATCH_BYTES`] of them, whichever comes first.
 const MOVE_BATCH_FILES: usize = 64;
 const MOVE_BATCH_BYTES: u64 = 64 << 20;
+/// Group commit (Round 033): a replaced file this small, on a local drive, waits in a
+/// batch for one parallel sync of the batch instead of its own sync on the way.
+const GROUP_FILE_MAX: u64 = 1 << 20;
+/// A batch is synced at this many bytes...
+const GROUP_BATCH_BYTES: u64 = 16 << 20;
+/// ...or once its first file has waited this long, so the bar and the files keep moving.
+const GROUP_BATCH_AGE: std::time::Duration = std::time::Duration::from_secs(1);
+/// After this many batched files the job tries other thread counts on its next files
+/// (the probe), and keeps the fastest. Smaller jobs keep the system's default.
+const GROUP_PROBE_AFTER: u64 = 1000;
+/// The thread counts the probe tries (the owner: 2 rather than 1, at most 32).
+const GROUP_PROBE: [usize; 4] = [2, 8, 16, 32];
+/// A big file copied under a temporary name is synced every this many bytes and the
+/// journal told how far it got, so a run that dies goes on from there (Round 033): at
+/// most this much is copied again. A file no bigger has no checkpoint.
+pub const CHECKPOINT: u64 = 256 << 20;
 /// Report at most this often, so a directory of small files does not drown the UI.
 const PROGRESS_STEP: u64 = 1 << 20;
+/// Bytes a `copy_file_range` step asks the kernel for: progress and Esc are seen
+/// between steps (item 22).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const KERNEL_CHUNK: usize = 4 << 20;
 /// And at least this often while anything moves.
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -105,9 +125,30 @@ pub struct Request {
     /// between two ways of writing, and tests set it here rather than in a global
     /// other tests read.
     pub safe: bool,
+    /// The platform's fast copy for this job (item 22, `[general] fast_copy`), taken
+    /// as `safe` is.
+    pub fast: bool,
     /// The waits between tries of a file that failed with an error that passes (a
     /// network one): [`BACKOFF_SECS`]; then the user is asked. Tests shorten them.
     pub backoff: Vec<std::time::Duration>,
+    /// Bytes between a big file's checkpoints ([`CHECKPOINT`]; 0: none). Tests make it
+    /// small.
+    pub checkpoint: u64,
+    /// Resume: big files an interrupted run had copied part of
+    /// ([`crate::journal::Interrupted::partial`]), each taken over where it stopped.
+    pub partial: Vec<crate::journal::Partial>,
+    /// Resume: the interrupted run's journal, which this job's own replaces.
+    pub resumed: Option<PathBuf>,
+    /// Resume: source folders the interrupted run finished
+    /// ([`crate::journal::Interrupted::done`]): neither counted nor walked again while
+    /// their copy is still there.
+    pub done_dirs: std::collections::HashSet<PathBuf>,
+    /// Resume, checked (B2, owner 2026-11-15): trust nothing the interrupted run made.
+    /// Finished folders are walked again, and a file at the destination that looks
+    /// identical (size and date) is read with its source and copied again if the two
+    /// differ: after a power cut, a new file can have the right size and no data.
+    /// Slow (it reads both sides of everything copied), so off unless asked for.
+    pub verify: bool,
 }
 
 /// The owner's decision 2, Round 031: five tries more, about 30 s in all, then the
@@ -213,7 +254,13 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            fast: crate::fastcopy::enabled(),
             backoff: backoff(),
+            checkpoint: CHECKPOINT,
+            partial: Vec::new(),
+            resumed: None,
+            done_dirs: Default::default(),
+            verify: false,
         }
     }
     pub fn mv(sources: Vec<PathBuf>, dest: PathBuf) -> Self {
@@ -232,7 +279,13 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            fast: crate::fastcopy::enabled(),
             backoff: backoff(),
+            checkpoint: CHECKPOINT,
+            partial: Vec::new(),
+            resumed: None,
+            done_dirs: Default::default(),
+            verify: false,
         }
     }
     pub fn delete(targets: Vec<PathBuf>, to_trash: bool) -> Self {
@@ -251,7 +304,13 @@ impl Request {
             existing: Existing::Ask,
             planned: None,
             safe: safe(),
+            fast: crate::fastcopy::enabled(),
             backoff: backoff(),
+            checkpoint: CHECKPOINT,
+            partial: Vec::new(),
+            resumed: None,
+            done_dirs: Default::default(),
+            verify: false,
         }
     }
 }
@@ -421,7 +480,13 @@ pub enum Answer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Summary {
     pub done: u64,
+    /// A checked resume ([`Request::verify`]): files that looked identical but held
+    /// other bytes than their source, so were copied again. Also counted in `done`.
+    pub repaired: u64,
     pub skipped: u64,
+    /// Of `skipped`: a file and a folder of the same name, which never replace each
+    /// other (#5). Said, and the Job box stays open for it.
+    pub kind_skips: u64,
     pub failed: u64,
     pub bytes: u64,
     pub cancelled: bool,
@@ -443,9 +508,17 @@ pub struct Summary {
     pub replaced_for_good: u64,
     /// Files replaced whose old version went to the trash (Round 031).
     pub replaced_to_trash: u64,
+    /// The job's worker stopped on an internal error (a panic) and never said how it
+    /// ended: what it did is not all listed here (`made` among it). Set by the side
+    /// that saw it go; a worker never sets it.
+    pub stopped: bool,
     /// A move: each source that went, and where it is now (the sources the request
     /// named, not what is under them). Lists kept in the app follow them (Round 031).
     pub relocated: Vec<(PathBuf, PathBuf)>,
+    /// Files whose bytes the platform's fast copy moved (item 22): cloned by the drive,
+    /// and copied by the kernel (`copy_file_range`). The rest, xdevcmd read and wrote.
+    pub cloned: u64,
+    pub by_kernel: u64,
 }
 
 impl Summary {
@@ -457,9 +530,37 @@ impl Summary {
             Kind::Extract => "extracted",
             Kind::Pack => "packed",
         };
-        let mut s = format!("{} {verb}", self.done);
+        // What check C found comes first and whole: the status line elides the middle
+        // of a long line, and the job box cuts its end (hand test, 2026-11).
+        let mut s = if self.repaired > 0 {
+            format!("{} found different and copied again; ", self.repaired)
+        } else {
+            String::new()
+        };
+        s.push_str(&format!("{} {verb}", self.done));
+        // The engine that ran (item 22), when it was not xdevcmd's own loop: named
+        // alone when it did every file, counted when engines were mixed.
+        let fast = match (self.cloned, self.by_kernel) {
+            (0, 0) => None,
+            (n, 0) if n == self.done => Some("cloned".to_string()),
+            (0, n) if n == self.done => Some("by the kernel".to_string()),
+            (0, k) => Some(format!("{k} by the kernel")),
+            (c, 0) => Some(format!("{c} cloned")),
+            (c, k) => Some(format!("{c} cloned, {k} by the kernel")),
+        };
+        if let Some(f) = fast {
+            s.push_str(&format!(" ({f})"));
+        }
         if self.skipped > 0 {
             s.push_str(&format!(", {} skipped", self.skipped));
+            // #5: said every time, so a file and a folder of one name are never a
+            // silent skip.
+            if self.kind_skips > 0 {
+                s.push_str(&format!(
+                    " ({} a file and a folder of the same name: never replaced)",
+                    self.kind_skips
+                ));
+            }
         }
         if self.failed > 0 {
             s.push_str(&format!(", {} failed", self.failed));
@@ -599,12 +700,50 @@ pub fn start(req: Request) -> Handle {
             moved_file: None,
             safe: req.safe,
             recording: req.kind == Kind::Copy,
+            copying: req.kind == Kind::Copy,
+            plan_confirmed: req.planned.is_some(),
             trash_root: req.trash_root.clone(),
             backoff: req.backoff.clone(),
             retry: false,
             network: Default::default(),
             keeps: Default::default(),
             old_trashed: None,
+            group: Group::new(),
+            fast: req.fast,
+            engine: crate::fastcopy::Engine::Own,
+            checkpoint: req.checkpoint,
+            partials: req
+                .partial
+                .iter()
+                .map(|p| (p.dst.clone(), p.clone()))
+                .collect(),
+            ckpt: None,
+            // Checked: nothing is taken as finished, so every folder is walked.
+            done_dirs: if req.verify {
+                Default::default()
+            } else {
+                req.done_dirs.clone()
+            },
+            verify: req.verify && req.existing == Existing::Resume,
+            finished: Vec::new(),
+            dbg: crate::debuglog::on(crate::debuglog::Topic::Jobs).then(|| {
+                Box::new(Dbg {
+                    job: crate::debuglog::next_job(),
+                    started: std::time::Instant::now(),
+                    phases: Default::default(),
+                    small: Default::default(),
+                    large: Default::default(),
+                    batches: 0,
+                    scan: Default::default(),
+                    journal: Default::default(),
+                    checkpoints: 0,
+                    checkpoint_time: Default::default(),
+                    resumed_bytes: 0,
+                    dirs_done: 0,
+                    dirs_skipped: 0,
+                })
+            }),
+            phase: "start",
         };
         w.run(req);
     });
@@ -670,6 +809,10 @@ struct Worker {
     safe: bool,
     /// A copy: what it makes is kept in [`Summary::made`], for its undo.
     recording: bool,
+    /// A copy (the kind, whatever the undo cap did to `recording`).
+    copying: bool,
+    /// The job comes from a confirmed plan ([`Request::planned`]).
+    plan_confirmed: bool,
     /// [`Request::trash_root`]: tests' trash, for a replaced file too.
     trash_root: Option<PathBuf>,
     /// [`Request::backoff`].
@@ -682,6 +825,239 @@ struct Worker {
     keeps: std::collections::HashMap<PathBuf, bool>,
     /// The file the last replace put in the trash, for its undo.
     old_trashed: Option<crate::trashed::Trashed>,
+    /// Group commit: replacements written and waiting for their batch's sync.
+    group: Group,
+    /// `[general] fast_copy` when the job started (item 22). Nothing reads it where
+    /// there is no fast copy yet (Windows).
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "android", target_vendor = "apple")),
+        allow(dead_code)
+    )]
+    fast: bool,
+    /// The engine that moved the last file's bytes.
+    engine: crate::fastcopy::Engine,
+    /// Bytes between a big file's checkpoints (0: none).
+    checkpoint: u64,
+    /// Resume: big files cut short after a checkpoint, by destination, not yet taken
+    /// over. Whatever is left at the end goes.
+    partials: std::collections::HashMap<PathBuf, crate::journal::Partial>,
+    /// The big file being written, while it has checkpoints.
+    ckpt: Option<Ckpt>,
+    /// Resume: source folders finished before, skipped while their copy is there.
+    done_dirs: std::collections::HashSet<PathBuf>,
+    /// [`Request::verify`]: an identical-looking destination is compared byte by byte.
+    verify: bool,
+    /// Folders copied without a failure whose last files wait in the group batch: told
+    /// to the journal once that batch is through without one.
+    finished: Vec<PathBuf>,
+    /// The debug log's record of this job ([`crate::debuglog`]), when it logs jobs.
+    dbg: Option<Box<Dbg>>,
+    /// The step under way, for the debug log's error lines.
+    phase: &'static str,
+}
+
+/// The phases a file goes through, as the debug log names them.
+#[derive(Clone, Copy)]
+enum Phase {
+    /// Is a file there, and is it to be replaced.
+    Check,
+    /// The source's details, and the source opened.
+    Open,
+    /// The new file made (or cloned, on macOS).
+    Create,
+    /// The bytes moved.
+    Write,
+    /// Permissions and the date.
+    Attrs,
+    /// Data synced, on its own or in a batch.
+    Sync,
+    /// The journal, the old file to the trash, the rename.
+    Finish,
+}
+
+const PHASES: [&str; 7] = [
+    "check", "open", "create", "write", "attrs", "sync", "finish",
+];
+
+/// What the debug log is told at a job's end. Added up as the job goes: one line a
+/// job, not one a file.
+struct Dbg {
+    job: u64,
+    started: std::time::Instant,
+    phases: [std::time::Duration; 7],
+    /// Files of up to [`GROUP_FILE_MAX`] and larger: count, bytes, time in `copy_bytes`.
+    small: (u64, u64, std::time::Duration),
+    large: (u64, u64, std::time::Duration),
+    batches: u64,
+    scan: std::time::Duration,
+    /// The journal begun and synced, before the first step.
+    journal: std::time::Duration,
+    /// Big files' checkpoints taken, and the time their syncs took.
+    checkpoints: u64,
+    checkpoint_time: std::time::Duration,
+    /// Bytes not copied again: big files taken over from their checkpoint.
+    resumed_bytes: u64,
+    /// Folders told to the journal as finished, and folders a resume skipped.
+    dirs_done: u64,
+    dirs_skipped: u64,
+}
+
+/// The big file being written now, while it has checkpoints: see [`CHECKPOINT`].
+struct Ckpt {
+    part: crate::journal::Partial,
+    /// Where the next checkpoint is due.
+    next: u64,
+}
+
+/// A replacement written under its temporary name, its handle open, waiting for the
+/// batch's sync before the steps that finish it (Round 033).
+struct Pending {
+    src: PathBuf,
+    dst: PathBuf,
+    tmp: PathBuf,
+    file: File,
+    size: u64,
+    /// What was agreed about `dst` when it was asked or planned ([`Worker::agreed`]).
+    agreed: Option<(PathBuf, Ident)>,
+}
+
+/// The probe under way: thread counts still to try, and what each one tried measured
+/// (milliseconds a file).
+type Probe = (Vec<usize>, Vec<(usize, f64)>);
+
+/// Group commit's state (Round 033). Measured: a sync per file costs a journal commit
+/// each; syncs in flight together share one, so N files on T threads cost about N÷T
+/// commits. On the owner's Windows 11 laptop 16 threads were 4.6× one thread, 32 up
+/// to 8.5×; on ext4 16 were 9.7×; on macOS 8 were 2.4×.
+struct Group {
+    pending: Vec<Pending>,
+    bytes: u64,
+    since: Option<std::time::Instant>,
+    /// Threads for a batch's syncs.
+    threads: usize,
+    /// Files batched so far in this job.
+    batched: u64,
+    /// The probe under way: thread counts still to try, and what each one measured
+    /// (milliseconds a file).
+    probe: Option<Probe>,
+    probed: bool,
+    /// A flush is running: a question it asks (the journal's) must not flush again.
+    flushing: bool,
+    /// The file being written must not join a batch: a batch's own fallback.
+    off: bool,
+    /// Set by `copy_bytes` when the file just written joined the batch.
+    deferred: bool,
+    /// What the probe measured, once it chose (for the debug log).
+    tried: Vec<(usize, f64)>,
+}
+
+impl Group {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            bytes: 0,
+            since: None,
+            threads: group_default_threads(),
+            batched: 0,
+            probe: None,
+            probed: false,
+            flushing: false,
+            off: false,
+            deferred: false,
+            tried: Vec::new(),
+        }
+    }
+
+    /// The threads the next batch syncs on.
+    fn threads_now(&self) -> usize {
+        self.probe
+            .as_ref()
+            .and_then(|(left, _)| left.first().copied())
+            .unwrap_or(self.threads)
+    }
+
+    /// The files the next batch holds: four rounds of its threads, at least 16 while
+    /// probing (one sample) and 64 otherwise.
+    fn cap(&self) -> usize {
+        let t = self.threads_now();
+        if self.probe.is_some() {
+            (4 * t).max(16)
+        } else {
+            (4 * t).max(64)
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.pending.len() >= self.cap()
+            || self.bytes >= GROUP_BATCH_BYTES
+            || self.since.is_some_and(|s| s.elapsed() >= GROUP_BATCH_AGE)
+    }
+
+    /// A batch of `files` synced in `ms`: the probe's measurement, and its choice once
+    /// every count is tried. A probe starts once [`GROUP_PROBE_AFTER`] files went by.
+    fn measured(&mut self, files: usize, ms: f64) {
+        if let Some((left, got)) = self.probe.as_mut() {
+            if files > 0 {
+                got.push((left.remove(0), ms / files as f64));
+            }
+            if left.is_empty() {
+                if let Some(best) = got.iter().min_by(|a, b| a.1.total_cmp(&b.1)) {
+                    self.threads = best.0;
+                }
+                self.tried = std::mem::take(got);
+                self.probe = None;
+                self.probed = true;
+            }
+        } else if !self.probed && self.batched >= GROUP_PROBE_AFTER {
+            // The default first, then the others: what the default measures here is
+            // what the others are compared with.
+            let mut order = vec![self.threads];
+            order.extend(GROUP_PROBE.iter().filter(|n| **n != self.threads));
+            self.probe = Some((order, Vec::new()));
+        }
+    }
+}
+
+/// The thread count group commit starts with (Round 033: the CI sweep and the owner's
+/// laptop): 8 on macOS, where more did not help; 16 elsewhere.
+fn group_default_threads() -> usize {
+    if cfg!(target_os = "macos") {
+        8
+    } else {
+        16
+    }
+}
+
+/// Sync every pending file's data on `threads` threads, each taking the next file: per
+/// file, the error if its sync failed.
+fn sync_all(batch: &[Pending], threads: usize) -> Vec<Option<io::Error>> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut out: Vec<Option<io::Error>> = (0..batch.len()).map(|_| None).collect();
+    let failed: Vec<(usize, io::Error)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads.clamp(1, batch.len().max(1)))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut bad = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(p) = batch.get(i) else { break };
+                        if let Err(e) = crate::faults::sync_data(&p.file, &p.tmp) {
+                            bad.push((i, e));
+                        }
+                    }
+                    bad
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap_or_default())
+            .collect()
+    });
+    for (i, e) in failed {
+        out[i] = Some(e);
+    }
+    out
 }
 
 impl Worker {
@@ -693,22 +1069,51 @@ impl Worker {
             let _ = self.tx.send(Event::Done(self.sum.clone()));
             return;
         }
+        // The engine's own wall behind the UI's (#2): a root, the home or a folder above
+        // it, or a path with `.`/`..`, is never deleted or moved, whatever asked.
+        if matches!(req.kind, Kind::Delete | Kind::Move) {
+            let homes = crate::protect::homes();
+            let refused: Vec<String> = req
+                .sources
+                .iter()
+                .filter_map(|s| {
+                    crate::protect::protected(s, &homes)
+                        .map(|_| format!("{}: never deleted or moved", s.display()))
+                })
+                .collect();
+            if !refused.is_empty() {
+                self.sum.failed = refused.len() as u64;
+                self.sum.errors = refused;
+                let _ = self.tx.send(Event::Done(self.sum.clone()));
+                return;
+            }
+        }
+        let kind = match req.kind {
+            Kind::Copy if !req.pairs.is_empty() => "sync",
+            Kind::Copy => "copy",
+            Kind::Move => "move",
+            Kind::Delete => "delete",
+            Kind::Extract => "extract",
+            Kind::Pack => "pack",
+        };
         if self.safe {
-            let kind = match req.kind {
-                Kind::Copy if !req.pairs.is_empty() => "sync",
-                Kind::Copy => "copy",
-                Kind::Move => "move",
-                Kind::Delete => "delete",
-                Kind::Extract => "extract",
-                Kind::Pack => "pack",
-            };
             let sources: Vec<PathBuf> = if req.pairs.is_empty() {
                 req.sources.clone()
             } else {
                 req.pairs.iter().map(|(s, _)| s.clone()).collect()
             };
-            match crate::journal::Journal::begin(kind, &sources, req.dest.as_deref(), req.to_trash)
-            {
+            let t = self.clock();
+            let begun = crate::journal::Journal::begin_as(
+                kind,
+                &sources,
+                req.dest.as_deref(),
+                req.rename_to.as_deref(),
+                req.to_trash,
+            );
+            if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
+                d.journal = t.elapsed();
+            }
+            match begun {
                 Some(Ok(j)) => self.journal = Some(j),
                 // Asked before anything is done (the owner's decision, Round 029): go on
                 // as with safe operations off, said in the summary, or stop now.
@@ -719,6 +1124,45 @@ impl Worker {
                 Some(Err(_)) => {}
                 None => {}
             }
+        }
+        // Resume: the big files cut short are this job's now. Written into its journal,
+        // and on disk, before the old journal goes, so a kill in between still keeps
+        // them. Without a journal of its own, there are no checkpoints to keep them by:
+        // they are copied again from the start.
+        // The folders finished before stay finished if this run dies too. A line that
+        // fails only breaks the journal, asked about before a step that needs it.
+        // The plan's decisions, for a resume to keep them (Round 030): written before
+        // the first step, synced with the first commit like every line. A resume
+        // writes them again before its old journal goes, for a second kill (repo
+        // review RR05: they were lost then).
+        if req.planned.is_some() || req.resumed.is_some() {
+            if let Some(j) = self.journal.as_mut() {
+                for (dst, e) in &req.expect {
+                    let _ = j.decided(dst, e);
+                }
+            }
+        }
+        if let Some(j) = self.journal.as_mut() {
+            for d in &self.done_dirs {
+                if j.done(d).is_err() {
+                    break;
+                }
+            }
+        }
+        if let Some(old) = &req.resumed {
+            let kept = match self.journal.as_mut() {
+                Some(j) => self
+                    .partials
+                    .values()
+                    .try_for_each(|p| j.part(&p.part).and_then(|()| j.checkpoint(p)))
+                    .and_then(|()| j.commit(old))
+                    .is_ok(),
+                None => false,
+            };
+            if !kept {
+                self.drop_partials();
+            }
+            crate::journal::forget(old);
         }
         if matches!(req.kind, Kind::Extract | Kind::Pack) {
             self.archive_job(&req);
@@ -733,19 +1177,11 @@ impl Worker {
             Existing::Resume => self.resuming = true,
         }
         self.expect = req.expect.clone();
-        // The plan's decisions, for a resume to keep them (Round 030): written before
-        // the first step, synced with the first commit like every line.
-        if req.planned.is_some() {
-            if let Some(j) = self.journal.as_mut() {
-                for (dst, e) in &req.expect {
-                    let _ = j.decided(dst, e);
-                }
-            }
-        }
         if !req.pairs.is_empty() {
             let sources: Vec<PathBuf> = req.pairs.iter().map(|(s, _)| s.clone()).collect();
             let (files, bytes) = scan(&sources);
             let _ = self.tx.send(Event::Scanned { files, bytes });
+            self.log_start(&req, kind, files, bytes);
             for (src, into) in &req.pairs {
                 if self.stopped() {
                     break;
@@ -760,8 +1196,15 @@ impl Worker {
             self.finish();
             return;
         }
-        let (files, bytes) = req.planned.unwrap_or_else(|| scan(&req.sources));
+        let t = self.dbg.as_ref().map(|_| std::time::Instant::now());
+        let (files, bytes) = req
+            .planned
+            .unwrap_or_else(|| scan_skipping(&req.sources, &self.done_dirs));
+        if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
+            d.scan = t.elapsed();
+        }
         let _ = self.tx.send(Event::Scanned { files, bytes });
+        self.log_start(&req, kind, files, bytes);
 
         for src in &req.sources {
             if self.stopped() {
@@ -791,6 +1234,8 @@ impl Worker {
                 Kind::Extract | Kind::Pack => {}
             }
             // Finished with this source (not stopped part way): a resume leaves it.
+            // Its batch first: a resume leaves a source marked done.
+            self.flush_group();
             if !self.stopped() && matches!(req.kind, Kind::Copy | Kind::Move) {
                 if let Some(j) = self.journal.as_mut() {
                     let _ = j.done(src);
@@ -871,12 +1316,109 @@ impl Worker {
     /// The job is over: say how it went. A journal that broke on a line no step needed
     /// synced (a new file's) is said here, since nobody was asked about it.
     fn finish(&mut self) {
+        // Taken over by no file of this job (skipped, changed, or the job stopped
+        // first): they would never be finished.
+        self.drop_partials();
+        self.flush_group();
         self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
         self.sum.bytes = self.bytes_done;
         if let Some(why) = self.journal.as_ref().and_then(|j| j.broken()) {
             self.sum.journal_off = Some(format!("its journal failed: {why}"));
         }
+        self.log_end();
         let _ = self.tx.send(Event::Done(self.sum.clone()));
+    }
+
+    /// The debug log's first line for this job: its shape, no names.
+    fn log_start(&mut self, req: &Request, kind: &str, files: u64, bytes: u64) {
+        let Some(job) = self.dbg.as_ref().map(|d| d.job) else {
+            return;
+        };
+        let existing = match req.existing {
+            Existing::Ask => "ask",
+            Existing::Update => "update",
+            Existing::Skip => "skip",
+            Existing::Replace => "replace",
+            Existing::Resume => "resume",
+        };
+        let mut e = crate::debuglog::Event::new("job_start")
+            .num("job", job)
+            .word("kind", kind)
+            .num("sources", req.sources.len().max(req.pairs.len()) as u64)
+            .num("files", files)
+            .num("bytes", bytes)
+            .word("existing", existing)
+            .flag("planned", req.planned.is_some())
+            .flag("safe", self.safe)
+            .flag("fast", req.fast)
+            .num("group_threads", self.group.threads as u64);
+        if let Some(src) = req.sources.first().and_then(|p| p.parent()) {
+            e = e.word("src_fs", &crate::plan::fs_word(src));
+        }
+        if let Some(d) = req.dest.as_deref() {
+            e = e
+                .word("dst_fs", &crate::plan::fs_word(d))
+                .flag("dst_network", self.on_network(d));
+        }
+        e.write();
+        if req.existing == Existing::Resume {
+            crate::debuglog::Event::new("resume")
+                .num("job", job)
+                .num("sources_left", req.sources.len() as u64)
+                .num("decisions_kept", req.expect.len() as u64)
+                .write();
+        }
+    }
+
+    /// The debug log's last line for this job: what it did and where the time went.
+    fn log_end(&mut self) {
+        let Some(d) = self.dbg.take() else { return };
+        let s = &self.sum;
+        let mut e = crate::debuglog::Event::new("job_end")
+            .num("job", d.job)
+            .ms("ms", d.started.elapsed())
+            .ms("scan_ms", d.scan)
+            .ms("journal_ms", d.journal)
+            .num("done", s.done)
+            .num("skipped", s.skipped)
+            .num("failed", s.failed)
+            .flag("cancelled", s.cancelled)
+            .num("bytes", self.bytes_done)
+            .num("cloned", s.cloned)
+            .num("by_kernel", s.by_kernel)
+            .num("replaced_to_trash", s.replaced_to_trash)
+            .flag("journal_off", s.journal_off.is_some());
+        for (name, t) in PHASES.iter().zip(d.phases) {
+            e = e.ms(&format!("{name}_ms"), t);
+        }
+        e.num("small_files", d.small.0)
+            .num("small_bytes", d.small.1)
+            .ms("small_ms", d.small.2)
+            .num("large_files", d.large.0)
+            .num("large_bytes", d.large.1)
+            .ms("large_ms", d.large.2)
+            .num("batches", d.batches)
+            .num("checkpoints", d.checkpoints)
+            .ms("checkpoint_ms", d.checkpoint_time)
+            .num("resumed_bytes", d.resumed_bytes)
+            .num("dirs_done", d.dirs_done)
+            .num("dirs_skipped", d.dirs_skipped)
+            .num("group_threads", self.group.threads as u64)
+            .write();
+    }
+
+    /// The time now, when the debug log keeps time.
+    fn clock(&self) -> Option<std::time::Instant> {
+        self.dbg.as_ref().map(|_| std::time::Instant::now())
+    }
+
+    /// The time since `t` added to `p`, and `t` moved on to now.
+    fn lap(&mut self, p: Phase, t: &mut Option<std::time::Instant>) {
+        if let (Some(d), Some(start)) = (self.dbg.as_mut(), t.as_mut()) {
+            let now = std::time::Instant::now();
+            d.phases[p as usize] += now - *start;
+            *start = now;
+        }
     }
 
     /// Before a step that cannot be undone, about `about`: the journal's lines are on
@@ -900,6 +1442,12 @@ impl Worker {
     /// Ask whether to go on without the journal, which cannot be written (`why`). Its
     /// file goes either way: half a journal is not one.
     fn go_without_journal(&mut self, why: String) -> bool {
+        if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+            crate::debuglog::Event::new("journal_failed")
+                .num("job", self.dbg_job())
+                .word("phase", self.phase)
+                .write();
+        }
         self.journal = None;
         match self.ask(Question::NoJournal { error: why.clone() }) {
             Answer::Yes | Answer::YesToAll => {
@@ -944,7 +1492,12 @@ impl Worker {
                 // The archive is one new file: an existing one is asked about first.
                 match self.resolve_conflict(None, &dest, bytes) {
                     Some(true) => crate::archive::pack(&req.sources, &dest, self),
-                    _ => Ok(()),
+                    // Left as it is: counted, so the summary says so (red-team of #5).
+                    Some(false) => {
+                        self.sum.skipped += 1;
+                        Ok(())
+                    }
+                    None => Ok(()),
                 }
             }
         };
@@ -956,15 +1509,59 @@ impl Worker {
     }
 
     fn ask(&mut self, q: Question) -> Answer {
+        // What is waiting in a batch is finished first: a question can stay open for
+        // minutes, and what was done before it should be done.
+        self.flush_group();
+        let logged = crate::debuglog::on(crate::debuglog::Topic::Errors).then(|| {
+            let (q_word, path) = match &q {
+                Question::Conflict { path, changed, .. } if *changed => ("changed", Some(path)),
+                Question::Conflict { path, .. } => ("conflict", Some(path)),
+                Question::CrossDevice { path } => ("cross_device", Some(path)),
+                Question::TrashUnavailable { path, .. } => ("no_trash", Some(path)),
+                Question::Failed { path, .. } => ("failed", Some(path)),
+                Question::NoJournal { .. } => ("no_journal", None),
+            };
+            (
+                q_word,
+                path.map(|p| crate::debuglog::file_id(p)),
+                std::time::Instant::now(),
+            )
+        });
         if self.tx.send(Event::Ask(q)).is_err() {
             return Answer::Abort;
         }
         // The UI has gone away if this fails, and continuing to touch the filesystem
         // without anyone able to stop us is the one thing we must not do.
-        self.answers.recv().unwrap_or(Answer::Abort)
+        let a = self.answers.recv().unwrap_or(Answer::Abort);
+        if let Some((q_word, file, t)) = logged {
+            let mut e = crate::debuglog::Event::new("ask")
+                .num("job", self.dbg_job())
+                .word("q", q_word)
+                .word("phase", self.phase)
+                .word("answer", &format!("{a:?}"))
+                .ms("waited_ms", t.elapsed());
+            if let Some(f) = file {
+                e = e.num("file", f);
+            }
+            e.write();
+        }
+        a
+    }
+
+    /// This job's number in the debug log; 0 when it logs only errors.
+    fn dbg_job(&self) -> u64 {
+        self.dbg.as_ref().map_or(0, |d| d.job)
     }
 
     fn note_error(&mut self, path: &Path, e: &io::Error) {
+        if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+            crate::debuglog::Event::new("error")
+                .num("job", self.dbg_job())
+                .file(path)
+                .word("phase", self.phase)
+                .error(e)
+                .write();
+        }
         self.sum.failed += 1;
         if self.sum.errors.len() < 20 {
             self.sum.errors.push(format!("{}: {e}", path.display()));
@@ -988,12 +1585,94 @@ impl Worker {
         }
     }
 
+    /// Why a skip happened, for the summary, without counting it: the caller does.
+    fn note_skip(&mut self, path: &Path, why: &str) {
+        self.sum.kind_skips += 1;
+        if self.sum.errors.len() < 20 {
+            self.sum.errors.push(format!("{}: {why}", path.display()));
+        }
+    }
+
+    /// Whether regular files `a` and `b` hold the same bytes, read side by side; a read
+    /// that fails counts as different (copying again then reports the error). Stops
+    /// early, as different, when the job is cancelled.
+    fn same_bytes(&mut self, a: &Path, b: &Path) -> bool {
+        self.same_upto(a, b, None)
+    }
+
+    /// [`same_bytes`](Self::same_bytes) for the first `upto` bytes only, when given:
+    /// both must hold that many (a kept part read again with its source, RR01).
+    fn same_upto(&mut self, a: &Path, b: &Path, upto: Option<u64>) -> bool {
+        use std::io::Read;
+        self.phase = "verify";
+        let (Ok(mut fa), Ok(mut fb)) = (File::open(a), File::open(b)) else {
+            return false;
+        };
+        // The box names the file and its bar moves while a big one is read (#3): the
+        // bytes read are shown, not added; the file's size is added once, after.
+        let _ = self.tx.send(Event::Begin {
+            path: a.to_path_buf(),
+        });
+        let mut read = 0u64;
+        let mut ba = vec![0u8; 1 << 20];
+        let mut bb = vec![0u8; 1 << 20];
+        loop {
+            if self.stopped() {
+                return false;
+            }
+            if self.last_tick.elapsed() >= PROGRESS_EVERY {
+                self.last_tick = std::time::Instant::now();
+                let _ = self.tx.send(Event::Progress {
+                    bytes_done: self.bytes_done + read,
+                    files_done: self.sum.done + self.sum.skipped + self.sum.failed,
+                });
+            }
+            let want = upto.map_or(ba.len(), |u| (u - read).min(ba.len() as u64) as usize);
+            if want == 0 {
+                return true;
+            }
+            let Ok(n) = read_full(&mut fa, &mut ba[..want]) else {
+                return false;
+            };
+            let Ok(m) = read_full(&mut fb, &mut bb[..want]) else {
+                return false;
+            };
+            if n != m || ba[..n] != bb[..m] {
+                return false;
+            }
+            if n == 0 {
+                // Both ended: whole files match; a prefix one short of `upto` does not.
+                return upto.is_none();
+            }
+            read += n as u64;
+        }
+        fn read_full(f: &mut File, buf: &mut [u8]) -> io::Result<usize> {
+            let mut got = 0;
+            while got < buf.len() {
+                match f.read(&mut buf[got..]) {
+                    Ok(0) => break,
+                    Ok(k) => got += k,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(got)
+        }
+    }
+
     /// Decide what to do about an existing destination. `Some(true)` means go ahead.
     /// `src`: the file that would replace it, for the update rule; none for an archive.
     fn resolve_conflict(&mut self, src: Option<&Path>, dst: &Path, incoming: u64) -> Option<bool> {
         let Some(now) = Ident::at(dst) else {
             return Some(true);
         };
+        // #5: a file never replaces a folder, nor a folder a file — before every rule
+        // below, "replace all" and the plan's word included. Skipped (the caller counts
+        // it) and said; an archive's entry (no source) is a file.
+        if let Some(why) = other_kind(src, dst) {
+            self.note_skip(dst, why);
+            return Some(false);
+        }
         if self.approved.as_deref() == Some(dst) {
             // Agreed already, at the move's question: that file is still the one.
             self.approved = None;
@@ -1020,13 +1699,37 @@ impl Worker {
         if self.skip_all {
             return Some(false);
         }
+        // A confirmed plan leaves what is identical (its Identical group has no other
+        // choice), also the files past its cap that it kept no row for.
+        if self.plan_confirmed && identical(src, dst) == Same::Yes {
+            return Some(false);
+        }
         if self.update {
             return Some(self.is_older(src, dst));
         }
         if self.resuming {
             match identical(src, dst) {
                 Same::Dirs => return Some(true),
-                Same::Yes => return Some(false),
+                Same::Yes => {
+                    // Regular files only: a link is checked by its target (identical),
+                    // and opening one to a FIFO or a device blocks or never ends
+                    // (red-team F2). A check that Stop cut short repairs nothing (F4).
+                    let regular = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_file());
+                    let differs = self.verify
+                        && src.is_some_and(|s| {
+                            regular(s) && regular(dst) && !self.same_bytes(s, dst)
+                        })
+                        && !self.stopped();
+                    if !differs {
+                        return Some(false);
+                    }
+                    // Short or empty under its real name (B2): the source's copy is
+                    // what the job was asked for, so it replaces it without a question,
+                    // while it is still this file.
+                    self.sum.repaired += 1;
+                    self.agreed = Some((dst.to_path_buf(), now));
+                    return Some(true);
+                }
                 Same::No => {}
             }
         }
@@ -1082,8 +1785,8 @@ impl Worker {
         ok
     }
 
-    /// The update rule: `dst` is replaced only when `src` is newer (beyond a FAT drive's
-    /// two seconds). Two directories merge. Without a source (an archive) it is kept.
+    /// The update rule: `dst` is replaced only when `src` is newer (beyond the precision
+    /// the coarser of the two times was kept to: 2 s on FAT). Two directories merge. Without a source (an archive) it is kept.
     fn is_older(&self, src: Option<&Path>, dst: &Path) -> bool {
         let (Some(s), Ok(d)) = (
             src.and_then(|s| fs::symlink_metadata(s).ok()),
@@ -1104,12 +1807,12 @@ impl Worker {
             return;
         };
         let dst = dest_dir.join(name);
-        if dst == src {
+        if crate::plan::onto_itself(src, &dst) {
             self.sum.skipped += 1;
             return;
         }
         // Copying a directory into itself would recurse until the disk filled.
-        if src.is_dir() && dst.starts_with(src) {
+        if crate::plan::into_itself(src, &dst, dest_dir) {
             let e = io::Error::other("cannot copy a directory into itself");
             self.note_error(src, &e);
             return;
@@ -1118,6 +1821,7 @@ impl Worker {
     }
 
     fn copy_node(&mut self, src: &Path, dst: &Path) {
+        self.phase = "walk";
         if self.stopped() {
             return;
         }
@@ -1149,7 +1853,31 @@ impl Worker {
             }
             self.moved(src, dst, before);
         } else if meta.is_dir() {
-            let made = dst.symlink_metadata().is_err();
+            // Resume: finished by the run before, and its copy still there.
+            if self.done_dirs.contains(src) && dst.is_dir() {
+                self.sum.skipped += 1;
+                if let Some(d) = self.dbg.as_mut() {
+                    d.dirs_skipped += 1;
+                }
+                return;
+            }
+            let failed_before = self.sum.failed;
+            let there = dst.symlink_metadata();
+            let made = there.is_err();
+            // #5: a folder never replaces a file, and a link is a file here, as the
+            // plan, a move and Alt+Y take it: the table says "skipped", and nothing is
+            // written through the link to wherever it points (QA 2026-11-17, P0; before,
+            // the copy went into the link's folder).
+            if let Some(m) = there.as_ref().ok().filter(|m| !m.is_dir()) {
+                self.sum.skipped += 1;
+                let why = if m.is_symlink() {
+                    "is a link \u{2014} not copied through; open it to copy into it"
+                } else {
+                    "is a file \u{2014} a folder never replaces it"
+                };
+                self.note_skip(dst, why);
+                return;
+            }
             if let Err(e) = fs::create_dir_all(dst) {
                 self.note_error(dst, &e);
                 return;
@@ -1178,8 +1906,15 @@ impl Worker {
                 }
                 self.copy_node(&ent.path(), &dst.join(ent.file_name()));
             }
+            // A directory made read-only would refuse its batch's renames: they go first.
+            if denies_writing(&meta) {
+                self.flush_group();
+            }
             let _ = fs::set_permissions(dst, meta.permissions());
             self.sum.done += 1;
+            if self.sum.failed == failed_before && !self.stopped() {
+                self.folder_finished(src);
+            }
             // Moving: the directory goes only once empty, that is when everything in
             // it was copied and removed; anything skipped keeps it.
             if self.moving {
@@ -1351,8 +2086,12 @@ impl Worker {
             }
             // Free now: written only if it is still free when opened, so a file that
             // appears meanwhile is asked about, not overwritten.
+            self.phase = "check";
+            let mut t = self.clock();
             let free = dst.symlink_metadata().is_err();
-            match self.resolve_conflict(Some(src), dst, size) {
+            let decided = self.resolve_conflict(Some(src), dst, size);
+            self.lap(Phase::Check, &mut t);
+            match decided {
                 Some(true) => {}
                 Some(false) => {
                     self.sum.skipped += 1;
@@ -1365,7 +2104,25 @@ impl Worker {
                 None => return,
             }
             appear_in_test(dst);
-            match self.copy_bytes(src, dst, free) {
+            let copied = self.copy_bytes(src, dst, free);
+            if let (Some(d), Some(t)) = (self.dbg.as_mut(), t) {
+                let lane = if size <= GROUP_FILE_MAX {
+                    &mut d.small
+                } else {
+                    &mut d.large
+                };
+                lane.0 += 1;
+                lane.1 += size;
+                lane.2 += t.elapsed();
+            }
+            match copied {
+                // Waiting for its batch: counted when the batch finishes it.
+                Ok(true) if std::mem::take(&mut self.group.deferred) => {
+                    if self.group.full() {
+                        self.flush_group();
+                    }
+                    return;
+                }
                 Ok(true) => {
                     self.sum.done += 1;
                     self.advance(0);
@@ -1391,6 +2148,17 @@ impl Worker {
                     if transient(&e, network) && tries < self.backoff.len() {
                         let wait = self.backoff[tries];
                         tries += 1;
+                        if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+                            crate::debuglog::Event::new("retry")
+                                .num("job", self.dbg_job())
+                                .file(dst)
+                                .word("phase", self.phase)
+                                .error(&e)
+                                .num("attempt", tries as u64)
+                                .num("of", self.backoff.len() as u64)
+                                .ms("wait_ms", wait)
+                                .write();
+                        }
                         let _ = self.tx.send(Event::Retrying {
                             path: dst.to_path_buf(),
                             error: e.to_string(),
@@ -1402,6 +2170,16 @@ impl Worker {
                             continue;
                         }
                         return;
+                    }
+                    if crate::debuglog::on(crate::debuglog::Topic::Errors) {
+                        crate::debuglog::Event::new("failed")
+                            .num("job", self.dbg_job())
+                            .file(dst)
+                            .word("phase", self.phase)
+                            .error(&e)
+                            .num("tries", tries as u64 + 1)
+                            .flag("network", network)
+                            .write();
                     }
                     let error = if tries > 0 {
                         format!("{e} (a network error: tried {} times)", tries + 1)
@@ -1448,8 +2226,12 @@ impl Worker {
     /// same way, so not even a killed run leaves a short file under a real name.
     /// Whatever was written and not kept is removed here.
     fn copy_bytes(&mut self, src: &Path, dst: &Path, new_only: bool) -> io::Result<bool> {
+        self.phase = "open";
+        let mut t = self.clock();
         let meta = fs::metadata(src)?;
         let mut r = File::open(src)?;
+        self.lap(Phase::Open, &mut t);
+        self.phase = "create";
         let in_place = new_only && !self.safe;
         let target = if in_place {
             dst.to_path_buf()
@@ -1457,6 +2239,7 @@ impl Worker {
             part_name(dst)
         };
         self.moved_file = None;
+        self.engine = crate::fastcopy::Engine::Own;
         writing_in_test(&target);
         if !in_place {
             if let Some(j) = self.journal.as_mut() {
@@ -1464,18 +2247,103 @@ impl Worker {
                 let _ = j.part(&target);
             }
         }
-        let mut w = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)?;
-        let written = self.write_all_from(&mut r, &mut w, &target);
+        let resumed = if in_place {
+            None
+        } else {
+            self.take_over(src, dst, &target)
+        };
+        // Checkpoints: a big file under a temporary name, with a journal to keep them.
+        self.ckpt = (!in_place
+            && self.checkpoint > 0
+            && self.journal.is_some()
+            && (meta.len() > self.checkpoint || resumed.is_some()))
+        .then(|| Ckpt {
+            part: crate::journal::Partial {
+                part: target.clone(),
+                src: src.to_path_buf(),
+                dst: dst.to_path_buf(),
+                ident: Ident::of(&meta),
+                bytes: resumed.unwrap_or(0),
+            },
+            next: resumed.unwrap_or(0) + self.checkpoint,
+        });
+        // Taken over under this run's name: said at once, or a kill before the next
+        // checkpoint would take it for an unfinished file and remove it.
+        if let (Some(c), Some(j), Some(_)) = (&self.ckpt, self.journal.as_mut(), resumed) {
+            let _ = j.checkpoint(&c.part);
+        }
+        // macOS clones by making the file itself, so before it is created (item 22).
+        #[cfg(target_vendor = "apple")]
+        let cloned = resumed.is_none() && self.fast && crate::fastcopy::clone_at(&r, &target);
+        #[cfg(not(target_vendor = "apple"))]
+        let cloned = false;
+        let opened = if let Some(at) = resumed {
+            // Taken over: what is past the checkpoint may not be on disk whole, so it
+            // is cut off, and both files go on from there.
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&target)
+                .and_then(|mut w| {
+                    use std::io::Seek;
+                    w.set_len(at)?;
+                    w.seek(io::SeekFrom::Start(at))?;
+                    r.seek(io::SeekFrom::Start(at))?;
+                    Ok(w)
+                })
+                .inspect(|_| {
+                    self.advance(at);
+                    if let Some(d) = self.dbg.as_mut() {
+                        d.resumed_bytes += at;
+                    }
+                })
+        } else if cloned {
+            fs::OpenOptions::new().write(true).open(&target)
+        } else {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+        };
+        let mut w = match opened {
+            Ok(w) => w,
+            Err(e) => {
+                if cloned || resumed.is_some() {
+                    let _ = fs::remove_file(&target);
+                }
+                self.ckpt = None;
+                return Err(e);
+            }
+        };
+        self.lap(Phase::Create, &mut t);
+        self.phase = "write";
+        let written = if cloned {
+            crate::faults::at(crate::faults::Point::Write, &target).map(|()| {
+                self.advance(meta.len());
+                self.engine = crate::fastcopy::Engine::Clone;
+                true
+            })
+        } else {
+            self.write_all_from(&mut r, &mut w, &target)
+        };
+        self.ckpt = None;
+        self.lap(Phase::Write, &mut t);
+        if matches!(written, Ok(true)) {
+            match self.engine {
+                crate::fastcopy::Engine::Clone => self.sum.cloned += 1,
+                crate::fastcopy::Engine::Kernel => self.sum.by_kernel += 1,
+                crate::fastcopy::Engine::Own => {}
+            }
+        }
         // A new file on a network target is synced before its rename (the owner's
         // decision 3, Round 031): SMB and NFS report a failed write only at the sync or
         // the close, and a dropped handle hides the close's error. A replacement is
         // synced anyway; a move's copies are synced with their batch.
         let written = match written {
             Ok(true) if new_only && !self.moving && self.on_network(dst) => {
-                crate::faults::sync_data(&w, &target).map(|()| true)
+                self.phase = "sync";
+                let r = crate::faults::sync_data(&w, &target).map(|()| true);
+                self.lap(Phase::Sync, &mut t);
+                r
             }
             other => other,
         };
@@ -1487,6 +2355,8 @@ impl Worker {
                 if let Ok(mtime) = meta.modified() {
                     let _ = w.set_times(FileTimes::new().set_modified(mtime));
                 }
+                self.lap(Phase::Attrs, &mut t);
+                self.phase = "finish";
                 // A new file is not synced here (the owner's call: new files stay
                 // fast). One whose source is to be removed (a move across devices) is
                 // synced with its batch, before any source goes (`remove_moved`).
@@ -1505,51 +2375,40 @@ impl Worker {
                     let r = crate::faults::at(crate::faults::Point::Rename, dst)
                         .and_then(|()| crate::noreplace::rename_noreplace(&target, dst))
                         .map(|()| true);
+                    self.lap(Phase::Finish, &mut t);
                     if r.is_ok() {
                         keep(self, w);
                     }
                     r
-                } else {
-                    // Removes the temporary file itself on any failure. The file there is
-                    // checked once more right before the rename: no portable rename
-                    // compares first, so a window of microseconds is left, not the
-                    // whole copy.
-                    // Where the trash is on this volume the old file goes there right
-                    // before the rename, so undo brings it back (Round 031). The
-                    // journal's `swap` line first: killed between the two, the next
-                    // start renames the complete new file in.
-                    let trash = self.replace_into_trash(dst);
-                    self.old_trashed = None;
-                    let r = commit_replace(w, &target, dst, || {
-                        if trash {
-                            if let Some(j) = self.journal.as_mut() {
-                                let _ = j.swap(&target, dst);
-                            }
-                        }
-                        // The journal first: its question can be open for minutes, and
-                        // the look at the target is the last thing before the rename.
-                        if !(self.durable(dst) && self.still_agreed(Some(src), dst)) {
-                            return Ok(false);
-                        }
-                        if trash {
-                            let t = crate::faults::at(crate::faults::Point::Trash, dst)
-                                .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
-                                .map_err(|e| {
-                                    io::Error::new(
-                                        e.kind(),
-                                        format!("the old file could not go to the trash: {e}"),
-                                    )
-                                })?;
-                            self.old_trashed = Some(t);
-                        }
-                        Ok(true)
+                } else if self.group_takes(dst, meta.len()) {
+                    // Group commit (Round 033): synced with its batch, then finished as
+                    // below ([`Worker::flush_group`]). The temporary file stays.
+                    self.group.pending.push(Pending {
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        tmp: target.clone(),
+                        file: w,
+                        size: meta.len(),
+                        agreed: self.agreed.clone(),
                     });
-                    // The rename failed after the old file went: it comes back.
-                    if !matches!(r, Ok(true)) {
-                        if let Some(t) = self.old_trashed.take() {
-                            let _ = crate::trashed::restore(&t);
-                        }
+                    self.group.bytes += meta.len();
+                    self.group.since.get_or_insert_with(std::time::Instant::now);
+                    self.group.batched += 1;
+                    self.group.deferred = true;
+                    return Ok(true);
+                } else {
+                    // Removes the temporary file itself on any failure.
+                    self.phase = "sync";
+                    let synced = crate::faults::sync_data(&w, &target);
+                    drop(w);
+                    self.lap(Phase::Sync, &mut t);
+                    if let Err(e) = synced {
+                        let _ = fs::remove_file(&target);
+                        return Err(e);
                     }
+                    self.phase = "finish";
+                    let r = self.finish_replace(src, &target, dst);
+                    self.lap(Phase::Finish, &mut t);
                     return r;
                 }
             }
@@ -1561,8 +2420,309 @@ impl Worker {
         kept
     }
 
+    /// The last steps of replacing `dst` with `tmp`, complete and synced (Round 029's
+    /// order): the journal's `swap` line where the old file goes to the trash, the
+    /// journal on disk, the target checked once more, the old file to the trash, the
+    /// rename. Whatever does not end in the rename removes `tmp`, and an old file
+    /// already in the trash comes back. The file there is checked right before the
+    /// rename: no portable rename compares first, so a window of microseconds is left,
+    /// not the whole copy.
+    fn finish_replace(&mut self, src: &Path, tmp: &Path, dst: &Path) -> io::Result<bool> {
+        let trash = self.replace_into_trash(dst);
+        if trash {
+            if let Some(j) = self.journal.as_mut() {
+                let _ = j.swap(tmp, dst);
+            }
+        }
+        // The journal first: its question can be open for minutes, and the look at the
+        // target is the last thing before the rename.
+        if !self.durable(dst) {
+            let _ = fs::remove_file(tmp);
+            return Ok(false);
+        }
+        self.rename_into(src, tmp, dst, trash)
+    }
+
+    /// The steps after the journal is on disk: the target checked once more, the old
+    /// file to the trash (`trash`), the rename. See [`Worker::finish_replace`].
+    fn rename_into(&mut self, src: &Path, tmp: &Path, dst: &Path, trash: bool) -> io::Result<bool> {
+        self.old_trashed = None;
+        let r = (|| {
+            if !self.still_agreed(Some(src), dst) {
+                return Ok(false);
+            }
+            // #5, once more at the last moment: a folder made there while the file was
+            // copied is never sent to the trash for it (also reached from a batch).
+            // Counted and said here: the callers drop an `Ok(false)` without a word.
+            if let Some(why) = other_kind(Some(src), dst) {
+                self.sum.skipped += 1;
+                self.note_skip(dst, why);
+                return Ok(false);
+            }
+            if trash {
+                let t = crate::faults::at(crate::faults::Point::Trash, dst)
+                    .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
+                    .map_err(|e| {
+                        io::Error::new(
+                            e.kind(),
+                            format!("the old file could not go to the trash: {e}"),
+                        )
+                    })?;
+                self.old_trashed = Some(t);
+            }
+            crate::faults::at(crate::faults::Point::Rename, dst)?;
+            fs::rename(tmp, dst)?;
+            Ok(true)
+        })();
+        if !matches!(r, Ok(true)) {
+            let _ = fs::remove_file(tmp);
+            // The rename failed after the old file went: it comes back.
+            if let Some(t) = self.old_trashed.take() {
+                let _ = crate::trashed::restore(&t);
+            }
+        }
+        r
+    }
+
+    /// Whether a replacement of `size` bytes at `dst` waits for a batch (Round 033):
+    /// small, on a local drive, not moving (a move batches its own way), and not a
+    /// batch's own fallback.
+    fn group_takes(&mut self, dst: &Path, size: u64) -> bool {
+        !self.group.off && !self.moving && size <= GROUP_FILE_MAX && !self.on_network(dst)
+    }
+
+    /// Sync the waiting batch, then finish each of its files in order, exactly as a
+    /// replacement on its own is finished ([`Worker::finish_replace`]). A file whose
+    /// sync failed, or whose last steps did not end in the rename, is done again on its
+    /// own from its source (a failed sync is never tried again on the same file:
+    /// fsyncgate); that way asks again if the file there changed, and asks about an
+    /// error that stays. Stopped: the temporary files go, and the old files stay.
+    fn flush_group(&mut self) {
+        if self.group.pending.is_empty() || self.group.flushing {
+            return;
+        }
+        self.group.flushing = true;
+        let failed_before = self.sum.failed;
+        let batch = std::mem::take(&mut self.group.pending);
+        self.group.bytes = 0;
+        self.group.since = None;
+        if self.stopped() {
+            for p in batch {
+                drop(p.file);
+                let _ = fs::remove_file(&p.tmp);
+            }
+            self.finished.clear();
+            self.group.flushing = false;
+            return;
+        }
+        let threads = self.group.threads_now();
+        let probing = self.group.probe.is_some();
+        self.phase = "sync";
+        let started = std::time::Instant::now();
+        let synced = sync_all(&batch, threads);
+        let took = started.elapsed();
+        let ms = took.as_secs_f64() * 1000.0;
+        self.group.measured(batch.len(), ms);
+        if let Some(d) = self.dbg.as_mut() {
+            d.batches += 1;
+            d.phases[Phase::Sync as usize] += took;
+            crate::debuglog::Event::new("batch")
+                .num("job", d.job)
+                .num("files", batch.len() as u64)
+                .num("bytes", batch.iter().map(|p| p.size).sum())
+                .num("threads", threads as u64)
+                .ms("sync_ms", took)
+                .num(
+                    "sync_failed",
+                    synced.iter().filter(|e| e.is_some()).count() as u64,
+                )
+                .flag("probing", probing)
+                .write();
+            if probing && self.group.probe.is_none() {
+                let mut e = crate::debuglog::Event::new("probe")
+                    .num("job", d.job)
+                    .num("chose", self.group.threads as u64);
+                for (n, per) in &self.group.tried {
+                    e = e.float(&format!("ms_per_file_{n}"), *per);
+                }
+                e.write();
+            }
+        }
+        let mut t = self.clock();
+        self.phase = "finish";
+        // The journal's lines for the whole batch (a `swap` where the old file goes to
+        // the trash), then one commit for them all, before any old file goes or any
+        // rename: each file's order is Round 029's, the journal's sync is shared.
+        let mut trash = Vec::with_capacity(batch.len());
+        for (p, failed) in batch.iter().zip(&synced) {
+            let to_trash = failed.is_none() && self.replace_into_trash(&p.dst);
+            if to_trash {
+                if let Some(j) = self.journal.as_mut() {
+                    let _ = j.swap(&p.tmp, &p.dst);
+                }
+            }
+            trash.push(to_trash);
+        }
+        let any = synced.iter().any(Option::is_none);
+        let journal = !any || self.stopped() || self.durable(&batch[0].dst);
+        for ((p, failed), to_trash) in batch.into_iter().zip(synced).zip(trash) {
+            let Pending {
+                src,
+                dst,
+                tmp,
+                file,
+                size,
+                agreed,
+            } = p;
+            drop(file);
+            let r = match failed {
+                Some(e) => {
+                    let _ = fs::remove_file(&tmp);
+                    Err(e)
+                }
+                None if self.stopped() || !journal => {
+                    let _ = fs::remove_file(&tmp);
+                    Ok(false)
+                }
+                None => {
+                    self.agreed = agreed;
+                    self.rename_into(&src, &tmp, &dst, to_trash)
+                }
+            };
+            // As `copy_file` takes the same outcomes for a file on its own.
+            let again = match r {
+                Ok(true) => {
+                    self.sum.done += 1;
+                    self.advance(0);
+                    if let Some(t) = self.old_trashed.take() {
+                        self.sum.replaced_to_trash += 1;
+                        self.made(&dst, Some(t));
+                    } else if self.recording {
+                        self.sum.replaced_for_good += 1;
+                    }
+                    false
+                }
+                // Not the file agreed to any more: back to the question.
+                Ok(false) => self.changed.as_deref() == Some(dst.as_path()),
+                // Said and asked about: Retry writes it again from its source.
+                Err(e) => {
+                    self.failed_file(&dst, &e, e.to_string());
+                    std::mem::take(&mut self.retry)
+                }
+            };
+            if again && !self.stopped() {
+                // Its bytes are counted again as it is written again.
+                self.bytes_done = self.bytes_done.saturating_sub(size);
+                self.lap(Phase::Finish, &mut t);
+                self.group.off = true;
+                self.copy_file(&src, &dst, size);
+                self.group.off = false;
+                t = self.clock();
+            }
+        }
+        self.lap(Phase::Finish, &mut t);
+        self.group.flushing = false;
+        // The folders whose last files were in this batch: finished, if it went through
+        // without a failure. Otherwise a resume walks them again, which is only slower.
+        let waiting = std::mem::take(&mut self.finished);
+        if self.sum.failed == failed_before && !self.stopped() {
+            for d in waiting {
+                self.tell_finished(&d);
+            }
+        }
+    }
+
+    /// A folder of a copy finished without a failure: a resume need not walk it again.
+    /// Told now, or once the batch holding its last files is through. Copies only: a
+    /// move removes what it finished, and a resume finds nothing there to walk.
+    fn folder_finished(&mut self, src: &Path) {
+        if !self.copying || self.moving || self.journal.is_none() {
+            return;
+        }
+        if self.group.pending.is_empty() {
+            self.tell_finished(src);
+        } else {
+            self.finished.push(src.to_path_buf());
+        }
+    }
+
+    fn tell_finished(&mut self, src: &Path) {
+        #[cfg(test)]
+        TOLD.lock().unwrap().push(src.to_path_buf());
+        if let Some(j) = self.journal.as_mut() {
+            if j.done(src).is_ok() {
+                if let Some(d) = self.dbg.as_mut() {
+                    d.dirs_done += 1;
+                }
+            }
+        }
+    }
+
     /// Copy `r` into `w`, which is `path`; Ok(false) when cancelled part-way.
+    /// The kept temporary files no file of this job took over: removed.
+    fn drop_partials(&mut self) {
+        for (_, p) in self.partials.drain() {
+            if p.part
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().contains(".xdevcmd-part-"))
+            {
+                let _ = fs::remove_file(&p.part);
+            }
+        }
+    }
+
+    /// Resume: the kept start of `dst`'s copy, renamed to `target` (this run's name for
+    /// it), and how many bytes of it count. Only while the source is the same file it
+    /// was (its size, date and identity) and the kept file holds what its checkpoint
+    /// says. Otherwise the kept file goes, and the copy starts again.
+    fn take_over(&mut self, src: &Path, dst: &Path, target: &Path) -> Option<u64> {
+        let p = self.partials.remove(dst)?;
+        let same = p.src == src
+            && Ident::at(src) == Some(p.ident)
+            && p.bytes <= fs::metadata(src).map(|m| m.len()).unwrap_or(0)
+            && fs::symlink_metadata(&p.part).is_ok_and(|m| m.is_file() && m.len() >= p.bytes)
+            // C trusts nothing the run that died made: the kept bytes are read again
+            // with the source's (repo review RR01: a damaged part was finished whole).
+            && (!self.verify || self.same_upto(src, &p.part, Some(p.bytes)));
+        if same && fs::rename(&p.part, target).is_ok() {
+            return Some(p.bytes);
+        }
+        let _ = fs::remove_file(&p.part);
+        None
+    }
+
+    /// `n` more bytes are in the big file being written (`w`): at a checkpoint, its data
+    /// is synced and then the journal says how far it is. A failed sync fails the copy,
+    /// which goes round as any write error; a failed line only breaks the journal,
+    /// which is asked about before the next step that needs it.
+    fn tick(&mut self, w: &File, n: u64) -> io::Result<()> {
+        let Some(c) = self.ckpt.as_mut() else {
+            return Ok(());
+        };
+        c.part.bytes += n;
+        if c.part.bytes < c.next {
+            return Ok(());
+        }
+        let t = std::time::Instant::now();
+        crate::faults::sync_data(w, &c.part.part)?;
+        c.next = c.part.bytes + self.checkpoint;
+        if let Some(j) = self.journal.as_mut() {
+            let _ = j.checkpoint(&c.part);
+        }
+        if let Some(d) = self.dbg.as_mut() {
+            d.checkpoints += 1;
+            d.checkpoint_time += t.elapsed();
+        }
+        Ok(())
+    }
+
     fn write_all_from(&mut self, r: &mut File, w: &mut File, path: &Path) -> io::Result<bool> {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if self.fast {
+            if let Some(done) = self.kernel_copy(r, w, path)? {
+                return Ok(done);
+            }
+        }
         let mut buf = vec![0u8; BUF];
         loop {
             if self.cancel.load(Ordering::Relaxed) {
@@ -1575,24 +2735,61 @@ impl Worker {
             crate::faults::at(crate::faults::Point::Write, path)?;
             w.write_all(&buf[..n])?;
             self.advance(n as u64);
+            self.tick(w, n as u64)?;
         }
         w.flush()?;
         Ok(true)
     }
 
+    /// Linux's fast copy (item 22): a clone, else `copy_file_range`. `None`: neither
+    /// would, and the file's offsets are where the kernel stopped, so read and write
+    /// go on from there. A fault planted at `Write` is met once per step taken.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn kernel_copy(&mut self, r: &File, w: &File, path: &Path) -> io::Result<Option<bool>> {
+        use crate::fastcopy::{Engine, Step};
+        // A clone is the whole file: not for one taken over part way.
+        let from_start = self.ckpt.as_ref().is_none_or(|c| c.part.bytes == 0);
+        if from_start && crate::fastcopy::clone_into(r, w) {
+            crate::faults::at(crate::faults::Point::Write, path)?;
+            self.advance(r.metadata()?.len());
+            self.engine = Engine::Clone;
+            return Ok(Some(true));
+        }
+        let mut first = true;
+        loop {
+            if self.cancel.load(Ordering::Relaxed) {
+                return Ok(Some(false));
+            }
+            match crate::fastcopy::kernel_step(r, w, KERNEL_CHUNK, first)? {
+                Step::Copied(n) => {
+                    crate::faults::at(crate::faults::Point::Write, path)?;
+                    self.advance(n as u64);
+                    self.tick(w, n as u64)?;
+                    first = false;
+                }
+                Step::End => {
+                    self.engine = Engine::Kernel;
+                    return Ok(Some(true));
+                }
+                Step::Refused => return Ok(None),
+            }
+        }
+    }
+
     // ── move ───────────────────────────────────────────────────────────────────────
 
     fn move_into(&mut self, src: &Path, dest_dir: &Path, rename: Option<&std::ffi::OsStr>) {
+        self.phase = "move";
         self.approved = None;
         let Some(name) = rename.or(src.file_name()) else {
             return;
         };
         let dst = dest_dir.join(name);
-        if dst == src {
+        if crate::plan::onto_itself(src, &dst) {
             self.sum.skipped += 1;
             return;
         }
-        if src.is_dir() && dst.starts_with(src) {
+        if crate::plan::into_itself(src, &dst, dest_dir) {
             let e = io::Error::other("cannot move a directory into itself");
             self.note_error(src, &e);
             return;
@@ -1625,7 +2822,7 @@ impl Worker {
                 self.approved = None;
                 continue;
             } else {
-                fs::rename(src, &dst)
+                self.move_over(src, &dst)
             };
             match r {
                 Err(e) if free && e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -1680,9 +2877,44 @@ impl Worker {
         self.approved = None;
     }
 
+    /// A move by rename over an existing `dst` the user agreed to replace. Where the
+    /// trash is on its volume, a file there goes to the trash first, as a copy's does
+    /// (Round 031); then `src` takes the name only if it is still free. A rename that
+    /// fails puts the old file back, so the cross-drive fallback (EXDEV) and any error
+    /// leave both files as they were. Before (QA 2026-11-17, P0) the rename replaced the
+    /// old file for good. A folder there is never sent: #5 refuses a file over a folder,
+    /// and a folder onto a folder is not a replacement (the rename fails, nothing lost).
+    fn move_over(&mut self, src: &Path, dst: &Path) -> io::Result<()> {
+        let old_is_file = dst.symlink_metadata().is_ok_and(|m| !m.is_dir());
+        if !old_is_file || !self.replace_into_trash(dst) {
+            return fs::rename(src, dst);
+        }
+        let t = crate::faults::at(crate::faults::Point::Trash, dst)
+            .and_then(|()| send_to_trash(dst, self.trash_root.as_deref()))
+            .map_err(|e| {
+                io::Error::new(
+                    e.kind(),
+                    format!("the old file could not go to the trash: {e}"),
+                )
+            })?;
+        let r = crate::faults::at(crate::faults::Point::Rename, dst)
+            .and_then(|()| crate::noreplace::rename_noreplace(src, dst));
+        match r {
+            Ok(()) => {
+                self.sum.replaced_to_trash += 1;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = crate::trashed::restore(&t);
+                Err(e)
+            }
+        }
+    }
+
     // ── delete ─────────────────────────────────────────────────────────────────────
 
     fn delete(&mut self, target: &Path, to_trash: bool, trash_root: Option<&Path>) {
+        self.phase = "delete";
         if self.stopped() {
             return;
         }
@@ -1734,7 +2966,13 @@ impl crate::archive::Hooks for Worker {
         });
     }
     fn conflict(&mut self, dst: &Path, incoming: u64) -> Option<bool> {
-        self.resolve_conflict(None, dst, incoming)
+        // An entry left as it is: counted here, as a copy counts its skips; the
+        // archive's walk goes on without a word (red-team of #5).
+        let r = self.resolve_conflict(None, dst, incoming);
+        if r == Some(false) {
+            self.sum.skipped += 1;
+        }
+        r
     }
     fn part(&mut self, p: &Path, made: bool) {
         // Only what is made is written down: a later start removes only what is
@@ -1773,6 +3011,18 @@ impl crate::archive::Hooks for Worker {
 }
 
 // ── free functions ─────────────────────────────────────────────────────────────────
+
+/// #5: why `src` may not replace `dst`, when one is a folder and the other is not. A
+/// link is not a folder here (replacing a link leaves its folder alone); no source (an
+/// archive's entry) is a file.
+fn other_kind(src: Option<&Path>, dst: &Path) -> Option<&'static str> {
+    let dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    match (src.is_some_and(dir), dir(dst)) {
+        (false, true) => Some("is a folder \u{2014} a file never replaces it"),
+        (true, false) => Some("is a file \u{2014} a folder never replaces it"),
+        _ => None,
+    }
+}
 
 /// What [`Existing::Resume`] makes of a destination that is there.
 #[derive(Debug, PartialEq, Eq)]
@@ -1819,13 +3069,33 @@ fn identical(src: Option<&Path>, dst: &Path) -> Same {
 
 /// Count what the job is about to touch, so a progress bar means something.
 pub fn scan(sources: &[PathBuf]) -> (u64, u64) {
-    scan_until(sources, &AtomicBool::new(false)).unwrap_or((0, 0))
+    scan_skipping(sources, &Default::default())
+}
+
+/// As [`scan`], leaving out the folders in `skip` (a resume's finished ones).
+fn scan_skipping(sources: &[PathBuf], skip: &std::collections::HashSet<PathBuf>) -> (u64, u64) {
+    scan_in(sources, &AtomicBool::new(false), skip).unwrap_or((0, 0))
 }
 
 /// As [`scan`], stopping when `stop` is set: `None` then. A count of a large tree on a
 /// slow disk takes seconds, and the dialog asking about it must not wait for it.
 pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> {
-    fn walk(p: &Path, files: &mut u64, bytes: &mut u64, stop: &AtomicBool) -> bool {
+    scan_in(sources, stop, &Default::default())
+}
+
+fn scan_in(
+    sources: &[PathBuf],
+    stop: &AtomicBool,
+    skip: &std::collections::HashSet<PathBuf>,
+) -> Option<(u64, u64)> {
+    let walk_skip = skip;
+    fn walk(
+        p: &Path,
+        files: &mut u64,
+        bytes: &mut u64,
+        stop: &AtomicBool,
+        skip: &std::collections::HashSet<PathBuf>,
+    ) -> bool {
         if stop.load(Ordering::Relaxed) {
             return false;
         }
@@ -1835,9 +3105,12 @@ pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> 
         if meta.file_type().is_symlink() {
             *files += 1;
         } else if meta.is_dir() {
+            if !skip.is_empty() && skip.contains(p) {
+                return true;
+            }
             if let Ok(it) = fs::read_dir(p) {
                 for e in it.flatten() {
-                    if !walk(&e.path(), files, bytes, stop) {
+                    if !walk(&e.path(), files, bytes, stop, skip) {
                         return false;
                     }
                 }
@@ -1850,7 +3123,7 @@ pub fn scan_until(sources: &[PathBuf], stop: &AtomicBool) -> Option<(u64, u64)> 
     }
     let (mut f, mut b) = (0, 0);
     for s in sources {
-        if !walk(s, &mut f, &mut b, stop) {
+        if !walk(s, &mut f, &mut b, stop, walk_skip) {
             return None;
         }
     }
@@ -1913,6 +3186,21 @@ pub fn safe() -> bool {
     SAFE.load(Ordering::Relaxed)
 }
 
+/// Whether a directory with `m`'s permissions refuses new names in it: no write bit
+/// for its owner on Unix; on Windows read-only does not stop that for a directory.
+fn denies_writing(m: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o200 == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = m;
+        false
+    }
+}
+
 /// The one way xdevcmd replaces a file (Round 029). `tmp`, complete and still open as
 /// `f`, is synced to the disk (a close error, or an NFS or SMB write that failed, is told
 /// here, not lost when the file is dropped), then `ready` runs (the journal's line
@@ -1973,18 +3261,35 @@ fn remove_file_anyway(p: &Path) -> io::Result<()> {
 /// this run (pid and start time, [`crate::journal::run_tag`]) and call, so two jobs
 /// never share one and a later process given the same pid never takes it for its own.
 pub(crate) fn part_name(dst: &Path) -> PathBuf {
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = N.fetch_add(1, Ordering::Relaxed);
+    let n = PART_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tail = format!(".xdevcmd-part-{}-{n}", crate::journal::run_tag());
     let name = dst
         .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
+        .map(|s| s.to_string_lossy())
         .unwrap_or_default();
+    // The run and counter make the name unique; the original name is only there for a
+    // person who finds a leftover. Cut it so the whole name fits the 255-byte limit most
+    // file systems have (a lossy non-UTF-8 name can grow threefold). Bytes are never
+    // fewer than UTF-16 units, so this also keeps Windows' 255 units.
+    let room = NAME_MAX.saturating_sub(1 + tail.len());
+    let mut end = name.len().min(room);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
     let dir = dst.parent().unwrap_or(Path::new("."));
-    dir.join(format!(
-        ".{name}.xdevcmd-part-{}-{n}",
-        crate::journal::run_tag()
-    ))
+    dir.join(format!(".{}{tail}", &name[..end]))
 }
+
+/// The counter in [`part_name`]: unique per call within a run.
+static PART_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The longest file name, in bytes, on the common file systems (ext4, APFS, Btrfs, XFS;
+/// NTFS counts 255 UTF-16 units).
+const NAME_MAX: usize = 255;
+
+/// The folders a job told its journal it finished, for tests.
+#[cfg(test)]
+static TOLD: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Tests put a path here to have a file appear at it between the check that found the
 /// name free and the write: the moment no test could otherwise reach.
@@ -1998,7 +3303,19 @@ fn appear_in_test(dst: &Path) {
         paths.remove(i);
         fs::write(dst, "theirs").unwrap();
     }
+    drop(paths);
+    // A folder in its place while the bytes are written (red-team of #5).
+    let mut dirs = APPEAR_DIR.lock().unwrap();
+    if let Some(i) = dirs.iter().position(|p| p == dst) {
+        dirs.remove(i);
+        let _ = fs::remove_file(dst);
+        fs::create_dir_all(dst.join("inner")).unwrap();
+        fs::write(dst.join("inner/keep.txt"), "kept").unwrap();
+    }
 }
+
+#[cfg(test)]
+static APPEAR_DIR: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(not(test))]
 fn appear_in_test(_: &Path) {}
@@ -2455,6 +3772,114 @@ mod tests {
     /// Round 031: with a trash on the volume, a replaced file goes there, after the
     /// journal is on disk and before the rename; undo removes the new one and brings
     /// the old one back.
+    /// #5: a file never replaces a folder, nor a folder a file — not with "replace all",
+    /// not with Yes to the question, not in a move. Skipped, and the summary says why.
+    /// #5, said every time (red-team): a folder that appears while the file is
+    /// written is kept, and the skip is counted and said, so the Job box stays open; an
+    /// archive's entry onto a folder is counted and said too.
+    #[test]
+    fn a_late_folder_and_an_archive_entry_are_skips_said_aloud() {
+        journals();
+        for safe in [true, false] {
+            let d = tmp(&format!("late-folder-{safe}"));
+            fs::create_dir_all(d.join("src")).unwrap();
+            fs::create_dir_all(d.join("to")).unwrap();
+            fs::write(d.join("src/a"), "new").unwrap();
+            fs::write(d.join("to/a"), "old").unwrap();
+            APPEAR_DIR.lock().unwrap().push(d.join("to/a"));
+            let mut req = Request::copy(vec![d.join("src/a")], d.join("to"));
+            req.trash_root = Some(d.join("trash"));
+            req.safe = safe;
+            req.existing = Existing::Replace;
+            let (s, _) = run_with(req, Answer::Yes);
+            let read = fs::read_to_string(d.join("to/a/inner/keep.txt")).ok();
+            assert_eq!(read.as_deref(), Some("kept"), "safe={safe}: {s:?}");
+            assert_eq!((s.skipped, s.kind_skips), (1, 1), "safe={safe}: {s:?}");
+            assert!(s.describe(Kind::Copy).contains("never replaced"), "{s:?}");
+            let _ = fs::remove_dir_all(&d);
+        }
+        let d = tmp("extract-over-folder");
+        let zp = d.join("x.zip");
+        {
+            let f = File::create(&zp).unwrap();
+            let mut z = zip::ZipWriter::new(f);
+            z.start_file("a", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            use std::io::Write;
+            z.write_all(b"zipped").unwrap();
+            z.finish().unwrap();
+        }
+        fs::create_dir_all(d.join("out/a")).unwrap();
+        fs::write(d.join("out/a/keep.txt"), "kept").unwrap();
+        let mut req = Request::extract(zp, vec!["a".into()], String::new(), d.join("out"));
+        req.trash_root = Some(d.join("trash"));
+        req.existing = Existing::Replace;
+        let (s, _) = run_with(req, Answer::Yes);
+        let read = fs::read_to_string(d.join("out/a/keep.txt")).ok();
+        assert_eq!(read.as_deref(), Some("kept"), "{s:?}");
+        assert!(
+            s.describe(Kind::Extract).contains("never replaced"),
+            "{}",
+            s.describe(Kind::Extract)
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_file_never_replaces_a_folder_nor_the_reverse() {
+        journals();
+        let d = tmp("file-over-dir");
+        for (existing, answer, mv) in [
+            (Existing::Replace, Answer::Yes, false),
+            (Existing::Ask, Answer::Yes, false),
+            (Existing::Ask, Answer::YesToAll, false),
+            (Existing::Replace, Answer::Yes, true),
+        ] {
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(d.join("src/b")).unwrap();
+            fs::create_dir_all(d.join("to/a")).unwrap();
+            fs::write(d.join("src/a"), "a file").unwrap();
+            fs::write(d.join("src/b/in.txt"), "in").unwrap();
+            fs::write(d.join("to/a/keep.txt"), "kept").unwrap();
+            fs::write(d.join("to/b"), "a file there").unwrap();
+            let sources = vec![d.join("src/a"), d.join("src/b")];
+            let mut req = if mv {
+                Request::mv(sources, d.join("to"))
+            } else {
+                Request::copy(sources, d.join("to"))
+            };
+            req.trash_root = Some(d.join("trash"));
+            req.safe = true;
+            req.existing = existing;
+            let (s, _) = run_with(req, answer);
+            let case = format!("{existing:?} {answer:?} move={mv}: {s:?}");
+            assert_eq!(
+                fs::read_to_string(d.join("to/a/keep.txt")).unwrap(),
+                "kept",
+                "{case}"
+            );
+            assert_eq!(
+                fs::read_to_string(d.join("to/b")).unwrap(),
+                "a file there",
+                "{case}"
+            );
+            assert!(
+                d.join("src/a").is_file() && d.join("src/b/in.txt").is_file(),
+                "{case}"
+            );
+            assert!(s.skipped >= 2, "{case}");
+            assert!(
+                s.errors
+                    .iter()
+                    .filter(|e| e.contains("is a folder") || e.contains("is a file"))
+                    .count()
+                    >= 2,
+                "{case}"
+            );
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_replaced_file_goes_to_the_trash_first_and_undo_brings_it_back() {
         journals();
@@ -2538,6 +3963,62 @@ mod tests {
         assert_eq!(fs::read_to_string(d.join("to").join(&tag)).unwrap(), "old");
         let left: Vec<_> = fs::read_dir(d.join("to")).unwrap().flatten().collect();
         assert_eq!(left.len(), 1, "no temporary file left: {left:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// QA 2026-11-17 (P0): a move by rename over a file sends the old file to the trash;
+    /// the rename failing after that puts it back, and the source stays where it was.
+    #[test]
+    fn a_move_over_a_file_trashes_the_old_one_and_a_failed_rename_puts_it_back() {
+        let d = tmp("move-over-trash");
+        let tag = format!("xmot-{}", std::process::id());
+        let setup = || {
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(d.join("src")).unwrap();
+            fs::create_dir_all(d.join("to")).unwrap();
+            fs::write(d.join("src").join(&tag), "new contents").unwrap();
+            fs::write(d.join("to").join(&tag), "old").unwrap();
+        };
+        let trashed = || -> Vec<String> {
+            fs::read_dir(d.join("trash/files"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| fs::read_to_string(e.path()).ok())
+                .collect()
+        };
+        let req = || {
+            let mut r = Request::mv(vec![d.join("src").join(&tag)], d.join("to"));
+            r.trash_root = Some(d.join("trash"));
+            r.existing = Existing::Replace;
+            r
+        };
+
+        setup();
+        let (s, _) = run_with(req(), Answer::Skip);
+        assert_eq!((s.done, s.replaced_to_trash), (1, 1), "{s:?}");
+        assert_eq!(
+            fs::read_to_string(d.join("to").join(&tag)).unwrap(),
+            "new contents"
+        );
+        assert!(!d.join("src").join(&tag).exists());
+        assert_eq!(trashed(), vec!["old".to_string()]);
+
+        setup();
+        let _f = crate::faults::fail(
+            crate::faults::Point::Rename,
+            &tag,
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let (s, _) = run_with(req(), Answer::Skip);
+        assert_eq!(s.replaced_to_trash, 0, "{s:?}");
+        assert_eq!(fs::read_to_string(d.join("to").join(&tag)).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(d.join("src").join(&tag)).unwrap(),
+            "new contents"
+        );
+        assert!(trashed().is_empty(), "{:?}", trashed());
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -2629,6 +4110,77 @@ mod tests {
         assert!(src.join("a.txt").exists(), "copy must not move");
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Item 22: a file of several kernel steps arrives whole by the platform's fast copy
+    /// (a clone, or the kernel's copy), which the summary names; off, xdevcmd reads and
+    /// writes, and says nothing about an engine.
+    #[test]
+    fn the_fast_copy_brings_the_file_whole_and_is_named_and_off_is_the_own_loop() {
+        let root = tmp("fast-copy");
+        let dst_on = root.join("on");
+        let dst_off = root.join("off");
+        fs::create_dir_all(&dst_on).unwrap();
+        fs::create_dir_all(&dst_off).unwrap();
+        // Not a multiple of a step, and not the same byte everywhere.
+        let body: Vec<u8> = (0..(9 << 20) + 12_345u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+        let src = root.join("big.bin");
+        fs::write(&src, &body).unwrap();
+
+        let mut req = Request::copy(vec![src.clone()], dst_on.clone());
+        req.fast = true;
+        let s = run(req);
+        assert_eq!((s.done, s.failed), (1, 0), "{:?}", s.errors);
+        assert!(fs::read(dst_on.join("big.bin")).unwrap() == body);
+        let fast = s.cloned + s.by_kernel;
+        if cfg!(any(target_os = "linux", target_vendor = "apple")) {
+            assert_eq!(fast, 1, "{s:?}");
+            let said = s.describe(Kind::Copy);
+            assert!(
+                said == "1 copied (cloned)" || said == "1 copied (by the kernel)",
+                "{said}"
+            );
+        } else {
+            assert_eq!(fast, 0, "{s:?}");
+        }
+
+        let mut req = Request::copy(vec![src.clone()], dst_off.clone());
+        req.fast = false;
+        let s = run(req);
+        assert_eq!((s.done, s.cloned, s.by_kernel), (1, 0, 0), "{s:?}");
+        assert!(fs::read(dst_off.join("big.bin")).unwrap() == body);
+        assert_eq!(s.describe(Kind::Copy), "1 copied");
+        let _ = fs::remove_dir_all(&root);
+
+        // Engines mixed in one job are counted.
+        let mixed = Summary {
+            done: 3,
+            cloned: 2,
+            by_kernel: 1,
+            ..Summary::default()
+        };
+        assert_eq!(
+            mixed.describe(Kind::Copy),
+            "3 copied (2 cloned, 1 by the kernel)"
+        );
+    }
+
+    /// A file the kernel will not copy (a /proc file says it is empty, and
+    /// `copy_file_range` copies nothing) is read and written by xdevcmd instead.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn what_the_kernel_will_not_copy_is_read_and_written_instead() {
+        let root = tmp("fast-refused");
+        fs::create_dir_all(&root).unwrap();
+        let mut req = Request::copy(vec![PathBuf::from("/proc/self/mounts")], root.clone());
+        req.fast = true;
+        let s = run(req);
+        assert_eq!((s.done, s.failed), (1, 0), "{:?}", s.errors);
+        assert_eq!((s.cloned, s.by_kernel), (0, 0), "{s:?}");
+        assert!(!fs::read(root.join("mounts")).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]
@@ -2864,6 +4416,500 @@ mod tests {
         );
     }
 
+    /// A big file is synced at each checkpoint while it is copied (Round 033); one no
+    /// bigger than a checkpoint is not (new files stay fast).
+    #[test]
+    fn a_big_file_is_synced_at_its_checkpoints_and_a_small_one_is_not() {
+        journals();
+        let root = tmp("ckpt-sync");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(root.join("ck-big.bin"), vec![1u8; 300 << 10]).unwrap();
+        fs::write(root.join("ck-small.bin"), vec![1u8; 100 << 10]).unwrap();
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            ".ck-",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![root.join("ck-small.bin")], dst.clone());
+        req.safe = true;
+        req.checkpoint = 128 << 10;
+        // The copy's own loop: a clone (APFS) brings the file whole, with no checkpoint.
+        req.fast = false;
+        let s = run(req.clone());
+        assert_eq!((s.done, s.failed), (1, 0), "no checkpoint, no sync: {s:?}");
+        req.sources = vec![root.join("ck-big.bin")];
+        req.backoff = Vec::new();
+        let (s, _) = run_answering(req, |_| Answer::Skip);
+        assert_eq!(s.done, 0, "the checkpoint's sync failed: {s:?}");
+        assert!(!dst.join("ck-big.bin").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A folder is told to the journal as finished only when nothing in it failed: a
+    /// file's error, or a failed sync in the batch its last files were in.
+    #[test]
+    fn only_a_folder_without_a_failure_is_told_finished() {
+        journals();
+        let root = tmp("told");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        for d in ["good", "bad", "batch"] {
+            fs::create_dir_all(src.join(d)).unwrap();
+            fs::create_dir_all(dst.join("src").join(d)).unwrap();
+        }
+        fs::write(src.join("good/g.txt"), "g").unwrap();
+        fs::write(src.join("bad/told-bad.txt"), "b").unwrap();
+        // A replacement: batched, and its batch's sync fails.
+        fs::write(src.join("batch/told-batch.txt"), "new").unwrap();
+        fs::write(dst.join("src/batch/told-batch.txt"), "old").unwrap();
+        let _w = crate::faults::fail(
+            crate::faults::Point::Write,
+            ".told-bad.txt",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let _s = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            ".told-batch.txt",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        // `good` first, on its own: copied inside `src`, it may finish while the failing
+        // batch is pending (the order of a listing is the file system's), and waits for
+        // it, and is rightly not told. Then all of `src`, `good` again among the rest.
+        let mut req = Request::copy(vec![src.join("good"), src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Replace;
+        req.backoff = Vec::new();
+        let (s, _) = run_answering(req, |_| Answer::Skip);
+        assert!(s.failed >= 2, "{s:?}");
+        let told: Vec<PathBuf> = TOLD
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.starts_with(&root))
+            .cloned()
+            .collect();
+        assert!(told.contains(&src.join("good")), "{told:?}");
+        assert!(!told.contains(&src.join("bad")), "a file failed: {told:?}");
+        assert!(
+            !told.contains(&src.join("batch")),
+            "its batch failed: {told:?}"
+        );
+        assert!(!told.contains(&src), "something under it failed: {told:?}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A job from a confirmed plan leaves an identical file it has no row for (past the
+    /// plan's cap) without asking; one that differs is still asked about.
+    #[test]
+    fn a_planned_job_leaves_identical_files_without_a_row() {
+        let root = tmp("planned-same");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        let when = std::time::SystemTime::now();
+        for dir in [&src, &dst] {
+            let p = dir.join("same.txt");
+            fs::write(&p, "same").unwrap();
+            let f = File::options().write(true).open(&p).unwrap();
+            f.set_times(FileTimes::new().set_modified(when)).unwrap();
+        }
+        fs::write(src.join("differs.txt"), "new").unwrap();
+        fs::write(dst.join("differs.txt"), "old!").unwrap();
+        let mut req = Request::copy(
+            vec![src.join("same.txt"), src.join("differs.txt")],
+            dst.clone(),
+        );
+        req.planned = Some((2, 7));
+        let (s, asked) = run_answering(req, |_| Answer::Skip);
+        assert_eq!(asked.len(), 1, "only the one that differs: {asked:?}");
+        assert_eq!(s.skipped, 2);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Resume does not walk a folder the run before finished while its copy is there
+    /// (a file added to it since is not copied, as the job's own snapshot); one whose
+    /// copy is gone is copied again.
+    #[test]
+    fn resume_does_not_walk_a_folder_finished_before() {
+        journals();
+        let root = tmp("done-dirs");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(src.join("finished")).unwrap();
+        fs::create_dir_all(src.join("open")).unwrap();
+        fs::write(src.join("finished").join("added-since.txt"), "new").unwrap();
+        fs::write(src.join("open").join("o.txt"), "o").unwrap();
+        fs::create_dir_all(dst.join("src").join("finished")).unwrap();
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.done_dirs = [src.join("finished")].into_iter().collect();
+        let s = run(req.clone());
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            !dst.join("src/finished/added-since.txt").exists(),
+            "not walked"
+        );
+        assert_eq!(fs::read_to_string(dst.join("src/open/o.txt")).unwrap(), "o");
+        fs::remove_dir_all(dst.join("src").join("finished")).unwrap();
+        let s = run(req);
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            dst.join("src/finished/added-since.txt").exists(),
+            "its copy was gone: copied again"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// B2: after a power cut a new file can keep its size and date with no data in it
+    /// (zeros, as XFS leaves it). A plain resume trusts it, in a finished folder and
+    /// out of one; a checked resume reads both sides and copies again only what differs.
+    #[test]
+    fn a_checked_resume_copies_again_a_file_with_the_right_size_and_wrong_bytes() {
+        journals();
+        let root = tmp("verify");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(src.join("finished")).unwrap();
+        fs::write(src.join("finished/torn.txt"), "hello world").unwrap();
+        fs::write(src.join("finished/good.txt"), "fine").unwrap();
+        fs::write(src.join("loose.txt"), "abc").unwrap();
+        let out = dst.join("src");
+        fs::create_dir_all(out.join("finished")).unwrap();
+        // The copies as a power cut left them: same size and date as the source.
+        let lay = |rel: &str, body: &[u8]| {
+            let to = out.join(rel);
+            fs::write(&to, body).unwrap();
+            let mtime = fs::metadata(src.join(rel)).unwrap().modified().unwrap();
+            File::options()
+                .write(true)
+                .open(&to)
+                .unwrap()
+                .set_modified(mtime)
+                .unwrap();
+        };
+        lay("finished/torn.txt", &[0; 11]);
+        lay("finished/good.txt", b"fine");
+        lay("loose.txt", &[0; 3]);
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.done_dirs = [src.join("finished")].into_iter().collect();
+
+        // Trusted (Enter): nothing read, the zeros stay.
+        let s = run(req.clone());
+        assert_eq!((s.failed, s.repaired), (0, 0), "{s:?}");
+        assert_eq!(fs::read(out.join("finished/torn.txt")).unwrap(), [0; 11]);
+        assert_eq!(fs::read(out.join("loose.txt")).unwrap(), [0; 3]);
+
+        // Checked: the two with other bytes are copied again; the good one is left.
+        req.verify = true;
+        let s = run(req);
+        assert_eq!((s.failed, s.repaired), (0, 2), "{s:?}");
+        assert_eq!(
+            fs::read_to_string(out.join("finished/torn.txt")).unwrap(),
+            "hello world"
+        );
+        assert_eq!(fs::read_to_string(out.join("loose.txt")).unwrap(), "abc");
+        assert_eq!(
+            fs::read_to_string(out.join("finished/good.txt")).unwrap(),
+            "fine"
+        );
+        assert!(
+            s.describe(Kind::Copy)
+                .starts_with("2 found different and copied again; "),
+            "{}",
+            s.describe(Kind::Copy)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A checked resume of a move: a copy with other bytes is replaced by its source,
+    /// which then goes, as the move asked; a trusted one leaves both.
+    #[test]
+    fn a_checked_resume_of_a_move_replaces_a_torn_copy_with_its_source() {
+        journals();
+        let root = tmp("verify-move");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("m.txt");
+        fs::write(&src, "moved").unwrap();
+        let to = dst.join("m.txt");
+        fs::write(&to, [0; 5]).unwrap();
+        let mtime = fs::metadata(&src).unwrap().modified().unwrap();
+        File::options()
+            .write(true)
+            .open(&to)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        let mut req = Request::mv(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        let s = run(req.clone());
+        assert_eq!((s.failed, s.repaired), (0, 0), "{s:?}");
+        assert!(src.exists(), "trusted: both kept");
+        req.verify = true;
+        let s = run(req);
+        assert_eq!((s.failed, s.repaired), (0, 1), "{s:?}");
+        assert_eq!(fs::read_to_string(&to).unwrap(), "moved");
+        assert!(!src.exists(), "the source went, as the move asked");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Checked is only for a resume: on any other job the flag changes nothing (a
+    /// file already there is asked about as always).
+    /// C compares regular files only. A link is checked by its target alone: opening a
+    /// link to a FIFO blocked the job before its first read, where Stop is looked at
+    /// (red-team F2). A cancelled check repairs nothing, so it counts none (F4).
+    #[cfg(unix)]
+    #[test]
+    fn a_checked_resume_reads_regular_files_only() {
+        journals();
+        let root = tmp("verify-fifo");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let fifo = root.join("pipe");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let src = root.join("l");
+        std::os::unix::fs::symlink(&fifo, &src).unwrap();
+        std::os::unix::fs::symlink(&fifo, dst.join("l")).unwrap();
+        let mut req = Request::copy(vec![src], dst);
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.verify = true;
+        let h = start(req);
+        let mut done = None;
+        let t = std::time::Instant::now();
+        while done.is_none() && t.elapsed() < Duration::from_secs(5) {
+            if let Ok(Event::Done(s)) = h.events.recv_timeout(Duration::from_millis(100)) {
+                done = Some(s);
+            }
+        }
+        if done.is_none() {
+            h.cancel();
+            // A writer frees the blocked open, so the worker can end.
+            let _ = fs::OpenOptions::new().write(true).open(&fifo);
+        }
+        let s = done.expect("the check of a link to a FIFO hung");
+        assert_eq!((s.skipped, s.repaired), (1, 0), "{s:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn verify_outside_a_resume_asks_as_before() {
+        let root = tmp("verify-ask");
+        let (src, dst) = (root.join("a.txt"), root.join("dst"));
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(&src, "new").unwrap();
+        fs::write(dst.join("a.txt"), "old").unwrap();
+        let mut req = Request::copy(vec![src], dst.clone());
+        req.verify = true;
+        let (s, asked) = run_with(req, Answer::Skip);
+        assert_eq!((asked, s.repaired), (1, 0), "{s:?}");
+        assert_eq!(fs::read_to_string(dst.join("a.txt")).unwrap(), "old");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Repo review RR01: C (a checked continue) read every finished copy again, but took
+    /// over a big file's kept part on trust: a part damaged after its checkpoint (`XXXX`
+    /// where the source has other bytes) was finished as a good copy. Under C the kept
+    /// bytes are compared with the source's: a part that differs goes, and the copy
+    /// starts again; one that matches is still taken over. Enter (not checked) is
+    /// unchanged.
+    #[test]
+    fn a_checked_resume_reads_a_kept_part_again_with_its_source() {
+        journals();
+        let root = tmp("ckpt-checked");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(200u32 << 10)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        let kept = 64 << 10;
+        let req = |part_bytes: &[u8]| {
+            fs::write(&part, part_bytes).unwrap();
+            let mut r = Request::copy(vec![src.clone()], dst.clone());
+            r.safe = true;
+            r.existing = Existing::Resume;
+            r.verify = true;
+            r.checkpoint = 32 << 10;
+            r.partial = vec![crate::journal::Partial {
+                part: part.clone(),
+                src: src.clone(),
+                dst: dst.join("big.bin"),
+                ident: Ident::at(&src).unwrap(),
+                bytes: kept as u64,
+            }];
+            r
+        };
+        // Damaged: the start written over after its checkpoint.
+        let mut damaged = body[..kept].to_vec();
+        damaged[..4].copy_from_slice(b"XXXX");
+        let s = run(req(&damaged));
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(
+            fs::read(dst.join("big.bin")).unwrap() == body,
+            "copied again"
+        );
+        assert!(!part.exists());
+        // As it should be: still taken over, and the copy is whole.
+        fs::remove_file(dst.join("big.bin")).unwrap();
+        let s = run(req(&body[..kept]));
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert!(fs::read(dst.join("big.bin")).unwrap() == body);
+        assert!(!part.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// C's look at a kept part reaches its last byte when the part ends on the read
+    /// buffer's edge and one past it (red-team on RR01): damage there is copied again.
+    #[test]
+    fn a_checked_resume_sees_damage_at_the_last_byte_of_a_kept_part() {
+        journals();
+        let root = tmp("ckpt-edge");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(3u32 << 20)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        for kept in [1usize << 20, (1 << 20) + 1, 2 << 20] {
+            let mut damaged = body[..kept].to_vec();
+            damaged[kept - 1] ^= 0xFF;
+            fs::write(&part, &damaged).unwrap();
+            let mut r = Request::copy(vec![src.clone()], dst.clone());
+            r.safe = true;
+            r.existing = Existing::Resume;
+            r.verify = true;
+            r.checkpoint = 1 << 20;
+            r.partial = vec![crate::journal::Partial {
+                part: part.clone(),
+                src: src.clone(),
+                dst: dst.join("big.bin"),
+                ident: Ident::at(&src).unwrap(),
+                bytes: kept as u64,
+            }];
+            let s = run(r);
+            assert_eq!((s.done, s.failed), (1, 0), "{kept}: {s:?}");
+            assert!(fs::read(dst.join("big.bin")).unwrap() == body, "{kept}");
+            assert!(!part.exists(), "{kept}");
+            fs::remove_file(dst.join("big.bin")).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A resumed job writes the plan's decisions to its own journal before the old one
+    /// goes, so a second kill keeps them too (repo review RR05: only a job with a plan
+    /// wrote them, and a resume has none, so the choices were lost the second time).
+    #[test]
+    fn a_resumed_job_carries_the_plans_decisions_into_its_own_journal() {
+        journals();
+        let root = tmp("resume-decided");
+        let tag = format!("xrd-{}", std::process::id());
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join(&tag);
+        fs::write(&src, "new").unwrap();
+        fs::write(dst.join(&tag), "old, left by the plan").unwrap();
+        let old_journal = root.join("old.journal");
+        fs::write(&old_journal, "kind copy\n").unwrap();
+        crate::faults::trace(&tag);
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.expect = [(dst.join(&tag), Expect::Skip)].into_iter().collect();
+        req.resumed = Some(old_journal.clone());
+        let s = run(req);
+        let seen = crate::faults::traced(&tag);
+        assert_eq!(
+            fs::read_to_string(dst.join(&tag)).unwrap(),
+            "old, left by the plan"
+        );
+        assert_eq!(s.failed, 0, "{s:?}");
+        assert!(
+            seen.iter()
+                .any(|(p, at)| *p == crate::faults::Point::JournalLine && at == &dst.join(&tag)),
+            "the skip was written to the new journal: {seen:?}"
+        );
+        assert!(!old_journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Resume takes over a big file kept after a checkpoint: what it holds is not
+    /// copied again (marked here with X, so a copy from the start would show), and the
+    /// rest follows. A source changed since starts again; a kept file no file of the
+    /// job reaches goes at the end, and so does the old journal.
+    #[test]
+    fn resume_goes_on_from_a_kept_checkpoint_while_the_source_is_unchanged() {
+        journals();
+        let root = tmp("ckpt-resume");
+        let dst = root.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        let src = root.join("big.bin");
+        let body: Vec<u8> = (0..(200u32 << 10)).map(|i| (i % 251) as u8).collect();
+        fs::write(&src, &body).unwrap();
+        let part = dst.join(".big.bin.xdevcmd-part-2147483646-0");
+        let kept = 64 << 10;
+        // More than the checkpoint said: what is past it is cut off.
+        fs::write(&part, vec![b'X'; kept + 100]).unwrap();
+        let stray = dst.join(".other.bin.xdevcmd-part-2147483646-1");
+        fs::write(&stray, "x").unwrap();
+        let old_journal = root.join("old.journal");
+        fs::write(&old_journal, "kind copy\n").unwrap();
+        let partial = |part: &Path, dst_name: &str| crate::journal::Partial {
+            part: part.to_path_buf(),
+            src: src.clone(),
+            dst: dst.join(dst_name),
+            ident: Ident::at(&src).unwrap(),
+            bytes: kept as u64,
+        };
+        let mut req = Request::copy(vec![src.clone()], dst.clone());
+        req.safe = true;
+        req.existing = Existing::Resume;
+        req.checkpoint = 32 << 10;
+        req.partial = vec![partial(&part, "big.bin"), partial(&stray, "other.bin")];
+        req.resumed = Some(old_journal.clone());
+        let s = run(req.clone());
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        let got = fs::read(dst.join("big.bin")).unwrap();
+        assert_eq!(got.len(), body.len());
+        assert!(
+            got[..kept].iter().all(|b| *b == b'X'),
+            "taken over, not copied again"
+        );
+        assert_eq!(got[kept..], body[kept..], "the rest follows");
+        assert!(!part.exists() && !stray.exists(), "nothing kept is left");
+        assert!(!old_journal.exists(), "the old journal went");
+        let names: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+
+        // The source changed since: copied from the start.
+        fs::remove_file(dst.join("big.bin")).unwrap();
+        fs::write(&part, vec![b'X'; kept]).unwrap();
+        req.partial = vec![partial(&part, "big.bin")];
+        req.resumed = None;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut changed = body.clone();
+        changed[0] = 0xEE;
+        fs::write(&src, &changed).unwrap();
+        let s = run(req);
+        assert_eq!((s.done, s.failed), (1, 0), "{s:?}");
+        assert_eq!(fs::read(dst.join("big.bin")).unwrap(), changed);
+        assert!(!part.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// The journal's line for a replacement cannot be written (disk full, say): the
     /// replacement is not made until the user says go on without it, and Stop keeps the
     /// old file. Before Round 029 the line's error was dropped and the file replaced.
@@ -3013,6 +5059,180 @@ mod tests {
             assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
             fs::remove_dir_all(&root).unwrap();
         }
+    }
+
+    /// Round 033, group commit: `n` small files over older ones in `d/to/src`.
+    fn many_to_replace(d: &Path, n: usize) {
+        for dir in [d.join("src"), d.join("to").join("src")] {
+            fs::create_dir_all(&dir).unwrap();
+        }
+        for i in 0..n {
+            fs::write(d.join("src").join(format!("f-{i:04}")), format!("new {i}")).unwrap();
+            fs::write(d.join("to").join("src").join(format!("f-{i:04}")), "old").unwrap();
+        }
+    }
+
+    /// Every file under `dir` either the old one or the new one, whole, and no
+    /// temporary file left: (new, old).
+    fn whole_files(dir: &Path) -> (usize, usize) {
+        let (mut new, mut old) = (0, 0);
+        for e in fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.contains("xdevcmd-part"),
+                "a temporary file left: {name}"
+            );
+            let i: usize = name.trim_start_matches("f-").parse().unwrap();
+            match fs::read_to_string(e.path()).unwrap().as_str() {
+                "old" => old += 1,
+                s if s == format!("new {i}") => new += 1,
+                s => panic!("{name} is neither: {s:?}"),
+            }
+        }
+        (new, old)
+    }
+
+    /// Group commit: many small replacements go in batches, each file synced before its
+    /// rename (the trace's order holds per file), all replaced, counted and kept for
+    /// undo, nothing temporary left.
+    #[test]
+    fn small_replacements_are_synced_in_batches_and_each_before_its_rename() {
+        let d = tmp("group");
+        many_to_replace(&d, 300);
+        let frag = d.to_string_lossy().into_owned();
+        crate::faults::trace(&frag);
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let (s, asked) = run_with(req, Answer::Yes);
+        let seen = crate::faults::traced(&frag);
+        assert_eq!(asked, 0);
+        assert_eq!(s.replaced_to_trash, 300, "{s:?}");
+        assert_eq!(whole_files(&d.join("to").join("src")), (300, 0));
+        // Per file: its sync before its rename.
+        for i in [0, 150, 299] {
+            let name = format!("f-{i:04}");
+            let at = |what: crate::faults::Point| {
+                seen.iter()
+                    .position(|(p, path)| *p == what && path.to_string_lossy().contains(&name))
+                    .unwrap_or_else(|| panic!("{what:?} of {name}: {seen:?}"))
+            };
+            assert!(
+                at(crate::faults::Point::SyncData) < at(crate::faults::Point::Rename),
+                "{name}"
+            );
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// One file's sync failing in a batch: that file alone is asked about (Skip keeps
+    /// the old one), the rest of the batch is replaced.
+    #[test]
+    fn a_failed_sync_in_a_batch_is_asked_about_that_file_alone() {
+        let d = tmp("group-fail");
+        many_to_replace(&d, 100);
+        let _f = crate::faults::fail(
+            crate::faults::Point::SyncData,
+            // The temporary file's name: `.f-0042.xdevcmd-part-…`.
+            ".f-0042.",
+            1,
+            crate::faults::Fault::Os(5),
+        );
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let (s, asked) = run_answering(req, |_| Answer::Skip);
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].contains("f-0042"), "{asked:?}");
+        assert_eq!((s.failed, s.replaced_to_trash), (1, 99), "{s:?}");
+        assert_eq!(whole_files(&d.join("to").join("src")), (99, 1));
+        assert_eq!(
+            fs::read_to_string(d.join("to").join("src").join("f-0042")).unwrap(),
+            "old"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Stopped with a batch waiting: its temporary files go and their old files stay;
+    /// every file is whole, old or new.
+    #[test]
+    fn a_job_stopped_with_a_batch_waiting_leaves_every_file_whole() {
+        let d = tmp("group-stop");
+        many_to_replace(&d, 400);
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let h = start(req);
+        let mut stopped = false;
+        let s = loop {
+            match h.events.recv_timeout(Duration::from_secs(20)) {
+                Ok(Event::Progress { .. }) if !stopped => {
+                    h.cancel();
+                    stopped = true;
+                }
+                Ok(Event::Ask(_)) => h.answer(Answer::Abort),
+                Ok(Event::Done(s)) => break s,
+                Ok(_) => {}
+                Err(e) => panic!("worker never finished: {e}"),
+            }
+        };
+        let (new, old) = whole_files(&d.join("to").join("src"));
+        assert_eq!(new + old, 400);
+        assert_eq!(new as u64, s.replaced_to_trash, "{s:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A directory copied read-only: its batch is finished before its permissions take
+    /// writing away, so its files are still replaced.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_directory_gets_its_batch_before_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("group-ro");
+        many_to_replace(&d, 20);
+        fs::set_permissions(d.join("src"), fs::Permissions::from_mode(0o555)).unwrap();
+        let mut req = Request::copy(vec![d.join("src")], d.join("to"));
+        req.existing = Existing::Replace;
+        req.trash_root = Some(d.join("trash"));
+        let (s, _) = run_with(req, Answer::Yes);
+        let to = d.join("to").join("src");
+        let (new, old) = whole_files(&to);
+        for p in [d.join("src"), to] {
+            let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755));
+        }
+        assert_eq!((new, old), (20, 0), "{s:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The probe: after [`GROUP_PROBE_AFTER`] files, the default first, then 2, 8, 16
+    /// and 32 (the default not twice), one batch each; the fastest a file is kept.
+    #[test]
+    fn the_probe_tries_the_default_first_then_the_others_and_keeps_the_fastest() {
+        let mut g = Group::new();
+        let d = g.threads;
+        g.batched = GROUP_PROBE_AFTER - 1;
+        g.measured(64, 64.0);
+        assert!(g.probe.is_none(), "not before");
+        g.batched = GROUP_PROBE_AFTER;
+        g.measured(64, 64.0);
+        let order = g.probe.as_ref().unwrap().0.clone();
+        assert_eq!(order[0], d);
+        let expected = GROUP_PROBE.len() + usize::from(!GROUP_PROBE.contains(&d));
+        assert_eq!(order.len(), expected);
+        assert_eq!(g.threads_now(), d);
+        assert_eq!(g.cap(), (4 * d).max(16));
+        // Each tried count's time a file: 32 is fastest.
+        for n in order {
+            assert_eq!(g.threads_now(), n);
+            let per = if n == 32 { 0.1 } else { 1.0 };
+            g.measured(g.cap(), per * g.cap() as f64);
+        }
+        assert!(g.probe.is_none() && g.probed);
+        assert_eq!(g.threads, 32);
+        assert_eq!(g.cap(), 128);
+        // Once only.
+        g.measured(64, 64.0);
+        assert!(g.probe.is_none());
     }
 
     /// A sync that fails: the temporary file goes, the old file stays, and Retry writes
@@ -3837,6 +6057,8 @@ mod tests {
         drop(big);
         let mut req = Request::copy(vec![root.join("big")], dst.clone());
         req.safe = true;
+        // The copy's own loop: a clone (APFS) is whole at once, nothing left to cancel.
+        req.fast = false;
         let h = start(req);
         loop {
             match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
@@ -3855,6 +6077,80 @@ mod tests {
             left.is_empty(),
             "nothing under the real name or a temporary one: {left:?}"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// B1: the temporary name used to add ~40 bytes to the real one, and a non-UTF-8
+    /// name grew threefold through `to_string_lossy`: a long name then failed with
+    /// "File name too long".
+    #[test]
+    fn the_temporary_name_fits_the_name_limit_and_keeps_the_runs_mark() {
+        let mark = format!(".xdevcmd-part-{}-", crate::journal::run_tag());
+        #[cfg_attr(not(unix), allow(unused_mut))] // a non-UTF-8 name is added on Unix
+        let mut names: Vec<std::ffi::OsString> = vec![
+            "a".into(),
+            "x".repeat(255).into(),
+            "é".repeat(127).into(),
+            "日本".repeat(42).into(),
+        ];
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            names.push(std::ffi::OsString::from_vec(vec![0xff; 90]));
+        }
+        for name in names {
+            let part = part_name(&Path::new("/d").join(&name));
+            let got = part.file_name().unwrap().to_string_lossy();
+            assert!(got.len() <= NAME_MAX, "{} bytes: {got}", got.len());
+            assert!(got.starts_with('.') && got.contains(&mark), "{got}");
+            assert_eq!(part.parent(), Some(Path::new("/d")));
+        }
+        let short = part_name(Path::new("/d/a"));
+        let short = short.file_name().unwrap().to_string_lossy();
+        assert!(
+            short.starts_with(&format!(".a{mark}")),
+            "kept whole: {short}"
+        );
+    }
+
+    /// B1, end to end: with safe operations on, a long name and a non-UTF-8 name are
+    /// copied and then replaced.
+    #[test]
+    fn with_safe_operations_long_and_non_utf8_names_are_copied_and_replaced() {
+        let root = tmp("safe-long");
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))] // non-UTF-8 on Linux only
+        let mut names: Vec<std::ffi::OsString> = vec!["n".repeat(250).into()];
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            names.push(std::ffi::OsString::from_vec(vec![0xff; 90]));
+        }
+        for name in &names {
+            fs::write(src.join(name), "one").unwrap();
+        }
+        let files: Vec<PathBuf> = names.iter().map(|n| src.join(n)).collect();
+        for body in ["one", "two"] {
+            for f in &files {
+                fs::write(f, body).unwrap();
+            }
+            let mut req = Request::copy(files.clone(), dst.clone());
+            req.safe = true;
+            let s = run(req);
+            assert_eq!(s.failed, 0, "{body}: {:?}", s.errors);
+            for name in &names {
+                assert_eq!(fs::read_to_string(dst.join(name)).unwrap(), body);
+            }
+        }
+        let left: Vec<_> = fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .filter(|n| n.to_string_lossy().contains("xdevcmd-part"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -3918,6 +6214,23 @@ mod tests {
         assert!(!f.exists(), "the source must be gone after a move");
         assert_eq!(fs::read(dst.join("f.txt")).unwrap(), b"payload");
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A trailing slash goes through a link: deleting `link/` emptied the folder it
+    /// points to, and then failed on the link (red-team of #2). Refused whole.
+    #[cfg(unix)]
+    #[test]
+    fn a_delete_never_goes_through_a_link_by_its_trailing_slash() {
+        let root = tmp("delete-link-slash");
+        let target = root.join("precious");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("f"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&target, root.join("link")).unwrap();
+        let through = PathBuf::from(format!("{}/", root.join("link").display()));
+        let s = run(Request::delete(vec![through], false));
+        assert!(target.join("f").exists(), "emptied through the link: {s:?}");
+        assert_eq!(s.done, 0, "{s:?}");
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -4097,6 +6410,65 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// Reproduced in review: through `link -> d/inner` a copy of `d` into `link`
+    /// recursed about 500 levels and aborted on a stack overflow.
+    #[cfg(unix)]
+    #[test]
+    fn copying_or_moving_a_directory_into_itself_through_a_link_is_refused() {
+        let root = tmp("self-link");
+        let d = root.join("d");
+        fs::create_dir_all(d.join("inner")).unwrap();
+        fs::write(d.join("f"), b"f").unwrap();
+        std::os::unix::fs::symlink(d.join("inner"), root.join("link")).unwrap();
+        for req in [
+            Request::copy(vec![d.clone()], root.join("link")),
+            Request::mv(vec![d.clone()], root.join("link")),
+            Request::copy(vec![d.clone()], d.join("inner").join("..").join("inner")),
+        ] {
+            let s = run(req);
+            assert_eq!(s.failed, 1, "refused");
+            assert_eq!(s.done, 0);
+            assert!(!d.join("inner").join("d").exists(), "nothing made inside");
+            assert!(d.join("f").is_file(), "the source is untouched");
+        }
+        // Onto itself: the destination is a link to d's parent.
+        std::os::unix::fs::symlink(&root, root.join("up")).unwrap();
+        let s = run(Request::copy(vec![d.clone()], root.join("up")));
+        assert_eq!((s.failed, s.done, s.skipped), (0, 0, 1));
+        assert_eq!(fs::read(d.join("f")).unwrap(), b"f");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// cosf C01, reproduced: through `link -> d/inner` to a folder not made yet
+    /// (`link/new`), the check could not resolve the folder and said no; the copy
+    /// recursed and aborted on a stack overflow.
+    #[cfg(unix)]
+    #[test]
+    fn copying_into_itself_through_a_link_to_a_missing_folder_is_refused() {
+        let root = tmp("self-link-missing");
+        let d = root.join("d");
+        fs::create_dir_all(d.join("inner")).unwrap();
+        fs::write(d.join("f"), b"f").unwrap();
+        std::os::unix::fs::symlink(d.join("inner"), root.join("link")).unwrap();
+        for req in [
+            Request::copy(vec![d.clone()], root.join("link").join("new")),
+            Request::mv(vec![d.clone()], root.join("link").join("new")),
+            Request::copy(
+                vec![d.clone()],
+                root.join("link").join("new").join("deeper"),
+            ),
+        ] {
+            let s = run(req);
+            assert_eq!((s.failed, s.done), (1, 0), "refused: {s:?}");
+            assert!(
+                !d.join("inner").join("new").join("d").exists(),
+                "nothing made inside"
+            );
+            assert!(d.join("f").is_file(), "the source is untouched");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn copying_a_directory_into_itself_is_refused() {
         let root = tmp("self-copy");
@@ -4120,7 +6492,10 @@ mod tests {
         // Sparse and large, so the cancel lands mid-copy even on a loaded machine.
         File::create(&big).unwrap().set_len(1 << 30).unwrap();
 
-        let h = start(Request::copy(vec![big], dst.clone()));
+        let mut req = Request::copy(vec![big], dst.clone());
+        // The copy's own loop: a clone (APFS) is whole at once, nothing left to cancel.
+        req.fast = false;
+        let h = start(req);
         let mut cancelled_at_progress = false;
         let summary = loop {
             match h.events.recv_timeout(Duration::from_secs(20)) {

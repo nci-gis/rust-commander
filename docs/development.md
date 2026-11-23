@@ -8,7 +8,7 @@ cargo run -p xdevcmd -- /etc /var     # start with two directories
 cargo install --path crates/xdevcmd --locked   # install your build as `xdevcmd`
 ```
 
-Needs Rust 1.88 or newer (`rustup`). Nothing needs root.
+Needs Rust 1.90 or newer (`rustup`). Nothing needs root.
 
 ## Check before you push
 
@@ -72,6 +72,105 @@ budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
 (everything but the terminal check under 1 s, a debug build: an order of magnitude over
 the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
+**On another machine or drive.** `--only CASE` runs just the cases whose name holds
+`CASE`, with no build and no start-up cases. Where to get `xtask`:
+
+- **With Rust**, any commit: `cargo xtask bench --only …` (and `cargo xtask try …`) in
+  the repository. The simplest for a developer.
+- **Without Rust, a release**: its `xdevcmd-bench-<tag>-<target>`, as testers do
+  ([How to test](how-to-test.md), step 1).
+- **Without Rust, code not released yet** (maintainers only, before a cut): the ci run of
+  the branch has `xtask` beside `xdevcmd` in its artifacts (below; the macOS ones run on
+  Intel and Apple Silicon).
+
+`--dir PATH` makes the trees on the
+drive being measured instead of the temporary directory. Away from the source, results
+go to `bench/results/` where it was started; with `XDEVCMD_DEBUG`, each run's jobs are
+logged in `bench/results/debug-<host>-<date>/<case>/`. `XDEVCMD_BENCH_FAST=0` turns the
+platform's fast copy off, to measure xdevcmd's own loop where the fast copy is a clone.
+
+**Two versions on one machine.** Each version's `xtask` in its own folder, the same
+names for both. `--save-baseline` writes `bench/baseline-<host>.json` whole, so one
+`--host` per case:
+
+```bash
+cd old        # the older version's xtask
+./xtask bench --only plan  --host mine-plan  --save-baseline
+./xtask bench --only list  --host mine-list  --save-baseline
+./xtask bench --only mixed --host mine-mixed --save-baseline
+mkdir -p ../new/bench && cp bench/baseline-*.json ../new/bench/
+cd ../new     # each line now says how far it moved (◀ past 15 %)
+./xtask bench --only plan  --host mine-plan
+./xtask bench --only list  --host mine-list
+./xtask bench --only mixed --host mine-mixed
+```
+
+Then the other way round (the newer as the baseline) before believing a small change:
+a busy minute shows as one.
+
+**The tester's sandbox.** `xtask try` is in the same archive; `xtask try --help` lists
+every option. `--make` makes the folder that [How to test](how-to-test.md) uses, with a
+SHA-256 manifest of its files. The manifest counts its own lines: a cut one is an
+error, never a PASS. `--kill-when` waits until a tenth of the files are replaced (check
+A), the first checkpoint is past (B) or a fifth of the tree is copied (C), then kills
+the xdevcmd that `--launch` started, by the process number it wrote in the sandbox, and
+only if that process is still xdevcmd; no other process is touched. `--clean` removes
+the sandbox only when `--make`'s marker is in it, and removes the marker last. Apart
+from `--launch` and `--kill-when`, `xtask try` never runs or looks for xdevcmd.
+
+How a tester measures on macOS, Windows and Linux: [Benchmarks](benchmark.md).
+
+## Fuzzing
+
+The parsers of input xdevcmd does not control are fuzzed by hand before a release
+(the release bar): what a shell prints (OSC 7, 9;9, 133), paths in a line of output,
+the config and theme files, names inside an archive, and archives themselves. The
+targets are in `fuzz/` (a crate of its own, outside the workspace: it needs nightly);
+the app's parsers are compiled there from their own source files.
+
+```bash
+rustup toolchain install nightly       # once
+cargo install cargo-fuzz               # once
+cargo xtask fuzz                       # every target, 60 s each
+cargo xtask fuzz --secs 600 paths osc  # longer, chosen targets
+```
+
+A crash stops its target and is kept in `fuzz/artifacts/<target>/`; the summary names
+it. Fix it with a regression test that fails without the fix (as `found.rs`'s
+`a_quoted_name_with_a_tab_is_not_taken`), then `cargo +nightly fuzz run <target>
+<file>` must pass. Each target also checks a property, not only "no panic": a path's
+span lies in its line, an archive name never climbs out of its folder. The corpus and
+artifacts stay local (`fuzz/.gitignore`). Not run in CI.
+
+## Reading a debug log
+
+`XDEVCMD_DEBUG` ([Troubleshooting](troubleshooting.md#sending-a-log-with-a-report);
+`xdevcmd-core/src/debuglog.rs`) writes one JSON object a line, each with `t_ms` (since
+the log started) and `ev`:
+
+| `ev` | Topic | Fields |
+|---|---|---|
+| `start` | — | `version`, `os`, `arch`, `topics`, `unix_time`, `cpus` |
+| `job_start` | jobs | `job`, `kind`, `sources`, `files`, `bytes`, `existing`, `planned`, `safe`, `fast`, `group_threads`, `src_fs`, `dst_fs`, `dst_network` |
+| `resume` | jobs | `job`, `sources_left`, `decisions_kept` |
+| `batch` | jobs | group commit: `files`, `bytes`, `threads`, `sync_ms`, `sync_failed`, `probing` |
+| `probe` | jobs | `chose`, and `ms_per_file_<threads>` for each count tried |
+| `job_end` | jobs | `ms`, `scan_ms`, `journal_ms`, the counts (`done`, `skipped`, `failed`, `cloned`, `by_kernel` …); the time per phase (`check_ms`, `open_ms`, `create_ms`, `write_ms`, `attrs_ms`, `sync_ms`, `finish_ms`); files up to 1 MiB and larger apart (`small_files`, `small_bytes`, `small_ms`, `large_…`); big files' checkpoints (`checkpoints`, `checkpoint_ms`) and bytes taken over from one on a resume (`resumed_bytes`); folders told to the journal as finished (`dirs_done`) and folders a resume skipped (`dirs_skipped`) |
+| `retry` | errors | `file`, `phase`, `kind`, `os`, `attempt`, `of`, `wait_ms` |
+| `failed` | errors | a file that failed for good: `file`, `phase`, `kind`, `os`, `tries`, `network` |
+| `ask` | errors | a question: `q`, `phase`, `answer`, `waited_ms`, `file` |
+| `error` | errors | an error counted in the summary: `file`, `phase`, `kind`, `os` |
+| `journal_failed` | errors | the journal could not be written: `phase` |
+
+`file` is a number for a path, the same within one run (a keyed hash; the key is never
+written). `kind` is Rust's `io::ErrorKind`, `os` the system's code (`errno`, or Windows'
+`GetLastError`). Nothing in a line is a name: words are kept to letters, digits and
+`_ . -`.
+
+Where a job's time went: the phases add up to the time spent on files; `ms` minus them
+is the walk, directories, the journal and waiting for answers. `small_ms` against
+`large_ms` is what item 43's lanes would overlap.
+
 ## Docs that are generated
 
 - `docs/keys.md`: `xdevcmd --print-keys > docs/keys.md`. A test fails if it is out of date.
@@ -109,8 +208,9 @@ without the icon, unless `XDEVCMD_REQUIRE_ICON=1`, which CI and releases set.
 - **`dev`** is where finished work collects. Every push to it runs CI, except one that
   touches only `.agents/` or `CHANGELOG.md`, which no test reads.
 - **`feat/<topic>`** holds anything bigger than a commit or two, such as a round of the
-  plan. Pushing it runs nothing, so commit as often as you like. When it is ready, open
-  a pull request into `dev`: CI runs on it, then merge.
+  plan. Every push to it runs CI too (except `.agents/` or `CHANGELOG.md` only), so a
+  broken build shows before the pull request. When it is ready, open a pull request
+  into `dev`: CI runs on it, then merge.
 
 A build to try on another system, from any branch: **Actions → ci → Run workflow**
 and pick the branch, or
@@ -119,8 +219,10 @@ and pick the branch, or
 gh workflow run ci --ref feat/topic
 ```
 
-The binaries are under that run's **Artifacts** (the macOS one runs on Intel and Apple
-Silicon). A draft pull request into `dev` gets the same builds.
+The binaries are under that run's **Artifacts**: `xdevcmd` and `xtask`, so the
+artifact is a whole test kit (`xtask try`); the macOS ones run on Intel and Apple
+Silicon. A draft pull request into `dev` gets the same builds. A new push to the branch
+cancels its run still going.
 
 ## Releasing
 
@@ -128,8 +230,9 @@ Write the notes as you go: every change that a user would notice gets a line und
 newest heading of `CHANGELOG.md`, in the same commit. A release then takes six steps.
 `cargo release` needs installing once: `cargo install --locked cargo-release`.
 Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it with
-`=x.y.z`; cargo-release rewrites the pin); `release.toml` says so with `publish = true`,
-so **every `cargo release` before step 5 says `--no-publish`**.
+`=x.y.z`; cargo-release rewrites the pin), by hand in step 5 only. `release.toml` has
+`publish = false`, so no `cargo release` publishes, even one that forgets
+`--no-publish` (the commands below still say it).
 
 1. **On `dev`**, date the notes and commit (add `minor`, `patch` or a version number to
    also raise the version; leave it out to release the version `Cargo.toml` has):
@@ -151,30 +254,35 @@ so **every `cargo release` before step 5 says `--no-publish`**.
 
 4. **The `release` workflow** first checks that the tag, the version in `Cargo.toml` and a
    dated CHANGELOG section agree and that the tag is on `main`
-   (`scripts/release-check.sh`), then builds Linux (x86_64
-   glibc and static musl, ARM64 static musl), macOS (ARM and Intel) and Windows, and opens
-   a **draft** release with the archives (each holding `LICENSE`, `README.md`,
-   `THIRD-PARTY.md`, the example `themes/` and this version's `docs/`),
-   `SHA256SUMS`, and that CHANGELOG section as its notes.
-   Read it, then Publish.
+   (`scripts/release-check.sh`), waits for that commit's `ci` run to pass
+   (`scripts/ci-green.sh`), then builds Linux (x86_64 glibc and static musl, ARM64
+   static musl), macOS (ARM and Intel) and Windows, smoke-tests each archive as a
+   user gets it (`scripts/smoke.sh`: unpacked, its files, at most 7 MiB, run where the
+   runner's CPU can, its version the tag's), attests their build provenance, and opens
+   a **draft** release with
+   the archives (each holding `LICENSE`, `README.md`, `THIRD-PARTY.md`, the example
+   `themes/` and this version's `docs/`), `SHA256SUMS`, and that CHANGELOG section as its
+   notes. Read it, then Publish.
 5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a
    crates.io token kept on the owner's machine, never in a workflow). Check first that
    `cargo package --workspace --exclude xtask` passes (CI does it on Linux):
 
    ```bash
-   cargo release publish                 # look: xdevcmd-core, then xdevcmd
-   cargo release publish --execute
+   cargo publish -p xdevcmd-core --locked --dry-run   # look
+   cargo publish -p xdevcmd-core --locked
+   cargo publish -p xdevcmd --locked --dry-run        # once the index has the core
+   cargo publish -p xdevcmd --locked
    ```
 
    A version on crates.io cannot be replaced, only yanked; publish after the GitHub
    release is good, not before.
-6. **Scoop and winget**, from the published release's `SHA256SUMS`: see
-   [packaging/README.md](../packaging/README.md).
+6. **Scoop**, from the published release's `SHA256SUMS`: see
+   [packaging/README.md](https://github.com/nci-gis/rust-commander/blob/main/packaging/README.md).
 
 ## Pre-releases
 
 A beta or release candidate (`0.4.0-beta.1`, `0.4.0-rc.1`) goes to **GitHub only**,
-marked pre-release, never "Latest"; crates.io, Scoop, winget and binstall wait for the
+marked pre-release, never "Latest"; crates.io, Scoop and binstall wait for the
 release itself (a version on crates.io can never be deleted, and package managers have
 no beta channel worth keeping). It is cut from `dev`, without a pull request into
 `main`. Semver orders them `0.4.0-beta.1 < 0.4.0-beta.2 < 0.4.0-rc.1 < 0.4.0`.
@@ -182,7 +290,9 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
 1. **Try the rules first** (nothing is built): Actions → release → Run workflow, with
    the tag to be (or `gh workflow run release --ref dev -f tag=v0.4.0-beta.1`). Before
    step 2 it fails on the version and the CHANGELOG, as it should; the branch rule is
-   what this tries. Locally: `scripts/release-check.sh v0.4.0-beta.1 origin/dev`.
+   what this tries. Locally, with `dev` checked out and pulled:
+   `scripts/release-check.sh v0.4.0-beta.1 HEAD` (another commit than the one checked
+   out is refused).
 2. **On `dev`**, the version and the dated notes, never published:
 
    ```bash
@@ -203,24 +313,37 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    ```
 
 4. **The `release` workflow** checks the tag (`scripts/release-check.sh`: a pre-release
-   on `dev` or `main`), builds the six archives and opens a **draft marked
-   pre-release**. Read it, then Publish. Help → Documentation in that build links the
-   tag's `docs/`.
-5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop and winget
-   (step 6). Every `cargo release` here says `--no-publish`.
+   on `dev` or `main`), waits for the `ci` run of the tag's commit (the one the push to
+   `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
+   six archives and opens a **draft marked pre-release**. Read it, then Publish. A
+   tester's kit (`xdevcmd-bench-…`) may be missing: its build never holds the release.
+   Count the six; for each one missing, say in the notes which target, and that it can
+   be built from the tag (How to test, step 1). Help →
+   Documentation in that build links the tag's `docs/`.
+5. **Not done for a pre-release**: crates.io (step 5 of "Releasing") and Scoop (step 6). `release.toml` (`publish = false`) keeps every `cargo release` off crates.io.
 
 A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1`,
 `git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.
 A published pre-release is not deleted: the next one supersedes it.
 
-CI runs on pushes to `dev` and `main` and on pull requests into them; the `release`
+CI runs on pushes to `dev`, `main` and `feat/**` and on pull requests into `dev` and
+`main`, and builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
 workflow runs only for a `v*` tag (a release on `main`, a pre-release on `dev` or
 `main`), or by hand to check a tag's rules. A change to the packaging
 (`release.yml`, `about.toml`, `about.hbs`) is therefore first exercised by the next
 tag. If that run fails, nothing is released: fix it on `dev`, merge, delete the tag
 (`git push origin :v0.2.0` and `git tag -d v0.2.0`) and tag `main` again.
 
+## Testing a pre-release by hand
+
+Before a pre-release is called good, the maintainer runs the manual cases on real
+hardware the CI cannot reach: [crates/xdevcmd/tests/manual/](https://github.com/nci-gis/rust-commander/blob/main/crates/xdevcmd/tests/manual/README.md),
+one file per area (data safety, undo and the trash, the plan table, running jobs,
+start-up and the screen, each system and terminal). Each case has an ID, its platform,
+steps, the expected result from the user docs, and what counts as a fail; results go
+in the round's `Check`, one line per case. Testers follow [How to test](how-to-test.md).
+
 ## How the code is organised
 
-Start with [.agents/context/project.md](../.agents/context/project.md): the rules,
-the layout and the conventions. Topic notes are in [.agents/reference/](../.agents/reference/).
+Start with `.agents/context/project.md` in the repository: the rules, the layout and
+the conventions. Topic notes are in `.agents/reference/`.

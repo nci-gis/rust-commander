@@ -269,7 +269,9 @@ fn f8_goes_to_the_trash_and_shift_f8_says_it_cannot_be_undone() {
 fn ctrl_z_puts_back_what_went_to_the_trash() {
     let (a, b) = fixture();
     // F8, Enter: to the trash (the sandbox's own); then Ctrl+Z asks, Enter puts it back.
-    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z", &a, &b);
+    // `wait` lets the delete job end first: a job's box takes every key but Esc and b,
+    // so on a slow runner Ctrl+Z was swallowed (run 43700546209, ubuntu-latest).
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,wait,Ctrl+z", &a, &b);
     assert!(!a.join("victim.txt").exists(), "{s}");
     assert!(
         s.contains("Undo the delete of victim.txt to the trash?"),
@@ -283,7 +285,7 @@ fn ctrl_z_puts_back_what_went_to_the_trash() {
     );
     // Run again in one go, with Enter at the question.
     let (a, b) = fixture();
-    let s = shot_keys("110x24", "Down,Insert,F8,Enter,Ctrl+z,Enter", &a, &b);
+    let s = shot_keys("110x24", "Down,Insert,F8,Enter,wait,Ctrl+z,Enter", &a, &b);
     assert!(a.join("victim.txt").exists(), "put back\n{s}");
     assert!(s.contains("undone"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
@@ -894,7 +896,7 @@ fn save_as_refuses_a_name_with_a_control_character() {
     let (a, b) = with_file("bad\u{15}x.txt", b"one\ntwo\n");
     let s = shot_keys("110x20", "Down,F3,F2,Enter", &a, &b);
     assert!(
-        s.contains("control character (U+0015)") && s.contains("not saved"),
+        s.contains("control character (U+0015) in the name") && s.contains("remove it"),
         "{s}"
     );
     let names: Vec<_> = fs::read_dir(&a)
@@ -2065,6 +2067,24 @@ fn closing_shells_then_the_last_one_removes_the_panel() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Plan A10, UX: Ctrl+O, mc's shell key, says where the shell is; in the shell the F-key
+/// bar is gone (its keys are the shell's), and back in the files it is there again.
+#[test]
+fn ctrl_o_names_the_shell_and_the_key_bar_hides_in_it() {
+    let (a, b) = files(&["alpha.txt"]);
+    let o = shot_keys(SIZE, "Ctrl+o", &a, &b);
+    assert!(status(&o).contains("the shell is F12"), "{o}");
+    let files_bar = shot_keys(SIZE, "", &a, &b);
+    assert!(files_bar.contains("8 Del"), "{files_bar}");
+    let shell = shot_keys(SIZE, "F12", &a, &b);
+    assert!(
+        !shell.contains("8 Del"),
+        "the bar shows in the shell\n{shell}"
+    );
+    let back = shot_keys(SIZE, "F12,F12", &a, &b);
+    assert!(back.contains("8 Del"), "{back}");
+}
+
 #[test]
 fn the_tab_bar_buttons_are_clickable() {
     let (a, b) = files(&["alpha.txt"]);
@@ -2686,6 +2706,47 @@ fn a_config_written_by_an_older_xdevcmd_still_loads() {
 }
 
 // ── session ────────────────────────────────────────────────────────────────────────
+
+/// `XDEVCMD_STATE` names the session file (config.md); a folder there is refused at the
+/// start, with what to set instead. Before, it was taken as the session's path, and the
+/// journal went to the folder *beside* it (cosf review 2026-11-19, plan v3 H-02).
+#[test]
+fn xdevcmd_state_naming_a_folder_is_refused() {
+    let top = scratch("state-folder");
+    let state = top.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let out = isolated()
+        .env("XDEVCMD_STATE", &state)
+        .arg("--screenshot=80x24")
+        .output()
+        .expect("xdevcmd should run");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{err}");
+    assert!(
+        err.contains("XDEVCMD_STATE") && err.contains("session.toml"),
+        "{err}"
+    );
+    assert!(!top.join("journal").exists(), "a journal beside the folder");
+    // A folder not made yet, named with a trailing separator, and a relative path (the
+    // journal would follow wherever xdevcmd was started): refused too (red-team of #48).
+    let sep = std::path::MAIN_SEPARATOR;
+    for bad in [
+        format!("{}{sep}", top.join("not-yet").display()),
+        "rel-state".to_string(),
+    ] {
+        let out = isolated()
+            .env("XDEVCMD_STATE", &bad)
+            .current_dir(&top)
+            .arg("--screenshot=80x24")
+            .output()
+            .expect("xdevcmd should run");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{bad}: {err}");
+        assert!(err.contains("XDEVCMD_STATE"), "{bad}: {err}");
+    }
+    assert!(!top.join("journal").exists(), "a journal beside it");
+    let _ = std::fs::remove_dir_all(&top);
+}
 
 /// xdevcmd with no directories, reading the session at `state`.
 fn shot_session(state: &std::path::Path, extra: &[&str]) -> String {
@@ -4064,6 +4125,76 @@ fn tilde_goes_home_and_ctrl_backslash_to_the_root() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A directory slower to read than the pane waits (150 ms) is waited for before the frame
+/// and before the next key: the Windows Ctrl+\\ flake (runs 43221291571, 43409507585) was
+/// `C:\\` read late, and the frame still showed the directory the key had left.
+#[test]
+fn a_slow_directory_is_waited_for_before_the_next_key_and_the_frame() {
+    let (a, b) = fixture();
+    fs::create_dir(a.join("slow-dir-x")).unwrap();
+    fs::write(a.join("slow-dir-x").join("inside.txt"), "").unwrap();
+    let out = isolated()
+        .env("XDEVCMD_TEST_SLOW_DIR", "slow-dir-x")
+        .arg("--screenshot=100x24")
+        .arg("--keys=Down,Enter")
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("inside"), "the slow directory's file\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Item 46: Alt+M shows the status line's past in the viewer, each message whole with
+/// its time; with none yet, it says so.
+#[test]
+fn messages_keeps_what_the_status_line_said() {
+    let (a, b) = fixture();
+    let s = shot_keys("100x20", "A-m", &a, &b);
+    assert!(s.contains("No messages yet"), "{s}");
+    let s = shot_keys("100x20", "Down,o,A-m", &a, &b);
+    let line = s
+        .lines()
+        .find(|l| l.contains("would open victim.txt"))
+        .unwrap_or_else(|| panic!("the message, kept\n{s}"));
+    let clock = line.split('\u{2502}').nth(2).unwrap_or("").trim_start();
+    let b = clock.as_bytes();
+    assert!(
+        b.len() > 8
+            && b[2] == b':'
+            && b[5] == b':'
+            && b[..8].iter().filter(|c| c.is_ascii_digit()).count() == 6,
+        "its time first: {line}"
+    );
+    assert!(s.contains("in memory only"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Item 48: Copy relative path writes from the repository's root, or from the folder
+/// outside one, and the status line says which.
+#[test]
+fn copy_relative_path_says_what_it_is_relative_to() {
+    let (a, b) = fixture();
+    let keys = "Down,F1,c,o,p,y,Space,r,e,l,Enter";
+    let s = shot_keys("110x20", keys, &a, &b);
+    assert!(
+        s.contains("copied victim.txt, relative to this folder (not in a repository)"),
+        "{s}"
+    );
+    fs::create_dir(a.parent().unwrap().join(".git")).unwrap();
+    let s = shot_keys("110x20", keys, &a, &b);
+    let rel = std::path::Path::new("a")
+        .join("victim.txt")
+        .display()
+        .to_string();
+    assert!(
+        s.contains(&format!("copied {rel}, relative to the repository")),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn bulk_rename_is_off_in_read_only_mode() {
     let (a, b) = fixture();
@@ -4373,7 +4504,13 @@ fn aged(p: &std::path::Path, body: &str, age_secs: u64) {
         fs::create_dir_all(d).unwrap();
     }
     fs::write(p, body).unwrap();
-    let t = std::time::SystemTime::now() - std::time::Duration::from_secs(age_secs);
+    // To the second: two files of the same age have the same time, however far apart
+    // they were made (times to the nanosecond must match exactly to be the same).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now - age_secs);
     let f = fs::File::options().write(true).open(p).unwrap();
     f.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
 }
@@ -5436,4 +5573,177 @@ fn a_copy_with_nothing_to_decide_is_the_dialog_it_always_was() {
     for not in ["create ", "Space changes", "\u{26a0}", "identical"] {
         assert!(!s.contains(not), "{not}\n{s}");
     }
+}
+
+/// QA 2026-11-17 (P1): a name that is not UTF-8 is kept exactly (guide.md, "File
+/// names"), also through a rename that changes another part of it: F2 adding "X", and
+/// Shift+F2 with `[N]-new`. Before, the byte shown as `�` became U+FFFD on disk.
+/// Linux: macOS and Windows names are always text.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_rename_keeps_the_bytes_of_a_name_it_did_not_change() {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = |p: &std::path::Path| -> Vec<Vec<u8>> {
+        let mut v: Vec<_> = fs::read_dir(p)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().as_bytes().to_vec())
+            .collect();
+        v.sort();
+        v
+    };
+    let (a, b) = fixture();
+    fs::remove_file(a.join("victim.txt")).unwrap();
+    let odd = std::ffi::OsStr::from_bytes(b"a\xff");
+    fs::write(a.join(odd), "x").unwrap();
+    let s = shot_keys("110x24", "Down,F2,End,X,Enter", &a, &b);
+    assert_eq!(bytes(&a), vec![b"a\xffX".to_vec()], "F2\n{s}");
+
+    let (a, b) = fixture();
+    fs::remove_file(a.join("victim.txt")).unwrap();
+    fs::write(a.join(odd), "x").unwrap();
+    let s = shot_keys(
+        "110x24",
+        "Down,Insert,S-F2,Ctrl+u,[,N,],-,n,e,w,Enter,wait",
+        &a,
+        &b,
+    );
+    assert_eq!(bytes(&a), vec![b"a\xff-new".to_vec()], "Shift+F2\n{s}");
+}
+
+/// QA 2026-11-17 (P0): a folder copied onto a name that is a link to a folder elsewhere.
+/// The table says "⛔ folder where a file is: skipped, never replaced"; the copy went
+/// through the link anyway and wrote outside the destination. What the table shows is
+/// what happens: nothing is written through the link. Unix: Windows' links need rights.
+#[cfg(unix)]
+#[test]
+fn a_folder_copied_onto_a_link_to_a_folder_writes_nothing_through_it() {
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let root = scratch(&format!("link-dest-{n}"));
+    let _ = fs::remove_dir_all(&root);
+    let (a, b, outside) = (root.join("a"), root.join("b"), root.join("outside"));
+    fs::create_dir_all(a.join("d")).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(a.join("d/new.txt"), "new").unwrap();
+    fs::write(outside.join("kept.txt"), "kept").unwrap();
+    std::os::unix::fs::symlink("../outside", b.join("d")).unwrap();
+    let s = shot_keys("118x34", "Ctrl+a,F5", &a, &b);
+    assert!(s.contains("skipped, never replaced"), "the table\n{s}");
+    let s = shot_keys("118x34", "Ctrl+a,F5,Enter,wait", &a, &b);
+    let mut there: Vec<_> = fs::read_dir(&outside)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    there.sort();
+    assert_eq!(there, vec!["kept.txt"], "written through the link\n{s}");
+    assert!(b.join("d").symlink_metadata().unwrap().is_symlink());
+    assert!(s.contains("1 skipped"), "the summary says so\n{s}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// QA 2026-11-17 (P0): F6 on the same drive replacing a file sent the old one nowhere:
+/// renamed over, gone for good, while the table said "a file replaced goes to the
+/// trash". The old file must be in the trash, as with F5. Linux only, as above.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_a_move_replaces_goes_to_the_trash() {
+    let (a, b) = planned_trees();
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let old = format!("old body of a moved-over file {n} {}", std::process::id());
+    aged(&b.join("older.txt"), &old, 3600);
+    let s = shot_keys("118x34", "*,F6,Down,Space", &a, &b);
+    assert!(s.contains("a file replaced goes to the trash"), "{s}");
+    let s = shot_keys("118x34", "*,F6,Down,Space,Enter,wait", &a, &b);
+    assert_eq!(fs::read_to_string(b.join("older.txt")).unwrap(), "new body");
+    assert!(!a.join("older.txt").exists(), "moved\n{s}");
+    let trash = scratch("isolation").join("data/Trash/files");
+    let kept = fs::read_dir(&trash)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t == old));
+    assert!(kept, "the replaced file is not in the trash\n{s}");
+    assert!(s.contains("(the old one in the trash)"), "{s}");
+}
+
+/// Plan A10's key table: the first day's tasks, each done by its keys on a fresh pair of
+/// folders, never needing more keys than beta.1 did (measured on the v0.4.0-beta.1 build
+/// with the same keys, 2026-11-17). `wait` lets a job finish and is not a key. The
+/// refusals' own round trips, and F8 while a folder opens, are in pty.rs.
+#[test]
+fn key_table_first_day_tasks_need_no_more_keys_than_beta_1() {
+    type Check = fn(&std::path::Path, &std::path::Path, &str) -> bool;
+    let rows: [(&str, &str, usize, Check); 5] = [
+        ("copy a file", "Down,F5,Enter,wait", 3, |_, b, _| {
+            b.join("victim.txt").exists()
+        }),
+        ("delete to the trash", "Down,F8,Enter,wait", 3, |a, _, _| {
+            !a.join("victim.txt").exists()
+        }),
+        (
+            "delete from a list (Alt+F7's results)",
+            "Alt+F7,v,i,c,*,Enter,End,F8,Enter,wait",
+            9,
+            |a, _, _| !a.join("victim.txt").exists(),
+        ),
+        (
+            "cd the shell here, its line empty",
+            "Alt+c",
+            1,
+            |_, _, s| !cfg!(unix) || status(s).contains("shell: cd"),
+        ),
+        (
+            "find a command and run it (F1)",
+            "F1,s,y,n,c,Enter",
+            6,
+            |_, _, s| s.contains("Synchronise \u{b7}"),
+        ),
+    ];
+    let mut table = String::new();
+    for (task, keys, beta1, check) in rows {
+        let (a, b) = fixture();
+        let s = shot_keys("110x24", keys, &a, &b);
+        let n = keys.split(',').filter(|k| *k != "wait").count();
+        table.push_str(&format!("{task}: {n} keys (beta.1: {beta1})\n"));
+        assert!(check(&a, &b, &s), "{task} not done by {keys}\n{s}");
+        assert!(n <= beta1, "{task}: {n} keys, beta.1 needed {beta1}");
+        let _ = fs::remove_dir_all(a.parent().unwrap());
+    }
+    eprintln!("{table}");
+}
+
+/// The key table's dead ends: a key that does nothing here names the one that does.
+/// Ctrl+O (mc's shell key) says F12. F8 while a folder opens is in pty.rs (the screenshot
+/// waits for slow folders, so it cannot refuse there).
+#[test]
+fn key_table_dead_ends_say_what_to_press() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Ctrl+o", &a, &b);
+    assert!(status(&s).contains("F12"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// The key table's footer row, Linux only: a click on the F-key bar's `8` does what F8
+/// does (its question, then Enter).
+#[cfg(target_os = "linux")]
+#[test]
+fn key_table_a_click_on_the_key_bar_does_what_the_key_does() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "", &a, &b);
+    let last = s.lines().count() - 1;
+    let bar = s.lines().nth(last).unwrap();
+    let x = bar[..bar.find("8 Del").expect("the key bar")]
+        .chars()
+        .count()
+        + 1;
+    let s = shot_keys(
+        "110x24",
+        &format!("Down,click:{x}:{last},Enter,wait"),
+        &a,
+        &b,
+    );
+    assert!(!a.join("victim.txt").exists(), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
 }

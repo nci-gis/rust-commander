@@ -192,7 +192,8 @@ impl Choice {
 impl Group {
     pub fn level(self) -> Level {
         match self {
-            Group::Blocked => Level::Cannot,
+            // #5: never replaced, so left out, as what cannot be copied is.
+            Group::Blocked | Group::FileOverDir | Group::DirOverFile => Level::Cannot,
             Group::Identical => Level::Info,
             _ => Level::Loses,
         }
@@ -202,11 +203,10 @@ impl Group {
     /// data (owner, 2026-11-13). Empty: nothing to choose.
     pub fn choices(self) -> &'static [Choice] {
         match self {
-            Group::Blocked | Group::Identical => &[],
-            // A file and a folder cannot replace each other in one step.
-            Group::FileOverDir | Group::DirOverFile | Group::CaseClash => {
-                &[Choice::Skip, Choice::Ask]
-            }
+            // A file and a folder never replace each other (#5): skipped, nothing to
+            // choose. The engine skips them whatever is chosen elsewhere.
+            Group::Blocked | Group::Identical | Group::FileOverDir | Group::DirOverFile => &[],
+            Group::CaseClash => &[Choice::Skip, Choice::Ask],
             _ => &[Choice::Skip, Choice::Replace, Choice::Ask],
         }
     }
@@ -234,8 +234,14 @@ impl Group {
             Group::Newer => format!("{n} would replace a newer file"),
             Group::Older => format!("{n} would replace an older file"),
             Group::Differs => format!("{n} would replace a file of another size"),
-            Group::FileOverDir => format!("{n} {} where a folder is", s("file", "files")),
-            Group::DirOverFile => format!("{n} {} where a file is", s("folder", "folders")),
+            Group::FileOverDir => format!(
+                "{n} {} where a folder is: skipped, never replaced",
+                s("file", "files")
+            ),
+            Group::DirOverFile => format!(
+                "{n} {} where a file is: skipped, never replaced",
+                s("folder", "folders")
+            ),
             Group::Identical => format!(
                 "{n} already there, identical: left as {}",
                 s("it is", "they are")
@@ -261,6 +267,9 @@ pub struct Totals {
     pub warned: u64,
     /// New rows counted but not kept, past [`CAP`].
     pub dropped: u64,
+    /// Identical rows counted but not kept, past [`CAP`]: the job leaves an identical
+    /// file without a row for it (a confirmed plan's rule), so they need no memory.
+    pub identical_dropped: u64,
     /// Bytes the job writes at the destination (what is identical is not copied).
     pub writes: u64,
     /// Files and links, as the F5 dialog has always counted them.
@@ -307,6 +316,9 @@ impl Plan {
         let mut n: std::collections::BTreeMap<Group, u64> = Default::default();
         for g in self.rows.iter().filter_map(Row::group) {
             *n.entry(g).or_default() += 1;
+        }
+        if self.totals.identical_dropped > 0 {
+            *n.entry(Group::Identical).or_default() += self.totals.identical_dropped;
         }
         n.into_iter().collect()
     }
@@ -619,6 +631,42 @@ pub fn is_network(dir: &Path) -> bool {
     fs_kind(dir) == Fs::Network
 }
 
+/// The file system at `dir`, as a word for the debug log ([`crate::debuglog`]): the
+/// system's own name where it gives one ("apfs", "ext4"), else the kind.
+pub fn fs_word(dir: &Path) -> String {
+    #[cfg(target_os = "linux")]
+    if let Ok(st) = rustix::fs::statfs(dir) {
+        #[allow(clippy::unnecessary_cast)]
+        let name = match st.f_type as i64 {
+            0xef53 => Some("ext4"),
+            0x9123_683e => Some("btrfs"),
+            0x5846_5342 => Some("xfs"),
+            0x0102_1994 => Some("tmpfs"),
+            0x2fc1_2fc1 => Some("zfs"),
+            0xcafe_4a11 => Some("bcachefs"),
+            0x794c_7630 => Some("overlay"),
+            0xf2f5_2010 => Some("f2fs"),
+            _ => None,
+        };
+        if let Some(n) = name {
+            return n.to_string();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(n) = mac_fs_name(dir) {
+        return String::from_utf8_lossy(&n).into_owned();
+    }
+    match fs_kind(dir) {
+        Fs::Fat => "fat",
+        Fs::Exfat => "exfat",
+        Fs::Ntfs => "ntfs",
+        Fs::Network => "network",
+        Fs::Other => "other",
+        Fs::Unknown => "unknown",
+    }
+    .to_string()
+}
+
 /// Bytes free at `dest` for this user; `None` where it cannot be asked (Windows).
 pub fn free_space(dest: &Path) -> Option<u64> {
     #[cfg(unix)]
@@ -852,11 +900,11 @@ fn plan_capped(
             continue;
         };
         let dst = dest.join(name);
-        if dst == *src {
+        if onto_itself(src, &dst) {
             s.blocked(src, &dst, false, Blocked::SameFile);
             continue;
         }
-        if src.is_dir() && dst.starts_with(src) {
+        if into_itself(src, &dst, dest) {
             s.blocked(src, &dst, true, Blocked::IntoItself);
             continue;
         }
@@ -876,6 +924,82 @@ fn plan_capped(
     })
 }
 
+/// What a directory listing says of an entry, kept so the walk does not stat it again.
+/// On Windows this matters: a stat opens the file, and Defender scans a file the first
+/// time it is opened, the bigger the longer (the owner's beta.1 test on Windows 11: about
+/// 1,500 documents of 500 MB took 1–1.5 s the first time, and as many small files a few
+/// ms). The listing's data (FindFirstFile's) opens nothing. On Unix a listing's
+/// `metadata()` is the same `lstat` a stat is.
+fn listed(ent: &fs::DirEntry) -> Option<fs::Metadata> {
+    ent.metadata().ok().filter(listing_will_do)
+}
+
+/// Whether a listing's metadata is as good as a stat's. On Windows not for a reparse
+/// point (a link, a junction, a cloud placeholder): those are stat'ed as before.
+#[cfg(windows)]
+fn listing_will_do(m: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+#[cfg(not(windows))]
+fn listing_will_do(_: &fs::Metadata) -> bool {
+    true
+}
+
+/// A destination directory that exists, listed once: what is there under each name.
+/// Folded where the destination ignores case, since a stat of `README.txt` there finds
+/// `Readme.txt`.
+struct There {
+    fold: bool,
+    /// Whether a name missing here can be trusted to be absent: not when it is unknown
+    /// whether case is ignored, nor when an entry's data could not be kept.
+    complete: bool,
+    entries: HashMap<OsString, Option<fs::Metadata>>,
+}
+
+impl There {
+    fn list(dir: &Path, t: &Target) -> Option<Self> {
+        let folded = t.ignores_case != Some(false);
+        let mut complete = t.ignores_case.is_some();
+        let mut entries = HashMap::new();
+        for e in fs::read_dir(dir).ok()? {
+            let Ok(e) = e else {
+                complete = false;
+                continue;
+            };
+            let key = if folded {
+                OsString::from(fold(&e.file_name()))
+            } else {
+                e.file_name()
+            };
+            entries.insert(key, listed(&e));
+        }
+        Some(Self {
+            fold: folded,
+            complete,
+            entries,
+        })
+    }
+
+    /// `None`: ask the file system (a stat). `Some(None)`: nothing there.
+    /// `Some(Some(m))`: what is there.
+    fn get(&self, name: &OsStr) -> Option<Option<fs::Metadata>> {
+        let key = if self.fold {
+            OsString::from(fold(name))
+        } else {
+            name.to_os_string()
+        };
+        match self.entries.get(&key) {
+            Some(Some(m)) => Some(Some(m.clone())),
+            Some(None) => None,
+            None if self.complete => Some(None),
+            None => None,
+        }
+    }
+}
+
 struct Scan<'a> {
     rows: Vec<Row>,
     totals: Totals,
@@ -890,6 +1014,20 @@ impl Scan<'_> {
     /// Plan `src` onto `dst`. `parent_new`: `dst`'s directory is itself new, so nothing
     /// can be there and it is not looked at. `false` once stopped.
     fn node(&mut self, src: &Path, dst: &Path, parent_new: bool, names: &mut Names) -> bool {
+        self.node_listed(src, dst, parent_new, names, None, None)
+    }
+
+    /// [`Self::node`], with what the listings already said: `src_meta` from `src`'s
+    /// directory, `there` from `dst`'s. Each is stat'ed only when they cannot say.
+    fn node_listed(
+        &mut self,
+        src: &Path,
+        dst: &Path,
+        parent_new: bool,
+        names: &mut Names,
+        src_meta: Option<fs::Metadata>,
+        there_dir: Option<&There>,
+    ) -> bool {
         if self.stop.load(Ordering::Relaxed) {
             return false;
         }
@@ -897,7 +1035,10 @@ impl Scan<'_> {
         if self.seen.is_multiple_of(PROGRESS_EVERY) {
             (self.progress)(self.totals.items, self.totals.bytes);
         }
-        let meta = match faults::at(Point::Stat, src).and_then(|()| fs::symlink_metadata(src)) {
+        let meta = match faults::at(Point::Stat, src).and_then(|()| match src_meta {
+            Some(m) => Ok(m),
+            None => fs::symlink_metadata(src),
+        }) {
             Ok(m) => m,
             Err(e) => {
                 self.blocked(src, dst, false, Blocked::Unreadable(e.to_string()));
@@ -912,9 +1053,12 @@ impl Scan<'_> {
         let there = if parent_new {
             None
         } else {
-            faults::at(Point::Stat, dst)
-                .ok()
-                .and_then(|()| fs::symlink_metadata(dst).ok())
+            faults::at(Point::Stat, dst).ok().and_then(|()| {
+                match there_dir.zip(dst.file_name()).and_then(|(d, n)| d.get(n)) {
+                    Some(known) => known,
+                    None => fs::symlink_metadata(dst).ok(),
+                }
+            })
         };
         let target = there.as_ref().map(Ident::of);
         let is_dir = ft.is_dir();
@@ -993,10 +1137,21 @@ impl Scan<'_> {
         self.push(row);
         let new = class == Class::New;
         let mut inner = Names::of(dst, new, &self.t);
+        // What is in the destination directory, read once rather than stat'ed per name.
+        let listing = if new { None } else { There::list(dst, &self.t) };
         for ent in entries {
             match ent {
                 Ok(ent) => {
-                    if !self.node(&ent.path(), &dst.join(ent.file_name()), new, &mut inner) {
+                    let name = ent.file_name();
+                    let m = listed(&ent);
+                    if !self.node_listed(
+                        &ent.path(),
+                        &dst.join(&name),
+                        new,
+                        &mut inner,
+                        m,
+                        listing.as_ref(),
+                    ) {
                         return false;
                     }
                 }
@@ -1053,9 +1208,14 @@ impl Scan<'_> {
         if row.blocked.is_none() && row.warn.is_some() {
             self.totals.warned += 1;
         }
+        // A file and a folder of one name are skipped, never written (#5): not counted
+        // in what the copy needs, or the space check asks for bytes it never writes.
         if row.blocked.is_none()
-            && row.class != Class::Identical
-            && (!row.dir || row.class == Class::DirOverFile)
+            && !matches!(
+                row.class,
+                Class::Identical | Class::FileOverDir | Class::DirOverFile
+            )
+            && !row.dir
         {
             self.totals.writes += row.bytes;
         }
@@ -1066,12 +1226,40 @@ impl Scan<'_> {
         } else if row.class == Class::New {
             self.totals.new += 1;
         }
-        if self.rows.len() >= self.cap && !row.needs_deciding() {
-            self.totals.dropped += 1;
-            return;
+        if self.rows.len() >= self.cap {
+            if !row.needs_deciding() {
+                self.totals.dropped += 1;
+                return;
+            }
+            // A resync onto a copy already the same is all identical rows: 5 million
+            // files would have held 5 million rows (the review, 2026-11-14).
+            if row.group() == Some(Group::Identical) {
+                self.totals.identical_dropped += 1;
+                return;
+            }
         }
         self.rows.push(row);
     }
+}
+
+/// Whether `dst` is `src` itself, by its text or on disk (a link to a parent, `..`,
+/// another case of a folder): copying or moving it there has nothing to do. Only under
+/// its own name: a move to a new name differing in case is a rename, and another name
+/// on the same file (a hard link) is another entry.
+pub(crate) fn onto_itself(src: &Path, dst: &Path) -> bool {
+    dst == src || (dst.file_name() == src.file_name() && crate::paths::same_entry(src, dst))
+}
+
+/// Whether putting the directory `src` at `dst`, in `dest_dir`, puts it inside itself,
+/// which would recurse into its own copy until the disk or the stack ran out. By the
+/// text, and on disk: `dest_dir` reached through a link into `src` is still inside it.
+/// A link to a directory is copied as a link, so only a real directory is checked on
+/// disk.
+pub(crate) fn into_itself(src: &Path, dst: &Path, dest_dir: &Path) -> bool {
+    if src.is_dir() && dst.starts_with(src) {
+        return true;
+    }
+    fs::symlink_metadata(src).is_ok_and(|m| m.is_dir()) && crate::paths::within(dest_dir, src)
 }
 
 /// Two files (or links), source and destination, compared as a copy would leave them.
@@ -1313,6 +1501,59 @@ mod tests {
         assert_eq!(row(&p, "f").blocked, Some(Blocked::SameFile));
     }
 
+    /// The text of the destination says nothing: a link into the source, or to its
+    /// parent, is the same place on disk.
+    #[cfg(unix)]
+    #[test]
+    fn into_itself_and_onto_itself_through_a_link_are_blocked() {
+        let d = tmp("itself-link");
+        fs::create_dir_all(d.join("a").join("inner")).unwrap();
+        std::os::unix::fs::symlink(d.join("a").join("inner"), d.join("down")).unwrap();
+        std::os::unix::fs::symlink(&d, d.join("a").join("up")).unwrap();
+        let p = plan(Kind::Copy, &[d.join("a")], &d.join("down"));
+        assert_eq!(row(&p, "a").blocked, Some(Blocked::IntoItself));
+        let p = plan(
+            Kind::Move,
+            &[d.join("a")],
+            &d.join("a").join("inner").join(".."),
+        );
+        assert_eq!(row(&p, "a").blocked, Some(Blocked::IntoItself));
+        let p = plan(Kind::Copy, &[d.join("a")], &d.join("a").join("up"));
+        assert_eq!(row(&p, "a").blocked, Some(Blocked::SameFile));
+        // A link to a folder is copied as a link: into its own target is fine.
+        let p = plan(Kind::Copy, &[d.join("down")], &d.join("a").join("inner"));
+        assert_eq!(row(&p, "down").blocked, None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Through a link into the source, to a folder not made yet: still into itself
+    /// (cosf C01: the folder could not be resolved, so the check said no, and the copy
+    /// recursed until the stack overflowed).
+    #[cfg(unix)]
+    #[test]
+    fn into_itself_through_a_link_to_a_folder_not_made_yet_is_blocked() {
+        let d = tmp("itself-missing");
+        fs::create_dir_all(d.join("a").join("inner")).unwrap();
+        std::os::unix::fs::symlink(d.join("a").join("inner"), d.join("down")).unwrap();
+        for dest in [
+            d.join("down").join("new"),
+            d.join("down").join("new").join("deeper"),
+        ] {
+            for kind in [Kind::Copy, Kind::Move] {
+                let p = plan(kind, &[d.join("a")], &dest);
+                assert_eq!(
+                    row(&p, "a").blocked,
+                    Some(Blocked::IntoItself),
+                    "{kind:?} {dest:?}"
+                );
+            }
+        }
+        // Not made yet and outside: fine.
+        let p = plan(Kind::Copy, &[d.join("a")], &d.join("elsewhere").join("new"));
+        assert_eq!(row(&p, "a").blocked, None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_rename_plans_the_one_source_under_its_new_name() {
         let d = tmp("rename");
@@ -1374,6 +1615,45 @@ mod tests {
         assert_eq!(p.totals.dropped, 6);
         assert_eq!(p.totals.items, 10);
         assert!(p.rows.iter().any(|r| r.src.ends_with("f9")));
+    }
+
+    /// Past the cap, identical rows are counted, not kept: a resync onto a copy that is
+    /// already the same holds no row per file. The table still says how many.
+    #[test]
+    fn past_the_cap_identical_rows_are_counted_not_kept() {
+        let d = tmp("cap-same");
+        let (src, to) = (d.join("src"), d.join("to"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        let when = SystemTime::now();
+        for i in 0..10 {
+            for dir in [&src, &to] {
+                let p = dir.join(format!("f{i}"));
+                fs::write(&p, "same").unwrap();
+                let f = fs::File::options().write(true).open(&p).unwrap();
+                f.set_times(fs::FileTimes::new().set_modified(when))
+                    .unwrap();
+            }
+        }
+        fs::write(to.join("f9"), "different").unwrap();
+        let sources: Vec<PathBuf> = (0..10).map(|i| src.join(format!("f{i}"))).collect();
+        let stop = AtomicBool::new(false);
+        let p = plan_capped(
+            Kind::Copy,
+            &sources,
+            &to,
+            None,
+            &stop,
+            &mut |_, _| {},
+            Target::UNKNOWN,
+            3,
+        )
+        .unwrap();
+        assert_eq!(p.totals.identical_dropped, 6, "{:?}", p.rows);
+        assert_eq!(p.rows.len(), 4, "the cap, and the one to decide");
+        assert!(p.rows.iter().any(|r| r.src.ends_with("f9")));
+        let identical = p.groups().into_iter().find(|(g, _)| *g == Group::Identical);
+        assert_eq!(identical, Some((Group::Identical, 9)), "all counted");
     }
 
     #[test]
@@ -1502,6 +1782,84 @@ mod tests {
             name_problem(OsStr::new(&"é".repeat(128)), false),
             Some(Blocked::TooLong)
         );
+    }
+
+    /// Round 033 (part F): inside a directory the walk takes what the listings say
+    /// instead of a stat per name (on Windows a stat opens the file, and Defender scans
+    /// it). The plan must be the same: each name planned from inside its directory
+    /// (listings) and on its own as a source (stats) gets the same class, size and
+    /// target.
+    #[test]
+    fn the_listings_plan_what_a_stat_per_name_plans() {
+        let d = tmp("listed");
+        let (s, to) = (d.join("s").join("d"), d.join("to").join("d"));
+        fs::create_dir_all(&s).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        let at = |p: &Path, secs: u64| {
+            let f = fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        let both = |name: &str, here: &str, there: &str, t_here: u64, t_there: u64| {
+            fs::write(s.join(name), here).unwrap();
+            fs::write(to.join(name), there).unwrap();
+            at(&s.join(name), t_here);
+            at(&to.join(name), t_there);
+        };
+        both("same", "abc", "abc", 1_000_000, 1_000_000);
+        both("newer", "abc", "abc", 2_000_000, 1_000_000);
+        both("older", "abc", "abc", 1_000_000, 2_000_000);
+        both("size", "abcd", "abc", 1_000_000, 1_000_000);
+        fs::write(s.join("new"), "n").unwrap();
+        fs::write(s.join("file-over-dir"), "f").unwrap();
+        fs::create_dir(to.join("file-over-dir")).unwrap();
+        fs::create_dir(s.join("dir-over-file")).unwrap();
+        fs::write(s.join("dir-over-file").join("x"), "x").unwrap();
+        fs::write(to.join("dir-over-file"), "f").unwrap();
+        fs::create_dir(s.join("merge")).unwrap();
+        fs::create_dir(to.join("merge")).unwrap();
+        fs::write(to.join("only-there"), "o").unwrap();
+
+        let t = Target {
+            fs: Fs::Other,
+            ignores_case: Some(false),
+            ..FAT
+        };
+        let listed = plan_on(t, Kind::Copy, std::slice::from_ref(&s), &d.join("to"));
+        let names = [
+            "same",
+            "newer",
+            "older",
+            "size",
+            "new",
+            "file-over-dir",
+            "dir-over-file",
+            "merge",
+        ];
+        let sources: Vec<PathBuf> = names.iter().map(|n| s.join(n)).collect();
+        let stated = plan_on(t, Kind::Copy, &sources, &to);
+        for n in names {
+            let (a, b) = (row(&listed, n), row(&stated, n));
+            assert_eq!(
+                (a.class, a.bytes, a.target, a.dir),
+                (b.class, b.bytes, b.target, b.dir),
+                "{n}"
+            );
+        }
+        assert_eq!(row(&listed, "same").class, Class::Identical);
+        assert_eq!(row(&listed, "new").class, Class::New);
+        assert_eq!(row(&listed, "file-over-dir").class, Class::FileOverDir);
+
+        // Where case is ignored, `README` finds `Readme` in the listing, as a stat
+        // there would (a case-sensitive disk under this test cannot show the stat).
+        fs::write(s.join("README"), "new").unwrap();
+        fs::write(to.join("Readme"), "old").unwrap();
+        let p = plan_on(FAT, Kind::Copy, std::slice::from_ref(&s), &d.join("to"));
+        let r = row(&p, "README");
+        assert_ne!(r.class, Class::New, "{r:?}");
+        assert!(r.target.is_some(), "{r:?}");
+        assert_eq!(r.warn, Some(Warn::CaseClash("Readme".into())));
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

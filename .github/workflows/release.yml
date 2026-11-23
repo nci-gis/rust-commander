@@ -5,9 +5,9 @@ name: release
 # Publish. A release (v1.2.3) is tagged on main; a pre-release (v1.2.3-beta.N, -rc.N) on
 # dev or main, and its draft is marked pre-release, never "Latest" (the owner,
 # 2026-11-13: pre-releases go to GitHub only). A tag cannot be filtered by branch here,
-# so the first job refuses one that breaks the rules (scripts/release-check.sh), and
-# nothing is built after it. Run by hand with a tag name, only that first job runs: the
-# rules tried before the tag exists.
+# so the first job refuses one that breaks the rules (scripts/release-check.sh) or whose
+# commit has not passed ci (scripts/ci-green.sh), and nothing is built after it. Run by
+# hand with a tag name, only the rules are tried, before the tag exists.
 on:
   push:
     tags: ["v*"]
@@ -30,6 +30,9 @@ jobs:
   check:
     name: tag, version and changelog agree
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
@@ -45,6 +48,14 @@ jobs:
           set -o pipefail
           scripts/release-check.sh "$TAG" "$GITHUB_SHA" | tee out.txt
           tail -n 1 out.txt >> "$GITHUB_OUTPUT"
+      # The tag's commit passed ci: a tag push starts this at once, in parallel with that
+      # commit's CI (Round 032), so it waits for it here (up to an hour) and builds
+      # nothing unless a run passed.
+      - name: ci passed on this commit
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-green.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA" 60
 
   licences:
     name: third-party licences
@@ -111,6 +122,53 @@ jobs:
             cp "target/${{ matrix.target }}/release/xdevcmd" "$name/"
             tar czf "$name.tar.gz" "$name"
           fi
+      # The archive itself, as a user gets it: unpacked elsewhere, its files there, the
+      # binary under 7 MiB, and run (where this runner's CPU can): its version is the
+      # tag's, and the --print commands work.
+      - name: smoke test
+        shell: bash
+        run: scripts/smoke.sh xdevcmd-${GITHUB_REF_NAME}-*.* "$GITHUB_REF_NAME"
+      # The benchmark and the tester's sandbox tool (docs/benchmark.md,
+      # docs/how-to-test.md), built here with the binary it measures, in an archive
+      # of its own: xdevcmd's stays lean, and an Actions artifact would go after 14 days.
+      # It never holds the release: a failure here leaves it out of the draft, where the
+      # person who publishes sees it missing.
+      - name: bench tool
+        id: bench
+        continue-on-error: true
+        shell: bash
+        run: |
+          cargo build --release --locked -p xtask --target ${{ matrix.target }}
+          name="xdevcmd-bench-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          # Made apart, and moved where the upload looks only once it has run.
+          mkdir -p bench-stage/"$name"
+          cp LICENSE docs/how-to-test.md docs/benchmark.md bench-stage/"$name"/
+          exe="target/${{ matrix.target }}/release/xtask"
+          cd bench-stage
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "../$exe.exe" "$name/"
+            7z a -tzip "$name.zip" "$name" > /dev/null
+            archive="$name.zip"
+          else
+            cp "../$exe" "$name/"
+            tar czf "$name.tar.gz" "$name"
+            archive="$name.tar.gz"
+          fi
+          # As a tester runs it: unpacked elsewhere, one small case, its results there,
+          # and --help. Not run only where this runner's CPU cannot (x86_64 macOS on
+          # an ARM runner), as scripts/smoke.sh does.
+          mkdir smoke && cd smoke
+          if [[ "$archive" == *.zip ]]; then 7z x "../$archive" > /dev/null; else tar xzf "../$archive"; fi
+          cd "$name"
+          if [[ "${{ matrix.target }}" == x86_64-apple-darwin && "$(uname -m)" == arm64 ]]; then
+            echo "bench tool: not run on this runner's CPU (arm64)"
+          else
+            ./xtask --help > /dev/null
+            ./xtask bench --only "plan 10,000" --runs 1 --host smoke
+            ls bench/results/*-smoke-*.json
+          fi
+          cd ../..
+          mv "$archive" ..
       - uses: actions/upload-artifact@v4
         with:
           name: xdevcmd-${{ matrix.target }}
@@ -125,6 +183,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance: a signed statement, kept by GitHub, that each archive was
+      # built here from this tag's commit. `gh attestation verify <archive> -R
+      # nci-gis/rust-commander` checks it (docs/security.md, "Checking a download").
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -134,6 +197,10 @@ jobs:
           path: dist
       - name: checksums
         run: cd dist && sha256sum xdevcmd-* > SHA256SUMS && cat SHA256SUMS
+      - name: provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/xdevcmd-*
       # Notes: this version's section of CHANGELOG.md. A release page, unlike a file,
       # keeps every line break, so each wrapped list item is joined back into one line.
       - name: notes

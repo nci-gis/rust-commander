@@ -4,8 +4,12 @@
 //!
 //! ```text
 //! cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
+//!                   [--only CASE] [--dir PATH]
 //! ```
 //!
+//! - `--only` runs the in-process cases whose name holds CASE, with no build (a copy of
+//!   this program runs it on a machine without Rust); `--dir` makes the trees on the
+//!   drive being measured. With `XDEVCMD_DEBUG`, each run's jobs go to a debug log.
 //! - Builds the release binary, then runs each case `--runs` times (5 by default) after
 //!   one warm-up run, and prints the median, p95 and best, with the change from this
 //!   host's baseline (marked past ±15 %).
@@ -21,8 +25,32 @@
 //!   Numbers from two machines are not comparable; nor are runs on a busy machine (the
 //!   load is printed first).
 //!
+//! ```text
+//! cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
+//! ```
+//!
+//! How making many small files durable scales with threads on this disk (Round 033,
+//! group commit): N files of 1 KiB written, then `File::sync_data`, as xdevcmd calls
+//! it, on 1, 2, 4, 8, 16, 32 and 64 threads; the median of three runs each. Run by the
+//! `bench` workflow on Linux, macOS and Windows runners to see the shape on ext4, APFS
+//! and NTFS: whether more threads help at all, which sets the number xdevcmd uses.
+//! `--probe` then compares, on one job of N files, 1 thread, this system's default, and
+//! probing with the job's own first files (16 on 2 threads, 32 on 8, 64 on 16, 128 on
+//! 32; the fastest kept for the rest).
+//!
 //! Not a CI gate: shared runners vary by tens of per cent. CI keeps hard budgets only
 //! (`crates/xdevcmd/tests/budgets.rs`).
+//!
+//! ```text
+//! cargo xtask fuzz [--secs N] [TARGET…]
+//! ```
+//!
+//! Fuzz the parsers of untrusted input (the release bar, item 5): each target in
+//! `fuzz/` (all of them by default) for N seconds (60), one after another, with
+//! `cargo +nightly fuzz run`. Needs the nightly toolchain and cargo-fuzz
+//! (`rustup toolchain install nightly`, `cargo install cargo-fuzz`). A crash stops that
+//! target and is kept in `fuzz/artifacts/<target>/`; the summary names it, and
+//! `cargo +nightly fuzz run <target> <file>` runs it again. By hand, not in CI.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -31,7 +59,38 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]";
+mod manual;
+mod qa;
+mod tryout;
+
+const USAGE: &str = "usage: cargo xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline]
+                         [--only CASE] [--dir PATH]
+       cargo xtask sync-sweep [--files N] [--dir PATH] [--probe]
+       cargo xtask fuzz [--secs N] [TARGET...]
+       cargo xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]";
+/// `xtask --help`: what each task is for. It never runs, looks for or asks an installed
+/// xdevcmd: `bench --only` measures the engine built into this program, of the version
+/// `--version` prints (the release it came with).
+const HELP: &str =
+    "xtask: xdevcmd's tester and developer tasks (docs/how-to-test.md, docs/benchmark.md)
+
+  bench      measure copies, listing and the planner on your own drives
+             (--only CASE: the engine built into this xtask, no Rust needed)
+  try        the tester's sandbox: make it, kill a copy mid-job, check every file
+  manual     the data-safety hand tests: list, show one, log its result for runs.tsv
+  sync-sweep how syncing many small files scales with threads (developers)
+  fuzz       the fuzz targets (developers, with Rust)
+  --version  the version this xtask was built from: measure with the same xdevcmd
+
+Each task's options: xtask bench --help, xtask try --help.
+
+usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
+       xtask try --make [--small] | --launch [--bin P] -- ARGS | --kill-when A|B|C | --reset A|B|C | --check | --tamper | --clean [--dir D]
+       xtask manual list | show M-DS-NN | log M-DS-NN PASS|FAIL|WAIVED [--check FILE] …
+       xtask sync-sweep [--files N] [--dir PATH] [--probe]
+       xtask fuzz [--secs N] [TARGET...]
+(From the repository: cargo xtask …)";
+
 /// Past this change from the baseline, a case is marked.
 const MARK: f64 = 15.0;
 
@@ -39,9 +98,28 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("bench") => bench(&args[1..]),
+        Some("sync-sweep") => sync_sweep(&args[1..]),
+        Some("fuzz") => fuzz(&args[1..]),
+        Some("try") => tryout::run(&args[1..], built_from().unwrap_or("unknown")),
+        Some("manual") => manual::run(&args[1..], built_from().unwrap_or("unknown")),
+        // The maintainer's checks around a cut; not in --help (needs the repository).
+        Some("qa") => qa::run(&args[1..]),
+        Some("--help" | "-h" | "help") => {
+            println!("{HELP}");
+            0
+        }
+        Some("--version" | "-V") => {
+            println!(
+                "xtask {} ({})",
+                built_from().unwrap_or("unknown"),
+                manual::COMMIT
+            );
+            0
+        }
         // A case run in a child: `bench-case NAME SIZE DIR`, its result as JSON.
         Some("bench-case") if args.len() == 4 => {
             let size = args[2].parse().unwrap_or(0);
+            debug_log(Path::new(&args[3]));
             match run_case(&args[1], size, Path::new(&args[3])) {
                 Ok(ms) => {
                     println!("{}", json!({ "ms": ms, "rss_kib": peak_rss_kib() }));
@@ -66,6 +144,10 @@ struct Opts {
     runs: usize,
     host: String,
     save_baseline: bool,
+    /// Only the cases whose name holds this (`--only mixed`); no build, no start-up.
+    only: Option<String>,
+    /// Where the cases make their trees: the drive being measured (`--dir E:\\bench`).
+    dir: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Result<Opts, String> {
@@ -74,6 +156,8 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         runs: 5,
         host: "unnamed".into(),
         save_baseline: false,
+        only: None,
+        dir: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -98,6 +182,8 @@ fn parse(args: &[String]) -> Result<Opts, String> {
                 }
                 o.host = h.clone();
             }
+            "--only" => o.only = Some(it.next().ok_or("--only needs a case")?.clone()),
+            "--dir" => o.dir = Some(PathBuf::from(it.next().ok_or("--dir needs a path")?)),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
     }
@@ -142,6 +228,304 @@ impl Result_ {
     }
 }
 
+/// `cargo xtask sync-sweep`: see the top of this file.
+fn sync_sweep(args: &[String]) -> i32 {
+    let mut files: usize = 1000;
+    let mut base = std::env::temp_dir();
+    let mut probe = false;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--probe" => probe = true,
+            "--files" => match it.next().and_then(|n| n.parse().ok()) {
+                Some(n) if n > 0 => files = n,
+                _ => {
+                    eprintln!("--files takes a number above 0");
+                    return 2;
+                }
+            },
+            "--dir" => match it.next() {
+                Some(d) => base = PathBuf::from(d),
+                None => {
+                    eprintln!("--dir takes a path");
+                    return 2;
+                }
+            },
+            _ => {
+                eprintln!("{USAGE}");
+                return 2;
+            }
+        }
+    }
+    let dir = base.join(format!("xdevcmd-sync-sweep-{}", std::process::id()));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("{}: {e}", dir.display());
+        return 1;
+    }
+    println!(
+        "sync-sweep · {} · {files} files of 1 KiB · {}",
+        std::env::consts::OS,
+        dir.display()
+    );
+    println!("{:>8} {:>10} {:>10}", "threads", "ms", "× 1 thread");
+    let mut one = None;
+    let mut code = 0;
+    for threads in [1usize, 2, 4, 8, 16, 32, 64] {
+        let mut runs = Vec::new();
+        for run in 0..3 {
+            match sweep_once(&dir.join(format!("t{threads}-{run}")), files, threads) {
+                Ok(ms) => runs.push(ms),
+                Err(e) => {
+                    eprintln!("{threads} threads: {e}");
+                    code = 1;
+                }
+            }
+        }
+        if runs.is_empty() {
+            continue;
+        }
+        runs.sort_by(f64::total_cmp);
+        let median = runs[runs.len() / 2];
+        let base = *one.get_or_insert(median);
+        println!("{threads:>8} {median:>10.0} {:>10.1}", base / median);
+    }
+    if probe {
+        code = code.max(probe_table(&dir, files));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    code
+}
+
+/// `files` files of 1 KiB written in `dir`, then synced on `threads` threads, each
+/// taking the next file: the milliseconds the syncs took.
+fn sweep_once(dir: &Path, files: usize, threads: usize) -> std::io::Result<f64> {
+    let open = write_files(dir, files)?;
+    let took = sync_files(&open, threads);
+    drop(open);
+    let _ = std::fs::remove_dir_all(dir);
+    took
+}
+
+/// `files` files of 1 KiB in `dir`, still open.
+fn write_files(dir: &Path, files: usize) -> std::io::Result<Vec<std::fs::File>> {
+    use std::io::Write;
+    std::fs::create_dir_all(dir)?;
+    let mut open = Vec::with_capacity(files);
+    for i in 0..files {
+        let mut f = std::fs::File::create(dir.join(format!("f{i:05}")))?;
+        f.write_all(&[b'x'; 1024])?;
+        open.push(f);
+    }
+    Ok(open)
+}
+
+/// Sync every file of `open` on `threads` threads, each taking the next file: the
+/// milliseconds it took.
+fn sync_files(open: &[std::fs::File], threads: usize) -> std::io::Result<f64> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let failed = std::sync::Mutex::new(None);
+    let t = Instant::now();
+    std::thread::scope(|s| {
+        for _ in 0..threads.max(1) {
+            s.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(f) = open.get(i) else { break };
+                if let Err(e) = f.sync_data() {
+                    *failed.lock().unwrap() = Some(e);
+                    break;
+                }
+            });
+        }
+    });
+    let took = ms(t);
+    match failed.into_inner().unwrap() {
+        Some(e) => Err(e),
+        None => Ok(took),
+    }
+}
+
+/// The thread count group commit would use without probing (Round 033, from the CI
+/// sweep): Linux 16, macOS 8, Windows 1.
+fn default_threads() -> usize {
+    if cfg!(target_os = "linux") {
+        16
+    } else if cfg!(target_os = "macos") {
+        8
+    } else {
+        1
+    }
+}
+
+/// How the files of one job are synced, for `--probe`.
+#[derive(Clone, Copy)]
+enum Way {
+    Fixed(usize),
+    /// The owner's idea: the job's own first files synced with 2, 8, 16 and 32 threads
+    /// in turn ([`probe_sample`] each), and the fastest kept for the rest. No extra writes:
+    /// the probe is work.
+    Probe,
+}
+
+const PROBE: [usize; 4] = [2, 8, 16, 32];
+
+/// How many of the job's files one probe step syncs: four rounds of its threads, at
+/// least 16. One thread costs the most per file where threads help, so it gets fewest.
+fn probe_sample(threads: usize) -> usize {
+    (4 * threads).max(16)
+}
+
+/// One job's files synced the given way: the total milliseconds, and the threads used
+/// for the bulk.
+fn job_once(dir: &Path, files: usize, way: Way) -> std::io::Result<(f64, usize)> {
+    let open = write_files(dir, files)?;
+    let r = (|| match way {
+        Way::Fixed(n) => Ok((sync_files(&open, n)?, n)),
+        Way::Probe => {
+            let mut total = 0.0;
+            let mut at = 0;
+            let mut best = (f64::INFINITY, default_threads());
+            for n in PROBE {
+                let end = (at + probe_sample(n)).min(open.len());
+                if end == at {
+                    break;
+                }
+                let took = sync_files(&open[at..end], n)?;
+                total += took;
+                let each = took / (end - at) as f64;
+                if each < best.0 {
+                    best = (each, n);
+                }
+                at = end;
+            }
+            total += sync_files(&open[at..], best.1)?;
+            Ok((total, best.1))
+        }
+    })();
+    drop(open);
+    let _ = std::fs::remove_dir_all(dir);
+    r
+}
+
+/// `--probe`: one job of `files` synced with 1 thread, with this system's default, and
+/// probed; the median of three runs each.
+fn probe_table(dir: &Path, files: usize) -> i32 {
+    let d = default_threads();
+    println!();
+    println!(
+        "probe · {files} files: the first {}, {}, {} and {} on 2, 8, 16 and 32 threads, then the fastest",
+        probe_sample(2),
+        probe_sample(8),
+        probe_sample(16),
+        probe_sample(32)
+    );
+    println!("{:>22} {:>10} {:>10}", "way", "ms", "threads");
+    let mut code = 0;
+    let ways: [(String, Way); 3] = [
+        ("fixed 1".into(), Way::Fixed(1)),
+        (format!("fixed {d} (default)"), Way::Fixed(d)),
+        ("probe".into(), Way::Probe),
+    ];
+    for (label, way) in ways {
+        let mut runs = Vec::new();
+        for run in 0..3 {
+            match job_once(&dir.join(format!("probe-{run}")), files, way) {
+                Ok(r) => runs.push(r),
+                Err(e) => {
+                    eprintln!("{label}: {e}");
+                    code = 1;
+                }
+            }
+        }
+        if runs.is_empty() {
+            continue;
+        }
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (ms, _) = runs[runs.len() / 2];
+        let chose: Vec<String> = runs.iter().map(|r| r.1.to_string()).collect();
+        println!("{label:>22} {ms:>10.0} {:>10}", chose.join("/"));
+    }
+    code
+}
+
+/// The fuzz targets, as `fuzz/Cargo.toml` names them.
+const FUZZ_TARGETS: [&str; 6] = [
+    "osc",
+    "paths",
+    "config",
+    "theme",
+    "archive_name",
+    "archive_list",
+];
+
+fn fuzz(args: &[String]) -> i32 {
+    let mut secs: u64 = 60;
+    let mut targets: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--secs" => match it.next().and_then(|n| n.parse().ok()) {
+                Some(n) if n > 0 => secs = n,
+                _ => {
+                    eprintln!("--secs takes a number above 0");
+                    return 2;
+                }
+            },
+            t if FUZZ_TARGETS.contains(&t) => targets.push(t.to_string()),
+            _ => {
+                eprintln!("{USAGE}\nfuzz targets: {}", FUZZ_TARGETS.join(", "));
+                return 2;
+            }
+        }
+    }
+    if targets.is_empty() {
+        targets = FUZZ_TARGETS.iter().map(|t| t.to_string()).collect();
+    }
+    let ready = Command::new("cargo")
+        .args(["+nightly", "fuzz", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !ready {
+        eprintln!(
+            "cargo fuzz needs the nightly toolchain and cargo-fuzz:\n  \
+             rustup toolchain install nightly\n  cargo install cargo-fuzz"
+        );
+        return 2;
+    }
+    let dir = root().join("fuzz");
+    let mut failed = Vec::new();
+    for t in &targets {
+        println!("== {t}: {secs} s");
+        let ok = Command::new("cargo")
+            .current_dir(&dir)
+            .args([
+                "+nightly",
+                "fuzz",
+                "run",
+                t,
+                "--",
+                &format!("-max_total_time={secs}"),
+            ])
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            failed.push(t.clone());
+        }
+    }
+    println!();
+    if failed.is_empty() {
+        println!("fuzz: {} target(s), {secs} s each, no crash", targets.len());
+        0
+    } else {
+        for t in &failed {
+            println!(
+                "fuzz: {t} failed; its input is in fuzz/artifacts/{t}/ \
+                 (cargo +nightly fuzz run {t} <file> runs it again)"
+            );
+        }
+        1
+    }
+}
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -149,7 +533,36 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Where `bench/` (results, baselines) goes: the repository's, for `cargo xtask` in it;
+/// otherwise beside where the program was started.
+fn results_root(source: &Path, via_cargo: bool, cwd: PathBuf) -> PathBuf {
+    // `CARGO` is set by `cargo run`/`cargo xtask`, not for a program started by hand.
+    if via_cargo && source.join("Cargo.toml").is_file() {
+        source.to_path_buf()
+    } else {
+        // A copy of this program away from the source: results beside where it started.
+        cwd
+    }
+}
+
+/// `xtask bench --help`: the options, the one place they are described (the owner,
+/// 2026-11-17: docs say what to do and point here for the rest).
+const BENCH_HELP: &str = "usage: xtask bench [--quick] [--runs N] [--host NAME] [--save-baseline] [--only CASE] [--dir PATH]
+  --only CASE       only the cases whose name holds CASE (plan, list, mixed, copy-small,
+                    copy-big, undo): no build, so it runs without Rust
+  --dir PATH        make the test trees on this drive, not the temporary folder
+  --host NAME       a name for this machine and drive; results and baselines carry it
+  --save-baseline   keep this run as bench/baseline-<host>.json: later runs say how far
+                    each case moved (marked past 15 %); one --host per --only case
+  --runs N          runs per case (5); the median, p95 and best are printed
+  --quick           fewer, smaller cases
+Results: bench/results/ where it was started. Steps: docs/benchmark.md.";
+
 fn bench(args: &[String]) -> i32 {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{BENCH_HELP}");
+        return 0;
+    }
     let o = match parse(args) {
         Ok(o) => o,
         Err(e) => {
@@ -157,23 +570,32 @@ fn bench(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let root = root();
+    let root = results_root(
+        &root(),
+        std::env::var_os("CARGO").is_some(),
+        std::env::current_dir().unwrap_or_default(),
+    );
+    // With --only, the in-process cases alone: no build, so a copy of this program
+    // runs them on a machine without Rust (the bench workflow's artifact).
+    let whole = o.only.is_none();
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    eprintln!("building the release binary…");
-    let built = Command::new(&cargo)
-        .args(["build", "--release", "--locked", "-p", "xdevcmd"])
-        .current_dir(&root)
-        .status();
-    if !built.is_ok_and(|s| s.success()) {
-        eprintln!("cargo build --release failed");
-        return 1;
+    if whole {
+        eprintln!("building the release binary…");
+        let built = Command::new(&cargo)
+            .args(["build", "--release", "--locked", "-p", "xdevcmd"])
+            .current_dir(&root)
+            .status();
+        if !built.is_ok_and(|s| s.success()) {
+            eprintln!("cargo build --release failed");
+            return 1;
+        }
     }
     let bin = root.join("target/release").join(if cfg!(windows) {
         "xdevcmd.exe"
     } else {
         "xdevcmd"
     });
-    let version = workspace_version(&root).unwrap_or_else(|| "unknown".into());
+    let version = built_from().unwrap_or("unknown");
     let date = today();
     println!(
         "xdevcmd {version} · host {} · {date} · {} · {} runs{}",
@@ -186,13 +608,17 @@ fn bench(args: &[String]) -> i32 {
         println!("load average {load} (numbers from a busy machine are not comparable)");
     }
 
-    let scratch = std::env::temp_dir().join(format!("xdevcmd-bench-{}", std::process::id()));
+    let scratch = o
+        .dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(format!("xdevcmd-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).expect("a scratch directory");
 
     let mut results: BTreeMap<String, Result_> = BTreeMap::new();
     // Package: measured once.
-    if let Ok(m) = std::fs::metadata(&bin) {
+    if let Some(m) = whole.then(|| std::fs::metadata(&bin).ok()).flatten() {
         results.insert(
             "package: binary".into(),
             Result_ {
@@ -202,7 +628,10 @@ fn bench(args: &[String]) -> i32 {
             },
         );
     }
-    if let Ok(lock) = std::fs::read_to_string(root.join("Cargo.lock")) {
+    if let Some(lock) = whole
+        .then(|| std::fs::read_to_string(root.join("Cargo.lock")).ok())
+        .flatten()
+    {
         results.insert(
             "package: crates in Cargo.lock".into(),
             Result_ {
@@ -231,12 +660,25 @@ fn bench(args: &[String]) -> i32 {
             5_000,
         ),
         ("undo a copy", "undo", 2_000, 10_000),
+        // One large file among many small ones (item 43's lanes): a small file waits for
+        // the large one before it. Size: the small files; the large one is a MiB per 5.
+        (
+            "mixed: one large file and small files",
+            "mixed",
+            1_000,
+            5_000,
+        ),
     ];
     let me = std::env::current_exe().expect("this program's path");
     for (shown, case, quick, full) in cases {
         let size = if o.quick { *quick } else { *full };
         if size == 0 {
             continue;
+        }
+        if let Some(only) = &o.only {
+            if !case.contains(only.as_str()) && !shown.contains(only.as_str()) {
+                continue;
+            }
         }
         let name = shown.to_string();
         let mut r = Result_ {
@@ -247,10 +689,22 @@ fn bench(args: &[String]) -> i32 {
         eprint!("{name}: ");
         for run in 0..=o.runs {
             let dir = scratch.join(format!("{case}-{run}"));
-            let out = Command::new(&me)
+            let mut child = Command::new(&me);
+            child
                 .args(["bench-case", case, &size.to_string()])
-                .arg(&dir)
-                .output();
+                .arg(&dir);
+            // XDEVCMD_DEBUG: each case's logs kept with the results, a folder a case.
+            if std::env::var_os("XDEVCMD_DEBUG").is_some()
+                && std::env::var_os("XDEVCMD_DEBUG_DIR").is_none()
+            {
+                child.env(
+                    "XDEVCMD_DEBUG_DIR",
+                    root.join("bench/results")
+                        .join(format!("debug-{}-{date}", o.host))
+                        .join(case),
+                );
+            }
+            let out = child.output();
             let _ = std::fs::remove_dir_all(&dir);
             let Some(v) = out
                 .ok()
@@ -279,6 +733,9 @@ fn bench(args: &[String]) -> i32 {
     // Start-up and idle CPU: the real program in a pseudo-terminal.
     #[cfg(unix)]
     for (answering, label) in [(true, "answering"), (false, "silent")] {
+        if !whole {
+            break;
+        }
         let mut total = Result_ {
             unit: "ms",
             values: Vec::new(),
@@ -406,10 +863,8 @@ fn bench(args: &[String]) -> i32 {
     let _ = std::fs::create_dir_all(&out_dir);
     let out = out_dir.join(format!("{version}-{}-{date}{suffix}.json", o.host));
     match std::fs::write(&out, &text) {
-        Ok(()) => println!(
-            "results: {}",
-            out.strip_prefix(&root).unwrap_or(&out).display()
-        ),
+        // Whole: where it went is never a guess.
+        Ok(()) => println!("results: {}", out.display()),
         Err(e) => eprintln!("could not write {}: {e}", out.display()),
     }
     if o.save_baseline {
@@ -440,6 +895,33 @@ fn make_tree(dir: &Path, n: u64, bytes: usize) -> std::io::Result<()> {
         std::fs::write(d.join(format!("file-{i:06}.txt")), &body)?;
     }
     Ok(())
+}
+
+/// A file of `mib` MiB.
+fn big_file(p: &Path, mib: u64) -> std::io::Result<()> {
+    let mb = vec![b'x'; 1 << 20];
+    let mut f = std::fs::File::create(p)?;
+    for _ in 0..mib {
+        std::io::Write::write_all(&mut f, &mb)?;
+    }
+    Ok(())
+}
+
+/// `XDEVCMD_DEBUG` in a case's child: its jobs written to a debug log, as xdevcmd
+/// writes them, in `XDEVCMD_DEBUG_DIR`, else beside the case's scratch directory.
+fn debug_log(case_dir: &Path) {
+    let Ok(v) = std::env::var("XDEVCMD_DEBUG") else {
+        return;
+    };
+    let (bits, _) = xdevcmd_core::debuglog::parse(&v);
+    if bits == 0 {
+        return;
+    }
+    let dir = std::env::var_os("XDEVCMD_DEBUG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| case_dir.with_file_name("debug"));
+    let _ = xdevcmd_core::debuglog::start(bits, &dir);
 }
 
 fn ms(t: Instant) -> f64 {
@@ -498,8 +980,12 @@ fn run_case(case: &str, size: u64, dir: &Path) -> Result<f64, String> {
                 }
             }
         }
-        "copy-small" | "copy-big" | "undo" => {
-            if case == "copy-big" {
+        "copy-small" | "copy-big" | "undo" | "mixed" => {
+            if case == "mixed" {
+                // Named to come first, so the small files wait behind it.
+                big_file(&src.join("0-large.bin"), (size / 5).max(1)).map_err(e)?;
+                make_tree(&src, size, 4096).map_err(e)?;
+            } else if case == "copy-big" {
                 let mb = vec![b'x'; 1 << 20];
                 let mut f = std::fs::File::create(src.join("large.bin")).map_err(e)?;
                 for _ in 0..size {
@@ -511,6 +997,9 @@ fn run_case(case: &str, size: u64, dir: &Path) -> Result<f64, String> {
             let mut req = Request::copy(vec![src.clone()], to.clone());
             // Whatever the user's setting, the default's way of writing.
             req.safe = true;
+            // The platform's fast copy (item 22) is the default; XDEVCMD_BENCH_FAST=0
+            // measures xdevcmd's own read and write against it.
+            req.fast = std::env::var("XDEVCMD_BENCH_FAST").as_deref() != Ok("0");
             let t = Instant::now();
             let s = run_job(ops::start(req))?;
             if case != "undo" {
@@ -713,13 +1202,20 @@ mod pty {
 
 // ── small things ─────────────────────────────────────────────────────────────────────
 
-fn workspace_version(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(root.join("Cargo.toml")).ok()?;
+/// The version of the code this program was built from, taken from the workspace's
+/// Cargo.toml when it was compiled: `cargo xtask` rebuilds it each time, and a copy from
+/// the bench workflow, run anywhere, still says which code it measures (read at run
+/// time, it said "unknown" there, or another project's version in that one's folder).
+fn built_from() -> Option<&'static str> {
+    workspace_version(include_str!("../../Cargo.toml"))
+}
+
+fn workspace_version(text: &str) -> Option<&str> {
     let section = &text[text.find("[workspace.package]")?..];
     let line = section
         .lines()
         .find(|l| l.trim_start().starts_with("version"))?;
-    Some(line.split('"').nth(1)?.to_string())
+    line.split('"').nth(1)
 }
 
 /// The machine's load, where the system says it cheaply.
@@ -745,6 +1241,17 @@ fn today() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// Now in UTC as `YYYYMMDD-HHMM`, for a file name.
+fn stamp() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (y, m, d) = civil((secs / 86_400) as i64);
+    let (h, min) = ((secs % 86_400) / 3600, (secs % 3600) / 60);
+    format!("{y:04}{m:02}{d:02}-{h:02}{min:02}")
+}
+
 /// Howard Hinnant's days-from-civil, inverted.
 fn civil(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
@@ -762,6 +1269,20 @@ fn civil(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The version is the workspace's, built in: a copy run outside the source says it.
+    #[test]
+    fn the_version_is_built_in_from_the_workspace() {
+        let v = built_from().expect("a version in the workspace's Cargo.toml");
+        assert!(v.split('.').count() >= 3, "{v}");
+        assert_eq!(
+            workspace_version(
+                "[workspace.package]\nedition = \"2021\"\nversion = \"1.2.3-rc.1\"\n"
+            ),
+            Some("1.2.3-rc.1")
+        );
+        assert_eq!(workspace_version("[package]\nversion = \"9.9.9\"\n"), None);
+    }
 
     #[test]
     fn median_p95_and_best() {
@@ -784,6 +1305,20 @@ mod tests {
         assert_eq!(civil(0), (1970, 1, 1));
         assert_eq!(civil(20_405), (2025, 11, 13));
         assert_eq!(civil(11_016), (2000, 2, 29));
+    }
+
+    /// A copy unpacked from a release, run by hand on a machine that also has the source
+    /// (a CI runner, a developer's laptop): its results go beside where it started, not
+    /// into the source it was built from (review of 2026-11-17: the release's smoke test
+    /// found none). `cargo xtask` in the repository keeps the repository's.
+    #[test]
+    fn results_go_beside_a_copy_and_into_the_repository_under_cargo() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let cwd = std::env::temp_dir();
+        assert_eq!(results_root(source, false, cwd.clone()), cwd);
+        assert_eq!(results_root(source, true, cwd.clone()), source);
+        let gone = Path::new("/no/such/source");
+        assert_eq!(results_root(gone, true, cwd.clone()), cwd);
     }
 
     #[test]

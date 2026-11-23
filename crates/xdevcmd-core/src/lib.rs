@@ -12,8 +12,10 @@ pub mod attrs;
 pub mod batch_rename;
 pub mod color;
 pub mod compare;
+pub mod debuglog;
 pub mod document;
 pub mod entry;
+pub mod fastcopy;
 #[doc(hidden)]
 pub mod faults;
 pub mod find;
@@ -30,6 +32,7 @@ pub mod ops;
 pub mod paths;
 pub mod plan;
 pub mod policy;
+pub mod protect;
 pub mod rename;
 pub mod sha256;
 pub mod size;

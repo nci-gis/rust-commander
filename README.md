@@ -41,11 +41,12 @@
 ```
 
 Two file panes, a terminal underneath, and the familiar keys of two-pane file managers:
-F5 copy, F6 move, F8 delete. Runs on Linux, macOS and Windows.
+F5 copy, F6 move, F8 delete. Built for Linux, macOS and Windows; [Platforms](#platforms)
+says how far each is tested.
 
 ## Install
 
-With Rust 1.88 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (from 0.3.0):
+With Rust 1.90 or newer, from [crates.io](https://crates.io/crates/xdevcmd) (from 0.3.0):
 
 ```bash
 cargo install xdevcmd --locked
@@ -56,17 +57,6 @@ Or the ready-made build, with no compiling, through
 
 ```bash
 cargo binstall xdevcmd
-```
-
-On Windows, with [Scoop](https://scoop.sh) or winget (planned; not available yet):
-
-```powershell
-scoop bucket add xdevcmd https://github.com/nci-gis/scoop-xdevcmd
-scoop install xdevcmd/xdevcmd
-```
-
-```powershell
-winget install XDevTeam.xdevcmd
 ```
 
 Or download a ready-made build for Linux (x86_64 and ARM64), macOS or Windows from
@@ -80,7 +70,12 @@ The newest code, from the repository:
 cargo install --git https://github.com/nci-gis/rust-commander xdevcmd --locked
 ```
 
-Each way installs the `xdevcmd` command.
+The `cargo` ways install the `xdevcmd` command. A download runs from the folder you
+unpack it in (`./xdevcmd`; `.\xdevcmd.exe` in PowerShell) until you put that folder on
+your `PATH`. Each release's archives can be checked:
+[security.md, "Checking a download"](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md#checking-a-download).
+
+**Planned, not available yet:** a Scoop bucket for Windows.
 
 ## Quick start
 
@@ -115,14 +110,34 @@ xdevcmd ~/src /tmp       # or with two directories
 
 The [guide](https://github.com/nci-gis/rust-commander/blob/main/docs/guide.md) explains each one.
 
+## Platforms
+
+What has been checked, and how. "CI" is the whole test suite on GitHub's runners at
+every pull request; "by hand" is the maintainer using it with
+[the hand-test list](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#testing-a-pre-release-by-hand).
+To check a version yourself: [How to test](https://github.com/nci-gis/rust-commander/blob/main/docs/how-to-test.md).
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Builds (x86_64; ARM64 too on Linux and macOS) | ✓ | ✓ | ✓ (x86_64) |
+| Whole test suite in CI | ✓ (x86_64, ARM64) | ✓ | ✓ |
+| Tests in a real pseudo-terminal | ✓ | ✓ | ConPTY: start-up only |
+| Used by hand by the maintainer | ✓ | not yet | ✓ (Windows 11) |
+| Shell reports (directory, prompt marks) | bash tested; zsh, fish not run | zsh not run | PowerShell, cmd not run; whether ConPTY passes them on is not checked |
+
+Known gaps are in [known issues and limits](https://github.com/nci-gis/rust-commander/blob/main/docs/known-issues.md).
+
 ## Configure
+
+On Linux and macOS (on Windows the file is `%APPDATA%\xdevcmd\config.toml`):
 
 ```bash
 mkdir -p ~/.config/xdevcmd
 xdevcmd --print-config > ~/.config/xdevcmd/config.toml   # all settings, with defaults
 ```
 
-Keep only the lines you change. See [docs/config.md](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md).
+Keep only the lines you change. The steps for Windows, and how the file is chosen:
+[docs/config.md](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md).
 
 ## Docs
 
@@ -131,8 +146,20 @@ Keep only the lines you change. See [docs/config.md](https://github.com/nci-gis/
 - [Config](https://github.com/nci-gis/rust-commander/blob/main/docs/config.md): settings, bookmarks, your own commands
 - [Shell](https://github.com/nci-gis/rust-commander/blob/main/docs/shell.md): stay in the directory you were in when you quit
 - [Security](https://github.com/nci-gis/rust-commander/blob/main/docs/security.md): what xdevcmd protects against, and safe modes
-- [Troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md): known problems on each system, and fixes
+- [Compatibility](https://github.com/nci-gis/rust-commander/blob/main/docs/compatibility.md): what stays the same from 0.4.0, and what is not promised
+- [Known issues and limits](https://github.com/nci-gis/rust-commander/blob/main/docs/known-issues.md): what does not work yet, and what will not change
+- [Troubleshooting](https://github.com/nci-gis/rust-commander/blob/main/docs/troubleshooting.md): a problem you see, and its fix
 - [Development](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md): build, test, contribute
+
+## Transparency
+
+xdevcmd is developed with AI coding agents (Claude Code, Copilot); most of the code is
+agent-written. A human maintainer sets the scope and the design, reviews the changes,
+and tests each release by hand. Safety rests on checks you can run yourself rather
+than on trust: about 950 tests, fault injection for copy, move and their journal,
+fuzzed parsers, `cargo-deny`, no `unsafe` code in the engine, no network access, and
+build provenance on every release. Found a problem? See
+[SECURITY.md](https://github.com/nci-gis/rust-commander/blob/main/SECURITY.md).
 
 ## Licence
 

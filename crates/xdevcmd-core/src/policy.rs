@@ -60,6 +60,36 @@ impl Policy {
         }
     }
 
+    /// Whether `path`, which may not exist yet, is inside the root: what every write
+    /// that makes, restores, opens or removes `path` asks. An existing path answers for
+    /// itself, links resolved, so a link in the root that leads out is outside. A path
+    /// not made yet answers by its nearest folder that exists, and a `..` in the part
+    /// still to make is outside: once made, it would be followed out (plan v3 H-03).
+    pub fn allows_at(&self, path: &Path) -> bool {
+        if self.root.is_none() {
+            return true;
+        }
+        if std::fs::symlink_metadata(path).is_ok() {
+            return self.allows(path);
+        }
+        let mut cur = path;
+        loop {
+            if matches!(
+                cur.components().next_back(),
+                Some(std::path::Component::ParentDir)
+            ) {
+                return false;
+            }
+            let Some(parent) = cur.parent().filter(|p| !p.as_os_str().is_empty()) else {
+                return false;
+            };
+            if std::fs::symlink_metadata(parent).is_ok() {
+                return self.allows(parent);
+            }
+            cur = parent;
+        }
+    }
+
     /// `path` if it is allowed, otherwise the root itself.
     pub fn clamp(&self, path: &Path) -> PathBuf {
         match &self.root {
@@ -89,6 +119,40 @@ mod tests {
         fs::create_dir_all(d.join("inside/deeper")).unwrap();
         fs::create_dir_all(d.join("outside")).unwrap();
         crate::paths::canonical(&d).unwrap()
+    }
+
+    /// A path not made yet is judged by its nearest folder that exists, an existing
+    /// one by itself, links resolved, and `..` in the part still to make is never
+    /// trusted: the one check for every path a write makes or restores (H-03).
+    #[test]
+    fn allows_at_judges_a_path_not_made_yet_by_its_nearest_folder() {
+        let r = root("at");
+        let p = Policy {
+            read_only: false,
+            root: Some(r.join("inside")),
+        };
+        assert!(p.allows_at(&r.join("inside/new.txt")));
+        assert!(
+            p.allows_at(&r.join("inside/new/deeper/x")),
+            "folders to make"
+        );
+        assert!(p.allows_at(&r.join("inside/deeper")), "an existing one");
+        assert!(!p.allows_at(&r.join("outside/new.txt")));
+        assert!(!p.allows_at(&r.join("inside/new/../../outside/x")), "..");
+        assert!(!p.allows_at(&r.join("inside/..")));
+        assert!(Policy::default().allows_at(&r.join("outside/new.txt")));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(r.join("outside"), r.join("inside/door")).unwrap();
+            assert!(
+                !p.allows_at(&r.join("inside/door")),
+                "a link that leads out"
+            );
+            assert!(!p.allows_at(&r.join("inside/door/new.txt")), "under it");
+            std::os::unix::fs::symlink(r.join("outside/none"), r.join("inside/loose")).unwrap();
+            assert!(!p.allows_at(&r.join("inside/loose")), "a dangling link");
+        }
+        let _ = fs::remove_dir_all(&r);
     }
 
     #[test]

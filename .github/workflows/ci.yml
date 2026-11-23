@@ -1,11 +1,11 @@
 name: ci
 
 on:
-  # Only the two long-lived branches: pushes to them, and pull requests into them.
-  # Work on a feat/ branch runs nothing until its pull request, or until someone asks
-  # for a run (below), for instance for a build to try on another system.
+  # The two long-lived branches and feat/ work branches: a feat/ branch is checked
+  # before its pull request exists (B6). A push to a branch with an open pull request
+  # runs twice (push and pull_request): the cost of not missing either.
   push:
-    branches: [main, dev]
+    branches: [main, dev, "feat/**"]
     # Nothing a test reads: the plan and the changelog. (The tests read README.md and
     # files under docs/, so those still run CI.)
     paths-ignore: [".agents/**", "CHANGELOG.md"]
@@ -17,6 +17,12 @@ on:
   # against dependencies that have not changed. Scheduled runs use main.
   schedule:
     - cron: "0 3 * * 1"
+
+# A new push to a branch makes its older run worthless: cancel it, and the runners go to
+# the commit that matters (plan v3, H-00). The weekly schedule has a group of its own.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -76,8 +82,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/xdev-other"
           echo "XDEVCMD_TEST_OTHER_DEV=$RUNNER_TEMP\\xdev-other" >> "$GITHUB_ENV"
       # The suite starts a real pty and renders real frames, so this is the step that
-      # actually says whether xdevcmd works on this platform.
-      - run: cargo test --all
+      # actually says whether xdevcmd works on this platform. --no-fail-fast: every test
+      # binary runs even when an earlier one fails, so one run shows every failure.
+      - run: cargo test --all --no-fail-fast
       # The cost of the sync rules on a move across devices (Round 029, decision 4):
       # from the second file system onto the runner's own disk, with and without the
       # syncs. A measurement, read in the log; it never fails the run. Only when a run
@@ -96,7 +103,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         # xtask is never published, but --workspace would still package it.
         run: cargo package --workspace --exclude xtask --locked
-      - run: cargo build --release
+      # xtask too: with xdevcmd in the artifact, a pushed branch is a whole test kit
+      # (xtask try) for a Mac or Windows machine, with no bench/ branch built by hand.
+      - run: cargo build --release -p xdevcmd -p xtask
       # Now that there is a release build: its size, and that it holds no fault seam.
       - run: cargo test -p xdevcmd --test budgets
       # macos-latest is Apple Silicon, and an Intel Mac cannot run what it builds. Build
@@ -105,12 +114,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           rustup target add x86_64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin
-          lipo -create -output xdevcmd-universal \
-            target/release/xdevcmd target/x86_64-apple-darwin/release/xdevcmd
-          lipo xdevcmd-universal -verify_arch x86_64 arm64
-          mv xdevcmd-universal target/release/xdevcmd
-          lipo -info target/release/xdevcmd
+          cargo build --release --target x86_64-apple-darwin -p xdevcmd -p xtask
+          for b in xdevcmd xtask; do
+            lipo -create -output "$b-universal" \
+              "target/release/$b" "target/x86_64-apple-darwin/release/$b"
+            lipo "$b-universal" -verify_arch x86_64 arm64
+            mv "$b-universal" "target/release/$b"
+            lipo -info "target/release/$b"
+          done
       # "/" is not allowed in an artifact name, and branches have them (feat/topic), as
       # does a pull request's own ref ("1/merge"): name it after the source branch,
       # with "/" made "-".
@@ -129,8 +140,26 @@ jobs:
           path: |
             target/release/xdevcmd
             target/release/xdevcmd.exe
+            target/release/xtask
+            target/release/xtask.exe
           if-no-files-found: error
           retention-days: 14
+
+  # The oldest Rust that Cargo.toml's rust-version promises, read from there so the
+  # two never drift (B5). Builds every target and runs the engine's tests on it.
+  msrv:
+    name: msrv (rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets --locked
+      - run: cargo test -p xdevcmd-core --lib --locked
 
   cross-check:
     name: cross-check from linux
@@ -139,12 +168,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-gnu, x86_64-apple-darwin
+          targets: x86_64-pc-windows-gnu, x86_64-apple-darwin, x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       # Catches a broken #[cfg] on another platform in seconds, without waiting for
       # that platform's runner.
       - run: cargo check --all-targets --target x86_64-pc-windows-gnu
       - run: cargo check --all-targets --target x86_64-apple-darwin
+      # The release builds xtask for its musl targets too (the bench archive): built,
+      # not only checked, so a link error shows before a tag.
+      - run: cargo build --release --locked -p xtask --target x86_64-unknown-linux-musl
 
   dependencies:
     name: dependencies (cargo-deny)

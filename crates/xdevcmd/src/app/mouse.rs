@@ -619,6 +619,12 @@ impl App {
             true,
         ));
         items.push(Item::cmd("Copy path", "", Cmd::CopyPath, true));
+        items.push(Item::cmd(
+            "Copy relative path",
+            "",
+            Cmd::CopyRelativePath,
+            true,
+        ));
         items.push(Item::act(
             "Terminal here",
             k(Action::CdTerminalHere),
@@ -653,7 +659,7 @@ impl App {
         for it in &mut items {
             match &it.cmd {
                 Some(Cmd::Act(a)) if self.refused(*a).is_some() => it.enabled = false,
-                Some(Cmd::CopyPath) if restricted => it.enabled = false,
+                Some(Cmd::CopyPath | Cmd::CopyRelativePath) if restricted => it.enabled = false,
                 _ => {}
             }
         }
@@ -767,6 +773,12 @@ impl App {
                     };
                 } else if cancel == 2 && hit(&a.buttons, 1) {
                     act = match a.also.take() {
+                        Some((_, _, c)) => ModalAct::Run(c),
+                        None => ModalAct::Close,
+                    };
+                } else if cancel == 2 && a.more.is_some() && hit(&a.buttons, 2) {
+                    // [yes] [also] [more]: the third is `more`, not cancel.
+                    act = match a.more.take() {
                         Some((_, _, c)) => ModalAct::Run(c),
                         None => ModalAct::Close,
                     };

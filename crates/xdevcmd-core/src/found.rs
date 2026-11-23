@@ -70,7 +70,12 @@ pub fn paths_in(line: &str) -> Vec<Found> {
             };
             let end = start + len;
             let inner = &line[start..end];
-            if inner.contains(' ') && !taken.iter().any(|r| r.start < end && start < r.end) {
+            // A tab only separates words: inside quotes it is a control character, which
+            // no candidate holds (found by `cargo xtask fuzz`, 2026-11-14).
+            if inner.contains(' ')
+                && !inner.contains('\t')
+                && !taken.iter().any(|r| r.start < end && start < r.end)
+            {
                 if let Some(mut f) = candidate(inner, start) {
                     locate_after(line, end + close.len_utf8(), &mut f);
                     taken.push(start..end);
@@ -177,6 +182,18 @@ fn candidate(word: &str, at: usize) -> Option<Found> {
             }
         }
     }
+    // A name ending in `/.` or `/..` names a folder by where it was printed (`src/..`
+    // is the folder above src): not a file, and its dots are not a full stop (#2).
+    // Punctuation after it first: `cd src/..;` is the same `src/..`.
+    let bare = path.trim_end_matches([',', ';', ':', '!', '?']);
+    if line.is_none()
+        && [".", ".."].iter().any(|d| {
+            bare.strip_suffix(d)
+                .is_some_and(|r| r.ends_with('/') || r.ends_with('\\'))
+        })
+    {
+        return None;
+    }
     // A sentence's full stop or a list's comma is not part of the name.
     if line.is_none() {
         let t = path.trim_end_matches(['.', ',', ';', ':', '!', '?']);
@@ -203,6 +220,23 @@ fn candidate(word: &str, at: usize) -> Option<Found> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A quoted name holding a tab is not a path: a tab is a control character there
+    /// (`cargo xtask fuzz` found `'G++\t/ '` taken whole).
+    #[test]
+    fn a_quoted_name_with_a_tab_is_not_taken() {
+        let got = paths_in("$'G++\t/ :r:4G'%l+4{\"");
+        assert!(
+            got.iter().all(|f| !f.path.chars().any(char::is_control)),
+            "{got:?}"
+        );
+        assert_eq!(
+            paths_in("'a b.txt'")[0].path,
+            "a b.txt",
+            "a space still holds"
+        );
+    }
+
     use super::*;
 
     /// A path found: its text, line and column.
@@ -214,6 +248,33 @@ mod tests {
             .into_iter()
             .map(|f| (f.path, f.line, f.col))
             .collect()
+    }
+
+    /// `src/..` names the folder above src by where it was printed: not a path to take,
+    /// and its dots are not a full stop that leaves `src/` (#2).
+    #[test]
+    fn a_name_ending_in_dots_after_a_slash_is_not_taken() {
+        for line in [
+            "src/..",
+            "src/.",
+            "a/b/..",
+            r"C:\x\..",
+            "cd src/..;",
+            "src/..,",
+        ] {
+            // Only the dotted name matters: `cd` alone may be taken, as before.
+            let f = found(line);
+            assert!(
+                f.iter()
+                    .all(|g| !["src", "src/", "a/b/", "a/b", r"C:\x\"].contains(&g.0.as_str())),
+                "{line}: {f:?}"
+            );
+        }
+        let f = found("see src/main.rs.");
+        assert!(
+            f.iter().any(|g| g.0 == "src/main.rs"),
+            "a full stop goes: {f:?}"
+        );
     }
 
     #[test]

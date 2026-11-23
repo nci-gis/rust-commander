@@ -1,10 +1,11 @@
 # Round 021: Panelize, a panel from the shell's output (v0.4 entry C)
 
-**Status**: Review (set aside for the owner's hand tests, 2026-11-12)
+**Status**: Complete (closed by the owner, 2026-11-15: "mình cấp quyền sửa status cho
+các round đã xong"; hand checks moved to `docs/testing-by-hand.md` §5.3 and §6)
 **Part of**: v0.4.0, entry C of `.agents/memory/2026-11-10-v0.4.0-plan.md`, trimmed as in
 `.agents/memory/2026-11-11-v0.4.0-scope-proposal.md`; ROADMAP item 30, part 2
 **Date started**: 2026-11-11
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-15
 
 ## Goal
 

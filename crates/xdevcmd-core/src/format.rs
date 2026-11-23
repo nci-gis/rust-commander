@@ -35,6 +35,11 @@ pub fn format_time(t: Option<SystemTime>) -> String {
     }
 }
 
+/// `21:08:05` in the machine's local timezone: the time of a status message.
+pub fn format_clock(t: SystemTime) -> String {
+    DateTime::<Local>::from(t).format("%H:%M:%S").to_string()
+}
+
 /// Fit a string into `width` display columns, putting an ellipsis in the middle so both
 /// the start of the name and its extension stay readable. Columns as the terminal draws
 /// them: a CJK character takes two, a combining accent none.

@@ -33,6 +33,12 @@ else
   pre=false
 fi
 
+git rev-parse -q --verify "$commit^{commit}" >/dev/null || err "$commit is not a commit"
+# The version and the notes are read from the working tree: it must be the commit
+# checked, or a dry run gives a false answer (repo review RR07).
+git diff --quiet "$commit" -- Cargo.toml '*/Cargo.toml' CHANGELOG.md 2>/dev/null ||
+  err "the working tree's Cargo.toml or CHANGELOG.md differs from $commit; check out $commit first"
+
 cargo_v=$(cargo metadata --no-deps --format-version 1 |
   python3 -c 'import json,sys; print([p for p in json.load(sys.stdin)["packages"] if p["name"]=="xdevcmd"][0]["version"])')
 [ "$cargo_v" = "$v" ] || err "tag $tag, but Cargo.toml says $cargo_v"

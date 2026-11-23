@@ -116,21 +116,59 @@ enum Select {
     Name(std::ffi::OsString),
 }
 
+/// Directory reads on their threads, still running, across every pane (pillar 2, A06).
+/// A read stuck in a dead mount's system call cannot be stopped; without a bound, going
+/// into such a mount again and again would leave a thread each time.
+static READS_LIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// At most this many at once; past it, a new read is refused with a note.
+const READS_MAX: usize = 16;
+
+/// Takes one place in [`READS_LIVE`]; gives it back when the thread ends.
+struct ReadSlot(&'static std::sync::atomic::AtomicUsize);
+
+impl ReadSlot {
+    fn take() -> Option<Self> {
+        Self::take_from(&READS_LIVE, READS_MAX)
+    }
+
+    fn take_from(live: &'static std::sync::atomic::AtomicUsize, max: usize) -> Option<Self> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut n = live.load(SeqCst);
+        loop {
+            if n >= max {
+                return None;
+            }
+            match live.compare_exchange(n, n + 1, SeqCst, SeqCst) {
+                Ok(_) => return Some(ReadSlot(live)),
+                Err(now) => n = now,
+            }
+        }
+    }
+}
+
+impl Drop for ReadSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Read `path` on a thread: its real path when `resolve`, its time, and its entries
-/// unless `time_only`.
+/// unless `time_only`. `None` when [`READS_MAX`] reads are still running.
 fn read_on_thread(
     path: &Path,
     resolve: bool,
     time_only: bool,
     hidden: bool,
-) -> (
+) -> Option<(
     std::sync::mpsc::Receiver<Read>,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
-) {
+)> {
+    let slot = ReadSlot::take()?;
     let (tx, rx) = std::sync::mpsc::channel();
     let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (path, counter) = (path.to_path_buf(), count.clone());
     std::thread::spawn(move || {
+        let _slot = slot;
         test_delay(&path);
         let dir = if resolve {
             xdevcmd_core::paths::canonical(&path).unwrap_or(path)
@@ -145,7 +183,7 @@ fn read_on_thread(
             entries,
         });
     });
-    (rx, count)
+    Some((rx, count))
 }
 
 /// `XDEVCMD_TEST_SLOW_DIR=<text>`: a directory whose path holds `<text>` is read two
@@ -238,6 +276,8 @@ impl Results {
 }
 
 const HISTORY: usize = 64;
+/// Search events taken in per tick at most (B08).
+const TAKE_PER_TICK: usize = 10_000;
 /// Up to this many entries a change check re-reads the whole listing, which catches a
 /// file growing as well as one appearing. Beyond it only the directory's own mtime is
 /// compared, so a huge directory costs one stat per check.
@@ -498,7 +538,9 @@ impl FilePane {
         };
         let mut found = Vec::new();
         let mut finished = false;
-        for ev in search.rx.try_iter() {
+        // A bounded share of each tick (B08): the rest waits in the search's queue, and
+        // keys are answered between.
+        for ev in search.rx.try_iter().take(TAKE_PER_TICK) {
             match ev {
                 find::Event::Found(p) => found.push(p),
                 find::Event::Gone(p) => r.gone.push(p),
@@ -512,6 +554,19 @@ impl FilePane {
                     finished = true;
                 }
             }
+        }
+        // A search past its cap stops there and says so (B08).
+        let shown = self.all.iter().filter(|e| !e.is_parent()).count();
+        if r.find && !finished && shown + found.len() >= find::MAX_FOUND {
+            found.truncate(find::MAX_FOUND.saturating_sub(shown));
+            if let Some(s) = r.search.take() {
+                s.cancel();
+            }
+            finished = true;
+            self.notice = Some(format!(
+                "stopped at {} found \u{2014} narrow the search to see the rest",
+                find::MAX_FOUND
+            ));
         }
         if finished {
             r.search = None;
@@ -1109,7 +1164,15 @@ impl FilePane {
         time_only: bool,
         why: ReadFor,
     ) -> Option<Read> {
-        let (rx, count) = read_on_thread(path, resolve, time_only, self.show_hidden);
+        let Some((rx, count)) = read_on_thread(path, resolve, time_only, self.show_hidden) else {
+            // Not for the periodic look: it simply comes again later.
+            if why != ReadFor::Check {
+                self.notice = Some(format!(
+                    "{READS_MAX} directory reads are still waiting on slow drives \u{2014} try again when they end"
+                ));
+            }
+            return None;
+        };
         match rx.recv_timeout(SLOW) {
             Ok(read) => Some(read),
             Err(_) => {
@@ -1159,6 +1222,21 @@ impl FilePane {
                 true
             }
         }
+    }
+
+    /// A directory read still under way on its thread, of any kind (`--screenshot`
+    /// waits for it before the next input).
+    pub fn is_reading(&self) -> bool {
+        self.reading.is_some()
+    }
+
+    /// The folder this pane is on its way to, while it opens: the listing on screen is
+    /// still the old one (#4). Not a reload or the periodic check, which keep the folder.
+    pub fn moving_to(&self) -> Option<&Path> {
+        self.reading
+            .as_ref()
+            .filter(|r| matches!(r.why, ReadFor::Move { .. }))
+            .map(|r| r.target.as_path())
     }
 
     /// Stop waiting for a slow read. The directory it was for, if there was one.
@@ -2016,6 +2094,21 @@ fn digits(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A06: reads stuck in a dead mount are bounded; a place comes back when one ends.
+    #[test]
+    fn stuck_reads_are_bounded_and_a_place_comes_back() {
+        static LIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let mut held: Vec<ReadSlot> = (0..5)
+            .map_while(|_| ReadSlot::take_from(&LIVE, 3))
+            .collect();
+        assert_eq!(held.len(), 3);
+        assert!(ReadSlot::take_from(&LIVE, 3).is_none());
+        held.pop();
+        let again = ReadSlot::take_from(&LIVE, 3);
+        assert!(again.is_some());
+        assert!(ReadSlot::take_from(&LIVE, 3).is_none());
+    }
 
     #[cfg(unix)]
     #[test]

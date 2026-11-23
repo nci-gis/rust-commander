@@ -30,6 +30,8 @@ mod modal;
 mod opener;
 mod pane;
 mod quiet;
+mod refusal;
+mod relpath;
 mod rename_dialog;
 mod safety;
 mod scrollbar;
@@ -339,6 +341,35 @@ fn main() -> Result<()> {
     let files = &settings.config.files;
     crate::pane::files::set_fuzzy(files.filter == "fuzzy");
     xdevcmd_core::ops::set_safe(settings.config.general.safe_operations);
+    xdevcmd_core::fastcopy::set_enabled(settings.config.general.fast_copy);
+    // XDEVCMD_STATE names the session file (config.md), by its full path. A folder, a
+    // name ending in a separator (a folder not made yet) or a relative path would put
+    // the journal, crash logs and bookmarks beside that folder, or wherever xdevcmd was
+    // started: refused before anything is written (plan v3 H-02, red-team of #48).
+    if let Some(p) = std::env::var_os("XDEVCMD_STATE").filter(|p| !p.is_empty()) {
+        let path = std::path::Path::new(&p);
+        let text = p.to_string_lossy();
+        let folder =
+            path.is_dir() || text.ends_with('/') || (cfg!(windows) && text.ends_with('\\'));
+        if folder {
+            fail(&format!(
+                "XDEVCMD_STATE={} is a folder; it names the session file: \
+                 XDEVCMD_STATE={}",
+                path.display(),
+                path.join("session.toml").display()
+            ));
+        }
+        if !path.is_absolute() {
+            fail(&format!(
+                "XDEVCMD_STATE={}: a full path to the session file, such as {}",
+                path.display(),
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(path)
+                    .display()
+            ));
+        }
+    }
     // Safe operations' journal sits beside the session, in the state directory.
     if let Some(dir) = session::default_path()
         .as_deref()
@@ -346,6 +377,7 @@ fn main() -> Result<()> {
     {
         xdevcmd_core::journal::init(dir.join("journal"));
     }
+    let debug_note = debug_log();
     look::init(look::Look {
         ls: files
             .ls_colors
@@ -396,6 +428,7 @@ fn main() -> Result<()> {
     app.cwd_file = cli.cwd_file.clone();
     clock.mark("panes");
     app.timings = startup::wanted(cli.timings, std::env::var("XDEVCMD_TIMINGS").ok());
+    app.debug_note = debug_note;
 
     if let Some((w, h)) = cli.screenshot {
         return screenshot(app, w, h, &cli.keys);
@@ -420,6 +453,10 @@ fn main() -> Result<()> {
     // init() for what it sets up (raw mode, the alternate screen, a panic hook that
     // undoes them); then our own Terminal, whose backend stays quiet when idle.
     drop(ratatui::init());
+    // From here every way out puts the terminal back, a `?` included (cosf #11: an
+    // error making the Terminal or turning the mouse on returned with raw mode and the
+    // alternate screen still on).
+    let restore = Restore;
     // What the terminal can draw, asked before anything reads its replies; over SSH the
     // environment rarely says. Not inside tmux or screen (`graphics::multiplexer`).
     #[cfg(unix)]
@@ -471,8 +508,7 @@ fn main() -> Result<()> {
 
     let result = app.run(&mut terminal);
 
-    let _ = execute!(stdout(), DisableMouseCapture);
-    ratatui::restore();
+    drop(restore);
     if timings {
         if let Some(json) = startup::last_json() {
             eprintln!("xdevcmd startup {json}");
@@ -505,7 +541,9 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
     terminal.draw(|f| app.draw(f))?;
     let finish_jobs = |app: &mut App| {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while (app.job_working() || app.syntax_waiting()) && std::time::Instant::now() < deadline {
+        while (app.job_working() || app.syntax_waiting() || app.reading_dir())
+            && std::time::Instant::now() < deadline
+        {
             std::thread::sleep(Duration::from_millis(20));
             app.tick();
         }
@@ -521,7 +559,10 @@ fn screenshot(mut app: App, w: u16, h: u16, keys: &str) -> Result<()> {
         std::thread::sleep(Duration::from_millis(30));
         app.tick();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while app.planning() && std::time::Instant::now() < deadline {
+        // A directory slower than SLOW to read (C:\ on a Windows runner, the Ctrl+\
+        // flake of runs 43221291571 and 43409507585): the next key acts on it, not on the
+        // directory the pane still showed.
+        while (app.planning() || app.reading_dir()) && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
             app.tick();
         }
@@ -714,6 +755,45 @@ fn said_yes(answer: &str) -> bool {
 /// Write to stdout. A reader that stops early (`xdevcmd --screenshot | head`) ends xdevcmd
 /// quietly with success, as it ends `cat`; `println!` panics there instead, once the
 /// output is larger than the pipe holds.
+/// `XDEVCMD_DEBUG`: start the debug log ([`xdevcmd_core::debuglog`]) in
+/// `XDEVCMD_DEBUG_DIR`, else the state directory. What the status line says about it:
+/// that it is on and where, or why not. `None`: not asked for.
+fn debug_log() -> Option<String> {
+    let value = std::env::var("XDEVCMD_DEBUG").ok()?;
+    let (bits, unknown) = xdevcmd_core::debuglog::parse(&value);
+    let unknown = if unknown.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " (not a topic: {}; the topics are jobs, errors, all)",
+            unknown.join(", ")
+        )
+    };
+    if bits == 0 {
+        return (!unknown.is_empty()).then(|| format!("debug log off{unknown}"));
+    }
+    let dir = std::env::var_os("XDEVCMD_DEBUG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            session::default_path()
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf)
+        });
+    let Some(dir) = dir else {
+        return Some("debug log not started: no state directory (set XDEVCMD_DEBUG_DIR)".into());
+    };
+    Some(match xdevcmd_core::debuglog::start(bits, &dir) {
+        Ok(p) => format!(
+            "debug log on ({}): {}{unknown}",
+            xdevcmd_core::debuglog::topic_names(bits),
+            p.display()
+        ),
+        Err(e) => format!("debug log not started in {}: {e}", dir.display()),
+    })
+}
+
 fn emit(text: &str) {
     use std::io::Write;
     let mut out = stdout().lock();
@@ -842,6 +922,8 @@ fn show_keys(keymap: &keys::Keymap, depth: xdevcmd_core::color::Depth) -> Result
     let does = |k: KeyEvent| keymap.action_for(k).map_or("-", name_of);
 
     terminal::enable_raw_mode()?;
+    // Put back on every way out, the `?` just below included (cosf #11).
+    let _raw = RawOff;
     execute!(stdout(), EnableMouseCapture)?;
     let mut out = stdout();
     let mut last_esc = false;
@@ -895,9 +977,34 @@ fn show_keys(keymap: &keys::Keymap, depth: xdevcmd_core::color::Depth) -> Result
             out.flush()?;
         }
     })();
-    let _ = execute!(stdout(), DisableMouseCapture);
-    let _ = terminal::disable_raw_mode();
     run
+}
+
+/// Puts the terminal back when dropped: mouse reporting off, then what
+/// `ratatui::init` set up (raw mode, the alternate screen).
+struct Restore;
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        // A panic on the main thread: the panic hook has already put the terminal back
+        // and said where the crash log is; a second restore would move the cursor back
+        // over that message (red-team on H-10).
+        if std::thread::panicking() {
+            return;
+        }
+        let _ = execute!(stdout(), DisableMouseCapture);
+        ratatui::restore();
+    }
+}
+
+/// Raw mode off when dropped, and mouse reporting with it (`--show-keys`).
+struct RawOff;
+
+impl Drop for RawOff {
+    fn drop(&mut self) {
+        let _ = execute!(stdout(), DisableMouseCapture);
+        let _ = ratatui::crossterm::terminal::disable_raw_mode();
+    }
 }
 
 fn fail(msg: &str) -> ! {

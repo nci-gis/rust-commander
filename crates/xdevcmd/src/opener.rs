@@ -12,6 +12,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 /// Whether opening `path` runs it: a program, a script, a shortcut, an installer, a
 /// disk image. Opening one of these is "run it", and that is asked before it happens.
@@ -242,8 +243,34 @@ fn system(path: &Path) -> Result<Command, String> {
     Ok(c)
 }
 
-/// Start `cmd` detached from the terminal. `report` hears about it only if it fails.
-pub fn spawn(mut cmd: Command, what: String, report: Sender<String>) -> Result<(), String> {
+/// After this long without an answer from the opener, the status line says
+/// "opening …" (item 45): a quick open shows no flicker.
+const SHOW_AFTER: Duration = Duration::from_millis(300);
+/// Some openers wait for the program they started (xdg-open with some desktops): after
+/// this long the file counts as handed over, and only a failure is reported after it.
+const GIVE_UP: Duration = Duration::from_secs(5);
+
+/// Start `cmd` detached from the terminal. Nothing is said at once; on `report` come
+/// "opening {what}…" if the opener is still running after 300 ms, then "opened {what}"
+/// (`done` is the whole message, for "opened x with y") when it hands the file over,
+/// "handed {what} to {program}" if it is still running after 5 s, or its error.
+pub fn spawn(
+    cmd: Command,
+    what: String,
+    done: String,
+    report: Sender<String>,
+) -> Result<(), String> {
+    spawn_timed(cmd, what, done, report, SHOW_AFTER, GIVE_UP)
+}
+
+fn spawn_timed(
+    mut cmd: Command,
+    what: String,
+    done: String,
+    report: Sender<String>,
+    show_after: Duration,
+    give_up: Duration,
+) -> Result<(), String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -252,11 +279,41 @@ pub fn spawn(mut cmd: Command, what: String, report: Sender<String>) -> Result<(
         .spawn()
         .map_err(|e| format!("cannot run {program}: {e}"))?;
     std::thread::spawn(move || {
-        if let Ok(status) = child.wait() {
-            // explorer.exe exits 1 even when it worked, so its status means nothing.
-            if !status.success() && !program.eq_ignore_ascii_case("explorer.exe") {
-                let _ = report.send(format!("{program} could not open {what} ({status})"));
+        let started = Instant::now();
+        let mut said_opening = false;
+        let mut handed = false;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    // explorer.exe exits 1 even when it worked, so its status means
+                    // nothing: it took the file.
+                    let ok = status.success() || program.eq_ignore_ascii_case("explorer.exe");
+                    if !ok {
+                        let _ = report.send(format!("{program} could not open {what} ({status})"));
+                    } else if !handed {
+                        // After "handed", a later success adds nothing.
+                        let _ = report.send(done);
+                    }
+                    return;
+                }
+                Ok(None) => {}
+                Err(_) => return,
             }
+            let took = started.elapsed();
+            if !handed && took >= give_up {
+                handed = true;
+                let _ = report.send(format!("handed {what} to {program}"));
+            } else if !said_opening && took >= show_after {
+                said_opening = true;
+                let _ = report.send(format!("opening {what}\u{2026}"));
+            }
+            // Fine-grained while someone may be watching the line, then rarely: this
+            // thread lives as long as the opener does.
+            std::thread::sleep(if handed {
+                Duration::from_secs(1)
+            } else {
+                Duration::from_millis(25)
+            });
         }
     });
     Ok(())
@@ -265,6 +322,54 @@ pub fn spawn(mut cmd: Command, what: String, report: Sender<String>) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Item 45: what the status line hears from an opener, in order.
+    #[cfg(unix)]
+    fn heard(script: &str, give_up_ms: u64) -> Vec<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut c = Command::new("sh");
+        c.args(["-c", script]);
+        spawn_timed(
+            c,
+            "a.pdf".into(),
+            "opened a.pdf".into(),
+            tx,
+            Duration::from_millis(100),
+            Duration::from_millis(give_up_ms),
+        )
+        .unwrap();
+        // The thread ends with the opener (or after "handed", with it too), and with
+        // it the sender: the list is complete.
+        rx.iter().collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quick_open_says_opened_only_and_a_slow_one_says_opening_first() {
+        assert_eq!(heard("exit 0", 2000), ["opened a.pdf"]);
+        assert_eq!(
+            heard("sleep 0.4", 2000),
+            ["opening a.pdf\u{2026}", "opened a.pdf"]
+        );
+        let failed = heard("exit 3", 2000);
+        assert_eq!(failed.len(), 1);
+        assert!(
+            failed[0].starts_with("sh could not open a.pdf"),
+            "{failed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_opener_that_waits_for_its_program_is_handed_over_and_a_late_failure_still_said() {
+        assert_eq!(
+            heard("sleep 1.2", 400),
+            ["opening a.pdf\u{2026}", "handed a.pdf to sh"]
+        );
+        let late = heard("sleep 1.2; exit 4", 400);
+        assert_eq!(late.len(), 3, "{late:?}");
+        assert!(late[2].starts_with("sh could not open"), "{late:?}");
+    }
 
     #[test]
     fn a_configured_opener_gets_the_path_as_one_argument() {
@@ -297,7 +402,7 @@ mod tests {
     fn a_failing_opener_is_reported_not_silent() {
         let (tx, rx) = std::sync::mpsc::channel();
         let c = command(Path::new("/nonexistent"), "false").unwrap();
-        spawn(c, "it".into(), tx).unwrap();
+        spawn(c, "it".into(), "opened it".into(), tx).unwrap();
         let msg = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         assert!(msg.contains("false could not open it"), "{msg}");
     }

@@ -133,6 +133,10 @@ pub struct General {
     /// next start clean up after a run that was killed and offer to resume it. Off, a
     /// new file is written under its own name. See docs/security.md.
     pub safe_operations: bool,
+    /// The platform's fast copy (item 22): a clone where the drive can (Btrfs, XFS,
+    /// APFS), else the kernel's copy on Linux, else xdevcmd's own read and write. Off,
+    /// xdevcmd always reads and writes. See docs/security.md.
+    pub fast_copy: bool,
 }
 
 impl Default for General {
@@ -144,6 +148,7 @@ impl Default for General {
             menu_bar: true,
             autosave_secs: 5,
             safe_operations: true,
+            fast_copy: true,
         }
     }
 }

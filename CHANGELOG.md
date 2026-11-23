@@ -10,6 +10,139 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **Known issues and limits** ([docs/known-issues.md](docs/known-issues.md)): what does
+  not work yet and what will not change, one line each, linked to the details.
+- **A big copy goes on from where it stopped**: with safe operations on, a file over
+  256 MiB is synced every 256 MiB, and Continue after a killed run (a crash, `kill -9`)
+  resumes from there. Continue also skips the folders the first run finished. A power
+  cut is best effort: see Security, "Safe operations".
+- **C, a checked continue**: when a copy may be damaged (a power cut, a drive pulled
+  out), C at the Interrupted dialog reads every file already copied again with its
+  source, finished folders included, and copies again any that differ (a file can keep
+  its size and date with no data in it). Slow; Enter still trusts what was copied.
+- **F forgets an interrupted job**: nothing more is done, what it did stays (Ctrl+Z
+  cannot undo it). With several jobs interrupted, the newest is asked first and the
+  dialog says how many wait; "Esc: asked again at the next start" is always shown.
+- **Messages** (Alt+M): the status line's last 50 messages, whole and with their times.
+- **Copy relative path** (right-click, F1): from the repository's root, else the folder.
+- **`o` and Open with… say what happened**: "opening …", then "opened …" or the error.
+- **A config file with a mistake is asked about at start**: continue with the defaults,
+  edit it, or quit.
+- **A debug log for bug reports**: `XDEVCMD_DEBUG=all`. It holds no file, folder, user
+  or host name. See Troubleshooting.
+- **Release archives can be checked** with build provenance (`gh attestation verify`),
+  and each is unpacked and checked before the release (run too, but for Intel macOS,
+  built on Apple Silicon). See Security, "Checking a download".
+- **Docs**: Compatibility (what stays the same from 0.4.0) and Benchmarks (measuring on
+  your machine); the guide says what a copy keeps, and what to use instead (rsync,
+  robocopy, rclone).
+- **`cargo xtask fuzz`** runs the fuzz targets for input from outside.
+- **A tester's kit comes with each release** (`xdevcmd-bench-<tag>-<target>`, built
+  for every target; a kit that fails to build does not hold the release back, its notes
+  say which is missing, and it can be built from the tag: see How to test): `xtask bench` measures your own drives; `xtask try` makes a sandbox, kills a
+  copy mid-job at the right moment (`--kill-when`: only the xdevcmd it started with
+  `--launch`, by its process number, never another one), and checks every file against its
+  manifest (PASS / FAIL); `--reset A|B|C` puts back a check's files, to do it again
+  without making the sandbox again. No Rust needed; `xtask --help`, `xtask try --help`,
+  `xtask bench --help`. See How to test and Benchmarks.
+
+### Changed
+- **Needs Rust 1.90** (was 1.88): two dependencies need it, so 1.88 and 1.89 could not
+  build 0.4.0-beta.1 or 0.3.0 with `--locked` either, whatever `rust-version` said. CI
+  now builds on 1.90 itself. 0.3.0 on crates.io keeps the old value; it is not yanked.
+- **winget is no longer planned for 0.4.0**: Windows gets Scoop and the release zip.
+  winget needs a signed build first.
+- **`q` no longer quits**: F10 and Ctrl+q do (`q` can be added back under `[keys]`).
+  Quitting while a program runs in a terminal asks first. **Quit without cd** moved
+  from `Q` to `Alt+x q`, so a stray Shift+q no longer quits either.
+- **Replacing many small files is many times faster**: they are synced in batches, on
+  several threads (5,000 files: 2.9 s instead of 59.7 s on Linux).
+- **Copies use the system's fast copy**: a clone on APFS, Btrfs and XFS,
+  `copy_file_range` on Linux, xdevcmd's own copy otherwise. `[general] fast_copy = false`
+  turns it off.
+- **F3 opens a big file at once** and indexes the rest in the background (a 1 GiB log:
+  1.5 ms instead of 120 ms).
+- **Find stops at 100,000 results** and says so.
+- **F1's own row, chosen in F1**, switches between the small and the large window.
+
+### Fixed
+- **The job box counts files as well as bytes** ("503 of 50000 files · 2.7 M of 195 M"),
+  and a long network error no longer hides which try it is: the line is cut at the end
+  of the error, "(3 of 5)" kept.
+- **Recording a hand test is two commands**: `xtask try --check` saves its output beside
+  the sandbox, and `xtask manual log` with no arguments asks for the cases (offering those
+  the check says were done), a result each and a note, and fills in the check file, the
+  terminal and the shell.
+- **Retry and Skip no longer feel the same**: the Failed question says what each does
+  (R: five more tries; S: leave it, go on), warns when a share looks down that Skip will
+  likely meet the same error next, and after a Skip the job box counts it ("· 1 skipped")
+  and says so for a few seconds.
+- **The job box grows with a wide terminal** (74 columns to 120): a long path or a
+  Windows network error reads whole once the window is made wider.
+- **Check C says how many it found different, first**: "3 found different and copied
+  again; 2001 copied …". The count sat in the middle of the line, which the status line
+  elides on a terminal of usual width, so several tampered copies read as "(…)".
+- **`xtask try --kill-when` lands mid-copy on a fast disk**: it kills at the point after
+  a name check only (the full check, which asked PowerShell for seconds on Windows, runs
+  before the wait), says so when the copy had ended before the kill, and `--make --big N`
+  makes check B's file N GiB.
+- **A job whose worker stops on an internal error ends as failed and says so**, instead
+  of "working" for ever (the next start offers to continue it); the terminal is put
+  back on every early error at start. F1's recent list keeps Copy path, Copy relative
+  path, Documentation, Log to file and Stop logging when it is read back.
+- **Read-only turns off Open with…'s menu too** (F3 still views the file), and a
+  command from a menu is refused as the action it does. What read-only and restricted
+  turn off is sorted once, for every action and command, and a new one does not build
+  until it is. Open with…'s menu waits while a folder opens, and is not offered inside
+  an archive, as Open with.
+- **Continue after a kill never trusts a line cut short**: the journal's last line,
+  written only in part when the run died, could name another folder (`/w/proj` for
+  `/w/proj-x`), which Continue then skipped. Such a line is not read. Every line the
+  journal writes is read and checked against `--root` by one table.
+- **With `--root`, a file put back from the trash goes back**: it was always refused,
+  as its free old name did not resolve. A new folder, Save as, a terminal log, a file put
+  back and an undo are checked against the root one way, and an undo of a move or a
+  rename whose place now leads out of the root is refused.
+- **Alt+F5 refuses an archive name with a control character**, as Save as, F7 and
+  Rename do (the name is prefilled from one someone else chose), and says a folder that
+  is not there before the job starts.
+- **A folder copied or moved into itself is refused however the destination is
+  reached**: through a link to a folder not made yet, it recursed until the stack
+  overflowed. Pack leaves out the archive it replaces whatever its path's text (`..`, a
+  link), in every format. Two hard links of one file are two files for F2, rename many,
+  Copy As and pack; changing only the case of a link's name is a rename on Windows too.
+- **Continue after a kill keeps what the job was asked to do**: C reads a big file's
+  kept part again with its source before going on from it; a Copy As goes on under its
+  new name; the table's skip and replace choices survive a second kill; and with
+  `--root`, a job whose record names a place outside the root is not offered or tidied
+  (also in 0.4.0-beta.1). F says if a kept part could not be removed, and the job is
+  then offered again at the next start.
+- **Alt+C and the user menu never add to a line you typed and did not run**: before,
+  a half-typed `rm -rf x` ran with the folder appended. They open a new shell instead.
+- **Your root, home, and the folders shown or in a shell are never deleted, moved or
+  renamed**, however written: a list row `src/..` removed its parent, and `link/` (a
+  trailing slash) emptied the folder the link points to (also in 0.4.0-beta.1).
+- **Writes wait while a folder opens**: F8 there acted on the old listing.
+- **A file never replaces a folder, nor the reverse**, even with "replace all".
+- **C checks the files the job had finished too**, and Esc keeps the job for the next
+  start.
+- **The delete box's count, and F3 in a big archive**, no longer stay at "counting…" or
+  "extracting…".
+- **A copy or move of a folder into its own subfolder is refused** however the
+  destination is written (a link, `..`, another case). Before, it recursed until the
+  disk filled or xdevcmd crashed.
+- **A file edited without a change of size is no longer taken for the same file** when
+  its time differs by less than 2 s: times are compared to the precision of the coarser
+  drive (exact on ext4, APFS, NTFS).
+- **A plan over millions of identical files** counts them instead of keeping a row for
+  each, which could take gigabytes.
+- **A new name with a control character** (a newline, ESC) is refused on every system.
+- **F5 and F6 check faster on Windows the first time**: no file is opened for each entry
+  (Defender scanned each one).
+- **`~` on Windows** when `HOME` is a Unix path (Cygwin, an old MSYS): `USERPROFILE`.
+- **A quoted name with a tab** is no longer offered as a path in a shell's output.
+
 ## [0.4.0-beta.1] - 2026-11-13
 
 ### Added

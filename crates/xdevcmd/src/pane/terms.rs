@@ -245,6 +245,11 @@ impl TermPanel {
         Some((tab.id, tab.focus))
     }
 
+    /// The number its tab shows (1 for the first), while it lives.
+    pub fn tab_number(&self, key: ShellKey) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == key.0).map(|i| i + 1)
+    }
+
     /// The shell `key` names, while it lives.
     pub fn shell(&self, key: ShellKey) -> Option<&TermPane> {
         self.tabs
@@ -481,6 +486,21 @@ impl TermPanel {
     }
 
     /// Every running shell, across all tabs and splits — what the limit counts.
+    /// The programs running in any shell of any tab (a `Busy` or `Remote` state), for
+    /// asking before quitting ends them. An idle shell, or one whose state this system
+    /// cannot tell, is not listed.
+    pub fn busy_programs(&self) -> Vec<String> {
+        use crate::pane::term::ShellState;
+        self.tabs
+            .iter()
+            .flat_map(|t| t.terms.values())
+            .filter_map(|t| match t.state() {
+                ShellState::Busy(p) | ShellState::Remote(p) => Some(p),
+                ShellState::Idle | ShellState::Unknown => None,
+            })
+            .collect()
+    }
+
     pub fn shell_count(&self) -> usize {
         self.tabs.iter().map(|t| t.terms.len()).sum()
     }
@@ -566,6 +586,17 @@ impl TermPanel {
     /// The focused shell's directory; see [`TermPane::shell_dir`].
     pub fn shell_dir(&self) -> Option<crate::pane::term::ShellDir> {
         self.focused().and_then(TermPane::shell_dir)
+    }
+
+    /// Where every shell is, as far as this system tells (each shell's
+    /// [`TermPane::shell_dir`]): folders a delete must not take from under them (#2).
+    pub fn shell_dirs(&self) -> Vec<std::path::PathBuf> {
+        self.tabs
+            .iter()
+            .flat_map(|t| t.terms.values())
+            .filter_map(TermPane::shell_dir)
+            .map(|d| d.path)
+            .collect()
     }
 
     /// Move a border between this tab's shells. False when the focused shell has no

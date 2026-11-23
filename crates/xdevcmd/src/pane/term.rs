@@ -77,6 +77,13 @@ pub struct TermPane {
     log: LogSlot,
     /// The log's failure has been said on the status line.
     log_said: std::cell::Cell<bool>,
+    /// Keys went in since the last Enter: the shell's line may hold text the user
+    /// typed and did not run, which Alt+C must not add to (#1). See [`typed_after`].
+    dirty: std::cell::Cell<bool>,
+    /// Linux: the shell's own name in /proc, read at the first look. Another name
+    /// there later is a program it `exec`ed, which owns the terminal as the shell's
+    /// own process (#1); that program is busy, never a prompt.
+    shell_comm: std::cell::OnceCell<String>,
 }
 
 /// Where a shell's log is kept, shared with its reader thread.
@@ -185,6 +192,27 @@ pub fn state_of(
         // Where the system should say and could not (its answer unreadable): never
         // idle on a guess.
         _ => ShellState::Unknown,
+    }
+}
+
+/// Programs that are shells, for [`TermPane::after_exec`].
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SHELLS: &[&str] = &[
+    "sh", "bash", "dash", "zsh", "fish", "ksh", "mksh", "tcsh", "csh", "nu", "pwsh", "elvish",
+    "xonsh", "ash", "yash", "oksh",
+];
+
+/// Whether the line holds typed text after a key's `bytes`, given whether it did
+/// before (#1). A lone Enter runs it; Ctrl+C clears it on Unix (Windows' consoles do
+/// not all clear it); Ctrl+L only redraws. Anything else — a letter, an arrow that
+/// brings back history, a key a program in the terminal took — may leave text there:
+/// the safe guess, since a wrong one opens a shell, never runs a command.
+pub fn typed_after(was: bool, bytes: &[u8]) -> bool {
+    match bytes {
+        b"\r" => false,
+        [0x03] if cfg!(unix) => false,
+        [0x0c] => was,
+        _ => true,
     }
 }
 
@@ -564,6 +592,8 @@ impl TermPane {
             last_output,
             log,
             log_said: std::cell::Cell::new(false),
+            dirty: std::cell::Cell::new(false),
+            shell_comm: std::cell::OnceCell::new(),
         })
     }
 
@@ -621,7 +651,18 @@ impl TermPane {
                 // Not started yet: asked again next time, not in 500 ms.
                 (None, None, None)
             } else {
+                // The shell's own name, at the first look with its pid: the pid is known
+                // once its exec is done, before anything typed can exec another (#1).
+                #[cfg(target_os = "linux")]
+                self.learn_shell_name(pid);
                 let (label, dir) = activity_of(pid);
+                // At its prompt (a directory is read only then): where the shell's own
+                // name is learnt, before any `exec` can change it (#1).
+                #[cfg(target_os = "linux")]
+                let (label, dir) = match dir.is_some().then(|| self.after_exec(pid, Fg::Shell)) {
+                    Some(Fg::Program(p)) => (Some(p), None),
+                    _ => (label, dir),
+                };
                 (Some(Instant::now()), label, dir)
             };
         }
@@ -776,7 +817,10 @@ impl TermPane {
         if wrap {
             bytes.extend_from_slice(b"\x1b[201~");
         }
-        self.send(bytes);
+        // xdevcmd's own: a line it ran (a `cd`, ending in Enter) leaves it clean; names
+        // typed for the user to finish leave it typed.
+        self.dirty.set(!text.ends_with('\r'));
+        self.write(bytes);
     }
 
     /// What the shell last said about itself in its output: the directory (OSC 7 or
@@ -810,8 +854,48 @@ impl TermPane {
         }
         match self.pid.load(Ordering::Relaxed) {
             0 => Fg::Unknown,
-            pid => foreground_of(pid),
+            pid => {
+                #[cfg(target_os = "linux")]
+                self.learn_shell_name(pid);
+                self.after_exec(pid, foreground_of(pid))
+            }
         }
+    }
+
+    /// Linux: read the shell's name in /proc, once.
+    #[cfg(target_os = "linux")]
+    fn learn_shell_name(&self, pid: u32) {
+        if self.shell_comm.get().is_none() {
+            if let Ok(c) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
+                let c = c.trim();
+                if !c.is_empty() {
+                    let _ = self.shell_comm.set(c.to_string());
+                }
+            }
+        }
+    }
+
+    /// `fg`, unless the shell's process now runs another program (`exec sleep 30`):
+    /// then that program has the terminal (#1). Linux only; elsewhere `fg` as it is.
+    fn after_exec(&self, pid: u32, fg: Fg) -> Fg {
+        #[cfg(target_os = "linux")]
+        if fg == Fg::Shell {
+            // The pid is known once the shell's own exec is done (spawn returns after
+            // it), so the first name read is the shell's.
+            let now = std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                .map(|c| c.trim().to_string())
+                .unwrap_or_default();
+            if !now.is_empty() {
+                let first = self.shell_comm.get_or_init(|| now.clone());
+                // A shell that execs another (`.bashrc` ending in `exec zsh`) is still a
+                // shell at its prompt, not a program (red-team of #1).
+                if *first != now && !SHELLS.contains(&now.as_str()) {
+                    return Fg::Program(now);
+                }
+            }
+        }
+        let _ = (pid, &self.shell_comm);
+        fg
     }
 
     /// For the tab bar: what it is doing, else what it is.
@@ -959,8 +1043,33 @@ impl TermPane {
         }
     }
 
+    /// Bytes to the program that are not xdevcmd's own text (mouse reports, the wheel's
+    /// arrows): they may leave something on the shell's line, so it counts as typed
+    /// (red-team of #1). Keys and xdevcmd's text go through [`Self::write`].
     pub fn send(&self, bytes: Vec<u8>) {
+        self.dirty.set(true);
+        self.write(bytes);
+    }
+
+    fn write(&self, bytes: Vec<u8>) {
         let _ = self.tx.send(bytes);
+    }
+
+    /// The text of the row the cursor is on, as the screen shows it.
+    fn cursor_row(&self) -> String {
+        let Ok(p) = self.parser.read() else {
+            return String::new();
+        };
+        let screen = p.screen();
+        let (row, _) = screen.cursor_position();
+        let (_, cols) = screen.size();
+        let line = screen.rows(0, cols.into()).nth(row as usize);
+        line.unwrap_or_default()
+    }
+
+    /// Whether the shell's line may hold text typed and not run (#1).
+    pub fn dirty(&self) -> bool {
+        self.dirty.get()
     }
 
     /// Translate a key into what a terminal would have sent. Returns false for keys we
@@ -971,7 +1080,14 @@ impl TermPane {
         let Some(bytes) = key_bytes(k) else {
             return false;
         };
-        self.send(bytes);
+        let mut dirty = typed_after(self.dirty.get(), &bytes);
+        // Enter after a trailing `\` continues the line (the shell shows `> `): it has
+        // not run, and what is typed next joins it (red-team of #1).
+        if !dirty && bytes == b"\r" && self.cursor_row().trim_end().ends_with('\\') {
+            dirty = true;
+        }
+        self.dirty.set(dirty);
+        self.write(bytes);
         true
     }
 
@@ -1409,6 +1525,20 @@ fn function_key_bytes(n: u8, mods: KeyModifiers) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use super::typed_after;
+
+    /// Which keys leave text on the shell's line (#1).
+    #[test]
+    fn a_line_is_typed_until_enter_or_ctrl_c() {
+        assert!(typed_after(false, b"r"));
+        assert!(typed_after(false, b"\x1b[A"), "history brings text back");
+        assert!(!typed_after(true, b"\r"));
+        assert!(typed_after(true, b"\x0c"), "Ctrl+L only redraws");
+        assert!(!typed_after(false, b"\x0c"));
+        assert_eq!(typed_after(true, b"\x03"), !cfg!(unix));
+        assert!(typed_after(false, b"ls\r\x1b"), "not a lone Enter");
+    }
+
     use super::*;
 
     /// macOS calls a script by its interpreter's name; the script's own is the program

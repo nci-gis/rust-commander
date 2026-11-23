@@ -58,6 +58,8 @@ pub struct Ask {
     /// A second way forward, between `yes` and cancel: its key (a letter), its verb,
     /// and what it does. "Send to this shell" in the question before typing into one.
     pub also: Option<(char, String, Cmd)>,
+    /// A third, after `also`: "Quit" in the dialog about a config that failed.
+    pub more: Option<(char, String, Cmd)>,
     pub buttons: Vec<Rect>,
     /// A quiet line at the bottom right, on the buttons' row: a credit, not content.
     pub footnote: Option<String>,
@@ -481,6 +483,10 @@ pub struct Job {
     pub buttons: Vec<Rect>,
     /// The answers on the question box, when one is up.
     pub answer_buttons: Vec<(Answer, Rect)>,
+    /// Failed files the user skipped, and what the last Retry or Skip did, shown for a
+    /// few seconds: the two felt the same with a share down (the owner, 2026-11-23).
+    pub skipped_failed: u64,
+    pub said: Option<(String, std::time::Instant)>,
 }
 
 impl Job {
@@ -500,12 +506,40 @@ impl Job {
             rate: Default::default(),
             buttons: Vec::new(),
             answer_buttons: Vec::new(),
+            skipped_failed: 0,
+            said: None,
         }
     }
 
-    /// Take everything the worker has sent without blocking.
+    /// Take everything the worker has sent without blocking. A worker gone without
+    /// its Done (a panic: crash.rs logs it and xdevcmd goes on) ends the job as
+    /// failed, not "working" for ever; the journal it left is the next start's to
+    /// offer, as after a kill (cosf #11).
     pub fn pump(&mut self) {
-        while let Ok(ev) = self.handle.events.try_recv() {
+        loop {
+            let ev = match self.handle.events.try_recv() {
+                Ok(ev) => ev,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if self.done.is_none() {
+                        self.question = None;
+                        self.retrying = None;
+                        // Short enough for the job box; what it did so far is what
+                        // its progress said (red-team on H-10).
+                        self.done = Some(Summary {
+                            done: self.files_done,
+                            bytes: self.bytes_done,
+                            failed: 1,
+                            stopped: true,
+                            errors: vec![
+                                "stopped: an internal error (crash log written); the next start tidies up".into(),
+                            ],
+                            ..Summary::default()
+                        });
+                    }
+                    break;
+                }
+            };
             match ev {
                 ops::Event::Scanned { files, bytes } => {
                     self.total_files = files;
@@ -549,8 +583,56 @@ impl Job {
     }
 
     pub fn answer(&mut self, a: Answer) {
+        if let Some(Question::Failed { path, .. }) = &self.question {
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let said = match a {
+                Answer::Skip | Answer::SkipAll => {
+                    self.skipped_failed += 1;
+                    Some(format!("skipped {name}: going on with the next file"))
+                }
+                Answer::Retry => Some(format!("trying {name} again")),
+                _ => None,
+            };
+            self.said = said.map(|t| (t, std::time::Instant::now()));
+        }
         self.handle.answer(a);
         self.question = None;
+    }
+
+    /// What the last Retry or Skip did, for five seconds after it.
+    pub fn said_line(&self, now: std::time::Instant) -> Option<&str> {
+        self.said
+            .as_ref()
+            .filter(|(_, at)| {
+                now.saturating_duration_since(*at) < std::time::Duration::from_secs(5)
+            })
+            .map(|(t, _)| t.as_str())
+    }
+
+    /// The retry line cut to `width` columns at the end of the error, never in the
+    /// middle: which try it is stays in sight (the owner, 2026-11-23: a long Windows
+    /// error took "(3 of 5)" out of the box).
+    pub fn retrying_line_fit(&self, now: std::time::Instant, width: usize) -> Option<String> {
+        use unicode_width::UnicodeWidthChar;
+        let line = self.retrying_line(now)?;
+        if unicode_width::UnicodeWidthStr::width(line.as_str()) <= width {
+            return Some(line);
+        }
+        let mut out = String::new();
+        let mut w = 0;
+        for c in line.chars() {
+            let cw = c.width().unwrap_or(0);
+            if w + cw + 1 > width {
+                break;
+            }
+            out.push(c);
+            w += cw;
+        }
+        out.push('\u{2026}');
+        Some(out)
     }
 
     /// "network error — trying again in 4 s (3 of 5): Connection timed out", while a
@@ -671,10 +753,25 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
                 "Deleting permanently cannot be undone.".to_string(),
             ],
         ),
-        Question::Failed { path, error } => (
-            "Failed".to_string(),
-            vec![path.display().to_string(), String::new(), error.clone()],
-        ),
+        Question::Failed { path, error } => {
+            let mut body = vec![
+                path.display().to_string(),
+                String::new(),
+                error.clone(),
+                String::new(),
+                "R tries this file again (five more tries). S leaves it and goes on with the next"
+                    .to_string(),
+                "file; it is not copied. Esc stops the job.".to_string(),
+            ];
+            // The engine's words for a network error it tried again and again.
+            if error.contains("a network error") {
+                body.push(
+                    "The share looks down: S will most likely meet the same error on the next file."
+                        .to_string(),
+                );
+            }
+            ("Failed".to_string(), body)
+        }
         Question::NoJournal { error } => (
             "Safe operations: no journal".to_string(),
             vec![
@@ -922,18 +1019,23 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
         .also
         .as_ref()
         .map(|(k, _, _)| k.to_ascii_uppercase().to_string());
+    let more_key = a
+        .more
+        .as_ref()
+        .map(|(k, _, _)| k.to_ascii_uppercase().to_string());
     a.buttons = match (&a.yes, &a.also, &also_key) {
-        (Some((verb, _)), Some((_, also, _)), Some(key)) => buttons(
-            frame,
-            inner.x,
-            y,
-            inner.width,
-            &[
+        (Some((verb, _)), Some((_, also, _)), Some(key)) => {
+            let mut b = vec![
                 ("Enter", verb.as_str(), accent),
                 (key.as_str(), also.as_str(), th.accent),
-                ("Esc", "cancel", th.accent),
-            ],
-        ),
+            ];
+            if let (Some((_, more, _)), Some(k)) = (&a.more, &more_key) {
+                b.push((k.as_str(), more.as_str(), th.accent));
+            } else {
+                b.push(("Esc", "cancel", th.accent));
+            }
+            buttons(frame, inner.x, y, inner.width, &b)
+        }
         (Some((verb, _)), _, _) => buttons(
             frame,
             inner.x,
@@ -1071,7 +1173,9 @@ fn render_input(frame: &mut Frame, area: Rect, i: &mut Input) {
 
 fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
     let th = theme::t();
-    let r = centered(area, 74, 8);
+    // 74 columns on a small terminal, more on a wide one (to 120): a long path or a
+    // Windows network error read whole once the window is made wider (the owner).
+    let r = centered(area, area.width.saturating_sub(8).clamp(74, 120), 8);
     let inner = frame_box(
         frame,
         r,
@@ -1114,12 +1218,18 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 inner,
                 1,
                 &{
+                    // How many files, as well as how many bytes (the owner, 2026-11-23:
+                    // 50,000 small files moved the bar by bytes only).
                     let mut s = format!(
-                        "{} files · {} of {}",
+                        "{} of {} files · {} of {}",
+                        j.files_done,
                         j.total_files,
                         human_size(j.bytes_done),
                         human_size(j.total_bytes)
                     );
+                    if j.skipped_failed > 0 {
+                        s.push_str(&format!(" · {} skipped", j.skipped_failed));
+                    }
                     if let Some(left) = j
                         .rate
                         .left(std::time::Instant::now(), (j.total_bytes, j.total_files))
@@ -1130,8 +1240,11 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 },
                 Style::new().fg(th.fg_dim),
             );
-            if let Some(line) = j.retrying_line(std::time::Instant::now()) {
+            let now = std::time::Instant::now();
+            if let Some(line) = j.retrying_line_fit(now, inner.width as usize) {
                 put(frame, inner, 2, &line, Style::new().fg(th.mark));
+            } else if let Some(line) = j.said_line(now) {
+                put(frame, inner, 2, line, Style::new().fg(th.mark));
             }
         }
     }
@@ -1199,6 +1312,38 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    /// A worker that ends without a word (a panic) ends its job as failed and says
+    /// so, instead of "working" for ever; the journal it left is the next start's to
+    /// offer (cosf #11, plan v3 H-10).
+    #[test]
+    fn a_job_whose_worker_ends_without_a_word_ends_as_failed() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Progress {
+            bytes_done: 1,
+            files_done: 0,
+        })
+        .unwrap();
+        j.pump();
+        assert!(j.done.is_none(), "still running");
+        drop(tx);
+        j.pump();
+        let s = j.done.as_ref().expect("ended");
+        assert_eq!(s.failed, 1);
+        assert!(
+            s.errors.iter().any(|e| e.contains("stopped")),
+            "{:?}",
+            s.errors
+        );
+        // A worker that said Done and then went is not a failure.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Done(ops::Summary::default())).unwrap();
+        drop(tx);
+        j.pump();
+        assert_eq!(j.done.as_ref().unwrap().failed, 0);
+    }
+
     /// Round 031: a job waiting to try a file again says so, counting down, and the
     /// line goes once the work moves on.
     #[test]
@@ -1221,6 +1366,17 @@ mod tests {
             "network error \u{2014} trying again in 4 s (3 of 5): Connection timed out"
         );
         assert!(j.retrying_line(at).unwrap().contains("trying again now"));
+        // A long error is cut at its end, so the try's number stays (the owner's
+        // Windows screenshot: "(3 of 5)" went with the middle).
+        let long = "network error \u{2014} trying again in 4 s (3 of 5): Connection timed out";
+        let fit = j
+            .retrying_line_fit(at - std::time::Duration::from_millis(3500), 60)
+            .unwrap();
+        assert!(
+            fit.contains("(3 of 5)") && fit.ends_with('\u{2026}'),
+            "{fit}"
+        );
+        assert!(long.starts_with(fit.trim_end_matches('\u{2026}')), "{fit}");
         tx.send(ops::Event::Progress {
             bytes_done: 1,
             files_done: 0,
@@ -1228,6 +1384,96 @@ mod tests {
         .unwrap();
         j.pump();
         assert!(j.retrying_line(at).is_none());
+    }
+
+    /// The owner (2026-11-23): a network error was still cut on a wide terminal, the
+    /// job box a fixed 74 columns. It grows with the terminal, to a limit.
+    #[test]
+    fn the_job_box_grows_with_a_wide_terminal() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Retrying {
+            path: PathBuf::from(r"\\server\share\tree\d000\f0421"),
+            error: "The network path was not found. (os error 53)".into(),
+            attempt: 4,
+            of: 5,
+            wait: std::time::Duration::from_secs(5),
+        })
+        .unwrap();
+        j.pump();
+        let mut text = |w: u16| {
+            let mut t = Terminal::new(TestBackend::new(w, 20)).unwrap();
+            let frame = t.draw(|f| render_job(f, f.area(), &mut j)).unwrap();
+            let b = &frame.buffer;
+            (0..b.area.height)
+                .map(|y| {
+                    (0..b.area.width)
+                        .map(|x| b.cell((x, y)).unwrap().symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let wide = text(140);
+        assert!(
+            wide.contains("(4 of 5): The network path was not found. (os error 53)"),
+            "{wide}"
+        );
+        // Small terminals keep the box they had; the line is cut at its end there.
+        let small = text(80);
+        assert!(
+            small.contains("(4 of 5)") && !small.contains("(os error 53)"),
+            "{small}"
+        );
+    }
+
+    /// The owner (2026-11-23): Retry and Skip felt the same, a network share down. The
+    /// question says what each does, a share that looks down says that Skip meets the
+    /// same error next, and after a Skip the box counts it and says so.
+    #[test]
+    fn retry_and_skip_say_what_each_does_and_a_skip_shows() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        let q = Question::Failed {
+            path: PathBuf::from("/mnt/share/tree/d000/f0421"),
+            error: "The network path was not found. (a network error: tried 6 times)".into(),
+        };
+        let body = question_text(&q).1.join("\n");
+        assert!(body.contains("R tries this file again"), "{body}");
+        assert!(
+            body.contains("S leaves it and goes on with the next"),
+            "{body}"
+        );
+        assert!(body.contains("the same error on the next file"), "{body}");
+        let local = question_text(&Question::Failed {
+            path: PathBuf::from("/tmp/f"),
+            error: "Permission denied".into(),
+        })
+        .1
+        .join("\n");
+        assert!(
+            !local.contains("the same error on the next file"),
+            "{local}"
+        );
+        tx.send(ops::Event::Ask(q)).unwrap();
+        j.pump();
+        j.answer(Answer::Skip);
+        let mut t = Terminal::new(TestBackend::new(140, 20)).unwrap();
+        let frame = t.draw(|f| render_job(f, f.area(), &mut j)).unwrap();
+        let b = &frame.buffer;
+        let text: String = (0..b.area.height)
+            .map(|y| {
+                (0..b.area.width)
+                    .map(|x| b.cell((x, y)).unwrap().symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        assert!(text.contains("1 skipped"), "{text}");
+        assert!(
+            text.contains("skipped f0421: going on with the next file"),
+            "{text}"
+        );
     }
 
     /// "設計書" from column 2: 書 covers columns 6 and 7. A box from column 7 would lose

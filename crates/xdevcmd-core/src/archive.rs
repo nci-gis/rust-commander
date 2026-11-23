@@ -631,7 +631,8 @@ pub fn pack(sources: &[PathBuf], dest: &Path, hooks: &mut dyn Hooks) -> io::Resu
                     stack.extend(kids.into_iter().rev());
                 }
             } else if m.is_file() {
-                if p == dest {
+                // The archive being replaced, by its text or on disk (`..`, a link).
+                if p == dest || crate::paths::same_entry(&p, dest) {
                     continue;
                 }
                 files.push((p.clone(), rel, false));
@@ -1047,6 +1048,48 @@ mod tests {
         // Only b chosen: small, fine.
         let b: std::collections::HashSet<String> = ["b".into()].into();
         assert!(check_room(&z, &d, &items, &b).is_ok());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// The archive being replaced is never packed into itself, however its path is
+    /// written (sibling of cosf C05, plan v3 H-04: it was compared by text only).
+    #[test]
+    fn pack_leaves_out_the_archive_it_replaces_whatever_its_text() {
+        for ext in ["zip", "tar", "tar.gz", "tgz"] {
+            let d = scratch(&format!("pack-self-text-{}", ext.replace('.', "-")));
+            fs::create_dir_all(d.join("proj")).unwrap();
+            fs::write(d.join("proj/a.txt"), "a").unwrap();
+            let old = format!("old.{ext}");
+            fs::write(d.join("proj").join(&old), "the archive being replaced").unwrap();
+            let dest = d.join("proj").join("..").join("proj").join(&old);
+            let mut log = Log::default();
+            pack(&[d.join("proj")], &dest, &mut log).unwrap();
+            let l = list(&d.join("proj").join(&old)).unwrap();
+            let names: Vec<_> = l.items.iter().map(|i| i.path.as_str()).collect();
+            assert!(
+                !names.contains(&format!("proj/{old}").as_str()),
+                "{ext}: {names:?}"
+            );
+            assert!(names.contains(&"proj/a.txt"), "{ext}: {names:?}");
+            let _ = fs::remove_dir_all(&d);
+        }
+    }
+
+    /// A hard link of the archive being replaced is a file of its own in the tree: it
+    /// is packed, not dropped without a word (P8 H-04, red-team).
+    #[cfg(unix)]
+    #[test]
+    fn pack_keeps_a_hard_link_of_the_archive_it_replaces() {
+        let d = scratch("pack-self-hard");
+        fs::create_dir_all(d.join("proj")).unwrap();
+        fs::write(d.join("proj/old.zip"), "the archive being replaced").unwrap();
+        fs::hard_link(d.join("proj/old.zip"), d.join("proj/kept.zip")).unwrap();
+        let mut log = Log::default();
+        pack(&[d.join("proj")], &d.join("proj/old.zip"), &mut log).unwrap();
+        let l = list(&d.join("proj/old.zip")).unwrap();
+        let names: Vec<_> = l.items.iter().map(|i| i.path.as_str()).collect();
+        assert!(names.contains(&"proj/kept.zip"), "{names:?}");
+        assert!(!names.contains(&"proj/old.zip"), "{names:?}");
         let _ = fs::remove_dir_all(&d);
     }
 

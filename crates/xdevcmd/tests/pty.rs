@@ -207,6 +207,15 @@ impl Session {
         session
     }
 
+    /// Wait for `what` on the status line (the last two rows), not anywhere: since the
+    /// Interrupted dialog says "every copied file", "copied" on screen is not the end
+    /// of a job, and F10 pressed while the job's box is up is not seen (CI, ARM).
+    fn wait_for_status(&self, what: &str) {
+        self.until(what, |scr| {
+            scr.lines().rev().take(2).any(|l| l.contains(what))
+        });
+    }
+
     fn screen(&self) -> String {
         self.parser.lock().unwrap().screen().contents()
     }
@@ -228,13 +237,19 @@ impl Session {
     }
 
     fn until(&self, what: &str, done: impl Fn(&str) -> bool) {
+        self.until_within(PATIENCE, what, done);
+    }
+
+    /// [`until`](Self::until), waiting at most `patience`: for work that is slow on a
+    /// busy runner by its size, not by a fault.
+    fn until_within(&self, patience: Duration, what: &str, done: impl Fn(&str) -> bool) {
         let start = Instant::now();
         loop {
             let s = self.screen();
             if done(&s) {
                 return;
             }
-            if start.elapsed() > PATIENCE {
+            if start.elapsed() > patience {
                 panic!("timed out waiting for {what}. Screen:\n{s}");
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -262,8 +277,11 @@ impl Session {
         self.until(&format!("{text:?} to go away"), |s| !s.contains(text));
     }
 
-    /// Where `text` is drawn, as (column, row).
+    /// Where `text` is drawn, as (column, row), once it is: a menu opened by the click
+    /// just before is drawn a moment later, and on a slow runner the lookup came first
+    /// (`read_only_mode_refuses_logging_a_tab`, run 43706043911).
     fn locate(&self, text: &str) -> (u16, u16) {
+        self.wait_for(text);
         let s = self.screen();
         s.lines()
             .enumerate()
@@ -309,11 +327,24 @@ impl Session {
         self.master = None;
     }
 
-    /// Press q and require a clean exit.
-    fn quit(mut self) {
-        self.send(b"q");
+    /// Press F10 and require a clean exit. A test that left a program running in a
+    /// shell is asked "Quit?" about it: yes. A job's box takes every key but Esc and b
+    /// while it runs: a test that started one waits for its end first (" copied" on
+    /// the status line), not for its file, which is there before the job has ended.
+    fn quit(self) {
+        self.quit_by(F10);
+    }
+
+    /// Press `key` and require a clean exit.
+    fn quit_by(mut self, key: &[u8]) {
+        self.send(key);
         let start = Instant::now();
+        let mut answered = false;
         loop {
+            if !answered && self.screen().contains("Running in the terminal") {
+                self.send(ENTER);
+                answered = true;
+            }
             match self.child.try_wait() {
                 Ok(Some(status)) => {
                     assert!(status.success(), "xdevcmd exited with {status:?}");
@@ -321,7 +352,7 @@ impl Session {
                 }
                 Ok(None) if start.elapsed() > PATIENCE => {
                     let _ = self.child.kill();
-                    panic!("xdevcmd did not exit on q. Screen:\n{}", self.screen());
+                    panic!("xdevcmd did not exit. Screen:\n{}", self.screen());
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(25)),
                 Err(e) => panic!("waiting for xdevcmd: {e}"),
@@ -338,6 +369,38 @@ impl Drop for Session {
     }
 }
 
+/// Plan A10: the refusals in the debug log, as `(code, next)` in the order written. The
+/// log is read after quit, from the state directory (`XDEVCMD_DEBUG=errors`).
+fn refusals(s: &Scratch) -> Vec<(String, String)> {
+    let field = |line: &str, k: &str| {
+        let key = format!("\"{k}\":\"");
+        let at = line.find(&key)? + key.len();
+        Some(line[at..].split('"').next()?.to_string())
+    };
+    std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(".jsonl"))
+        .flat_map(|p| {
+            std::fs::read_to_string(p)
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|l| l.contains("\"ev\":\"refused\""))
+        .map(|l| (field(&l, "code").unwrap(), field(&l, "next").unwrap()))
+        .collect()
+}
+
+/// The pairs `refusals` should find.
+fn pairs(want: &[(&str, &str)]) -> Vec<(String, String)> {
+    want.iter()
+        .map(|(c, n)| (c.to_string(), n.to_string()))
+        .collect()
+}
+
 fn wait_file(path: &Path, what: &str, ok: impl Fn(Option<String>) -> bool) {
     let start = Instant::now();
     while !ok(std::fs::read_to_string(path).ok()) {
@@ -351,6 +414,7 @@ fn wait_file(path: &Path, what: &str, ok: impl Fn(Option<String>) -> bool) {
 const DOWN: &[u8] = b"\x1b[B";
 const INSERT: &[u8] = b"\x1b[2~";
 const ENTER: &[u8] = b"\r";
+const F10: &[u8] = b"\x1b[21~";
 const F4: &[u8] = b"\x1bOS";
 const F5: &[u8] = b"\x1b[15~";
 const F6: &[u8] = b"\x1b[17~";
@@ -377,6 +441,102 @@ fn starts_draws_both_panes_and_quits_cleanly() {
     xdevcmd.send(DOWN);
     xdevcmd.wait_for("sub");
     xdevcmd.quit();
+}
+
+/// A config with a mistake (item 49): a dialog at start, never a silent fallback.
+/// Enter continues on the defaults and says so; q quits.
+#[test]
+fn a_config_with_a_mistake_is_asked_about_at_start() {
+    let s = Scratch::new("bad-config");
+    let cfg = s.file("bad.toml", "[general\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("Config not loaded");
+    x.wait_below("Config not loaded", "could not be used");
+    x.send(ENTER);
+    x.wait_gone("Config not loaded");
+    x.wait_for("defaults in use");
+    x.quit();
+
+    // Again, and q on the dialog ends xdevcmd at once.
+    let x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    x.wait_for("Config not loaded");
+    x.quit_by(b"q");
+}
+
+/// E on that dialog opens the file in the editor; mended there, xdevcmd says so.
+#[test]
+fn a_config_mended_from_the_dialog_is_checked_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("mend-config");
+    let cfg = s.file("bad.toml", "[general\n");
+    let editor = s.file("mend.sh", "#!/bin/sh\n: > \"$1\"\n");
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cfg_s = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        Some(&editor),
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg_s)],
+    );
+    x.wait_for("Config not loaded");
+    x.send(b"e");
+    x.wait_for("is right now");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), "");
+    x.quit();
+}
+
+/// XDEVCMD_DEBUG: the status line says the log is on and where; a copy is written to
+/// it by its numbers, and no name of what was copied is in it.
+#[test]
+fn the_debug_log_is_said_at_start_and_holds_no_names() {
+    let s = Scratch::new("debuglog");
+    s.file("left/Private-notes.txt", "customer data");
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_DEBUG", "all")],
+    );
+    x.wait_for("debug log on (jobs, errors)");
+    x.send(DOWN);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    let start = Instant::now();
+    while !s.right().join("Private-notes.txt").exists() {
+        assert!(start.elapsed() < PATIENCE, "not copied:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    // The file is there before the job has ended; its box takes F10 until then.
+    x.wait_for(" copied");
+    x.quit();
+    let log = std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().ends_with(".jsonl"))
+        .expect("a debug log in the state directory");
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        text.lines().next().unwrap().contains("\"ev\":\"start\""),
+        "{text}"
+    );
+    assert!(text.contains("\"ev\":\"job_start\""), "{text}");
+    assert!(text.contains("\"ev\":\"job_end\""), "{text}");
+    for name in ["Private", "notes", "debuglog", "left", "right"] {
+        assert!(!text.contains(name), "{name} in the log:\n{text}");
+    }
 }
 
 /// How long start-up took: on the status line with XDEVCMD_TIMINGS, step by step up to
@@ -465,8 +625,17 @@ fn the_shell_pane_runs_commands() {
 #[test]
 fn copying_over_a_file_asks_first_then_overwrites() {
     let s = Scratch::new("overwrite");
-    s.file("left/report.txt", "NEW");
+    let source = s.file("left/report.txt", "NEW");
     let target = s.file("right/report.txt", "OLDER");
+    // The same time on both, so only the size differs: written apart, the target is
+    // newer by a few milliseconds, which the plan now tells.
+    let when = std::fs::metadata(&source).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&target)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
     let mut xdevcmd = Session::start(&s, None);
 
     xdevcmd.send(DOWN);
@@ -697,20 +866,33 @@ fn going_quickly_past_pictures_sends_only_the_one_stopped_on() {
     x.send(DOWN);
     x.send(b"\x1bq"); // quick view on a.png
     wait_bytes(&x, "\x1b_Ga=T,f=100,", 1);
-    // Five Downs a key-repeat apart (`send` waits 60 ms after each, under the 120 ms a
-    // picture must be stayed on): past b, c, d, e to f. Without the wait each was
-    // decoded and sent.
+    // Five Downs a key-repeat apart (60 ms, under the 120 ms a picture must be stayed
+    // on): past b, c, d, e to f. Without the wait each was decoded and sent. Each gap is
+    // timed: on a busy runner (macOS CI) the test's own sleep grew past 120 ms, and a
+    // picture stayed on that long is rightly sent. Such a gap allows one more, and only
+    // then; at 20 ms the decode is still running and the test proves nothing.
+    let mut slow_gaps = 0;
+    let mut last: Option<Instant> = None;
     for _ in 0..5 {
-        x.send(DOWN);
+        let mut w = x.writer.lock().unwrap();
+        w.write_all(DOWN).unwrap();
+        w.flush().unwrap();
+        drop(w);
+        let now = Instant::now();
+        if last.is_some_and(|t| now - t >= Duration::from_millis(115)) {
+            slow_gaps += 1;
+        }
+        last = Some(now);
+        std::thread::sleep(Duration::from_millis(60));
     }
     x.wait_for("f.png");
     wait_bytes(&x, "\x1b_Ga=T,f=100,", 2);
     std::thread::sleep(Duration::from_millis(500));
     let raw = String::from_utf8_lossy(&x.raw.lock().unwrap()).into_owned();
-    assert_eq!(
-        raw.matches("\x1b_Ga=T,").count(),
-        2,
-        "a.png, then only f.png"
+    let sent = raw.matches("\x1b_Ga=T,").count();
+    assert!(
+        (2..=2 + slow_gaps).contains(&sent),
+        "a.png, then only f.png: {sent} sent, {slow_gaps} gap(s) of 115 ms or more"
     );
     x.quit();
 }
@@ -908,7 +1090,12 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
     let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
     big.set_len(2 << 30).unwrap();
     drop(big);
-    let cfg = s.file("eio.toml", "[general]\nautosave_secs = 0\n");
+    // The copy's own loop: the platform's fast copy (a clone on APFS) copies 2 GiB of
+    // nothing at once, and there would be no copy left to cancel.
+    let cfg = s.file(
+        "eio.toml",
+        "[general]\nautosave_secs = 0\nfast_copy = false\n",
+    );
     let cfg = cfg.to_string_lossy().into_owned();
     let mut x = Session::start_env(
         &s,
@@ -950,20 +1137,29 @@ fn a_lost_terminal_cancels_cleans_and_saves_even_before_the_signal() {
 fn quitting_with_a_copy_running_cancels_it_cleans_up_and_ends() {
     let s = Scratch::new("quit-jobs");
     std::fs::create_dir(s.left().join("sub")).unwrap();
-    // Sparse, as in the lost-terminal test: still copying when q comes, at most 2 GiB.
+    // Sparse, as in the lost-terminal test: still copying when F10 comes, at most
+    // 2 GiB, and through the copy's own loop for the same reason.
     let big = std::fs::File::create(s.left().join("sub/big.bin")).unwrap();
     big.set_len(2 << 30).unwrap();
     drop(big);
-    let mut x = Session::start(&s, None);
+    let cfg = s.file("quit-jobs.toml", "[general]\nfast_copy = false\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", cfg.as_str())],
+    );
     x.send(DOWN);
     x.send(ENTER); // into sub
     x.wait_for("/left/sub");
     x.send(DOWN);
     x.send(F5);
     x.wait_for("[Enter] go");
-    // Go, to the background (b), and quit (q) in one write: a fast disk copies 2 GiB of
+    // Go, to the background (b), and quit (F10) at once: a fast disk copies 2 GiB of
     // nothing in a second or two.
-    x.send(b"\rbq");
+    x.send(b"\rb");
+    x.send(F10);
     x.wait_for("cancel them and quit");
     x.send(ENTER);
     let start = Instant::now();
@@ -1085,12 +1281,12 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
     std::fs::write(
         journal.join("2147483646-0.journal"),
         format!(
-            "{}kind copy\nsrc {}\nsrc {}\ndest {}\npart {}\n",
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\ndir {}\n",
             host_line(),
             hex(&src.join("a.txt")),
             hex(&src.join("b.txt")),
             hex(&dst),
-            hex(&part)
+            hex(&dst)
         ),
     )
     .unwrap();
@@ -1110,6 +1306,246 @@ fn an_interrupted_copy_is_tidied_up_and_resumed_at_the_next_start() {
         std::thread::sleep(Duration::from_millis(25));
     }
     x.quit();
+}
+
+/// The owner, 2026-11-17: two interrupted jobs. The newest is offered first, the dialog
+/// says one more waits, Esc keeps both, and once the newest is answered the older one is
+/// offered at the next start.
+#[test]
+fn two_interrupted_jobs_the_newest_first_and_the_other_said() {
+    let s = Scratch::new("two-jobs");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("older.txt"), "o").unwrap();
+    std::fs::write(src.join("newer.txt"), "n").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    for (n, name, secs) in [
+        (1, "older.txt", 1_700_000_000u64),
+        (0, "newer.txt", 1_800_000_000),
+    ] {
+        let p = journal.join(format!("2147483646-{n}.journal"));
+        std::fs::write(
+            &p,
+            format!(
+                "{}kind copy\nsrc {}\ndest {}\n",
+                host_line(),
+                hex(&src.join(name)),
+                hex(&dst)
+            ),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+            .unwrap();
+    }
+    for _ in 0..2 {
+        let mut x = Session::start(&s, None);
+        x.wait_for("Interrupted");
+        x.wait_for("copy of newer.txt");
+        x.wait_for("1 older interrupted job waits");
+        x.wait_for("Esc: asked again at the next start");
+        x.send(b"\x1b"); // Esc: both kept
+        x.quit();
+    }
+    let mut x = Session::start(&s, None);
+    x.wait_for("copy of newer.txt");
+    x.send(ENTER);
+    x.wait_for("1 copied");
+    x.quit();
+    assert_eq!(std::fs::read_to_string(dst.join("newer.txt")).unwrap(), "n");
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("copy of older.txt");
+    assert!(
+        !x.screen().contains("older interrupted job"),
+        "{}",
+        x.screen()
+    );
+    x.send(ENTER);
+    x.wait_for("1 copied");
+    x.quit();
+    assert_eq!(std::fs::read_to_string(dst.join("older.txt")).unwrap(), "o");
+}
+
+/// The owner, 2026-11-17: an interrupted job can be forgotten for good (F), not only
+/// put off (Esc): nothing more is done, what it copied stays, and the next start does
+/// not ask again.
+#[test]
+fn f_forgets_an_interrupted_job() {
+    let s = Scratch::new("forget");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "a").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    std::fs::write(dst.join("a.txt"), "a").unwrap(); // copied before the kill
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst)
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("F forgets it");
+    x.send(b"f");
+    x.wait_for("forgotten");
+    x.quit();
+    assert!(!dst.join("b.txt").exists(), "nothing more is done");
+    assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "a");
+    assert_eq!(
+        std::fs::read_dir(&journal).unwrap().count(),
+        0,
+        "not asked again"
+    );
+    let x = Session::start(&s, None);
+    x.wait_for("Name"); // the panes are drawn: a dialog would be up by now
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!x.screen().contains("Interrupted"), "{}", x.screen());
+    x.quit();
+}
+
+/// QA of #42 (P1): a killed delete to the trash. Its dialog showed `[Enter] continue
+/// [Esc] cancel` and no F, though F worked, and spoke of copies. The keys that work are
+/// the keys shown, and the words are a delete's.
+#[test]
+fn an_interrupted_delete_shows_f_and_speaks_of_the_trash() {
+    let s = Scratch::new("forget-delete");
+    std::fs::write(s.left().join("gone.txt"), "g").unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind delete\nsrc {}\ntrash\n",
+            host_line(),
+            hex(&s.left().join("gone.txt"))
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("[F] forget it");
+    assert!(!x.screen().contains("cut short"), "{}", x.screen());
+    x.send(b"f");
+    x.wait_for("forgotten");
+    x.quit();
+    assert!(s.left().join("gone.txt").exists(), "nothing more is done");
+    assert_eq!(std::fs::read_dir(&journal).unwrap().count(), 0);
+}
+
+/// B2: the Interrupted dialog offers C, a checked continue. A copy left with the right
+/// size and date and no data (a power cut) is read with its source and copied again.
+#[cfg(unix)]
+#[test]
+fn c_at_the_interrupted_dialog_checks_what_was_copied_and_copies_again_what_differs() {
+    let s = Scratch::new("resume-check");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "data").unwrap();
+    std::fs::write(dst.join("a.txt"), [0u8; 4]).unwrap();
+    let date = std::fs::metadata(src.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\ndest {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&dst),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("check (slow)");
+    x.send(b"c");
+    x.wait_for("found different");
+    assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "data");
+    x.quit();
+}
+
+/// Hand test of check C (2026-11): after several `xtask try --tamper`, the result did not
+/// say how many were found different. The line put that in its middle, which the status
+/// line elides on a terminal of usual width. It now comes first, whole.
+#[cfg(unix)]
+#[test]
+fn c_says_how_many_it_found_different_where_the_status_line_keeps_it() {
+    let s = Scratch::new("resume-check3");
+    let (src, dst) = (s.left(), s.right());
+    let tree = src.join("tree");
+    let mut done = String::new();
+    for d in 0..3 {
+        std::fs::create_dir_all(tree.join(format!("d{d}"))).unwrap();
+        std::fs::create_dir_all(dst.join(format!("tree/d{d}"))).unwrap();
+        for f in 0..4 {
+            let rel = format!("d{d}/f{f}");
+            std::fs::write(tree.join(&rel), vec![b'x'; 3000 + f]).unwrap();
+            if d < 2 {
+                let len = 3000 + f;
+                let content = if d == 0 && f < 3 {
+                    vec![0u8; len]
+                } else {
+                    vec![b'x'; len]
+                };
+                std::fs::write(dst.join("tree").join(&rel), content).unwrap();
+                let date = std::fs::metadata(tree.join(&rel))
+                    .unwrap()
+                    .modified()
+                    .unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(dst.join("tree").join(&rel))
+                    .unwrap()
+                    .set_modified(date)
+                    .unwrap();
+            }
+        }
+        if d < 2 {
+            done.push_str(&format!("done {}\n", hex(&tree.join(format!("d{d}")))));
+        }
+    }
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\ndest {}\n{done}",
+            host_line(),
+            hex(&tree),
+            hex(&dst)
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.wait_for("check (slow)");
+    x.send(b"c");
+    x.wait_for("3 found different and copied again");
+    x.quit();
+    for f in 0..3 {
+        assert_eq!(
+            std::fs::read(dst.join(format!("tree/d0/f{f}"))).unwrap(),
+            vec![b'x'; 3000 + f]
+        );
+    }
 }
 
 /// A directory on another file system than the temporary directory, for a move across
@@ -1217,7 +1653,7 @@ fn a_planned_copy_killed_then_continued_keeps_every_decision() {
     let mut x = Session::start_with(&s, None, &[s.left(), s.right()]);
     x.wait_for("Interrupted");
     x.send(ENTER); // continue
-    x.wait_for("copied");
+    x.wait_for_status("copied");
     assert!(!x.screen().contains("Already exists"), "{}", x.screen());
     assert_eq!(
         std::fs::read_to_string(s.right().join("b-fresh.txt")).unwrap(),
@@ -1376,6 +1812,177 @@ fn a_move_killed_before_removing_its_source_says_both_are_there() {
     let _ = std::fs::remove_dir_all(&other);
 }
 
+/// A big copy killed (SIGKILL) after a checkpoint (Round 033): the next start keeps
+/// what was on disk and Continue goes on from there; the debug log says how much was
+/// not copied again. Read and write (fast copy off), slowed per chunk, so the kill
+/// lands after the first checkpoint (256 MiB) and before the end.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let s = Scratch::new("ckpt-kill");
+    let src = s.left().join("big.bin");
+    let size: u64 = 384 << 20;
+    {
+        // Sparse, with marks at both ends and in the middle.
+        let mut f = std::fs::File::create(&src).unwrap();
+        f.set_len(size).unwrap();
+        for at in [0, 300 << 20, size - 4] {
+            f.seek(SeekFrom::Start(at)).unwrap();
+            f.write_all(b"MARK").unwrap();
+        }
+    }
+    // A folder copied first (folders come before files): its folders are told to the
+    // journal as finished.
+    std::fs::create_dir_all(s.left().join("a-tree/sub")).unwrap();
+    s.file("left/a-tree/sub/f.txt", "f");
+    let cfg = s.file("fast-off.toml", "[general]\nfast_copy = false\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[
+            ("XDEVCMD_CONFIG", cfg.as_str()),
+            ("XDEVCMD_FAULTS", "delay|write|.big.bin.xdevcmd-part|2"),
+        ],
+    );
+    x.send(DOWN);
+    x.send(INSERT);
+    x.send(INSERT);
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    let journal = s.0.join("journal");
+    let start = Instant::now();
+    let has_ckpt = || {
+        std::fs::read_dir(&journal).ok().is_some_and(|d| {
+            d.flatten()
+                .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("\nckpt ")))
+        })
+    };
+    while !has_ckpt() {
+        assert!(
+            start.elapsed() < PATIENCE * 4,
+            "no checkpoint:\n{}",
+            x.screen()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let lines: String = std::fs::read_dir(&journal)
+        .unwrap()
+        .flatten()
+        .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+        .collect();
+    assert!(
+        lines.contains(&format!("\ndone {}\n", hex(&s.left().join("a-tree/sub")))),
+        "a finished folder is in the journal:\n{lines}"
+    );
+    let pid = x.child.process_id().expect("a pid");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let start = Instant::now();
+    while !matches!(x.child.try_wait(), Ok(Some(_))) {
+        assert!(start.elapsed() < PATIENCE, "xdevcmd did not die");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    drop(x);
+    assert!(
+        !s.right().join("big.bin").exists(),
+        "killed before the end: no big.bin under its name"
+    );
+
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", cfg.as_str()), ("XDEVCMD_DEBUG", "jobs")],
+    );
+    x.wait_for("Interrupted");
+    x.wait_for("kept part way");
+    x.send(ENTER); // continue
+    x.wait_for("1 copied");
+    assert_eq!(
+        std::fs::read_to_string(s.right().join("a-tree/sub/f.txt")).unwrap(),
+        "f"
+    );
+    let mut got = std::fs::File::open(s.right().join("big.bin")).unwrap();
+    assert_eq!(got.metadata().unwrap().len(), size);
+    for at in [0, 300 << 20, size - 4] {
+        let mut b = [0u8; 4];
+        got.seek(SeekFrom::Start(at)).unwrap();
+        got.read_exact(&mut b).unwrap();
+        assert_eq!(&b, b"MARK", "at {at}");
+    }
+    assert!(
+        std::fs::read_dir(s.right()).unwrap().count() == 2,
+        "no temporary file left"
+    );
+    x.quit();
+    let log = std::fs::read_dir(&s.0)
+        .unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().ends_with(".jsonl"))
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
+        .expect("a debug log");
+    let resumed: u64 = log
+        .lines()
+        .filter(|l| l.contains("\"job_end\""))
+        .filter_map(|l| {
+            let at = l.find("\"resumed_bytes\":")? + "\"resumed_bytes\":".len();
+            l[at..]
+                .split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()
+        })
+        .max()
+        .unwrap_or(0);
+    assert!(
+        resumed >= 256 << 20,
+        "taken over from the checkpoint: {resumed}"
+    );
+}
+
+/// Continue does not walk a folder the interrupted copy finished (its `done` line), as
+/// long as its copy is there; the rest of the source is copied.
+#[cfg(unix)]
+#[test]
+fn resume_does_not_walk_a_folder_the_run_before_finished() {
+    let s = Scratch::new("resume-dirs");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::create_dir_all(src.join("tree/finished")).unwrap();
+    s.file("left/tree/finished/added-since.txt", "not walked");
+    s.file("left/tree/rest.txt", "rest");
+    std::fs::create_dir_all(dst.join("tree/finished")).unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}v 3\nkind copy\nsrc {}\ndest {}\ndone {}\n",
+            host_line(),
+            hex(&src.join("tree")),
+            hex(&dst),
+            hex(&src.join("tree/finished")),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.send(ENTER); // continue
+    x.wait_for("1 skipped");
+    assert_eq!(
+        std::fs::read_to_string(dst.join("tree/rest.txt")).unwrap(),
+        "rest"
+    );
+    assert!(!dst.join("tree/finished/added-since.txt").exists());
+    x.quit();
+}
+
 /// Continuing an interrupted copy never replaces a file the user kept in the first run:
 /// a destination that differs from its (newer) source is asked about, and Skip keeps
 /// it. With the old rule (update) the newer source replaced it unasked.
@@ -1415,6 +2022,54 @@ fn resume_from_app_does_not_replace_a_kept_newer_source_file() {
     x.quit();
 }
 
+/// After a power cut a file the journal calls done can hold the wrong bytes under its
+/// real name, with the size and date of its source. C checks every file the run wrote,
+/// the done ones too; it skipped them, so the wrong bytes stayed (#3, 2026-11-16).
+#[test]
+fn a_checked_resume_repairs_a_file_the_journal_called_done() {
+    let s = Scratch::new("resume-check");
+    let (src, dst) = (s.left(), s.right());
+    std::fs::write(src.join("a.txt"), "AAAA").unwrap();
+    std::fs::write(src.join("b.txt"), "b").unwrap();
+    std::fs::write(dst.join("a.txt"), "ZZZZ").unwrap();
+    let date = std::fs::metadata(src.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(dst.join("a.txt"))
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
+    let journal = s.0.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::write(
+        journal.join("2147483646-0.journal"),
+        format!(
+            "{}kind copy\nsrc {}\nsrc {}\ndest {}\ndone {}\n",
+            host_line(),
+            hex(&src.join("a.txt")),
+            hex(&src.join("b.txt")),
+            hex(&dst),
+            hex(&src.join("a.txt")),
+        ),
+    )
+    .unwrap();
+    let mut x = Session::start(&s, None);
+    x.wait_for("Interrupted");
+    x.send(b"c");
+    wait_file(&dst.join("b.txt"), "b copied", |c| {
+        c.as_deref() == Some("b")
+    });
+    wait_file(&dst.join("a.txt"), "a repaired", |c| {
+        c.as_deref() == Some("AAAA")
+    });
+    // The job box ignores q: wait for its summary on the status line.
+    x.wait_for_status("copied");
+    x.quit();
+}
+
 /// An interrupted permanent delete is cleaned up after but never offered again: one
 /// Enter would go on, where Shift+F8 itself takes only Y.
 #[cfg(unix)]
@@ -1435,6 +2090,57 @@ fn an_interrupted_permanent_delete_is_not_offered_again() {
     x.send(ENTER);
     std::thread::sleep(Duration::from_millis(300));
     assert!(victim.exists(), "Enter deleted nothing");
+    x.quit();
+}
+
+/// The count in a delete box arrives on its own thread; the box shows it when it
+/// does. It stayed at "counting…" for good when the count was taken before it came
+/// (#6, 2026-11-16).
+#[test]
+fn the_count_in_a_delete_box_arrives_while_it_is_open() {
+    let s = Scratch::new("count-live");
+    std::fs::create_dir_all(s.left().join("many")).unwrap();
+    for i in 0..2000 {
+        s.file(&format!("left/many/f{i:04}.txt"), "x");
+    }
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(SHIFT_F8);
+    x.wait_for("This cannot be undone.");
+    x.wait_for("2000 files");
+    x.send(b"\x1b");
+    x.wait_gone("This cannot be undone.");
+    assert!(s.left().join("many/f0000.txt").exists());
+    x.quit();
+}
+
+/// F3 on an entry of a big archive extracts it on a thread; the viewer opens when it
+/// is done. It never opened when the result was taken before it came (#6).
+#[test]
+fn an_entry_of_a_big_archive_opens_in_the_viewer() {
+    let s = Scratch::new("view-big-tar");
+    let mut body = String::new();
+    for i in 0..400_000 {
+        body.push_str(&format!("LINE-{i:06} of the big entry\n"));
+    }
+    assert!(body.len() > 9 << 20, "past the 8 MiB read at once");
+    let mut b = tar::Builder::new(std::fs::File::create(s.left().join("big.tar")).unwrap());
+    let mut h = tar::Header::new_gnu();
+    h.set_size(body.len() as u64);
+    h.set_mode(0o644);
+    h.set_cksum();
+    b.append_data(&mut h, "inner.txt", body.as_bytes()).unwrap();
+    b.finish().unwrap();
+    drop(b);
+    let mut x = Session::start(&s, None);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.wait_for("11 M"); // the entry, its name and extension in two columns
+    x.send(DOWN);
+    x.send(b"\x1bOR"); // F3
+    x.wait_for("LINE-000000 of the big entry");
+    x.send(b"\x1b");
+    x.wait_gone("LINE-000000");
     x.quit();
 }
 
@@ -1733,7 +2439,11 @@ fn click_into_program(tag: &str, setup: &str, reset: &str) -> String {
     xdevcmd.mouse(32, 11, bar_y + 4, false);
     xdevcmd.mouse(0, 11, bar_y + 4, true);
     xdevcmd.send(b"\r");
-    xdevcmd.wait_for("got:");
+    // The typed command holds "got:" too: wait for the line that starts with it.
+    xdevcmd.until("the program's answer", |scr| {
+        scr.lines()
+            .any(|l| l.trim_start_matches('\u{2502}').starts_with("got:"))
+    });
     let screen = xdevcmd.screen();
     xdevcmd.send(F12);
     xdevcmd.quit();
@@ -1783,7 +2493,11 @@ fn a_drag_out_of_the_shell_still_ends_in_its_program() {
     xdevcmd.mouse(0, 10, 3, true);
     xdevcmd.click(12, bar_y + 3, 16); // Ctrl+click
     xdevcmd.send(b"\r");
-    xdevcmd.wait_for("got:");
+    // The typed command holds "got:" too: wait for the line that starts with it.
+    xdevcmd.until("the program's answer", |scr| {
+        scr.lines()
+            .any(|l| l.trim_start_matches('\u{2502}').starts_with("got:"))
+    });
     let screen = xdevcmd.screen();
     let got = screen
         .lines()
@@ -1998,6 +2712,258 @@ fn alt_c_does_not_type_into_a_pipeline_whose_first_program_ended() {
     xdevcmd.wait_gone("A program is running");
     assert!(!xdevcmd.screen().contains("$ cd "), "a cd was typed");
     xdevcmd.quit();
+}
+
+/// Text typed into the shell and not run: Alt+C added its `cd` and Enter to it, so the
+/// half-typed command ran with the directory as one more argument (#1, 2026-11-16;
+/// `rm -rf x` became `rm -rf xcd '…'`). It opens a new shell there instead.
+#[test]
+fn alt_c_never_adds_to_a_line_typed_and_not_run() {
+    let s = Scratch::new("dirty");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_DEBUG", "errors")]);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made");
+    x.wait_for("$ touch made");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(ENTER); // into sub
+    x.send(ALT_C);
+    // The disk first, because that is the harm; the message second.
+    std::thread::sleep(Duration::from_millis(800));
+    let made: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("made"))
+        })
+        .collect();
+    assert!(made.is_empty(), "the typed line ran: {made:?}");
+    x.wait_for("shell 1 keeps its typed text");
+    x.wait_for("\u{2302} 2");
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"pwd > where.txt\r");
+    wait_file(
+        &s.left().join("sub/where.txt"),
+        "the new shell's pwd",
+        |t| t.is_some_and(|t| t.trim_end().ends_with("sub")),
+    );
+    x.send(F12);
+    x.quit();
+    assert_eq!(refusals(&s), pairs(&[("dirty_line", "done")]));
+}
+
+/// With every shell tab in use the new shell cannot open: nothing is typed, and the
+/// status names the key that frees the line (Ctrl+C), after which Alt+C types its cd.
+#[cfg(unix)]
+#[test]
+fn alt_c_with_a_typed_line_and_no_room_says_how_to_free_it() {
+    let s = Scratch::new("dirty-full");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let cfg = s.file("config.toml", "[terminal]\nmax_terminals = 1\n");
+    let cfg = cfg.to_str().unwrap().to_string();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg), ("XDEVCMD_DEBUG", "errors")],
+    );
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made");
+    x.wait_for("$ touch made");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.send(ALT_C);
+    std::thread::sleep(Duration::from_millis(800));
+    let made: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("made"))
+        })
+        .collect();
+    assert!(made.is_empty(), "the typed line ran: {made:?}");
+    x.wait_for("Ctrl+C clears shell 1's line");
+    x.send(F12);
+    x.send(b"\x03"); // the refusal's next key
+    x.wait_for("$ ");
+    x.send(F12);
+    x.send(ALT_C);
+    x.wait_for("shell: cd");
+    x.send(F12);
+    x.send(b"pwd > here.txt\r");
+    wait_file(&s.left().join("sub/here.txt"), "pwd in sub", |t| {
+        t.is_some_and(|t| t.trim_end().ends_with("sub"))
+    });
+    x.send(F12);
+    x.quit();
+    // The key it names is the key pressed above.
+    assert_eq!(refusals(&s), pairs(&[("busy", "Ctrl+C")]));
+}
+
+/// `exec sleep 30` runs sleep as the shell's own process: the terminal is still that
+/// process's, so it looked like the shell at its prompt, and Alt+C typed its cd into
+/// sleep. Linux reads the new name in /proc (#1); elsewhere a known issue.
+#[cfg(target_os = "linux")]
+#[test]
+fn alt_c_does_not_type_into_a_program_the_shell_execed() {
+    let s = Scratch::new("exec");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"exec sleep 30\r");
+    std::thread::sleep(Duration::from_millis(500));
+    x.send(F12);
+    x.send(ALT_C);
+    x.wait_for("A program is running");
+    x.wait_for("sleep is running in this terminal");
+    x.send(b"\x1b");
+    x.wait_gone("A program is running");
+    assert!(!x.screen().contains("cd '"), "a cd was typed");
+    x.quit();
+}
+
+/// The user menu types its command and Enter through the same door: onto a line typed
+/// and not run, `touch made` became `touch madeecho GOT …` (red-team of #1).
+#[test]
+fn the_user_menu_never_adds_to_a_line_typed_and_not_run() {
+    let s = Scratch::new("menu-dirty");
+    s.file("left/f.txt", "x");
+    s.file(
+        "config.toml",
+        "[[menu]]\nkey = \"e\"\nlabel = \"say it\"\ncommand = \"echo GOT %s DONE\"\n",
+    );
+    let flag = format!("--config={}", s.0.join("config.toml").display());
+    let mut x = Session::start_flags(&s, &[&flag]);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made");
+    x.wait_for("$ touch made");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(b"\x1b[20;2~"); // Shift+F9
+    x.wait_for("say it");
+    x.send(b"e");
+    std::thread::sleep(Duration::from_millis(1200));
+    let ran: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name().is_some_and(|n| {
+                let n = n.to_string_lossy();
+                n.starts_with("made") || n == "GOT" || n == "DONE"
+            })
+        })
+        .collect();
+    assert!(ran.is_empty(), "the typed line ran: {ran:?}");
+    x.wait_for("shell 1 keeps its typed text");
+    x.send(F12); // the new shell has the focus
+    x.quit();
+}
+
+/// QA 2026-11-17 (P0): what xdevcmd types must be inert wherever the shell's line is: at
+/// its prompt, and inside a double quote, a single quote or a here-doc left open, where
+/// Alt+C typed `cd '<folder>'` and a folder named `$(touch PWNED)` ran once the quote
+/// was closed. Each case: open, type with Alt+C (or names with Alt+Enter), close, and
+/// look for PWNED on the disk.
+#[cfg(unix)]
+#[test]
+fn what_is_typed_into_an_open_quote_never_runs_a_name() {
+    type Case<'a> = (&'a [u8], &'a str, &'a [u8], &'a [u8]);
+    let cases: [Case; 5] = [
+        (b"echo \"\r", "$(touch PWNED)", ALT_C, b"\"\r"),
+        (b"cat <<EOF\r", "$(touch PWNED)", ALT_C, b"EOF\r"),
+        (b"echo \"\r", "d\";touch PWNED;\"", ALT_C, b"\"\r"),
+        // The name's own `'` ends the quote; the rest of it is escaped, so no closer.
+        (b"echo '\r", "q';touch PWNED;'", ALT_C, b""),
+        // Red-team: inside an open backtick a backslash is taken off, so a backtick in
+        // the name came alive. Such a name is refused: nothing typed, nothing runs.
+        (b"echo `echo\r", "a`touch$IFS.PWNED`", ALT_C, b"`\r"),
+    ];
+    for (open, name, key, close) in cases {
+        let s = Scratch::new("open-quote");
+        std::fs::create_dir(s.left().join(name)).unwrap();
+        let mut x = Session::start(&s, None);
+        x.send(F12);
+        x.wait_for("$ ");
+        x.send(open);
+        x.wait_for("> ");
+        x.send(F12);
+        x.send(DOWN);
+        x.send(ENTER); // into the folder
+        x.send(key);
+        std::thread::sleep(Duration::from_millis(800));
+        x.send(F12);
+        x.send(close);
+        x.send(b"echo closed-$((6*7))\r");
+        x.wait_for("closed-42");
+        let pwned: Vec<_> = walk(&s.0)
+            .into_iter()
+            .filter(|p| p.file_name().is_some_and(|n| n == "PWNED" || n == ".PWNED"))
+            .collect();
+        assert!(pwned.is_empty(), "{name:?} ran:\n{}", x.screen());
+        x.send(F12);
+        x.quit();
+    }
+    // Names typed with Alt+Enter, inside an open double quote.
+    let s = Scratch::new("open-quote-names");
+    std::fs::create_dir(s.left().join("$(touch PWNED)")).unwrap();
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"echo \"\r");
+    x.wait_for("> ");
+    x.send(F12);
+    x.send(DOWN); // the folder
+    x.send(ALT_ENTER);
+    std::thread::sleep(Duration::from_millis(800));
+    x.send(F12);
+    x.send(b"\"\r");
+    x.send(b"echo closed-$((6*7))\r");
+    x.wait_for("closed-42");
+    let pwned: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| p.file_name().is_some_and(|n| n == "PWNED"))
+        .collect();
+    assert!(pwned.is_empty(), "a typed name ran:\n{}", x.screen());
+    x.send(F12);
+    x.quit();
+}
+
+/// A line continued with `\` and Enter has not run: the shell waits at `> ` for the
+/// rest, and Alt+C's cd would be the rest (red-team of #1: `rm -rf ~/old \` then Alt+C
+/// removes the pane's directory).
+#[cfg(unix)]
+#[test]
+fn alt_c_after_a_continued_line_opens_a_new_shell() {
+    let s = Scratch::new("ps2");
+    std::fs::create_dir(s.left().join("sub")).unwrap();
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"touch made \\\r");
+    x.wait_for("> ");
+    x.send(F12);
+    x.send(DOWN);
+    x.send(ENTER);
+    x.send(ALT_C);
+    std::thread::sleep(Duration::from_millis(1200));
+    let ran: Vec<_> = walk(&s.0)
+        .into_iter()
+        .filter(|p| {
+            p.file_name().is_some_and(|n| {
+                let n = n.to_string_lossy();
+                n.starts_with("made") || n == "cd"
+            })
+        })
+        .collect();
+    assert!(ran.is_empty(), "the continued line ran: {ran:?}");
+    x.wait_for("shell 1 keeps its typed text");
+    x.quit();
 }
 
 #[test]
@@ -2238,8 +3204,8 @@ fn alt_enter_types_the_marked_names_quoted_without_running_them() {
     xdevcmd.send(INSERT);
     xdevcmd.send(INSERT);
     xdevcmd.send(ALT_ENTER);
-    // The shell is in the names' directory: bare names, quoted, a space after, no Enter.
-    xdevcmd.wait_for("$ 'a b' 'it'\\''s' ");
+    // The shell is in the names' directory: bare names, escaped, a space after, no Enter.
+    xdevcmd.wait_for("$ a\\ b it\\'s ");
     std::thread::sleep(Duration::from_millis(300));
     let screen = xdevcmd.screen();
     let prompts = screen.lines().filter(|l| l.contains("$ ")).count();
@@ -2252,7 +3218,7 @@ fn alt_enter_types_the_marked_names_quoted_without_running_them() {
     xdevcmd.send(b"\x1b[H"); // Home: the cursor on ..
     xdevcmd.send(DOWN); // on "a b", with the marks still on both
     xdevcmd.send(ALT_ENTER);
-    let full = format!("'{}' ", s.left().join("a b").display());
+    let full = format!("{} ", s.left().join("a b").display()).replace("a b", "a\\ b");
     xdevcmd.wait_for(&full);
     xdevcmd.send(F12);
     xdevcmd.send(b"\x15");
@@ -2285,8 +3251,8 @@ fn alt_enter_types_nothing_into_a_running_program() {
     xdevcmd.wait_for("[Enter] open a new shell");
     xdevcmd.send(ENTER);
     xdevcmd.wait_for("\u{2302} 2");
-    xdevcmd.wait_for("$ 'a b' ");
-    xdevcmd.wait_for("new shell: 'a b'");
+    xdevcmd.wait_for("$ a\\ b ");
+    xdevcmd.wait_for("new shell: a\\ b");
     let typed = std::fs::read_to_string(s.left().join("typed.txt")).unwrap_or_default();
     assert!(typed.is_empty(), "cat got {typed:?}");
     xdevcmd.quit();
@@ -2304,7 +3270,7 @@ fn typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it() {
     let script = s.file(
         "paste.sh",
         &format!(
-            "#!/bin/sh\nprintf '\\033[?2004h'\nstty raw -echo\nhead -c 18 > '{}'\nsleep 30\n",
+            "#!/bin/sh\nprintf '\\033[?2004h'\nstty raw -echo\nhead -c 17 > '{}'\nsleep 30\n",
             out.display()
         ),
     );
@@ -2328,8 +3294,8 @@ fn typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it() {
     let start = Instant::now();
     loop {
         let got = std::fs::read(&out).unwrap_or_default();
-        if got.len() >= 18 {
-            assert_eq!(got, b"\x1b[200~'a b' \x1b[201~".to_vec());
+        if got.len() >= 17 {
+            assert_eq!(got, b"\x1b[200~a\\ b \x1b[201~".to_vec());
             break;
         }
         assert!(start.elapsed() < PATIENCE, "got {got:?}");
@@ -2352,6 +3318,145 @@ fn f3_on_a_fifo_says_so_instead_of_freezing() {
                              // Before: File::open on the FIFO never returned and nothing redrew again.
     xdevcmd.wait_for("FIFO");
     xdevcmd.quit();
+}
+
+/// A03: F3 on a big file draws at once and the rest of its index comes in behind; the
+/// count is completed on screen with no key pressed, and the end is reachable.
+#[test]
+fn f3_on_a_big_file_finishes_its_index_without_a_key() {
+    let s = Scratch::new("big-view");
+    let body: String = (0..1_000_000).map(|i| format!("line {i}\n")).collect();
+    s.file("left/big.txt", &body);
+    let mut xdevcmd = Session::start(&s, None);
+    xdevcmd.send(DOWN);
+    xdevcmd.send(b"\x1bOR"); // F3
+    xdevcmd.wait_for("line 0");
+    xdevcmd.wait_for("1000000 lines");
+    xdevcmd.send(b"\x1b[F"); // End
+    xdevcmd.wait_for("line 999999");
+    xdevcmd.send(b"\x1b");
+    xdevcmd.wait_gone("1000000 lines");
+    xdevcmd.quit();
+}
+
+/// What `/proc` says of a process: resident memory in KiB, threads, open descriptors.
+#[cfg(target_os = "linux")]
+fn usage(pid: u32) -> (u64, u64, usize) {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+    let field = |key: &str| -> u64 {
+        status
+            .lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse().ok())
+            .unwrap()
+    };
+    let fds = std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .unwrap()
+        .count();
+    (field("VmRSS:"), field("Threads:"), fds)
+}
+
+/// B08 (Round 033): everything at once — a shell printing without end, a copy in the
+/// background, a find that reaches its cap, F3 on a big file. Memory, threads and
+/// descriptors stay bounded and level, and Esc and F10 still answer at once.
+#[cfg(target_os = "linux")]
+#[test]
+fn everything_at_once_stays_bounded_and_keys_still_answer() {
+    let s = Scratch::new("all-at-once");
+    let many = s.left().join("many");
+    std::fs::create_dir(&many).unwrap();
+    for i in 0..(find_cap() + 20_000) {
+        std::fs::File::create(many.join(format!("f-{i:06}"))).unwrap();
+    }
+    let body: String = (0..1_000_000).map(|i| format!("line {i}\n")).collect();
+    s.file("right/big.txt", &body);
+
+    let mut x = Session::start(&s, None);
+    let pid = x.child.process_id().unwrap();
+    let (rss0, threads0, fds0) = usage(pid);
+
+    // A shell that never stops printing.
+    x.send(F12);
+    x.send(b"yes xdevcmd-noise\r");
+    x.wait_for("xdevcmd-noise");
+    x.send(F12);
+
+    // A copy of the 120,000 files to the other pane, sent to the background.
+    x.send(DOWN); // many
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(b"\rb");
+    x.wait_for("background");
+
+    // A find that reaches its cap.
+    x.send(b"\x1b[18;3~"); // Alt+F7
+    x.wait_for("Find");
+    x.send(b"f-*");
+    x.send(ENTER);
+    x.wait_for("stopped at 100000 found");
+    // The copy keeps what it made for its undo (up to 200,000 entries, its own cap):
+    // memory is level only once it has ended.
+    // 120,000 files: slow on a busy runner by their number alone.
+    x.until_within(Duration::from_secs(120), "the copy to end", |screen| {
+        screen.contains(" copied")
+    });
+
+    // F3 on a big file in the other pane: the last row, after the copy's directory.
+    x.send(b"\t");
+    x.send(b"\x1b[F"); // End
+    x.send(b"\x1bOR");
+    x.wait_for("1000000 lines");
+
+    let (rss1, threads1, fds1) = usage(pid);
+    std::thread::sleep(Duration::from_secs(2));
+    let (rss2, threads2, fds2) = usage(pid);
+    eprintln!(
+        "B08: rss {rss0} → {rss1} → {rss2} KiB, threads {threads0} → {threads1} → {threads2}, fds {fds0} → {fds1} → {fds2}"
+    );
+    // Bounded: what all of it holds (100,000 rows, a million lines' index, the shell's
+    // history) in a debug build.
+    assert!(rss2 < 400 * 1024, "{rss2} KiB");
+    assert!(threads2 < 64, "{threads2} threads");
+    assert!(fds2 < 128, "{fds2} descriptors");
+    // Level: the shell goes on printing, nothing else is added.
+    assert!(rss2 <= rss1 + 16 * 1024, "growing: {rss1} → {rss2} KiB");
+
+    // Keys answer: Esc closes the viewer, F10 ends (a job, or the program still printing
+    // in the shell, is asked about first). Esc's time includes `send`'s own 310 ms after a lone Esc.
+    let t = Instant::now();
+    x.send(b"\x1b");
+    x.wait_gone("1000000 lines");
+    let esc = t.elapsed();
+    let t = Instant::now();
+    x.send(b"\x1b[21~"); // F10
+    let asked = loop {
+        if x.screen().contains("Quit?") {
+            break true;
+        }
+        if x.child.try_wait().unwrap().is_some() {
+            break false;
+        }
+        assert!(t.elapsed() < PATIENCE, "F10 did nothing:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let f10 = t.elapsed();
+    eprintln!("B08: Esc {esc:?}, F10 {f10:?} (the copy still running: {asked})");
+    assert!(esc < Duration::from_secs(1), "Esc took {esc:?}");
+    assert!(f10 < Duration::from_secs(1), "F10 took {f10:?}");
+    if asked {
+        x.send(ENTER);
+    }
+    let start = Instant::now();
+    while x.child.try_wait().unwrap().is_none() {
+        assert!(start.elapsed() < PATIENCE, "still running:\n{}", x.screen());
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn find_cap() -> usize {
+    xdevcmd_core::find::MAX_FOUND
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
@@ -2490,7 +3595,7 @@ fn restricted_mode_never_starts_a_shell() {
 // ── group A: cd on exit, and a directory that changes underneath ──────────────────
 
 #[test]
-fn q_writes_the_directory_for_the_shell_and_shift_q_does_not() {
+fn quit_writes_the_directory_for_the_shell_and_quit_without_cd_does_not() {
     let s = Scratch::new("cwd-file");
     std::fs::create_dir_all(s.left().join("deeper")).unwrap();
     let out = s.0.join("cwd");
@@ -2499,7 +3604,9 @@ fn q_writes_the_directory_for_the_shell_and_shift_q_does_not() {
     let mut xdevcmd = Session::start_flags(&s, &[&flag]);
     xdevcmd.send(DOWN);
     xdevcmd.send(ENTER);
-    xdevcmd.wait_for("deeper ");
+    // The pane's title, not the row: "deeper " is on screen as soon as the list is,
+    // before Enter is taken (failed on CI, #47; the class of the "copied" wait).
+    xdevcmd.wait_for("/deeper");
     xdevcmd.quit();
     let got = std::fs::read_to_string(&out).expect("q writes it");
     assert_eq!(
@@ -2510,13 +3617,21 @@ fn q_writes_the_directory_for_the_shell_and_shift_q_does_not() {
 
     std::fs::remove_file(&out).unwrap();
     let mut xdevcmd = Session::start_flags(&s, &[&flag]);
+    // A lone Q is a stray key now, not a quit (B4).
     xdevcmd.send(b"Q");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        xdevcmd.child.try_wait().ok().flatten().is_none(),
+        "Q alone must not quit"
+    );
+    xdevcmd.send(ALT_X);
+    xdevcmd.send(b"q");
     let start = Instant::now();
     while xdevcmd.child.try_wait().ok().flatten().is_none() {
-        assert!(start.elapsed() < PATIENCE, "Q should quit");
+        assert!(start.elapsed() < PATIENCE, "Alt+x q should quit");
         std::thread::sleep(Duration::from_millis(25));
     }
-    assert!(!out.exists(), "Q leaves the shell where it was");
+    assert!(!out.exists(), "Alt+x q leaves the shell where it was");
 }
 
 #[test]
@@ -2779,13 +3894,16 @@ fn a_menu_row_in_f1_asks_before_typing_into_a_busy_shell() {
 }
 
 /// Keymap A keeps F1 for the program in the shell; xdevcmd's F1 there is Alt+X F1.
+///
+/// The `dd` tests here type `echo GOT''_X`: the shell shows the typed line, so a plain
+/// `GOT_X` in it matched `wait_for` before `dd` had read anything (run 43703634147).
 #[test]
 fn from_the_shell_f1_is_the_programs_and_alt_x_f1_opens_commands() {
     let s = Scratch::new("f1-shell");
     let mut x = Session::start(&s, None);
     x.send(F12);
     x.wait_for("$ ");
-    x.send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT_F1\r");
+    x.send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT''_F1\r");
     std::thread::sleep(Duration::from_millis(300));
     x.send(F1);
     x.wait_for("GOT_F1");
@@ -3056,7 +4174,7 @@ fn inside_the_shell_only_f12s_family_is_xdevcmds() {
     }
     let expected: Vec<u8> = keys.concat();
     let cmd = format!(
-        "stty raw -echo; dd bs=1 count={} of=keys.bin 2>/dev/null; stty sane; echo GOT_ALL\r",
+        "stty raw -echo; dd bs=1 count={} of=keys.bin 2>/dev/null; stty sane; echo GOT''_ALL\r",
         expected.len()
     );
     xdevcmd.send(cmd.as_bytes());
@@ -3096,8 +4214,9 @@ fn alt_x_is_the_prefix_inside_the_shell_and_gives_back_what_it_does_not_use() {
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
-    xdevcmd
-        .send(b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT_IT\r");
+    xdevcmd.send(
+        b"stty raw -echo; dd bs=1 count=3 of=keys.bin 2>/dev/null; stty sane; echo GOT''_IT\r",
+    );
     std::thread::sleep(Duration::from_millis(300));
     xdevcmd.send(ALT_X);
     xdevcmd.wait_for("ALT+X");
@@ -3120,8 +4239,9 @@ fn alt_x_then_enter_in_the_shell_reaches_the_program() {
     let mut xdevcmd = Session::start(&s, None);
     xdevcmd.send(F12);
     xdevcmd.wait_for("$ ");
-    xdevcmd
-        .send(b"stty raw -echo; dd bs=1 count=4 of=keys.bin 2>/dev/null; stty sane; echo GOT_IT\r");
+    xdevcmd.send(
+        b"stty raw -echo; dd bs=1 count=4 of=keys.bin 2>/dev/null; stty sane; echo GOT''_IT\r",
+    );
     std::thread::sleep(Duration::from_millis(300));
     // Alt+X, Esc: cancelled, nothing sent.
     xdevcmd.send(ALT_X);
@@ -4142,6 +5262,102 @@ fn panelize_takes_a_whole_line_that_names_a_file() {
     x.quit();
 }
 
+/// A list from the output may hold `src/..`, `.` or `~`: a row that names a folder
+/// above, the shell's own, or home. Shift+F8 on `src/..` removed its parent, the folder
+/// the shell was in, with everything in it (#2, reproduced 2026-11-16).
+#[test]
+fn a_listed_row_naming_a_folder_above_is_never_deleted() {
+    let s = Scratch::new("list-dotdot");
+    std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
+    s.file("left/proj/keep.txt", "k");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    let proj = s.left().join("proj").display().to_string();
+    x.send(format!("cd '{proj}'\r").as_bytes());
+    x.send(b"printf '%s\\n' src/..\r");
+    x.wait_for("\u{2502}src/..");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}src/..");
+    let (cx, cy) = x.locate("\u{2502}src/..");
+    x.drag((cx + 2, cy), (cx + 5, cy));
+    x.wait_for("selected");
+    x.send(b"p");
+    // Fixed: the line is not a row at all. Before, it made a list of one row.
+    x.until("a list, or none", |scr| {
+        scr.contains("no paths in those lines") || scr.contains(" items")
+    });
+    if x.screen().contains("no paths in those lines") {
+        x.send(b"\x1b"); // the selection
+        x.wait_for("Esc close");
+        x.send(b"\x1b"); // the view
+        x.wait_gone("history \u{b7} sh");
+        x.send(F12); // back to the files, for quit
+    } else {
+        x.send(DOWN);
+        x.send(SHIFT_F8);
+        std::thread::sleep(Duration::from_millis(500));
+        x.send(b"y");
+        std::thread::sleep(Duration::from_millis(1500));
+    }
+    assert!(
+        s.left().join("proj/keep.txt").exists(),
+        "the folder above was deleted:\n{}",
+        x.screen()
+    );
+    x.quit();
+}
+
+/// A list made of `/ . .. ~ src/..`: a line with `..` is not a row (it names a folder by
+/// where the shell was); `.` is the shell's folder, `/` and the home are rows, and F8 on
+/// each is refused with its reason. Nothing is offered for deleting (#2).
+#[test]
+fn a_list_of_root_home_and_dots_offers_nothing_to_delete() {
+    let s = Scratch::new("list-guards");
+    std::fs::create_dir_all(s.left().join("proj/src")).unwrap();
+    s.file("left/proj/keep.txt", "k");
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(&s, None, &dirs, &[("XDEVCMD_DEBUG", "errors")]);
+    x.send(F12);
+    x.wait_for("$ ");
+    let proj = s.left().join("proj").display().to_string();
+    x.send(format!("cd '{proj}'\r").as_bytes());
+    x.send(b"printf '%s\\n' / . .. '~' src/..\r");
+    x.wait_for("\u{2502}src/..");
+    x.send(SHIFT_F12);
+    x.wait_for("history \u{b7} sh");
+    x.wait_below("history \u{b7} sh", "\u{2502}src/..");
+    let (cx, cy) = x.locate("\u{2502}/");
+    x.drag((cx + 2, cy), (cx + 2, cy + 4));
+    x.wait_for("5 lines selected");
+    x.send(b"p");
+    // `.` is the shell's folder (the list's own root, so no name), `/`, the home; the
+    // title says the rows are up.
+    x.wait_for("list 3");
+    x.send(DOWN);
+    x.send(b"\x1b[19~"); // F8
+    x.wait_for("holds a folder shown or in a shell");
+    for _ in 0..2 {
+        x.send(DOWN);
+        x.send(b"\x1b[19~");
+        x.wait_for("is never deleted or moved");
+        x.send(b"\x1b[D"); // anything, so the next status is new
+    }
+    assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
+    assert!(s.left().join("proj/keep.txt").exists());
+    x.quit();
+    // Nothing to press: the safe thing (nothing) is done.
+    assert_eq!(
+        refusals(&s),
+        pairs(&[
+            ("protected_cwd", "done"),
+            ("protected_root", "done"),
+            ("protected_home", "done"),
+        ])
+    );
+}
+
 /// `--root`: a path outside it is left out of a list, and the title counts it.
 #[test]
 fn a_list_leaves_out_what_is_outside_the_root() {
@@ -4207,6 +5423,43 @@ fn a_slow_directory_shows_a_bar_and_esc_stops_it() {
         xdevcmd.screen()
     );
     xdevcmd.quit();
+}
+
+/// While a folder is still opening, the old listing is on screen and its cursor is on
+/// the folder being opened: F8 there deleted that folder, where the user meant a file
+/// inside it (#4). A write action waits for the listing it acts on, and says so.
+#[test]
+fn a_write_action_while_a_folder_opens_waits_for_it() {
+    let s = Scratch::new("slow-f8");
+    std::fs::create_dir_all(s.left().join("slowdir")).unwrap();
+    s.file("left/slowdir/inside.txt", "x");
+    let dirs = [s.left(), s.right()];
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &dirs,
+        &[
+            ("XDEVCMD_TEST_SLOW_DIR", "slowdir"),
+            ("XDEVCMD_DEBUG", "errors"),
+        ],
+    );
+    x.wait_for("slowdir");
+    x.send(DOWN);
+    x.send(ENTER);
+    x.wait_for("opening slowdir\u{2026}");
+    x.send(b"\x1b[19~"); // F8
+    x.wait_for("still opening");
+    assert!(!x.screen().contains("Moved to the trash"), "{}", x.screen());
+    x.wait_for("inside");
+    x.send(DOWN); // the new listing's cursor starts on `..`
+    x.send(b"\x1b[19~"); // the refusal's next: the same key, now on inside.txt
+    x.wait_for("Moved to the trash");
+    assert!(x.screen().contains("inside.txt"), "{}", x.screen());
+    x.send(b"\x1b");
+    assert!(s.left().join("slowdir/inside.txt").exists());
+    x.quit();
+    // `next` is the action pressed again: F8's `[keys]` name.
+    assert_eq!(refusals(&s), pairs(&[("loading", "delete")]));
 }
 
 /// B02 (Round 029): Enter on a search result whose directory is slow to read lands on

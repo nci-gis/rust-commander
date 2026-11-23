@@ -50,13 +50,27 @@ pub fn save(list: &[PathBuf]) -> std::io::Result<()> {
     session::write_private(&p, text.as_bytes())
 }
 
+/// The home directory: `HOME`, then `USERPROFILE`, the first that is an absolute path
+/// here. On Windows a `HOME` left by Cygwin or an old MSYS (`/home/ann`) is not one, so
+/// `USERPROFILE` is used, rather than "no home directory".
+pub fn home_dir() -> Option<PathBuf> {
+    pick_home(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+fn pick_home(
+    home: Option<std::ffi::OsString>,
+    profile: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    [home, profile]
+        .into_iter()
+        .flatten()
+        .map(PathBuf::from)
+        .find(|p| p.is_absolute())
+}
+
 /// `~` and `~/…` are the home directory; anything else is taken as written.
 pub fn expand_tilde(s: &str) -> PathBuf {
-    let home = || {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-    };
+    let home = home_dir;
     if s == "~" {
         if let Some(h) = home() {
             return h;
@@ -72,7 +86,7 @@ pub fn expand_tilde(s: &str) -> PathBuf {
 
 /// A path for a person to read: the home directory shortened to `~`.
 pub fn tidy(p: &Path) -> String {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = home_dir();
     match home.as_deref().and_then(|h| p.strip_prefix(h).ok()) {
         Some(rest) if rest.as_os_str().is_empty() => "~".into(),
         Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
@@ -83,6 +97,23 @@ pub fn tidy(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_home_that_is_not_a_path_here_gives_way_to_userprofile() {
+        let p = |s: &str| Some(std::ffi::OsString::from(s));
+        #[cfg(windows)]
+        let (abs, other) = (r"C:\Users\ann", r"D:\home");
+        #[cfg(not(windows))]
+        let (abs, other) = ("/home/ann", "/srv/ann");
+        // Cygwin's HOME as Windows sees it, or anything relative: not a home here.
+        assert_eq!(pick_home(p("home/ann"), p(abs)), Some(PathBuf::from(abs)));
+        #[cfg(windows)]
+        assert_eq!(pick_home(p("/home/ann"), p(abs)), Some(PathBuf::from(abs)));
+        assert_eq!(pick_home(p(other), p(abs)), Some(PathBuf::from(other)));
+        assert_eq!(pick_home(None, p(abs)), Some(PathBuf::from(abs)));
+        assert_eq!(pick_home(p("rel"), None), None);
+        assert_eq!(pick_home(None, None), None);
+    }
 
     #[test]
     fn tilde_is_home_and_nothing_else_is() {

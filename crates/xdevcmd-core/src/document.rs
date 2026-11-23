@@ -1,9 +1,14 @@
 //! A file opened for viewing, without reading it all into memory.
 //!
 //! The whole point of a viewer in a file manager is that it opens a 2 GB log instantly.
-//! So the file stays on disk: opening streams through it once to record where each line
-//! starts (eight bytes per line), and everything after that is a seek and a short read of
-//! only what is on screen.
+//! So the file stays on disk: a stream through it records where each line starts (eight
+//! bytes per line), and everything after that is a seek and a short read of only what is
+//! on screen.
+//!
+//! The stream is progressive (A03, Round 033): opening indexes the first
+//! [`INLINE_INDEX`] bytes, enough for the first screens, and a thread of its own indexes
+//! the rest while the viewer is already drawn. [`Document::poll_index`] takes in what it
+//! found; dropping the document stops it.
 //!
 //! A document can also hold bytes in memory instead ([`Document::from_bytes`]): a
 //! shell's history, which can carry tokens and customer data, is viewed without ever
@@ -12,10 +17,22 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
+
+/// Bytes indexed before [`Document::open`] returns: the first screens of any file,
+/// and the whole of most (a few milliseconds). The rest is indexed in the background.
+pub const INLINE_INDEX: u64 = 4 << 20;
+/// Bytes read per step of the index, and per message from its thread.
+const INDEX_CHUNK: usize = 256 * 1024;
+/// Messages the index's thread may have waiting: it waits rather than holding more
+/// than this many chunks' offsets in memory when the viewer does not take them (B08).
+const INDEX_QUEUE: usize = 16;
 
 /// Stop indexing here. A file with more lines than this is still viewable; the viewer
 /// says it is showing the first part rather than pretending otherwise.
-pub(crate) const MAX_LINES: usize = 4_000_000;
+pub const MAX_LINES: usize = 4_000_000;
 /// A single "line" longer than this is truncated for display. Minified JavaScript is one
 /// line of several megabytes, and nothing good comes of trying to lay that out.
 pub(crate) const MAX_LINE: u64 = 64 * 1024;
@@ -75,6 +92,54 @@ pub struct Document {
     /// early, in which case everything past here is simply not shown — gluing the
     /// remainder onto the last line would render megabytes of newlines as one row.
     indexed_len: u64,
+    /// The rest of the file being indexed in the background, while it is.
+    indexer: Option<Indexer>,
+    /// Bytes indexed so far: `len` once the index is complete.
+    scanned: u64,
+}
+
+/// What the index's thread sends.
+enum Found {
+    /// Line starts after the last ones sent, and the bytes scanned through.
+    Lines(Vec<u64>, u64),
+    /// The end: of the file (`None`), or the cap on lines, at the start of the first
+    /// line left out (`Some`).
+    End(Option<u64>),
+}
+
+/// The background half of the index: its messages, and the flag that stops it.
+struct Indexer {
+    rx: Receiver<Found>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Indexer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Line starts in `buf`, read at `offset` of a file of `len` bytes, added to `out`,
+/// with `count` the lines known before. `Some(start)`: the cap was reached, and
+/// `start` is the first line left out (not in `out`).
+fn starts_in(buf: &[u8], offset: u64, len: u64, count: usize, out: &mut Vec<u64>) -> Option<u64> {
+    let mut count = count;
+    for (i, b) in buf.iter().enumerate() {
+        if *b == b'\n' {
+            let start = offset + i as u64 + 1;
+            // A trailing newline ends the last line; it does not begin an empty one.
+            // Without this every text file shows a phantom final row.
+            if start < len {
+                if count >= MAX_LINES {
+                    // Every line kept has a known end, and the document stops here.
+                    return Some(start);
+                }
+                out.push(start);
+                count += 1;
+            }
+        }
+    }
+    None
 }
 
 impl Document {
@@ -103,6 +168,8 @@ impl Document {
             binary,
             fully_indexed: true,
             indexed_len: len,
+            indexer: None,
+            scanned: 0,
         };
         if !binary {
             doc.index_lines()?;
@@ -124,9 +191,12 @@ impl Document {
             binary,
             fully_indexed: true,
             indexed_len: len,
+            indexer: None,
+            scanned: 0,
         };
         if !binary {
-            // Reading memory cannot fail.
+            // Reading memory cannot fail, and it is all indexed here: it is already in
+            // memory, and a history is small.
             let _ = doc.index_lines();
         }
         doc
@@ -146,58 +216,154 @@ impl Document {
     /// without this, switching such a file to text showed "0 lines" and an empty
     /// screen. Some files that look binary are text — UTF-16 is full of NUL bytes.
     pub fn ensure_lines(&mut self) -> io::Result<()> {
-        if self.lines.is_empty() && self.len > 0 {
+        if self.lines.is_empty() && self.len > 0 && self.indexer.is_none() {
             self.index_lines()?;
         }
         Ok(())
     }
 
+    /// The first [`INLINE_INDEX`] bytes here (all of a document in memory), the rest
+    /// on a thread of its own with its own handle on the file: a slow disk or a share
+    /// never holds up a key.
     fn index_lines(&mut self) -> io::Result<()> {
         self.lines.clear();
+        self.indexer = None;
+        self.fully_indexed = true;
+        self.indexed_len = self.len;
         if self.len > 0 {
             self.lines.push(0);
         }
-        let mut buf = vec![0u8; 256 * 1024];
+        let inline = match self.source {
+            Source::Memory(_) => self.len,
+            Source::File(_) => INLINE_INDEX.min(self.len),
+        };
+        let mut buf = vec![0u8; INDEX_CHUNK];
         let mut offset: u64 = 0;
-        while offset < self.len {
-            let n = self.source.read_at(offset, &mut buf)?;
+        while offset < inline {
+            let want = ((self.len - offset) as usize).min(buf.len());
+            let n = self.source.read_at(offset, &mut buf[..want])?;
             if n == 0 {
                 break;
             }
-            for (i, b) in buf[..n].iter().enumerate() {
-                if *b == b'\n' {
-                    let start = offset + i as u64 + 1;
-                    // A trailing newline ends the last line; it does not begin an empty
-                    // one. Without this every text file shows a phantom final row.
-                    if start < self.len {
-                        self.lines.push(start);
-                        if self.lines.len() >= MAX_LINES {
-                            // Drop the line we just started so every remaining line has
-                            // a known end, and stop the document here.
-                            self.fully_indexed = false;
-                            self.indexed_len = self.lines.pop().unwrap_or(self.len);
-                            return Ok(());
-                        }
-                    }
-                }
-            }
+            let count = self.lines.len();
+            let mut found = Vec::new();
+            let cap = starts_in(&buf[..n], offset, self.len, count, &mut found);
+            self.lines.extend(found);
             offset += n as u64;
+            self.scanned = offset;
+            if let Some(start) = cap {
+                self.capped(start);
+                return Ok(());
+            }
+        }
+        if offset >= self.len {
+            self.scanned = self.len;
+            return Ok(());
+        }
+        match File::open(&self.path) {
+            Ok(f) => self.indexer = Some(spawn_indexer(f, offset, self.len, self.lines.len())),
+            // Not there to open again (removed since): what is indexed is what is shown.
+            Err(_) => {
+                let last = self.lines.pop().unwrap_or(0);
+                self.capped(last);
+            }
         }
         Ok(())
+    }
+
+    /// The index stopped at `start`, the first line left out.
+    fn capped(&mut self, start: u64) {
+        self.fully_indexed = false;
+        self.indexed_len = start;
+        self.scanned = self.len;
+    }
+
+    /// Take in what the background index found since the last call. True when
+    /// anything changed (more lines, or the end).
+    pub fn poll_index(&mut self) -> bool {
+        let Some(ix) = self.indexer.take() else {
+            return false;
+        };
+        let mut moved = false;
+        loop {
+            match ix.rx.try_recv() {
+                Ok(Found::Lines(starts, upto)) => {
+                    self.lines.extend(starts);
+                    self.scanned = upto;
+                    moved = true;
+                }
+                Ok(Found::End(None)) => {
+                    self.scanned = self.len;
+                    return true;
+                }
+                Ok(Found::End(Some(start))) => {
+                    self.capped(start);
+                    return true;
+                }
+                Err(TryRecvError::Empty) => {
+                    self.indexer = Some(ix);
+                    return moved;
+                }
+                // The thread failed (a read error): the line being read has no known
+                // end, so the document stops before it.
+                Err(TryRecvError::Disconnected) => {
+                    let last = self.lines.pop().unwrap_or(0);
+                    self.capped(last);
+                    return true;
+                }
+            }
+        }
+    }
+
+    /// Whether the rest of the file is still being indexed.
+    pub fn indexing(&self) -> bool {
+        self.indexer.is_some()
+    }
+
+    /// How far the index has got, 0 to 100.
+    pub fn indexed_percent(&self) -> u8 {
+        (self.scanned.min(self.len) * 100)
+            .checked_div(self.len)
+            .map_or(100, |p| p as u8)
+    }
+
+    /// Wait for the whole index (tests, and callers that need every line).
+    pub fn wait_indexed(&mut self) {
+        while self.indexing() {
+            if !self.poll_index() {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    /// Where the text shown so far ends: the start of the line still being indexed,
+    /// whose end is not known yet; once indexed, [`Document::indexed_len`]'s value.
+    fn text_end(&self) -> u64 {
+        match (&self.indexer, self.lines.last()) {
+            (Some(_), Some(&last)) => last,
+            _ => self.indexed_len,
+        }
     }
 
     /// Where line `i` starts in the file; for `i == line_count()`, where the text shown
     /// ends. `None` past that.
     pub fn line_start(&self, i: usize) -> Option<u64> {
-        match self.lines.get(i) {
-            Some(&s) => Some(s),
-            None if i == self.lines.len() => Some(self.indexed_len),
-            None => None,
+        let count = self.line_count();
+        match i.cmp(&count) {
+            std::cmp::Ordering::Less => self.lines.get(i).copied(),
+            std::cmp::Ordering::Equal => Some(self.text_end()),
+            std::cmp::Ordering::Greater => None,
         }
     }
 
+    /// Lines known whole. While the index runs, the line it is in the middle of is not
+    /// one of them yet.
     pub fn line_count(&self) -> usize {
-        self.lines.len()
+        if self.indexer.is_some() {
+            self.lines.len().saturating_sub(1)
+        } else {
+            self.lines.len()
+        }
     }
 
     pub fn hex_rows(&self) -> usize {
@@ -206,10 +372,12 @@ impl Document {
 
     /// One line, with its terminator removed and over-long content cut.
     pub fn line(&mut self, i: usize) -> io::Result<String> {
-        let Some(&start) = self.lines.get(i) else {
+        if i >= self.line_count() {
+            return Ok(String::new());
+        }
+        let (Some(start), Some(end)) = (self.line_start(i), self.line_start(i + 1)) else {
             return Ok(String::new());
         };
-        let end = self.lines.get(i + 1).copied().unwrap_or(self.indexed_len);
         let want = end.saturating_sub(start).min(MAX_LINE) as usize;
         let mut buf = vec![0u8; want];
         let got = self.source.read_at(start, &mut buf)?;
@@ -218,7 +386,7 @@ impl Document {
     }
 
     pub fn lines_from(&mut self, from: usize, count: usize) -> Vec<String> {
-        (from..(from + count).min(self.lines.len()))
+        (from..(from + count).min(self.line_count()))
             .map(|i| self.line(i).unwrap_or_default())
             .collect()
     }
@@ -245,16 +413,21 @@ impl Document {
     /// the per-line version did four million seeks and took 1.2 s with the UI frozen.
     /// Folding is ASCII-only, which is what `grep -i` gives you without a locale.
     pub fn find(&mut self, needle: &str, from: usize, backwards: bool) -> Option<usize> {
-        if needle.is_empty() || self.lines.is_empty() {
+        let count = self.line_count();
+        if needle.is_empty() || count == 0 {
             return None;
         }
         let pat = needle.as_bytes().to_ascii_lowercase();
         if backwards {
-            let end = *self.lines.get(from.min(self.lines.len() - 1))?;
+            let end = *self.lines.get(from.min(count - 1))?;
             self.scan(0, end, &pat, true)
         } else {
+            if from + 1 >= count {
+                return None;
+            }
             let start = self.lines.get(from + 1).copied()?;
-            self.scan(start, self.indexed_len, &pat, false)
+            let end = self.text_end();
+            self.scan(start, end, &pat, false)
         }
     }
 
@@ -304,6 +477,50 @@ impl Document {
         }
         last_hit.map(|at| self.line_of(at))
     }
+}
+
+/// The rest of a file's index, from `offset` (`count` lines known) to `len`, on a thread
+/// of its own reading `f`.
+fn spawn_indexer(mut f: File, offset: u64, len: u64, count: usize) -> Indexer {
+    let (tx, rx) = std::sync::mpsc::sync_channel(INDEX_QUEUE);
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let work = move || {
+        if f.seek(SeekFrom::Start(offset)).is_err() {
+            return;
+        }
+        let mut buf = vec![0u8; INDEX_CHUNK];
+        let (mut offset, mut count) = (offset, count);
+        while offset < len {
+            if flag.load(Ordering::Relaxed) {
+                return;
+            }
+            let want = ((len - offset) as usize).min(buf.len());
+            let n = match read_up_to(&mut f, &mut buf[..want]) {
+                Ok(0) => break,
+                Ok(n) => n,
+                // Dropped without an end: the document stops where it got to.
+                Err(_) => return,
+            };
+            let mut found = Vec::new();
+            let cap = starts_in(&buf[..n], offset, len, count, &mut found);
+            count += found.len();
+            offset += n as u64;
+            // The viewer gone (the receiver dropped): stop.
+            if tx.send(Found::Lines(found, offset)).is_err() {
+                return;
+            }
+            if let Some(start) = cap {
+                let _ = tx.send(Found::End(Some(start)));
+                return;
+            }
+        }
+        let _ = tx.send(Found::End(None));
+    };
+    // No thread to be had: the work and its sender are dropped, the receiver sees a
+    // disconnect, and the document stops at what was indexed inline.
+    let _ = std::thread::Builder::new().name("index".into()).spawn(work);
+    Indexer { rx, stop }
 }
 
 /// A line as the viewer shows it, from its first bytes (at most [`MAX_LINE`], the
@@ -556,6 +773,75 @@ mod tests {
         assert_eq!(d.line_count(), 50_000);
         assert_eq!(d.lines_from(49_998, 10), vec!["line 49998", "line 49999"]);
         assert_eq!(d.line(12_345).unwrap(), "line 12345");
+    }
+
+    /// A03: past [`INLINE_INDEX`], open returns with the first part indexed and the
+    /// rest comes in behind; every line shown is whole, and a search does not pretend
+    /// it looked at what is not indexed yet.
+    #[test]
+    fn a_big_file_opens_at_once_and_its_index_comes_in_behind() {
+        let body: String = (0..1_000_000).map(|i| format!("line {i}\n")).collect();
+        assert!(body.len() as u64 > 2 * INLINE_INDEX);
+        let p = write("progressive.txt", body.as_bytes());
+        let mut d = Document::open(&p).unwrap();
+        // Nothing taken in yet: only the inline part, and the line it stopped in the
+        // middle of is not counted.
+        assert!(d.indexing());
+        let first = d.line_count();
+        assert!(first > 0 && first < 1_000_000, "{first}");
+        assert_eq!(d.line(first - 1).unwrap(), format!("line {}", first - 1));
+        assert_eq!(d.line(first).unwrap(), "", "past what is known: nothing");
+        assert_eq!(d.find("line 999999", 0, false), None);
+        assert!(d.indexed_percent() < 100);
+
+        d.wait_indexed();
+        assert!(!d.indexing() && d.fully_indexed);
+        assert_eq!(d.line_count(), 1_000_000);
+        assert_eq!(d.indexed_percent(), 100);
+        assert_eq!(d.line(999_999).unwrap(), "line 999999");
+        assert_eq!(d.line(first).unwrap(), format!("line {first}"));
+        assert_eq!(d.find("line 999999", 0, false), Some(999_999));
+    }
+
+    /// The cap on lines, reached by the background index: the document stops at a
+    /// line's end, as when it is reached inline.
+    #[test]
+    fn the_cap_reached_in_the_background_stops_at_a_whole_line() {
+        let mut body = Vec::new();
+        while (body.len() as u64) < INLINE_INDEX + 1000 {
+            body.extend_from_slice(&[b'a'; 999]);
+            body.push(b'\n');
+        }
+        let before = body.len() / 1000;
+        body.extend(std::iter::repeat_n(b'\n', MAX_LINES));
+        body.extend_from_slice(b"tail\n");
+        let p = write("capped.txt", &body);
+        let mut d = Document::open(&p).unwrap();
+        assert!(d.indexing() && d.fully_indexed);
+        d.wait_indexed();
+        assert!(!d.fully_indexed);
+        assert_eq!(d.line_count(), MAX_LINES);
+        assert_eq!(d.line(0).unwrap().len(), 999);
+        assert_eq!(d.line(before).unwrap(), "");
+        let last = d.line_count() - 1;
+        assert!(!d.line(last).unwrap().contains('\n'));
+    }
+
+    /// Dropped while indexing (the viewer closed with Esc): the thread is told to stop,
+    /// and nothing waits for it.
+    #[test]
+    fn a_document_dropped_while_indexing_does_not_wait_for_its_index() {
+        let body: String = (0..1_000_000).map(|i| format!("row {i}\n")).collect();
+        let p = write("dropped.txt", body.as_bytes());
+        let t = std::time::Instant::now();
+        let d = Document::open(&p).unwrap();
+        assert!(d.indexing());
+        drop(d);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            t.elapsed()
+        );
     }
 
     #[test]

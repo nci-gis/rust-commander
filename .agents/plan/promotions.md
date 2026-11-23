@@ -283,5 +283,7 @@ beta.4: i18n … EN, VI, JA preview; rc.N bug fix; stable v0.4.0 khi rc.N đã o
 Plan B (rc from the beta.2 tag if the plan slips). The languages decision of 2026-11-15
 had reached the owner's notes and the handoff but never `ROADMAP.md`.
 **What**: `plan/ROADMAP.md`: rows for beta.3 and beta.4, rc.N, the 0.4.0 condition,
-Plan B, and the Release path decision.
+Plan B, and the Release path decision. Then the same day: beta.3's timebox (one week, to
+2026-11-30, the Plan B trigger) and the backlog's features kept for 0.4.x or 0.5; the
+beta.2 row says fuzz passed.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

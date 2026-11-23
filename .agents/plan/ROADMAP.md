@@ -52,15 +52,17 @@ start at 0.4.0; winget is item 48 [draft] (owner, 2026-11-15).
 | Release | Contents | Status |
 |---|---|---|
 | **0.4.0-beta.1** | Items 21, 30a, 30b, 31–33, 35, 37 (light), 38, 40 (Rounds 018–028); pillar 1 (data correct) and **Smart Planner v1**, item 42 (Rounds 029–031); the pre-release plumbing (032) | Released 2026-11-13. Rounds 018–028 at Review until the owner's hand tests; 029–031 Complete; 032 open |
-| **0.4.0-beta.2** | **Smart Planner v2**, item 43: group commit for copies and replaces, the platform's fast copy (22), checkpointed resume, finished folders skipped; pillar 2 (responsive and bounded); items 45, 46; and rc.1's planned work, moved here by the owner (2026-11-14): pillars 3 and 4 (compatibility promise, what a copy keeps, fuzzing, smoke test and provenance, the hand-test matrix, the benchmark protocol) | Round 033: code done and hardened (plan v3, #42–#65), CI green, speed gate passed (Windows, macOS 2026-11-17; Linux again 2026-11-23). Hand-test ledger PASS (2026-11-23, #66). Left: a fuzz run, then the cut (Round 033 Check §7). Lanes: the owner's call on the D0 numbers; else 0.5, as planned |
-| **0.4.0-beta.3** | **Refactor** (owner, 2026-11-23): one definition per concept, as measured by the cosf rounds (R5–R7 synthesis §6.3; `xtask qa defs`): the concepts still defined in several places (control characters, home and state folders, atomic write H-06, display width and text fit, refusal messages, SortKey text, CLI options), one job type for the workers, and splitting `ops.rs` and `App`'s state. No new features. The owner accepts the risk and retests: the hand-test ledger, the speed A/B against beta.2 and a red-team per data-path PR, as for beta.2. Before and after numbers: `qa defs`, deleted/added lines, `App` fields, the size of `ops.rs` | — |
+| **0.4.0-beta.2** | **Smart Planner v2**, item 43: group commit for copies and replaces, the platform's fast copy (22), checkpointed resume, finished folders skipped; pillar 2 (responsive and bounded); items 45, 46; and rc.1's planned work, moved here by the owner (2026-11-14): pillars 3 and 4 (compatibility promise, what a copy keeps, fuzzing, smoke test and provenance, the hand-test matrix, the benchmark protocol) | Round 033: code done and hardened (plan v3, #42–#65), CI green, speed gate passed (Windows, macOS 2026-11-17; Linux again 2026-11-23). Hand-test ledger PASS (2026-11-23, #66); fuzz passed (2026-11-23). Left: the owner's go for the cut (Round 033 Check §7). Lanes: the owner's call on the D0 numbers; else 0.5, as planned |
+| **0.4.0-beta.3** | **Refactor** (owner, 2026-11-23): one definition per concept, as measured by the cosf rounds (R5–R7 synthesis §6.3; `xtask qa defs`): the concepts still defined in several places (control characters, home and state folders, atomic write H-06, display width and text fit, refusal messages, SortKey text, CLI options), one job type for the workers, and splitting `ops.rs` and `App`'s state. No new features. The owner accepts the risk and retests: the hand-test ledger, the speed A/B against beta.2 and a red-team per data-path PR, as for beta.2. Before and after numbers: `qa defs`, deleted/added lines, `App` fields, the size of `ops.rs`. **Timebox: one week at most, to 2026-11-30** (owner, 2026-11-23); not done by then → Plan B | — |
 | **0.4.0-beta.4** | **Languages** (owner, 2026-11-15; restated 2026-11-23): the i18n mechanism and a pseudo-locale; English, Vietnamese, and Japanese as a preview | — |
 | **0.4.0-rc.N** | Fixes only (feature freeze); rc.1 also syncs new files before a job ends (B3, a power cut) | — |
 | **0.4.0** | When an rc is good: all tests and the owner's week green; then packages, then the launch (item 10) | — |
 
 **Plan B** (owner, 2026-11-23): beta.2 is cut and tagged, so if beta.3 or beta.4 slips,
 rc.1 can be built from `v0.4.0-beta.2` instead (fixes only), and the refactor and
-languages move to 0.5. Every beta is a GitHub pre-release.
+languages move to 0.5. The trigger for beta.3 is its timebox, 2026-11-30. Every beta is
+a GitHub pre-release. The backlog's features (pending tasks, skip all, a checkpoint by
+time, …) are not in beta.3 or beta.4: they go to 0.4.x or 0.5 (owner, 2026-11-23).
 
 The four pillars come from an outside review (owner, 2026-11-12):
 [memory/2026-11-12-four-pillars-for-rc1.md](../memory/2026-11-12-four-pillars-for-rc1.md).
@@ -96,7 +98,8 @@ Not for 0.4 (the review agrees): mmap, a trie, a custom arena, Tokio, a batch WA
 
 ## After beta.2: 0.4.x
 
-Found during the beta.2 hardening and its hand tests, and deferred by the owner, so
+Features here go to 0.4.x or 0.5, never into beta.3 (refactor) or beta.4 (languages)
+(owner, 2026-11-23). Found during the beta.2 hardening and its hand tests, and deferred by the owner, so
 that the hand-test evidence of the freeze would not go stale (2026-11-22). None of them
 blocks the cut. Each has its row in `skills/qa/references/past-misses.md` where one
 exists.

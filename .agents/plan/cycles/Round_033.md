@@ -1127,8 +1127,7 @@ Done since 2026-11-17: D0 on Windows and macOS (§4b, §4c); plan v3 steps 1–8
 - **owner**: merge #66 (the ledger passes on it, §8) and this PR; at the cut,
   `cargo xtask qa ledger --rev <the cut commit>` once more (neither touches the data
   path, so it stays PASS).
-- **owner**: `cargo xtask fuzz` on a machine with nightly (§10); this session's proxy
-  refuses static.rust-lang.org.
+- Fuzz: done, no crash (§10).
 - **owner**: lanes (item 43's rest): decide on the D0 numbers (§4b, §4c), else 0.5 as
   ROADMAP plans.
 - Rehearsed 2026-11-23 on a local `dev` with this branch, #66 and beta.2 merged (not
@@ -1191,18 +1190,26 @@ two passes were the disk's drift, not the code; the interleaved runs do not show
 for this check (2026-11-23) was to run it there only if Linux showed more than 5 %
 after a second look, which it does not.
 
-### 10. Fuzz before the release
+### 10. Fuzz before the release (2026-11-23)
 
-Not run in this session: nightly cannot be installed here (the proxy refuses
-static.rust-lang.org). **owner**: `cargo xtask fuzz` (six targets, 60 s each), as the
-release bar asks before each release. Facts for the call: the code the six targets
-compile (`found.rs`, `archive::clean` and `list`, `config.rs`, `decor.rs`,
-`pane/shell_report.rs`) did not change between `5574138` and `66fc4b1`; the only
-change near them is `archive::pack` (H-04), which no target reads. The last run on
-record is the first 30 s run of this round (it found the tab in `found.rs`). The
-journal reader changed most (H-07) and has no target: it reads xdevcmd's own files, not
-input from outside, so the bar does not ask for it; a target for it is worth a line in
-0.4.x.
+Run in this session at `66fc4b1`: nightly cannot be installed here (the proxy refuses
+static.rust-lang.org), so the stable compiler with `RUSTC_BOOTSTRAP=1`, which builds
+cargo-fuzz's address-sanitizer targets the same way; then `cargo fuzz run -O <target> --
+-max_total_time=60` for each of the six, as `cargo xtask fuzz` does.
+
+| Target | Runs in 60 s | Coverage | Crashes |
+|---|---|---|---|
+| osc | 4,008,454 | 293 | 0 |
+| paths | 1,489,905 | 873 | 0 |
+| config | 453,887 | 3,282 | 0 |
+| theme | 752,085 | 2,869 | 0 |
+| archive_name | 3,089,206 | 132 | 0 |
+| archive_list | 87,142 | 397 | 0 |
+
+**Passes**: no crash, `fuzz/artifacts/` empty. The code the targets compile (`found.rs`,
+`archive::clean` and `list`, `config.rs`, `decor.rs`, `pane/shell_report.rs`) did not
+change since `5574138`. The journal reader changed most (H-07) and has no target: it
+reads xdevcmd's own files, so the bar does not ask for it; a target for it is in 0.4.x.
 
 ### 11. Tester header for the release (draft; above the CHANGELOG section)
 

@@ -4,6 +4,6 @@ date_utc	built_from	version	os	terminal	shell	case	result	check	evidence	issue	n
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	windows	Windows Terminal	pwsh	M-DS-04	PASS	PASS	check-windows-20261123-0808.txt	-	-
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	windows	Windows Terminal	pwsh	M-DS-02	PASS	-	-	-	-
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	windows	Windows Terminal	pwsh	M-DS-06	PASS	-	-	-	-
-2026-11-23	unknown	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-02	PASS	-	-	-	macOS (Intel); its build commit to confirm
-2026-11-23	unknown	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-05	PASS	-	-	-	macOS (Intel) onto FAT32; its build commit to confirm
-2026-11-23	unknown	0.4.0-beta.1	linux	Ubuntu Terminal	bash	M-DS-07	PASS	-	-	-	Ubuntu 22.04; its build commit to confirm
+2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-02	PASS	-	-	-	macOS (Intel)
+2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-05	PASS	-	-	-	macOS (Intel) onto FAT32
+2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	linux	Ubuntu Terminal	bash	M-DS-07	PASS	-	-	-	Ubuntu 22.04

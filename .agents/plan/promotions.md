@@ -266,3 +266,24 @@ jobs" widened into **Pending tasks** (pause, a list of jobs not finished, manual
 the owner's design; the list also shows background jobs, to bring one back (the owner
 chose this over a separate command before the cut).
 **Promoted by**: XDevTeam (approval = merging this branch). Written by Claude Code.
+
+## 2026-11-23: ROADMAP's beta.2 row brought up to date; a journal fuzz target in 0.4.x
+
+**Source**: the owner, 2026-11-23, approving the cut preparation ("duyệt đề xuất nhé"),
+which named this edit.
+**What**: `plan/ROADMAP.md`: the 0.4.0-beta.2 row says what is left (a fuzz run,
+the cut; lanes the owner's call, else 0.5); one 0.4.x row, a fuzz target for
+the journal reader.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-23: the release path gets beta.3 (refactor) and beta.4 (languages)
+
+**Source**: the owner, 2026-11-23: "beta.3 là refactor => chấp nhận rủi ro và retest …
+beta.4: i18n … EN, VI, JA preview; rc.N bug fix; stable v0.4.0 khi rc.N đã okay", with
+Plan B (rc from the beta.2 tag if the plan slips). The languages decision of 2026-11-15
+had reached the owner's notes and the handoff but never `ROADMAP.md`.
+**What**: `plan/ROADMAP.md`: rows for beta.3 and beta.4, rc.N, the 0.4.0 condition,
+Plan B, and the Release path decision. Then the same day: beta.3's timebox (one week, to
+2026-11-30, the Plan B trigger) and the backlog's features kept for 0.4.x or 0.5; the
+beta.2 row says fuzz passed.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

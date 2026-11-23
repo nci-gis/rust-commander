@@ -941,6 +941,47 @@ All A10 fixes are merged: #25–#32 (#33, the guide's contents, open). Left, in 
      verify SHA256SUMS, the attestation, `--version`, and the six
      `xdevcmd-bench-v0.4.0-beta.2-<target>` assets.
 
+### 2026-11-17 to 11-23: review fixes, plan v3 hardening, the hand tests (#42–#66)
+
+Written 2026-11-23 by Claude Code from the merged PRs; the plan v3 notes and P8/T5 raw
+files are in the owner's cosf folder (`rounds/2026-11-21_step5_summary.md`,
+`rounds/2026-11-21_step7_status.md`).
+
+- **Review fixes**: #42 (xtask try re-runs; interrupted jobs newest first, the Esc line
+  shown), #44 (external repo and docs reviews: recovery blockers RR01–RR07, docs
+  R01–R15, two red-team rounds), #45 (hand-test findings; `docs/known-issues.md`).
+- **Plan v3, option B** (the owner: harden and consolidate inside beta.2, as a measured
+  experiment), steps 1–9:
+  - Step 1–4 tools: #46 H-00 (CI cancels older runs; xtask in the artifact), #47 H-01
+    (`--kill-when` kills only the launched PID), #48 H-02 (`XDEVCMD_STATE` names the
+    session file), #49 (a pty wait flake), #50 (review lessons, past misses, QA and
+    red-team rules), #51 (`xtask qa ledger`, `qa defs`).
+  - Step 5 consolidation, each red first with a red-team: #52 H-04 (one path identity:
+    into itself through a missing folder, one entry by dev/ino and links), #53 H-07 (one
+    table of journal lines; a torn last line is not read), #54 H-08 (Alt+F5 checks its
+    name as Save as does; control characters checked before trimming, found by T5),
+    #55 H-03 (one check of a path to make under `--root`), #56 H-05 (every action and
+    command sorted once into what writes, exhaustive), #61 H-10 (a stopped worker ends
+    its job; the terminal is put back on every way out; a panic keeps the journal).
+  - Step 6 P8 (planted faults) and T5 (a second model on the diff): round 1 on H-04
+    (Claude QA 8/8, red-team 8/8, T5 6/8, 5/8 strict); round 2 on H-07 (7 seeds, all
+    reviewers 7/7, CI 0/7). Ceiling effect: seeds inside the diff only measure "reads
+    every changed line"; next design plants omissions (0.4.x). T5: one real finding
+    Claude missed (H-08), one P1 it missed because the file was not in its excerpt
+    (H-10). The seed commits (`f76a4e1`, `3c6c190`) are not in the integration history.
+  - Step 7 lessons and tools: #57 and #62 (past-misses X01–X13, S1–S2, E01–E07, W03;
+    review lessons L18–L24), #58 (a wait for a bare word needs a reason), #59 (`xtask
+    manual list|show|log`), #60 (manual cases keep their shape and quote the docs).
+  - Step 8 freeze, then the owner's hand tests (Windows, macOS Intel, Linux; local
+    disk, a network share, NFS, USB): #63 (`--kill-when` lands mid-copy on a fast
+    disk; `--make --big N`), #64 (the job box counts files; the retry line keeps its
+    try; check C says first how many it found different, `ops.rs`, the last data-path
+    commit, `9c04988`), #65 (a guided `manual log` and `--check` saved; the job box
+    grows with the terminal; Retry and Skip say what each does), #66 (the rows).
+  - Deferred by the owner to 0.4.x (ROADMAP "After beta.2: 0.4.x"): H-06 (one atomic
+    write), cosf #12 (the journal folder's 0700 failure), E01–E07, W03, pending tasks
+    (pause, a list, manual resume), skip all, a checkpoint by time, a resumed job's bar.
+
 ## Check
 
 Written 2026-11-17 by Claude Code, on `feat/v0.4.0-beta.2` at 5574138 (CI green, all six
@@ -1052,6 +1093,13 @@ Same method as §4b; xtask cross-built for x86_64 (bench runs 44024783112, 44024
 | `dragging_the_scrollbar_scrolls_the_list_and_the_cursor_follows` | macOS, once | known |
 | `a_far_jump_in_long_lines_waits_for_the_scan` | windows-latest | fixed (#35: 1 s bound) |
 | `a_directory_name_cannot_run_a_command_through_alt_c` | ubuntu-24.04-arm, once | passed on rerun; watch |
+| a pty wait for `deeper ` matched the list row before Enter (#49) | ubuntu, once | fixed (#49: waits for the pane title) |
+| a core unit test with a timing wait, on ARM (past-misses W03) | ubuntu-24.04-arm, once (#59) | passed on rerun; 0.4.x (`tests/waits.rs` reads `wait_for` only) |
+
+The 58 tests new since `5574138` (core, app, pty, render, xtask), run 10 times on Linux
+at `66fc4b1` (2026-11-23): 580 of 580 passed. macOS and Windows: CI ran each once on
+every push; the last five runs on this branch (to `66fc4b1`) passed at the first
+attempt.
 
 ### 6. Known issues for the release notes (rc.1)
 
@@ -1063,11 +1111,124 @@ Alt+F5 and tar extraction turn non-UTF-8 names into U+FFFD; bash's `read -s` is 
 as busy; an open single quote in fish or PowerShell; names with a backtick are refused
 for sh/bash/zsh; plan 10,000 ≈ 10 % slower on Linux.
 
-### 7. Still to do before the cut
+Added 2026-11-23 from the hand tests (user-facing lines in `docs/known-issues.md`):
+Esc ends a job and its journal (not offered to continue; pending tasks in 0.4.x); with
+a share down, Skip meets the same error on the next file after ~30 s of tries (the
+question now warns; skip all in 0.4.x); a job sent to the background comes back only
+to ask or with errors; a hard NFS mount whose server is gone blocks in the system call
+(no retry shown, Esc waits for the call; by design). Still: a new file copied just
+before a power cut can be short under its real name (B3, rc.1): continue with C.
 
-- **owner**: D0 done on Windows (§4b) and macOS Intel (§4c): both pass.
-- **owner**: manual cases, at least M-DS-01..07 on macOS and Windows, one line each here.
-- **owner**: read this Check, then the go for the cut (PR feat → dev, `cargo release`,
-  tag, notes, verify the six `xdevcmd-bench-*` assets).
+### 7. Still to do before the cut (updated 2026-11-23)
+
+Done since 2026-11-17: D0 on Windows and macOS (§4b, §4c); plan v3 steps 1–8 (Do,
+2026-11-17 to 11-23); speed again at the cut, Linux (§9).
+
+- **owner**: merge #66 (the ledger passes on it, §8) and this PR; at the cut,
+  `cargo xtask qa ledger --rev <the cut commit>` once more (neither touches the data
+  path, so it stays PASS).
+- Fuzz: done, no crash (§10).
+- **owner**: lanes (item 43's rest): decide on the D0 numbers (§4b, §4c), else 0.5 as
+  ROADMAP plans.
+- Rehearsed 2026-11-23 on a local `dev` with this branch, #66 and beta.2 merged (not
+  pushed): `cargo release version 0.4.0-beta.2` bumps both crates and the pinned
+  dependency; `cargo release replace` turns `[Unreleased]` into the dated heading. The
+  full `cargo release … --no-tag` could not reach index.crates.io from this session
+  (TLS through the proxy), so its dry run is the owner's first step at the cut.
+  #66 and #67 run no CI (docs and rows only, on `qa/` and `docs/` branches); the
+  feat → dev PR runs it all.
+- **owner**: read this Check, then the go for the cut (PR feat → dev with a merge
+  commit, `cargo release 0.4.0-beta.2` dry run then `--execute`, author check, tag,
+  the tester header of §11 above the CHANGELOG section in the release, publish, verify
+  SHA256SUMS, the attestation, `--version` and the six `xdevcmd-bench-*` assets, "close
+  033", merge dev back).
+
+### 8. The hand-test ledger (`xtask qa ledger`, 2026-11-23)
+
+21 cells: M-DS-01..07 on linux, macos and windows, each a fresh PASS (built at or after
+the last data-path commit, `9c04988`) or a waiver with its reason. Rows in #66, all
+built from `66fc4b1`.
+
+| Case | linux | macos | windows |
+|---|---|---|---|
+| 01 check A | PASS (Ubuntu 24.04) | PASS | PASS |
+| 02 a drive pulled | WAIVED (same code, tested on Windows and macOS) | PASS | PASS |
+| 03 check B | PASS | PASS | PASS |
+| 04 check C | PASS | PASS | PASS (5 tampers: "5 found different") |
+| 05 move across drives | WAIVED (same code) | PASS (onto FAT32) | WAIVED (USB not allowed on that machine) |
+| 06 a network share | WAIVED (no share this round) | WAIVED (no share this round) | PASS |
+| 07 NFS | PASS (Ubuntu 22.04) | WAIVED (NFS client on Linux only) | WAIVED (NFS client on Linux only) |
+
+`qa ledger` on #66's head (`782641e`): **PASS: every case has fresh evidence on every
+system, or a waiver.** Waivers are the owner's (2026-11-23). An earlier macOS run (built `8e1020d`, before
+#63–#65) is not counted: older than the last data-path commit.
+
+### 9. Speed again at the cut, Linux (2026-11-23)
+
+Release xtask built at `5574138` (A, the D0 side B of 2026-11-17) and `66fc4b1` (B,
+after plan v3's data-path changes: H-03, H-04, H-07, H-10, #64), `--only` per case, one
+host name per side and pass; pass 2 with the sides swapped. This machine: a 2-core
+cloud VM, load about 1. Medians; "B vs A" positive = B slower.
+
+| Case | A | B | pass 1 | B (pass 2) | A (pass 2) | pass 2 |
+|---|---|---|---|---|---|---|
+| plan 10,000 | 21.4 ms | 19.1 ms | −11 % | 17.7 ms | 29.1 ms | −39 % |
+| plan 100,000 | 194 ms | 173 ms | −11 % | 173 ms | 212 ms | −18 % |
+| plan 200,000 | 386 ms | 400 ms | +4 % | 376 ms | 402 ms | −6 % |
+| list 10,000 | 21.4 ms | 21.0 ms | −2 % | 18.0 ms | 25.0 ms | −28 % |
+| list 100,000 | 267 ms | 228 ms | −15 % | 215 ms | 246 ms | −13 % |
+| mixed (large + small files) | 3.01 s | 3.37 s | +12 % | 3.88 s | 3.43 s | +13 % |
+
+Mixed was 12–13 % slower in both passes, inside the 5–15 % band; it is a copy to this
+VM's disk, and A against itself drifted 14 % between the passes. Four more runs of mixed
+alone, interleaved A, B, A, B: 3.67, 3.58, 3.57, 3.70 s (−2 %, +4 %). Over all four runs
+of each side the medians are 3.50 s (A) and 3.64 s (B): +4 %.
+
+**Gate: passes** (no case slower past 15 % in both passes). Inference: mixed's first
+two passes were the disk's drift, not the code; the interleaved runs do not show it. No
+"slower by" line. The owner's Windows laptop is the gate machine of §4b; the rule set
+for this check (2026-11-23) was to run it there only if Linux showed more than 5 %
+after a second look, which it does not.
+
+### 10. Fuzz before the release (2026-11-23)
+
+Run in this session at `66fc4b1`: nightly cannot be installed here (the proxy refuses
+static.rust-lang.org), so the stable compiler with `RUSTC_BOOTSTRAP=1`, which builds
+cargo-fuzz's address-sanitizer targets the same way; then `cargo fuzz run -O <target> --
+-max_total_time=60` for each of the six, as `cargo xtask fuzz` does.
+
+| Target | Runs in 60 s | Coverage | Crashes |
+|---|---|---|---|
+| osc | 4,008,454 | 293 | 0 |
+| paths | 1,489,905 | 873 | 0 |
+| config | 453,887 | 3,282 | 0 |
+| theme | 752,085 | 2,869 | 0 |
+| archive_name | 3,089,206 | 132 | 0 |
+| archive_list | 87,142 | 397 | 0 |
+
+**Passes**: no crash, `fuzz/artifacts/` empty. The code the targets compile (`found.rs`,
+`archive::clean` and `list`, `config.rs`, `decor.rs`, `pane/shell_report.rs`) did not
+change since `5574138`. The journal reader changed most (H-07) and has no target: it
+reads xdevcmd's own files, so the bar does not ask for it; a target for it is in 0.4.x.
+
+### 11. Tester header for the release (draft; above the CHANGELOG section)
+
+Links are absolute (a release body does not resolve paths), at the tag.
+
+```markdown
+**A pre-release for testers.** Please read [How to test](https://github.com/nci-gis/rust-commander/blob/v0.4.0-beta.2/docs/how-to-test.md) first;
+a week of real use is welcome. Betas are not covered by the
+[compatibility promise](https://github.com/nci-gis/rust-commander/blob/v0.4.0-beta.2/docs/compatibility.md). What does not work yet, and what will
+not change: [Known issues](https://github.com/nci-gis/rust-commander/blob/v0.4.0-beta.2/docs/known-issues.md).
+
+- **After a power cut**, a new file copied just before it can be short under its real
+  name: at the next start, continue with **C** (check, slow). Syncing new files before
+  a job ends comes in rc.1.
+- **Esc ends a job**: it is not offered to continue later. A killed run is.
+- **A hard NFS mount whose server is gone** waits in the system: no retry is shown.
+
+Lost or wrong file? Stop, keep the trash as it is, and report it the same day with the
+debug log (`XDEVCMD_DEBUG=all`): [Reporting a problem](https://github.com/nci-gis/rust-commander/blob/v0.4.0-beta.2/docs/troubleshooting.md#reporting-a-problem).
+```
 
 ## Act

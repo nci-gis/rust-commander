@@ -263,5 +263,6 @@ of a network share pulled mid-copy (Retry and Skip felt the same).
 **What**: one row in `plan/ROADMAP.md`, "After beta.2: 0.4.x", then reworded with the owner
 the same day: Skip all told apart from R, S, Pause and Esc; and "several interrupted
 jobs" widened into **Pending tasks** (pause, a list of jobs not finished, manual resume),
-the owner's design.
+the owner's design; the list also shows background jobs, to bring one back (the owner
+chose this over a separate command before the cut).
 **Promoted by**: XDevTeam (approval = merging this branch). Written by Claude Code.

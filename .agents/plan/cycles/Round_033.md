@@ -1131,6 +1131,13 @@ Done since 2026-11-17: D0 on Windows and macOS (§4b, §4c); plan v3 steps 1–8
   refuses static.rust-lang.org.
 - **owner**: lanes (item 43's rest): decide on the D0 numbers (§4b, §4c), else 0.5 as
   ROADMAP plans.
+- Rehearsed 2026-11-23 on a local `dev` with this branch, #66 and beta.2 merged (not
+  pushed): `cargo release version 0.4.0-beta.2` bumps both crates and the pinned
+  dependency; `cargo release replace` turns `[Unreleased]` into the dated heading. The
+  full `cargo release … --no-tag` could not reach index.crates.io from this session
+  (TLS through the proxy), so its dry run is the owner's first step at the cut.
+  #66 and #67 run no CI (docs and rows only, on `qa/` and `docs/` branches); the
+  feat → dev PR runs it all.
 - **owner**: read this Check, then the go for the cut (PR feat → dev with a merge
   commit, `cargo release 0.4.0-beta.2` dry run then `--execute`, author check, tag,
   the tester header of §11 above the CHANGELOG section in the release, publish, verify

@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.0-beta.2] - 2026-11-23
+
 ### Added
 - **Known issues and limits** ([docs/known-issues.md](docs/known-issues.md)): what does
   not work yet and what will not change, one line each, linked to the details.

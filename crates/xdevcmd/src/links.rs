@@ -112,7 +112,7 @@ impl Links {
     /// (`find::check_grouped`): a line that names a file whole is that file.
     pub fn line_paths(&self, i: usize, shown: &str) -> xdevcmd_core::find::Group {
         let parts = self.paths(i, shown);
-        if shown.chars().any(|c| c.is_control() && c != '\t') {
+        if xdevcmd_core::controls::first(shown, &['\t']).is_some() {
             return (Vec::new(), parts);
         }
         let mut wholes: Vec<PathBuf> = Vec::new();

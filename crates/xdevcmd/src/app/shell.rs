@@ -516,10 +516,10 @@ impl App {
         // else may have chosen: a control character in it is refused, as everywhere a
         // name could later be typed into a shell or pasted. In the whole text, before
         // the trim: a tab or a newline at either end is not a space to drop (T5, H-08).
-        if let Some(c) = crate::safety::control_char(&raw) {
+        if let Some(c) = xdevcmd_core::controls::first(&raw, &[]) {
             return Err(format!(
-                "a control character (U+{:04X}) in the name \u{2014} remove it",
-                c as u32
+                "{} in the name \u{2014} remove it",
+                xdevcmd_core::controls::named(c)
             ));
         }
         let typed = raw.trim();

@@ -88,6 +88,21 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
 
 ## Do
 
+- **W0, the walker** (the owner, 2026-11-24, an exception to "no new features":
+  "đưa vào beta.3 luôn … lên trước refactor để xem luôn"): a small ASCII agent walks
+  the status line a step a second when `[general] animation` is on (off by default),
+  waits before a message, and goes on from where it stopped. New module `walker.rs`;
+  one field on `App` (86); drawn by `draw_status` on the 1 s heartbeat it already had.
+  **A deliberate test of the rules** (the owner, 2026-11-24: "đây là 1 lần mình thử
+  phá rule đã chốt để xem kết quả có bị stale ko … sau đó review xem ảnh hưởng"). To
+  review at the Check: did W0 cost the timebox (time spent on it vs W1–W9); did it
+  make evidence stale (`walker.rs`, `draw.rs`, `config.rs`, `settings_dialog.rs` are
+  not on the data path, so the hand-test ledger should stay fresh; confirm with `qa
+  ledger`); did it pull in more scope (requests that followed it); did it break the
+  "no assertion changed" rule (it did not: new tests only).
+- W1 #72, W2 #73 merged 2026-11-24: width definitions all in `format.rs` (9),
+  `chars().count()` 40 → 14, none a width.
+
 ## Check
 
 ## Act

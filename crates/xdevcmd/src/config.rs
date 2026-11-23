@@ -137,6 +137,10 @@ pub struct General {
     /// APFS), else the kernel's copy on Linux, else xdevcmd's own read and write. Off,
     /// xdevcmd always reads and writes. See docs/security.md.
     pub fast_copy: bool,
+    /// A small agent walks along the status line, a step a second, and waits before a
+    /// message while it shows. Off by default: a moving thing is not for everyone, and
+    /// over SSH each step is a little traffic.
+    pub animation: bool,
 }
 
 impl Default for General {
@@ -149,6 +153,7 @@ impl Default for General {
             autosave_secs: 5,
             safe_operations: true,
             fast_copy: true,
+            animation: false,
         }
     }
 }

@@ -578,6 +578,8 @@ pub struct App {
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
     pub usage: crate::usage::Usage,
+    /// The status line's walker (`[general] animation`): moved as the line is drawn.
+    walker: std::cell::RefCell<crate::walker::Walker>,
     /// F3 inside a big archive, extracting on a thread.
     pending_view: Option<PendingView>,
     /// The session as last written, and when the last check for changes ran.
@@ -721,6 +723,7 @@ impl App {
             under_graphic: Vec::new(),
             bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
+            walker: std::cell::RefCell::default(),
             pending_view: None,
             saved: None,
             last_autosave: Instant::now(),

@@ -476,11 +476,12 @@ impl App {
         let rw = right.cells().min(avail.saturating_sub(3));
         let lw = avail.saturating_sub(rw + 2);
         let gap = avail.saturating_sub(lw + rw).min(2);
+        let shown_left = elide_middle(&left, lw);
         buf.set_line(
             area.x,
             area.y,
             &Line::from(Span::styled(
-                elide_middle(&left, lw),
+                shown_left.clone(),
                 Style::new().fg(theme::t().fg),
             )),
             lw as u16,
@@ -494,6 +495,29 @@ impl App {
             )),
             rw as u16,
         );
+        if self.settings.config.general.animation {
+            // Between the panes' line and the message, a column clear of each.
+            let start = shown_left.cells() + 1;
+            let end = (lw + gap).saturating_sub(1);
+            let lane = end.saturating_sub(start);
+            let held = !self.status.is_empty();
+            let mut w = self.walker.borrow_mut();
+            w.tick(Instant::now(), lane, held);
+            if lane >= crate::walker::WIDTH {
+                // While a message shows, just before it; else where it walked to.
+                let at = if held {
+                    end - crate::walker::WIDTH
+                } else {
+                    start + w.pos()
+                };
+                frame.buffer_mut().set_string(
+                    area.x + at as u16,
+                    area.y,
+                    w.sprite(),
+                    Style::new().fg(theme::t().accent),
+                );
+            }
+        }
         if !badge.is_empty() {
             let th = theme::t();
             frame.buffer_mut().set_line(

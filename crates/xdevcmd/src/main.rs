@@ -44,6 +44,7 @@ mod theme;
 mod usage;
 mod usermenu;
 mod viewer;
+mod walker;
 mod watch;
 mod wrap;
 

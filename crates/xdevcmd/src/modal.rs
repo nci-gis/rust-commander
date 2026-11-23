@@ -1376,6 +1376,55 @@ mod tests {
         );
     }
 
+    /// The owner (2026-11-23): Retry and Skip felt the same, a network share down. The
+    /// question says what each does, a share that looks down says that Skip meets the
+    /// same error next, and after a Skip the box counts it and says so.
+    #[test]
+    fn retry_and_skip_say_what_each_does_and_a_skip_shows() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        let q = Question::Failed {
+            path: PathBuf::from("/mnt/share/tree/d000/f0421"),
+            error: "The network path was not found. (a network error: tried 6 times)".into(),
+        };
+        let body = question_text(&q).1.join("\n");
+        assert!(body.contains("R tries this file again"), "{body}");
+        assert!(
+            body.contains("S leaves it and goes on with the next"),
+            "{body}"
+        );
+        assert!(body.contains("the same error on the next file"), "{body}");
+        let local = question_text(&Question::Failed {
+            path: PathBuf::from("/tmp/f"),
+            error: "Permission denied".into(),
+        })
+        .1
+        .join("\n");
+        assert!(
+            !local.contains("the same error on the next file"),
+            "{local}"
+        );
+        tx.send(ops::Event::Ask(q)).unwrap();
+        j.pump();
+        j.answer(Answer::Skip);
+        let mut t = Terminal::new(TestBackend::new(140, 20)).unwrap();
+        let frame = t.draw(|f| render_job(f, f.area(), &mut j)).unwrap();
+        let b = &frame.buffer;
+        let text: String = (0..b.area.height)
+            .map(|y| {
+                (0..b.area.width)
+                    .map(|x| b.cell((x, y)).unwrap().symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        assert!(text.contains("1 skipped"), "{text}");
+        assert!(
+            text.contains("skipped f0421: going on with the next file"),
+            "{text}"
+        );
+    }
+
     /// "設計書" from column 2: 書 covers columns 6 and 7. A box from column 7 would lose
     /// its left border to it on a real terminal, so 書 goes.
     #[test]

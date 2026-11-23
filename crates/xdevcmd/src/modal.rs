@@ -483,6 +483,10 @@ pub struct Job {
     pub buttons: Vec<Rect>,
     /// The answers on the question box, when one is up.
     pub answer_buttons: Vec<(Answer, Rect)>,
+    /// Failed files the user skipped, and what the last Retry or Skip did, shown for a
+    /// few seconds: the two felt the same with a share down (the owner, 2026-11-23).
+    pub skipped_failed: u64,
+    pub said: Option<(String, std::time::Instant)>,
 }
 
 impl Job {
@@ -502,6 +506,8 @@ impl Job {
             rate: Default::default(),
             buttons: Vec::new(),
             answer_buttons: Vec::new(),
+            skipped_failed: 0,
+            said: None,
         }
     }
 
@@ -577,8 +583,33 @@ impl Job {
     }
 
     pub fn answer(&mut self, a: Answer) {
+        if let Some(Question::Failed { path, .. }) = &self.question {
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let said = match a {
+                Answer::Skip | Answer::SkipAll => {
+                    self.skipped_failed += 1;
+                    Some(format!("skipped {name}: going on with the next file"))
+                }
+                Answer::Retry => Some(format!("trying {name} again")),
+                _ => None,
+            };
+            self.said = said.map(|t| (t, std::time::Instant::now()));
+        }
         self.handle.answer(a);
         self.question = None;
+    }
+
+    /// What the last Retry or Skip did, for five seconds after it.
+    pub fn said_line(&self, now: std::time::Instant) -> Option<&str> {
+        self.said
+            .as_ref()
+            .filter(|(_, at)| {
+                now.saturating_duration_since(*at) < std::time::Duration::from_secs(5)
+            })
+            .map(|(t, _)| t.as_str())
     }
 
     /// The retry line cut to `width` columns at the end of the error, never in the
@@ -722,10 +753,25 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
                 "Deleting permanently cannot be undone.".to_string(),
             ],
         ),
-        Question::Failed { path, error } => (
-            "Failed".to_string(),
-            vec![path.display().to_string(), String::new(), error.clone()],
-        ),
+        Question::Failed { path, error } => {
+            let mut body = vec![
+                path.display().to_string(),
+                String::new(),
+                error.clone(),
+                String::new(),
+                "R tries this file again (five more tries). S leaves it and goes on with the next"
+                    .to_string(),
+                "file; it is not copied. Esc stops the job.".to_string(),
+            ];
+            // The engine's words for a network error it tried again and again.
+            if error.contains("a network error") {
+                body.push(
+                    "The share looks down: S will most likely meet the same error on the next file."
+                        .to_string(),
+                );
+            }
+            ("Failed".to_string(), body)
+        }
         Question::NoJournal { error } => (
             "Safe operations: no journal".to_string(),
             vec![
@@ -1181,6 +1227,9 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                         human_size(j.bytes_done),
                         human_size(j.total_bytes)
                     );
+                    if j.skipped_failed > 0 {
+                        s.push_str(&format!(" · {} skipped", j.skipped_failed));
+                    }
                     if let Some(left) = j
                         .rate
                         .left(std::time::Instant::now(), (j.total_bytes, j.total_files))
@@ -1191,9 +1240,11 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 },
                 Style::new().fg(th.fg_dim),
             );
-            if let Some(line) = j.retrying_line_fit(std::time::Instant::now(), inner.width as usize)
-            {
+            let now = std::time::Instant::now();
+            if let Some(line) = j.retrying_line_fit(now, inner.width as usize) {
                 put(frame, inner, 2, &line, Style::new().fg(th.mark));
+            } else if let Some(line) = j.said_line(now) {
+                put(frame, inner, 2, line, Style::new().fg(th.mark));
             }
         }
     }

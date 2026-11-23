@@ -74,6 +74,10 @@ that heading and starts a new, empty one here. -->
   the sandbox, and `xtask manual log` with no arguments asks for the cases (offering those
   the check says were done), a result each and a note, and fills in the check file, the
   terminal and the shell.
+- **Retry and Skip no longer feel the same**: the Failed question says what each does
+  (R: five more tries; S: leave it, go on), warns when a share looks down that Skip will
+  likely meet the same error next, and after a Skip the job box counts it ("· 1 skipped")
+  and says so for a few seconds.
 - **The job box grows with a wide terminal** (74 columns to 120): a long path or a
   Windows network error reads whole once the window is made wider.
 - **Check C says how many it found different, first**: "3 found different and copied

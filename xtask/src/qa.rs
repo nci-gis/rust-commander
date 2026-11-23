@@ -431,6 +431,26 @@ pub const CONCEPTS: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "display width and text fit",
+        // Text turned into columns: one module is the target (Round 035, W2).
+        &[
+            "fn text_cells(",
+            "fn cells(c: char)",
+            "fn width(s: &str)",
+            "fn fit(&self, width",
+            "fn elide_middle(",
+            "fn elided(",
+            "fn fit_start(",
+            "fn fit_end(",
+        ],
+    ),
+    (
+        "chars counted (a width when it sizes a column)",
+        // Each `chars().count()` outside tests: a column wrong for a wide (CJK) or a
+        // combining (VI) letter when it is used as a width. Not every one is a width.
+        &[".chars().count()"],
+    ),
+    (
         "journal kinds",
         // A line's word spelled outside the table (`journal::Tag`), as the writer and
         // the reader each spelled it before H-07, and the table itself: 1 is one place.
@@ -476,6 +496,49 @@ pub fn defs(root: &Path) -> String {
         for a in at {
             s.push_str(&format!("  {a}\n"));
         }
+    }
+    s.push_str(&sizes(root, &files));
+    s
+}
+
+/// Files that big (the code before tests) are named by `qa defs`: one to split.
+pub const BIG_FILE: usize = 2_500;
+
+/// The fields of `struct App`, and every file whose code before its tests is over
+/// `BIG_FILE` lines (Round 035's measures of state and file size).
+fn sizes(root: &Path, files: &[PathBuf]) -> String {
+    let app = fs::read_to_string(root.join("crates/xdevcmd/src/app.rs")).unwrap_or_default();
+    let fields = app
+        .lines()
+        .skip_while(|l| !l.starts_with("pub struct App {"))
+        .skip(1)
+        .take_while(|l| !l.starts_with('}'))
+        .filter(|l| {
+            let t = l.trim_start();
+            let t = t
+                .strip_prefix("pub ")
+                .or_else(|| t.strip_prefix("pub(crate) "))
+                .unwrap_or(t);
+            l.starts_with("    ")
+                && !l.starts_with("     ")
+                && t.split_once(':').is_some_and(|(n, _)| {
+                    !n.is_empty()
+                        && n.chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                })
+        })
+        .count();
+    let mut s = format!("struct App fields: {fields}\nfiles over {BIG_FILE} lines of code:\n");
+    let mut big: Vec<(usize, String)> = files
+        .iter()
+        .filter_map(|f| {
+            let n = before_tests(&fs::read_to_string(f).ok()?).lines().count();
+            (n > BIG_FILE).then(|| (n, f.strip_prefix(root).unwrap_or(f).display().to_string()))
+        })
+        .collect();
+    big.sort_by(|a, b| b.cmp(a));
+    for (n, f) in big {
+        s.push_str(&format!("  {f}: {n}\n"));
     }
     s
 }
@@ -726,6 +789,32 @@ mod tests {
 
     /// The real files parse: every data-safety case is found, and the runs file's
     /// header is the columns.
+    #[test]
+    fn sizes_count_app_fields_and_name_big_files_without_their_tests() {
+        let root = std::env::temp_dir().join(format!("qa-sizes-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let src = root.join("crates/xdevcmd/src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("app.rs"),
+            "pub struct App {\n    pub a: u8,\n    b: Vec<\n        u8,\n    >,\n    // c: no\n    pub(crate) d_2: (),\n}\nstruct Other {\n    e: u8,\n}\n",
+        )
+        .unwrap();
+        let code = "fn f() {}\n".repeat(BIG_FILE + 1);
+        let tests = "#[cfg(test)]\nmod tests {\n".to_string() + &"\n".repeat(BIG_FILE);
+        fs::write(src.join("big.rs"), &code).unwrap();
+        fs::write(src.join("small.rs"), "fn g() {}\n".to_string() + &tests).unwrap();
+        let files = vec![src.join("app.rs"), src.join("big.rs"), src.join("small.rs")];
+        let got = sizes(&root, &files);
+        assert!(got.contains("struct App fields: 3\n"), "{got}");
+        assert!(
+            got.contains(&format!("crates/xdevcmd/src/big.rs: {}", BIG_FILE + 1)),
+            "{got}"
+        );
+        assert!(!got.contains("small.rs"), "{got}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn the_real_cases_and_runs_files_parse() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();

@@ -83,7 +83,9 @@ step 7's on Windows). Second window: `xtask try --kill-when C`; in xdevcmd: F5 o
 again with the same `--launch` line and press **C**: "1 found different … copied again".
 
 **9. Check every file**: `xtask try --check`. The last line must be
-**PASS: every copy whole, no file lost or wrong**. Then `xtask try --clean`.
+**PASS: every copy whole, no file lost or wrong**; it is saved as `check-<os>-<time>.txt`
+beside `xdevcmd-try`. To record the run: `xtask manual log`, and answer its questions
+(Enter takes what it offers). Then `xtask try --clean`.
 
 **10. Use it for a week** for your normal file work, where you would use Explorer,
 Finder, mc or Total Commander: copies and moves onto folders that share some names, F8

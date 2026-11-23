@@ -1241,6 +1241,17 @@ fn today() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// Now in UTC as `YYYYMMDD-HHMM`, for a file name.
+fn stamp() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (y, m, d) = civil((secs / 86_400) as i64);
+    let (h, min) = ((secs % 86_400) / 3600, (secs % 3600) / 60);
+    format!("{y:04}{m:02}{d:02}-{h:02}{min:02}")
+}
+
 /// Howard Hinnant's days-from-civil, inverted.
 fn civil(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;

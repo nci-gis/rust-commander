@@ -59,10 +59,14 @@ header. The kit writes it for you, checked as the ledger will check it:
 ```bash
 xtask manual list                       # the cases, and what xtask try does for each
 xtask manual show M-DS-01               # one case
-xtask try --check > check-a.txt         # after the run: keep what --check said
-xtask manual log M-DS-01 PASS --check check-a.txt
-xtask manual log M-DS-06 WAIVED --note "no NFS server"
+xtask try --check                       # after the run: saves check-<os>-<time>.txt beside the sandbox
+xtask manual log                        # guided: pick the cases, P/F/W each, a note; Enter takes the offer
 ```
+
+The guided log offers the disk cases the newest saved check says were done, with their
+result, and fills in that check file, the terminal and the shell. One case by flags still
+works: `xtask manual log M-DS-01 PASS --check check-macos-20261123-0950.txt`, or
+`xtask manual log M-DS-06 WAIVED --note "no NFS server"`.
 
 It refuses a row that would not count (a disk case without `--check` saying PASS, a
 waiver without a reason, a build of uncommitted code) and appends it to this file

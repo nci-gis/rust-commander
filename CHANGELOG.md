@@ -70,6 +70,10 @@ that heading and starts a new, empty one here. -->
 - **The job box counts files as well as bytes** ("503 of 50000 files · 2.7 M of 195 M"),
   and a long network error no longer hides which try it is: the line is cut at the end
   of the error, "(3 of 5)" kept.
+- **Recording a hand test is two commands**: `xtask try --check` saves its output beside
+  the sandbox, and `xtask manual log` with no arguments asks for the cases (offering those
+  the check says were done), a result each and a note, and fills in the check file, the
+  terminal and the shell.
 - **Check C says how many it found different, first**: "3 found different and copied
   again; 2001 copied …". The count sat in the middle of the line, which the status line
   elides on a terminal of usual width, so several tampered copies read as "(…)".

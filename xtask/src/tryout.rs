@@ -180,6 +180,12 @@ pub fn run(args: &[String], version: &str) -> i32 {
         Some(w) => find(&dir).and_then(|root| match w {
             "--check" => check(&root).map(|r| {
                 print!("{}", r.text());
+                // Saved beside the sandbox, for `xtask manual log` (the owner: typing
+                // a file name per case was the hard part).
+                match save_check(&checks_dir(&root), &r.text()) {
+                    Ok(p) => println!("saved: {}", p.display()),
+                    Err(e) => eprintln!("not saved: {e}"),
+                }
                 i32::from(r.failed())
             }),
             "--tamper" => tamper(&root).map(|p| {
@@ -553,6 +559,42 @@ fn state(path: &Path, len: u64, sha: &str) -> Result<bool, String> {
         Ok(_) => Err(format!("{}: other bytes than its source", path.display())),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Where `--check` saves its output: the folder that holds the sandbox, so `--clean`
+/// never takes it, and where `xtask manual log` looks.
+pub fn checks_dir(root: &Path) -> PathBuf {
+    root.parent()
+        .map_or_else(|| root.to_path_buf(), Path::to_path_buf)
+}
+
+/// The sandbox `dir` names (as `--dir` does), if any.
+pub fn sandbox_in(dir: &Path) -> Option<PathBuf> {
+    find(dir).ok()
+}
+
+/// `text` in a new `check-<os>-<UTC time>.txt` in `dir`; never over an earlier one.
+fn save_check(dir: &Path, text: &str) -> io::Result<PathBuf> {
+    let base = format!("check-{}-{}", crate::manual::os(), crate::stamp());
+    for n in 1..100 {
+        let name = if n == 1 {
+            format!("{base}.txt")
+        } else {
+            format!("{base}-{n}.txt")
+        };
+        let p = dir.join(name);
+        match File::options().write(true).create_new(true).open(&p) {
+            Ok(mut f) => {
+                f.write_all(text.as_bytes()).map_err(at(&p))?;
+                return Ok(p);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(at(&p)(e)),
+        }
+    }
+    Err(io::Error::other(format!(
+        "{base}: 99 files of that name already"
+    )))
 }
 
 pub fn check(root: &Path) -> io::Result<Report> {
@@ -1519,6 +1561,25 @@ mod tests {
             2,
             "nothing written outside"
         );
+        let _ = fs::remove_dir_all(&t);
+    }
+    #[test]
+    fn a_check_is_saved_beside_the_sandbox_never_over_another() {
+        let t = top("save-check");
+        let root = t.join(NAME);
+        fs::create_dir_all(&root).unwrap();
+        let dir = checks_dir(&root);
+        assert_eq!(dir, t);
+        let a = save_check(&dir, "PASS: one\n").unwrap();
+        let b = save_check(&dir, "PASS: two\n").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(fs::read_to_string(&a).unwrap(), "PASS: one\n");
+        assert_eq!(fs::read_to_string(&b).unwrap(), "PASS: two\n");
+        assert!(a
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("check-"));
         let _ = fs::remove_dir_all(&t);
     }
 

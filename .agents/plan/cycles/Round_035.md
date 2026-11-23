@@ -41,7 +41,7 @@ control characters in names, refusal messages).
 | `qa defs` control characters in names | 10 | **≤ 2** |
 | `qa defs` home and state folders | 6 | **1** |
 | `qa defs` journal kinds | 1 | 1 |
-| `qa defs` display width and text fit (W1) | 6 (`format.rs` ×4, `commands.rs::width`, `links.rs::fit`) | **4, all in `format.rs`** |
+| `qa defs` display width and text fit (W1) | 8 (`format.rs` ×6, `commands.rs::width`, `links.rs::fit`) | **6, all in `format.rs`** |
 | `qa defs` chars counted (W1; a width when it sizes a column) | 40 | none used as a width (the rest named in W2's PR) |
 | `qa defs` `struct App` fields | 85 | < 60 (stretch < 40) |
 | `qa defs` files over 2,500 lines of code before tests | `ops.rs` 3,597 (6,565 with tests) | none |

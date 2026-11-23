@@ -41,9 +41,10 @@ control characters in names, refusal messages).
 | `qa defs` control characters in names | 10 | **≤ 2** |
 | `qa defs` home and state folders | 6 | **1** |
 | `qa defs` journal kinds | 1 | 1 |
-| display width and text fit | not in `qa defs`; `format.rs` (4 fns) plus `commands.rs::width`, `links.rs::fit`, and 41 `.chars().count()` in `crates/xdevcmd/src` (some are widths) | **one module**; no `.chars().count()` used as a width |
-| `struct App` fields | 85 | < 60 (stretch < 40) |
-| `ops.rs` lines | 6,565 | no file over 2,500 |
+| `qa defs` display width and text fit (W1) | 6 (`format.rs` ×4, `commands.rs::width`, `links.rs::fit`) | **4, all in `format.rs`** |
+| `qa defs` chars counted (W1; a width when it sizes a column) | 40 | none used as a width (the rest named in W2's PR) |
+| `qa defs` `struct App` fields | 85 | < 60 (stretch < 40) |
+| `qa defs` files over 2,500 lines of code before tests | `ops.rs` 3,597 (6,565 with tests) | none |
 | deleted / added lines in `src` | 0.235 (#46–#65) | higher |
 
 ## Plan

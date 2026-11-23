@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use xdevcmd_core::format::Cells;
 
 /// A path in a line, that exists.
 #[derive(Debug, Clone, PartialEq)]
@@ -246,7 +247,7 @@ impl Said {
     /// path gives up its middle, as much as the whole needs and never below half the
     /// line; what still does not fit is cut at the end as before.
     pub fn fit(&self, width: usize) -> String {
-        let n = |s: &str| s.chars().count();
+        let n = |s: &str| s.cells();
         let total = n(&self.before) + n(&self.path) + n(&self.after);
         if total <= width {
             return self.text();
@@ -290,6 +291,23 @@ pub fn describe(l: &Link) -> Said {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Round 035, W2: `fit` counted characters, so a path of wide (CJK) letters
+    /// outgrew the line it was fitted to.
+    #[test]
+    fn a_wide_path_is_fitted_to_columns() {
+        let said = Said {
+            before: "→ ".into(),
+            path: "/home/ユーザー/プロジェクト/ドキュメント/設計書.md:12".into(),
+            after: "  Enter opens".into(),
+        };
+        // Wide enough that the path, not the end of the line, gives up the rest.
+        for width in [32, 40, 50, 60] {
+            let got = said.fit(width);
+            let cells = xdevcmd_core::format::text_cells(&got);
+            assert!(cells <= width, "{width} columns, got {cells}: {got}");
+        }
+    }
 
     /// A small tree of its own for each test: they run at once.
     fn tree(name: &str) -> PathBuf {

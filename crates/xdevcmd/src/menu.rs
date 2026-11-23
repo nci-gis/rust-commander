@@ -5,6 +5,7 @@
 //! does exactly what its key does, through the same code path.
 
 use std::path::PathBuf;
+use xdevcmd_core::format::Cells;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
@@ -309,16 +310,11 @@ impl Menu {
         let label_w = self
             .items
             .iter()
-            .map(|i| i.label.chars().count())
+            .map(|i| i.label.cells())
             .max()
             .unwrap_or(0);
-        let hint_w = self
-            .items
-            .iter()
-            .map(|i| i.hint.chars().count())
-            .max()
-            .unwrap_or(0);
-        let title_w = self.title.as_ref().map_or(0, |t| t.chars().count() + 4);
+        let hint_w = self.items.iter().map(|i| i.hint.cells()).max().unwrap_or(0);
+        let title_w = self.title.as_ref().map_or(0, |t| t.cells() + 4);
         let inner_w = (label_w + hint_w + 5).max(title_w).max(22) as u16;
         let w = (inner_w + 2).min(screen.width);
         let h = (self.items.len() as u16 + 2).min(screen.height);
@@ -385,8 +381,8 @@ impl Menu {
                 (false, false) => (th.fg_dim, th.bg_panel),
             };
             buf.set_style(row, Style::new().bg(bg));
-            let gap = (inner.width as usize)
-                .saturating_sub(item.label.chars().count() + item.hint.chars().count() + 2);
+            let gap =
+                (inner.width as usize).saturating_sub(item.label.cells() + item.hint.cells() + 2);
             let line = Line::from(vec![
                 Span::styled(format!(" {}", item.label), Style::new().fg(fg)),
                 Span::raw(" ".repeat(gap)),
@@ -421,6 +417,30 @@ mod tests {
             ],
             (0, 0),
         )
+    }
+
+    /// Round 035, W2: the box was sized by counting characters, so a wide (CJK) label
+    /// outgrew it and its hint was cut. It is sized in columns, as the terminal draws.
+    #[test]
+    fn a_wide_label_fits_its_box_with_its_hint() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let label = "ファイルを表示する名前の長い項目";
+        let mut m = Menu::new(
+            None,
+            vec![Item::act(label, "F3", Action::View, true)],
+            (0, 0),
+        );
+        let mut t = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        let frame = t.draw(|f| m.render(f, f.area())).unwrap();
+        let b = &frame.buffer;
+        let row: String = (0..80).map(|x| b.cell((x, 1)).unwrap().symbol()).collect();
+        assert!(row.contains("F3"), "{row}");
+        let label_cells = xdevcmd_core::format::text_cells(label) as u16;
+        let right = (0..80u16)
+            .rev()
+            .find(|&x| b.cell((x, 1)).unwrap().symbol() == "│")
+            .unwrap();
+        assert!(right >= label_cells + 2 + 2, "the box (right edge {right}) is narrower than its label ({label_cells} columns): {row}");
     }
 
     #[test]

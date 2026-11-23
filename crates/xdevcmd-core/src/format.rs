@@ -64,25 +64,26 @@ pub fn elide_middle(s: &str, width: usize) -> String {
 /// start gets the odd column; columns a wide character could not use go to the end.
 pub fn elided(s: &str, width: usize) -> Option<(usize, usize)> {
     let chars: Vec<char> = s.chars().collect();
-    if chars.iter().map(|&c| cells(c)).sum::<usize>() <= width {
+    if chars.iter().map(|&c| char_cells(c)).sum::<usize>() <= width {
         return None;
     }
     let keep = width.saturating_sub(1);
     let mut head = 0;
     let mut used = 0;
-    while head < chars.len() && used + cells(chars[head]) <= keep.div_ceil(2) {
-        used += cells(chars[head]);
+    while head < chars.len() && used + char_cells(chars[head]) <= keep.div_ceil(2) {
+        used += char_cells(chars[head]);
         head += 1;
     }
     let room = keep - used;
     let mut tail = 0;
     let mut tail_used = 0;
-    while tail < chars.len() - head && tail_used + cells(chars[chars.len() - 1 - tail]) <= room {
-        tail_used += cells(chars[chars.len() - 1 - tail]);
+    while tail < chars.len() - head && tail_used + char_cells(chars[chars.len() - 1 - tail]) <= room
+    {
+        tail_used += char_cells(chars[chars.len() - 1 - tail]);
         tail += 1;
     }
     // An accent whose letter did not fit is not shown on its own.
-    while tail > 0 && cells(chars[chars.len() - tail]) == 0 {
+    while tail > 0 && char_cells(chars[chars.len() - tail]) == 0 {
         tail -= 1;
     }
     Some((head, tail))
@@ -107,13 +108,51 @@ pub fn fit_end(s: &str, width: usize) -> String {
     out
 }
 
-/// Columns a string takes on the terminal.
+/// Columns a string takes on the terminal. The one measure of text on screen: a CJK
+/// character takes two columns, a combining accent none. Never `chars().count()` for a
+/// width (Round 035, W2).
 pub fn text_cells(s: &str) -> usize {
-    s.chars().map(cells).sum()
+    s.chars().map(char_cells).sum()
 }
 
-fn cells(c: char) -> usize {
+/// `.cells()`: the columns of a `str` (or a `String`) on the terminal, as
+/// [`text_cells`]; read where a width is wanted, as `.chars().count()` was.
+pub trait Cells {
+    fn cells(&self) -> usize;
+}
+
+impl Cells for str {
+    fn cells(&self) -> usize {
+        text_cells(self)
+    }
+}
+
+/// Columns one character takes on the terminal: 2 for a wide one, 0 for an accent.
+pub fn char_cells(c: char) -> usize {
     unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// `s` cut to `width` columns, with `…` where it was cut: the end gives way. As
+/// [`elide_middle`], which keeps both ends, for text whose start says what it is.
+pub fn cut_end(s: &str, width: usize) -> String {
+    if text_cells(s) <= width {
+        return s.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let cw = char_cells(c);
+        if used + cw > width - 1 {
+            break;
+        }
+        out.push(c);
+        used += cw;
+    }
+    out.push('\u{2026}');
+    out
 }
 
 /// Make one line of a file safe to draw: tabs become spaces on a fixed grid, and other
@@ -144,6 +183,16 @@ pub fn display_line(s: &str, tab: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cut_end_counts_columns_so_wide_characters_fit() {
+        // Six CJK characters are twelve columns: cut to seven, five fit with the `…`.
+        let c = cut_end("日本語のコマ", 7);
+        assert_eq!(c, "日本語\u{2026}");
+        assert!(text_cells(&c) <= 7);
+        assert_eq!(cut_end("日本語", 6), "日本語");
+        assert_eq!(cut_end("copy", 3), "co\u{2026}");
+    }
 
     #[test]
     fn small_sizes_stay_exact() {

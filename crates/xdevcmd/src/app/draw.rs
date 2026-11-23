@@ -1,6 +1,7 @@
 //! Drawing: the menu bar, the frame, the status line and the key footer.
 
 use super::*;
+use xdevcmd_core::format::Cells;
 
 impl App {
     /// What the drop-down for menu `i` holds, built from the keymap and the mode in
@@ -137,7 +138,7 @@ impl App {
         let mut x = area.x + 1;
         for (i, title) in BAR.iter().enumerate() {
             let text = format!(" {title} ");
-            let w = text.chars().count() as u16;
+            let w = text.cells() as u16;
             if x + w > area.x + area.width {
                 break;
             }
@@ -157,7 +158,7 @@ impl App {
         // names the xdevcmd it came from by this number (main.rs, `own_panel`). Dim, and
         // only where the menus leave room.
         let me = format!("xdevcmd {} ", std::process::id());
-        let w = me.chars().count() as u16;
+        let w = me.cells() as u16;
         let end = area.x + area.width;
         if x + 2 + w <= end {
             buf.set_line(
@@ -463,7 +464,7 @@ impl App {
         // An open two-key group is shown the same way, in the accent colour, so a key
         // waiting for its second is never a surprise.
         let group = self.group_badge();
-        let badges = badge.chars().count() + group.as_ref().map_or(0, |g| g.chars().count() + 1);
+        let badges = badge.cells() + group.as_ref().map_or(0, |g| g.cells() + 1);
         let left = format!("{}{left}", " ".repeat(badges));
         let right = format!("{} ", self.status);
 
@@ -472,7 +473,7 @@ impl App {
         let avail = area.width as usize;
         // The right half (messages) wins space, but a gap of two is always kept between
         // them: with both halves long they otherwise ran together, "…historytoo small".
-        let rw = right.chars().count().min(avail.saturating_sub(3));
+        let rw = right.cells().min(avail.saturating_sub(3));
         let lw = avail.saturating_sub(rw + 2);
         let gap = avail.saturating_sub(lw + rw).min(2);
         buf.set_line(
@@ -510,7 +511,7 @@ impl App {
         }
         if let Some(g) = group {
             let th = theme::t();
-            let x = area.x + badge.chars().count() as u16;
+            let x = area.x + badge.cells() as u16;
             frame.buffer_mut().set_line(
                 x,
                 area.y,
@@ -570,7 +571,7 @@ impl App {
                 .strip_prefix('F')
                 .filter(|d| d.parse::<u8>().is_ok())
                 .unwrap_or(&key);
-            let w = (k.chars().count() + label.chars().count() + 3) as u16;
+            let w = (k.cells() + label.cells() + 3) as u16;
             if cx + w > area.x + area.width {
                 break;
             }

@@ -5,6 +5,7 @@
 //! up, which is the point: nothing is overwritten or deleted until a key is pressed.
 
 use std::path::PathBuf;
+use xdevcmd_core::format::Cells;
 
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
@@ -910,7 +911,7 @@ pub(crate) fn buttons(
     for (key, label, colour) in items {
         let k = format!("[{key}]");
         let l = format!(" {label}");
-        let w = (k.chars().count() + l.chars().count()) as u16;
+        let w = (k.cells() + l.cells()) as u16;
         rects.push(Rect::new(cx, y, w.min((x + width).saturating_sub(cx)), 1));
         cx += w + 2;
         spans.push(Span::styled(
@@ -957,7 +958,7 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     let accent = if a.danger { th.err } else { th.accent };
     let shown = a.body.len().min(area.height.saturating_sub(6) as usize);
     let need = |l: &String| {
-        let n = l.chars().count();
+        let n = l.cells();
         if l.trim().contains(' ') {
             n.min(PROSE_WIDTH)
         } else {
@@ -1056,7 +1057,7 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     };
     if let Some(note) = &a.footnote {
         // Right-aligned, and only where it clears the buttons.
-        let len = note.chars().count() as u16;
+        let len = note.cells() as u16;
         let x = inner.right().saturating_sub(len);
         if a.buttons.iter().all(|b| b.right() < x) {
             frame
@@ -1073,8 +1074,8 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
     let w = c
         .body
         .iter()
-        .map(|l| l.chars().count())
-        .chain(std::iter::once(c.title.chars().count() + 8))
+        .map(|l| l.cells())
+        .chain(std::iter::once(c.title.cells() + 8))
         .max()
         .unwrap_or(40)
         .clamp(40, 100) as u16

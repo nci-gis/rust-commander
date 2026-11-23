@@ -64,21 +64,13 @@ impl Saved {
     }
 }
 
-/// `$XDEVCMD_STATE`, then `$XDG_STATE_HOME/xdevcmd`, `%LOCALAPPDATA%\xdevcmd` on Windows, then
-/// `~/.local/state/xdevcmd`.
+/// `$XDEVCMD_STATE` (the session file itself), else `session.toml` in the state folder
+/// ([`xdevcmd_core::dirs::state_dir`]).
 pub fn default_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("XDEVCMD_STATE").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
-    if let Some(x) = std::env::var_os("XDG_STATE_HOME").filter(|p| !p.is_empty()) {
-        return Some(PathBuf::from(x).join("xdevcmd").join("session.toml"));
-    }
-    if cfg!(windows) {
-        if let Some(a) = std::env::var_os("LOCALAPPDATA") {
-            return Some(PathBuf::from(a).join("xdevcmd").join("session.toml"));
-        }
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/xdevcmd/session.toml"))
+    xdevcmd_core::dirs::state_dir().map(|d| d.join("session.toml"))
 }
 
 /// Read the last session. Anything wrong — missing, unreadable, a version from some

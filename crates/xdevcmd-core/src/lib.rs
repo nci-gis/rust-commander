@@ -14,6 +14,7 @@ pub mod color;
 pub mod compare;
 pub mod controls;
 pub mod debuglog;
+pub mod dirs;
 pub mod document;
 pub mod entry;
 pub mod fastcopy;

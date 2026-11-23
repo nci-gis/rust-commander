@@ -977,22 +977,13 @@ pub(crate) fn color_name(c: Color) -> String {
     }
 }
 
-/// Where the config is looked for, first match wins.
+/// Where the config is looked for, first match wins: `$XDEVCMD_CONFIG`, else
+/// `config.toml` in the config folder ([`xdevcmd_core::dirs::config_dir`]).
 pub fn default_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("XDEVCMD_CONFIG").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
-    if let Some(x) = std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()) {
-        return Some(PathBuf::from(x).join("xdevcmd").join("config.toml"));
-    }
-    if cfg!(windows) {
-        if let Some(a) = std::env::var_os("APPDATA") {
-            return Some(PathBuf::from(a).join("xdevcmd").join("config.toml"));
-        }
-    }
-    // macOS included: terminal tools conventionally live in ~/.config, not in
-    // ~/Library/Application Support, and that is where a user will look.
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/xdevcmd/config.toml"))
+    xdevcmd_core::dirs::config_dir().map(|d| d.join("config.toml"))
 }
 
 /// What happened when loading, so the UI can say it.

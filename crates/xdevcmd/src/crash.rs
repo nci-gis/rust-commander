@@ -146,10 +146,9 @@ fn write_in(dir: &Path, text: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-/// The user's home directory, as the system names it.
+/// The user's home directory, as the rest of xdevcmd finds it.
 fn home() -> Option<String> {
-    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    std::env::var(var).ok()
+    xdevcmd_core::dirs::home().map(|h| h.to_string_lossy().into_owned())
 }
 
 /// `text` with every mention of `home` written `~`. A home of `/` or shorter says

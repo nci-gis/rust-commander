@@ -483,6 +483,10 @@ pub struct Job {
     pub buttons: Vec<Rect>,
     /// The answers on the question box, when one is up.
     pub answer_buttons: Vec<(Answer, Rect)>,
+    /// Failed files the user skipped, and what the last Retry or Skip did, shown for a
+    /// few seconds: the two felt the same with a share down (the owner, 2026-11-23).
+    pub skipped_failed: u64,
+    pub said: Option<(String, std::time::Instant)>,
 }
 
 impl Job {
@@ -502,6 +506,8 @@ impl Job {
             rate: Default::default(),
             buttons: Vec::new(),
             answer_buttons: Vec::new(),
+            skipped_failed: 0,
+            said: None,
         }
     }
 
@@ -577,8 +583,33 @@ impl Job {
     }
 
     pub fn answer(&mut self, a: Answer) {
+        if let Some(Question::Failed { path, .. }) = &self.question {
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let said = match a {
+                Answer::Skip | Answer::SkipAll => {
+                    self.skipped_failed += 1;
+                    Some(format!("skipped {name}: going on with the next file"))
+                }
+                Answer::Retry => Some(format!("trying {name} again")),
+                _ => None,
+            };
+            self.said = said.map(|t| (t, std::time::Instant::now()));
+        }
         self.handle.answer(a);
         self.question = None;
+    }
+
+    /// What the last Retry or Skip did, for five seconds after it.
+    pub fn said_line(&self, now: std::time::Instant) -> Option<&str> {
+        self.said
+            .as_ref()
+            .filter(|(_, at)| {
+                now.saturating_duration_since(*at) < std::time::Duration::from_secs(5)
+            })
+            .map(|(t, _)| t.as_str())
     }
 
     /// The retry line cut to `width` columns at the end of the error, never in the
@@ -722,10 +753,25 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
                 "Deleting permanently cannot be undone.".to_string(),
             ],
         ),
-        Question::Failed { path, error } => (
-            "Failed".to_string(),
-            vec![path.display().to_string(), String::new(), error.clone()],
-        ),
+        Question::Failed { path, error } => {
+            let mut body = vec![
+                path.display().to_string(),
+                String::new(),
+                error.clone(),
+                String::new(),
+                "R tries this file again (five more tries). S leaves it and goes on with the next"
+                    .to_string(),
+                "file; it is not copied. Esc stops the job.".to_string(),
+            ];
+            // The engine's words for a network error it tried again and again.
+            if error.contains("a network error") {
+                body.push(
+                    "The share looks down: S will most likely meet the same error on the next file."
+                        .to_string(),
+                );
+            }
+            ("Failed".to_string(), body)
+        }
         Question::NoJournal { error } => (
             "Safe operations: no journal".to_string(),
             vec![
@@ -1127,7 +1173,9 @@ fn render_input(frame: &mut Frame, area: Rect, i: &mut Input) {
 
 fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
     let th = theme::t();
-    let r = centered(area, 74, 8);
+    // 74 columns on a small terminal, more on a wide one (to 120): a long path or a
+    // Windows network error read whole once the window is made wider (the owner).
+    let r = centered(area, area.width.saturating_sub(8).clamp(74, 120), 8);
     let inner = frame_box(
         frame,
         r,
@@ -1179,6 +1227,9 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                         human_size(j.bytes_done),
                         human_size(j.total_bytes)
                     );
+                    if j.skipped_failed > 0 {
+                        s.push_str(&format!(" · {} skipped", j.skipped_failed));
+                    }
                     if let Some(left) = j
                         .rate
                         .left(std::time::Instant::now(), (j.total_bytes, j.total_files))
@@ -1189,9 +1240,11 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 },
                 Style::new().fg(th.fg_dim),
             );
-            if let Some(line) = j.retrying_line_fit(std::time::Instant::now(), inner.width as usize)
-            {
+            let now = std::time::Instant::now();
+            if let Some(line) = j.retrying_line_fit(now, inner.width as usize) {
                 put(frame, inner, 2, &line, Style::new().fg(th.mark));
+            } else if let Some(line) = j.said_line(now) {
+                put(frame, inner, 2, line, Style::new().fg(th.mark));
             }
         }
     }
@@ -1331,6 +1384,96 @@ mod tests {
         .unwrap();
         j.pump();
         assert!(j.retrying_line(at).is_none());
+    }
+
+    /// The owner (2026-11-23): a network error was still cut on a wide terminal, the
+    /// job box a fixed 74 columns. It grows with the terminal, to a limit.
+    #[test]
+    fn the_job_box_grows_with_a_wide_terminal() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Retrying {
+            path: PathBuf::from(r"\\server\share\tree\d000\f0421"),
+            error: "The network path was not found. (os error 53)".into(),
+            attempt: 4,
+            of: 5,
+            wait: std::time::Duration::from_secs(5),
+        })
+        .unwrap();
+        j.pump();
+        let mut text = |w: u16| {
+            let mut t = Terminal::new(TestBackend::new(w, 20)).unwrap();
+            let frame = t.draw(|f| render_job(f, f.area(), &mut j)).unwrap();
+            let b = &frame.buffer;
+            (0..b.area.height)
+                .map(|y| {
+                    (0..b.area.width)
+                        .map(|x| b.cell((x, y)).unwrap().symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let wide = text(140);
+        assert!(
+            wide.contains("(4 of 5): The network path was not found. (os error 53)"),
+            "{wide}"
+        );
+        // Small terminals keep the box they had; the line is cut at its end there.
+        let small = text(80);
+        assert!(
+            small.contains("(4 of 5)") && !small.contains("(os error 53)"),
+            "{small}"
+        );
+    }
+
+    /// The owner (2026-11-23): Retry and Skip felt the same, a network share down. The
+    /// question says what each does, a share that looks down says that Skip meets the
+    /// same error next, and after a Skip the box counts it and says so.
+    #[test]
+    fn retry_and_skip_say_what_each_does_and_a_skip_shows() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        let q = Question::Failed {
+            path: PathBuf::from("/mnt/share/tree/d000/f0421"),
+            error: "The network path was not found. (a network error: tried 6 times)".into(),
+        };
+        let body = question_text(&q).1.join("\n");
+        assert!(body.contains("R tries this file again"), "{body}");
+        assert!(
+            body.contains("S leaves it and goes on with the next"),
+            "{body}"
+        );
+        assert!(body.contains("the same error on the next file"), "{body}");
+        let local = question_text(&Question::Failed {
+            path: PathBuf::from("/tmp/f"),
+            error: "Permission denied".into(),
+        })
+        .1
+        .join("\n");
+        assert!(
+            !local.contains("the same error on the next file"),
+            "{local}"
+        );
+        tx.send(ops::Event::Ask(q)).unwrap();
+        j.pump();
+        j.answer(Answer::Skip);
+        let mut t = Terminal::new(TestBackend::new(140, 20)).unwrap();
+        let frame = t.draw(|f| render_job(f, f.area(), &mut j)).unwrap();
+        let b = &frame.buffer;
+        let text: String = (0..b.area.height)
+            .map(|y| {
+                (0..b.area.width)
+                    .map(|x| b.cell((x, y)).unwrap().symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        assert!(text.contains("1 skipped"), "{text}");
+        assert!(
+            text.contains("skipped f0421: going on with the next file"),
+            "{text}"
+        );
     }
 
     /// "設計書" from column 2: 書 covers columns 6 and 7. A box from column 7 would lose

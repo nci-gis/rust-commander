@@ -255,3 +255,14 @@ not much inconvenient now)", after the hand test of two interrupted jobs; and th
 deferrals the owner chose before the freeze (H-06, cosf #12, E01–E07).
 **What**: `plan/ROADMAP.md` gets a section "After beta.2: 0.4.x" with those items.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-23: "skip all" for failed files, in the 0.4.x backlog
+
+**Source**: the owner, 2026-11-23: "okay, ghi vào backlog nhé bro", after the hand test
+of a network share pulled mid-copy (Retry and Skip felt the same).
+**What**: one row in `plan/ROADMAP.md`, "After beta.2: 0.4.x", then reworded with the owner
+the same day: Skip all told apart from R, S, Pause and Esc; and "several interrupted
+jobs" widened into **Pending tasks** (pause, a list of jobs not finished, manual resume),
+the owner's design; the list also shows background jobs, to bring one back (the owner
+chose this over a separate command before the cut).
+**Promoted by**: XDevTeam (approval = merging this branch). Written by Claude Code.

@@ -3,6 +3,9 @@
 //! ```text
 //! xtask manual list                 the cases, with what `xtask try` does for each
 //! xtask manual show M-DS-NN         one case: setup, steps, expected, fail if
+//! xtask manual log                guided: the cases, their results, a note; the
+//!                                   newest saved `xtask try --check`, terminal and
+//!                                   shell filled in
 //! xtask manual log M-DS-NN RESULT [--check FILE] [--evidence FILE] [--issue N]
 //!                  [--note TEXT] [--terminal T] [--shell S] [--to FILE]
 //!                                   one row for runs.tsv, checked as `qa ledger` will
@@ -14,7 +17,7 @@
 //! commit this xtask was built from: use the xtask that came with the xdevcmd you test.
 
 use std::collections::BTreeMap;
-use std::io::Write as _;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::qa::{self, COLUMNS, DISK, RUNS};
@@ -36,6 +39,7 @@ fn with_try(case: &str) -> Option<&'static str> {
 
 const USAGE: &str = "usage: xtask manual list
        xtask manual show M-DS-NN
+       xtask manual log            (guided: asks for the cases, results and a note)
        xtask manual log M-DS-NN PASS|FAIL|WAIVED [--check FILE] [--evidence FILE]
                         [--issue N] [--note TEXT] [--terminal T] [--shell S] [--to FILE]";
 
@@ -55,6 +59,32 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 2
             }
         },
+        Some("log") if args.len() == 1 => {
+            let here = std::env::current_dir().unwrap_or_default();
+            let dir = crate::tryout::sandbox_in(&here)
+                .map_or(here, |root| crate::tryout::checks_dir(&root));
+            let stdin = std::io::stdin();
+            let mut out = std::io::stdout();
+            match ask_rows(&mut stdin.lock(), &mut out, &dir, &detected()) {
+                Ok(rows) => {
+                    let mut bad = 0;
+                    for a in &rows {
+                        match log(a, version) {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => {
+                                bad += 1;
+                                eprintln!("manual log {}: {e}", a.case);
+                            }
+                        }
+                    }
+                    i32::from(bad > 0) * 2
+                }
+                Err(e) => {
+                    eprintln!("manual log: {e}");
+                    2
+                }
+            }
+        }
         Some("log") if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) => {
             println!("{USAGE}");
             0
@@ -195,7 +225,216 @@ fn check_said(text: &str, case: &str) -> Option<&'static str> {
     }
 }
 
-fn os() -> &'static str {
+/// The terminal and shell this runs in, as well as the environment tells.
+fn detected() -> (String, String) {
+    let env = |k: &str| std::env::var(k).unwrap_or_default();
+    let terminal = match env("TERM_PROGRAM").as_str() {
+        "Apple_Terminal" => "Terminal.app".to_string(),
+        "" if !env("WT_SESSION").is_empty() => "Windows Terminal".into(),
+        "" => env("TERM"),
+        t => t.to_string(),
+    };
+    // PowerShell 7 puts its own modules first; cmd and Windows PowerShell do not.
+    let shell = if cfg!(windows) && env("PSModulePath").contains("PowerShell\\7") {
+        "pwsh".to_string()
+    } else {
+        let s = env("SHELL");
+        let s = if s.is_empty() { env("ComSpec") } else { s };
+        let name = s.rsplit(['/', '\\']).next().unwrap_or("").to_string();
+        name.strip_suffix(".exe")
+            .map_or(name.clone(), str::to_string)
+    };
+    (terminal, shell)
+}
+
+/// The newest `check-*.txt` in `dir`: what `xtask try --check` saved last.
+fn newest_check(dir: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with("check-") && n.ends_with(".txt")
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .max()
+        .map(|(_, p)| p)
+}
+
+/// One line of an answer; the end of input is an empty answer.
+fn answer(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl Write,
+    q: &str,
+) -> Result<String, String> {
+    write!(out, "{q}")
+        .and_then(|()| out.flush())
+        .map_err(|e| e.to_string())?;
+    let mut l = String::new();
+    input.read_line(&mut l).map_err(|e| e.to_string())?;
+    Ok(l.trim().to_string())
+}
+
+/// The guided `manual log`: which cases, each one's result (a waiver's reason), one
+/// note, the terminal and shell (`found`, to confirm). A disk case takes the newest
+/// saved check in `dir`, and its result is offered from it. Nothing is written here.
+fn ask_rows(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl Write,
+    dir: &Path,
+    found: &(String, String),
+) -> Result<Vec<LogArgs>, String> {
+    let w = |out: &mut dyn Write, s: String| writeln!(out, "{s}").map_err(|e| e.to_string());
+    let ids = qa::case_ids(CASES_MD)?;
+    let title = |id: &str| {
+        CASES_MD
+            .lines()
+            .find_map(|l| l.strip_prefix(&format!("### {id} ")))
+            .unwrap_or("")
+            .to_string()
+    };
+    let check = newest_check(dir);
+    let text = check.as_ref().and_then(|p| std::fs::read_to_string(p).ok());
+    let said = |id: &str| text.as_deref().and_then(|t| check_said(t, id));
+    match &check {
+        Some(p) => {
+            w(out, format!("Check file: {}", p.display()))?;
+            for id in ids.iter().filter(|i| area_of(i).is_some()) {
+                w(
+                    out,
+                    format!(
+                        "  {id} {}: {}",
+                        area_of(id).unwrap_or(""),
+                        said(id).unwrap_or("?")
+                    ),
+                )?;
+            }
+        }
+        None => w(
+            out,
+            format!(
+                "No check-*.txt in {}: run `xtask try --check` first for M-DS-01/03/04.",
+                dir.display()
+            ),
+        )?,
+    }
+    for (n, id) in ids.iter().enumerate() {
+        w(out, format!("  {}  {id}  {}", n + 1, title(id)))?;
+    }
+    // Offered: the disk cases the check says were done here.
+    let offered: Vec<usize> = ids
+        .iter()
+        .enumerate()
+        .filter(|(_, id)| matches!(said(id), Some("PASS" | "FAIL")) && area_of(id).is_some())
+        .map(|(n, _)| n + 1)
+        .collect();
+    let offer = offered
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let q = if offer.is_empty() {
+        "Cases (numbers, e.g. 1,3,4): ".to_string()
+    } else {
+        format!("Cases (numbers, e.g. 1,3,4; Enter = {offer}): ")
+    };
+    let got = answer(input, out, &q)?;
+    let got = if got.is_empty() { offer } else { got };
+    let mut chosen = Vec::new();
+    for t in got.split([',', ' ']).filter(|t| !t.is_empty()) {
+        let id = t
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .and_then(|n| ids.get(n))
+            .or_else(|| ids.iter().find(|i| i.eq_ignore_ascii_case(t)))
+            .ok_or(format!("{t} is not a case: 1-{}", ids.len()))?;
+        if !chosen.contains(id) {
+            chosen.push(id.clone());
+        }
+    }
+    if chosen.is_empty() {
+        return Err("no case chosen".into());
+    }
+    let mut rows = Vec::new();
+    for id in &chosen {
+        let default = match said(id) {
+            Some(r @ ("PASS" | "FAIL")) if area_of(id).is_some() => Some(r),
+            _ => None,
+        };
+        let q = match default {
+            Some(r) => format!("{id} {} [P/F/W; Enter = {r}]: ", title(id)),
+            None => format!("{id} {} [P/F/W]: ", title(id)),
+        };
+        let mut result = None;
+        for _ in 0..3 {
+            let a = answer(input, out, &q)?.to_ascii_uppercase();
+            result = match (a.as_str(), default) {
+                ("", Some(r)) => Some(r.to_string()),
+                ("P" | "PASS", _) => Some("PASS".into()),
+                ("F" | "FAIL", _) => Some("FAIL".into()),
+                ("W" | "WAIVED", _) => Some("WAIVED".into()),
+                _ => None,
+            };
+            if result.is_some() {
+                break;
+            }
+            w(out, "  P, F or W".into())?;
+        }
+        let result = result.ok_or(format!("{id}: no result"))?;
+        if area_of(id).is_some() && result == "PASS" && check.is_none() {
+            w(
+                out,
+                format!("  {id} skipped: a PASS needs `xtask try --check` saved first"),
+            )?;
+            continue;
+        }
+        let mut a = LogArgs {
+            case: id.clone(),
+            result,
+            ..LogArgs::default()
+        };
+        if a.result == "WAIVED" {
+            let why = answer(input, out, "  why waived: ")?;
+            if why.is_empty() {
+                w(out, format!("  {id} skipped: a waiver needs its reason"))?;
+                continue;
+            }
+            a.note = Some(why);
+        }
+        if area_of(id).is_some() {
+            a.check.clone_from(&check);
+        }
+        rows.push(a);
+    }
+    if rows.is_empty() {
+        return Err("nothing to write".into());
+    }
+    let note = answer(input, out, "Note for these rows (Enter = none): ")?;
+    let t = answer(input, out, &format!("Terminal [{}]: ", found.0))?;
+    let sh = answer(input, out, &format!("Shell [{}]: ", found.1))?;
+    for a in &mut rows {
+        if !note.is_empty() {
+            a.note = Some(match a.note.take() {
+                Some(why) => format!("{why}; {note}"),
+                None => note.clone(),
+            });
+        }
+        a.terminal = Some(if t.is_empty() {
+            found.0.clone()
+        } else {
+            t.clone()
+        });
+        a.shell = Some(if sh.is_empty() {
+            found.1.clone()
+        } else {
+            sh.clone()
+        });
+    }
+    Ok(rows)
+}
+
+pub fn os() -> &'static str {
     if cfg!(target_os = "macos") {
         "macos"
     } else if cfg!(windows) {
@@ -260,25 +499,9 @@ fn row(
                 .map(|n| n.to_string_lossy().into_owned())
         })
         .unwrap_or_default();
-    let env = |k: &str| std::env::var(k).unwrap_or_default();
-    let terminal = a.terminal.clone().unwrap_or_else(|| {
-        let t = env("TERM_PROGRAM");
-        if !t.is_empty() {
-            t
-        } else if !env("WT_SESSION").is_empty() {
-            "Windows Terminal".into()
-        } else {
-            env("TERM")
-        }
-    });
-    let shell = a.shell.clone().unwrap_or_else(|| {
-        let s = env("SHELL");
-        if s.is_empty() {
-            env("ComSpec")
-        } else {
-            s
-        }
-    });
+    let (t, sh) = detected();
+    let terminal = a.terminal.clone().unwrap_or(t);
+    let shell = a.shell.clone().unwrap_or(sh);
     let values = [
         today.to_string(),
         commit.to_string(),
@@ -347,6 +570,70 @@ mod tests {
             result: result.into(),
             ..LogArgs::default()
         }
+    }
+
+    /// The guided log (the owner, 2026-11-23: a file name and every field per case was
+    /// too much to type).
+    #[test]
+    fn the_guided_log_offers_what_the_saved_check_did_and_asks_the_rest() {
+        let d = std::env::temp_dir().join(format!("xtask-guided-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let found = ("Terminal.app".to_string(), "zsh".to_string());
+        let ask = |input: &str| {
+            let mut out = Vec::new();
+            let r = ask_rows(&mut input.as_bytes(), &mut out, &d, &found);
+            (r, String::from_utf8(out).unwrap())
+        };
+        // No check saved: a disk case cannot pass, a waiver still can.
+        let (r, said) = ask("1\np\n");
+        assert!(
+            r.is_err() && said.contains("run `xtask try --check` first"),
+            "{said}"
+        );
+        let (r, _) = ask("6\nw\n\n");
+        assert!(r.is_err(), "a waiver with no reason");
+        let rows = ask("6\nw\nno share here\n\n\nbash\n").0.unwrap();
+        assert_eq!(rows.len(), 1);
+        let a = &rows[0];
+        assert_eq!((a.case.as_str(), a.result.as_str()), ("M-DS-06", "WAIVED"));
+        assert_eq!(a.note.as_deref(), Some("no share here"));
+        assert_eq!(
+            (a.terminal.as_deref(), a.shell.as_deref()),
+            (Some("Terminal.app"), Some("bash"))
+        );
+        assert!(a.check.is_none());
+        // A check with A and C done, B not: Enter takes 1 and 4, their results PASS.
+        std::fs::write(
+            d.join("check-macos-20261123-0950.txt"),
+            "PASS     sources unchanged\nPASS     copy of tree/ (check C)\nNOT DONE copy of big/ (check B)\n   8 not copied yet\nPASS     replace-src onto replace-dst (check A)\nno file lost or wrong so far\n",
+        )
+        .unwrap();
+        let (r, said) = ask("\n\n\n5 tampers\n\n\n");
+        let rows = r.unwrap();
+        assert!(said.contains("Enter = 1,4"), "{said}");
+        assert_eq!(
+            rows.iter()
+                .map(|a| (a.case.as_str(), a.result.as_str()))
+                .collect::<Vec<_>>(),
+            [("M-DS-01", "PASS"), ("M-DS-04", "PASS")]
+        );
+        for a in &rows {
+            assert_eq!(
+                a.check.as_deref(),
+                Some(d.join("check-macos-20261123-0950.txt").as_path())
+            );
+            assert_eq!(a.note.as_deref(), Some("5 tampers"));
+            assert_eq!(a.terminal.as_deref(), Some("Terminal.app"));
+            // Each row is one the ledger counts.
+            let text = std::fs::read_to_string(a.check.as_ref().unwrap()).unwrap();
+            assert!(row(a, "0.4.0", "abcdef0", "2026-11-23", Some(&text)).is_ok());
+        }
+        // A wrong answer is asked again; an unknown case is refused.
+        let rows = ask("4\nx\nf\n\n\n\n").0.unwrap();
+        assert_eq!(rows[0].result, "FAIL");
+        assert!(ask("9\n").0.is_err());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

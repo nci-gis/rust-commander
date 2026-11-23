@@ -336,8 +336,10 @@ A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1
 `git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.
 A published pre-release is not deleted: the next one supersedes it.
 
-CI runs on pushes to `dev`, `main` and `feat/**` and on pull requests into `dev` and
-`main`, and builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
+CI runs on pushes to `dev`, `main` and the integration branches (`feat/v*`, such as
+`feat/v0.4.0-beta.3`), and on pull requests into `dev` and `main`; a working branch
+runs it by hand once a piece is done (`gh workflow run ci --ref <branch>`), not on each
+push. It also builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
 workflow runs only for a `v*` tag (a release on `main`, a pre-release on `dev` or
 `main`), or by hand to check a tag's rules. A change to the packaging
 (`release.yml`, `about.toml`, `about.hbs`) is therefore first exercised by the next

@@ -319,6 +319,23 @@ impl Mode {
         self >= Mode::ReadOnly
     }
 
+    /// Why something is refused in this mode: `read-only mode — copying is turned off`.
+    /// Every mode refusal is worded here once (Round 035, W4), so beta.4 translates it
+    /// once; `next` is the safe thing to press instead, or empty.
+    pub fn turned_off(self, what: &str, next: &str) -> String {
+        format!("{} mode \u{2014} {what} is turned off{next}", self.label())
+    }
+
+    /// Why Settings cannot save in this mode. One wording: the dialog's note and the
+    /// refusal behind it had drifted apart ("its settings included" and "settings
+    /// included"; Round 035, W4).
+    pub fn writes_nothing(self) -> String {
+        format!(
+            "{} mode \u{2014} xdevcmd writes nothing, its settings included",
+            self.label()
+        )
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Mode::Normal => "normal",

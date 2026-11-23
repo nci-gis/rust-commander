@@ -368,8 +368,7 @@ impl App {
             Action::OpenWith | Action::OpenWithMenu => " \u{2014} F3 views it",
             _ => "",
         };
-        mode.read_only()
-            .then(|| format!("{} mode \u{2014} {what} is turned off{next}", mode.label()))
+        mode.read_only().then(|| mode.turned_off(what, next))
     }
 
     /// Why `a` cannot run inside an archive, or `None`. Only reading and extracting
@@ -720,14 +719,11 @@ impl App {
         match c {
             Cmd::Act(a) => self.perform(a),
             Cmd::CopyPath | Cmd::CopyRelativePath if self.settings.mode == Mode::Restricted => {
-                self.status = "restricted mode \u{2014} the clipboard is turned off".into();
+                self.status = Mode::Restricted.turned_off("the clipboard", "");
             }
             // Bookmarks are saved to a file: "saves anything" is off in read-only.
             Cmd::AddBookmark(_) | Cmd::RemoveBookmark(_) if self.settings.mode.read_only() => {
-                self.status = format!(
-                    "{} mode \u{2014} that is turned off",
-                    self.settings.mode.label()
-                );
+                self.status = self.settings.mode.turned_off("that", "");
             }
             Cmd::CopyPath => self.copy_path(false),
             Cmd::CopyRelativePath => self.copy_path(true),

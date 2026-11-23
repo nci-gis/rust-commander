@@ -6,10 +6,7 @@ impl App {
     /// File → Settings….
     pub(super) fn open_settings(&mut self) {
         let cannot_save = if self.settings.mode.read_only() {
-            Some(format!(
-                "{} mode \u{2014} xdevcmd writes nothing, its settings included",
-                self.settings.mode.label()
-            ))
+            Some(self.settings.mode.writes_nothing())
         } else if let Outcome::Rejected { .. } = self.config_outcome {
             Some(
                 "config.toml has an error (Help \u{203a} Config in use says which): fix it by hand first"
@@ -39,10 +36,7 @@ impl App {
         }
         // The dialog offers no Save in these modes; refused here too, not on its word.
         if self.settings.mode.read_only() {
-            self.status = format!(
-                "{} mode \u{2014} xdevcmd writes nothing, settings included",
-                self.settings.mode.label()
-            );
+            self.status = self.settings.mode.writes_nothing();
             return;
         }
         let Some(path) = crate::config::path_in_use() else {

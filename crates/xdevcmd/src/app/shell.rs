@@ -1082,10 +1082,7 @@ impl App {
             .map(|p| Self::describe(&[PathBuf::from(p)]))
             .unwrap_or_default();
         if self.refused(Action::NewTerminal).is_some() || self.settings.mode.read_only() {
-            self.status = format!(
-                "{} mode \u{2014} running programs is turned off",
-                self.settings.mode.label()
-            );
+            self.status = self.settings.mode.turned_off("running programs", "");
             return;
         }
         if !self.interactive {

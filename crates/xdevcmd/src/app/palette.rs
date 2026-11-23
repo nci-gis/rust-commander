@@ -56,7 +56,7 @@ impl App {
             Run::Extra(Extra::CopyPath | Extra::CopyRelativePath)
                 if self.settings.mode == Mode::Restricted =>
             {
-                Some("restricted mode \u{2014} the clipboard is turned off".into())
+                Some(Mode::Restricted.turned_off("the clipboard", ""))
             }
             Run::Extra(_) | Run::ReadOnly(_) => None,
         }

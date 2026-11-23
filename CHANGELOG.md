@@ -74,6 +74,8 @@ that heading and starts a new, empty one here. -->
   the sandbox, and `xtask manual log` with no arguments asks for the cases (offering those
   the check says were done), a result each and a note, and fills in the check file, the
   terminal and the shell.
+- **The job box grows with a wide terminal** (74 columns to 120): a long path or a
+  Windows network error reads whole once the window is made wider.
 - **Check C says how many it found different, first**: "3 found different and copied
   again; 2001 copied …". The count sat in the middle of the line, which the status line
   elides on a terminal of usual width, so several tampered copies read as "(…)".

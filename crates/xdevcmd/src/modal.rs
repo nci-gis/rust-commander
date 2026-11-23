@@ -1127,7 +1127,9 @@ fn render_input(frame: &mut Frame, area: Rect, i: &mut Input) {
 
 fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
     let th = theme::t();
-    let r = centered(area, 74, 8);
+    // 74 columns on a small terminal, more on a wide one (to 120): a long path or a
+    // Windows network error read whole once the window is made wider (the owner).
+    let r = centered(area, area.width.saturating_sub(8).clamp(74, 120), 8);
     let inner = frame_box(
         frame,
         r,

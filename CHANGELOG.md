@@ -10,6 +10,11 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **A walker on the status line**, off by default: with `[general] animation = true`
+  (or Settings, General), a small agent walks along the status line, a step a second,
+  and waits just before a message while it shows.
+
 ### Changed
 - **The test kit is `xdevcmd-testkit-…`** in a release (`xdevcmd-bench-…` until
   0.4.0-beta.2): it holds `xtask`, for the tests by hand and the benchmark.

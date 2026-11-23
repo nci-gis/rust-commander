@@ -579,6 +579,40 @@ fn a_group_says_what_it_takes_and_enter_closes_it() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// The owner (2026-11-23): a small agent walks along the status line when
+/// `[general] animation` is on, waits just before a message, and is not there when off
+/// (the default).
+#[test]
+fn the_walker_shows_only_when_animation_is_on_and_waits_before_a_message() {
+    let (a, b) = fixture();
+    let off = shot_cfg_env("", &[], "", &a, &b);
+    let status = off.lines().rev().nth(1).unwrap_or_default();
+    assert!(
+        !status.contains("[o_o]") && !status.contains("[-_-]"),
+        "off by default\n{off}"
+    );
+    let on = "[general]\nanimation = true\n";
+    let s = shot_cfg_env(on, &[], "", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(
+        status.contains("[o_o]"),
+        "on, it walks the status line\n{s}"
+    );
+    let s = shot_cfg_env(on, &[], "Ctrl+h", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    let msg = status.find("hidden files").expect(&s);
+    let me = status.find("[o_o]").expect(&s);
+    assert!(me < msg, "before the message\n{s}");
+    assert!(
+        status[me..msg]
+            .trim_start_matches(|c| c != ' ')
+            .trim()
+            .is_empty(),
+        "just before it\n{status}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn a_group_of_keys_that_do_not_repeat_closes_after_one() {
     // Hidden files are toggled once, not again and again: Alt+G waits for its second

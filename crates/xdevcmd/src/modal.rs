@@ -1333,6 +1333,47 @@ mod tests {
         assert!(j.retrying_line(at).is_none());
     }
 
+    /// The owner (2026-11-23): a network error was still cut on a wide terminal, the
+    /// job box a fixed 74 columns. It grows with the terminal, to a limit.
+    #[test]
+    fn the_job_box_grows_with_a_wide_terminal() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut j = Job::new(ops::Kind::Copy, ops::Handle::for_test(rx));
+        tx.send(ops::Event::Retrying {
+            path: PathBuf::from(r"\\server\share\tree\d000\f0421"),
+            error: "The network path was not found. (os error 53)".into(),
+            attempt: 4,
+            of: 5,
+            wait: std::time::Duration::from_secs(5),
+        })
+        .unwrap();
+        j.pump();
+        let mut text = |w: u16| {
+            let mut t = Terminal::new(TestBackend::new(w, 20)).unwrap();
+            let frame = t.draw(|f| render_job(f, f.area(), &mut j)).unwrap();
+            let b = &frame.buffer;
+            (0..b.area.height)
+                .map(|y| {
+                    (0..b.area.width)
+                        .map(|x| b.cell((x, y)).unwrap().symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let wide = text(140);
+        assert!(
+            wide.contains("(4 of 5): The network path was not found. (os error 53)"),
+            "{wide}"
+        );
+        // Small terminals keep the box they had; the line is cut at its end there.
+        let small = text(80);
+        assert!(
+            small.contains("(4 of 5)") && !small.contains("(os error 53)"),
+            "{small}"
+        );
+    }
+
     /// "設計書" from column 2: 書 covers columns 6 and 7. A box from column 7 would lose
     /// its left border to it on a real terminal, so 書 goes.
     #[test]

@@ -100,6 +100,13 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
   not on the data path, so the hand-test ledger should stay fresh; confirm with `qa
   ledger`); did it pull in more scope (requests that followed it); did it break the
   "no assertion changed" rule (it did not: new tests only).
+- **CI by batch** (#75, the owner: CI once a piece is done): merges into the
+  integration branch in a burst cancel each other's runs (the concurrency group), so
+  only the last one finishes. W1's new test failed on Windows (a path written with
+  `/`), #72's own run was cancelled by #73's, and the branch stayed red on Windows
+  from #72 to #75 unseen until the run by hand on the W3–W5 stack (45252575167). Fixed
+  in #78; green on all seven jobs (45254421358). For the Check: a burst of merges needs
+  its last run read, not assumed.
 - W1 #72, W2 #73 merged 2026-11-24: width definitions all in `format.rs` (9),
   `chars().count()` 40 → 14, none a width.
 

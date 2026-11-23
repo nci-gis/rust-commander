@@ -10,6 +10,14 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+- **The test kit is `xdevcmd-testkit-…`** in a release (`xdevcmd-bench-…` until
+  0.4.0-beta.2): it holds `xtask`, for the tests by hand and the benchmark.
+
+### Fixed
+- **Links in a release's notes open**: they point at the tag's files, where the
+  CHANGELOG's relative links did not resolve on the release page.
+
 ## [0.4.0-beta.2] - 2026-11-23
 
 ### Added

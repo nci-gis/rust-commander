@@ -74,6 +74,11 @@ inside the repository, else to `runs.tsv` in the current folder, to commit later
 the xtask that came with the xdevcmd you test: `built_from` is the commit xtask was
 built from (`xtask --version` shows it).
 
+**Log on the machine that ran the test.** A row takes its `os` from where `manual log`
+runs, so a result relayed from another machine lands under the wrong system and the
+ledger counts it there (2026-11-23: macOS and Linux results logged on Windows). Log
+each system's rows there, or write them by hand with the right `os`.
+
 By hand: `built_from` is the commit the tested build came from, as a SHA or
 `git describe` (`…-g<sha>`), never a branch name or HEAD; a `-dirty` build counts as no
 evidence. `os` is exactly `linux`, `macos` or `windows` (the terminal and the rest go in

@@ -4,8 +4,12 @@ on:
   # The two long-lived branches and feat/ work branches: a feat/ branch is checked
   # before its pull request exists (B6). A push to a branch with an open pull request
   # runs twice (push and pull_request): the cost of not missing either.
+  # The integration branches only (feat/v0.4.0-beta.3 and the like): a working branch
+  # runs no CI per push (the owner, 2026-11-24: CI once a piece is done, not for each
+  # small change). A piece is checked when it merges into its integration branch, or
+  # earlier by hand: gh workflow run ci --ref <branch>.
   push:
-    branches: [main, dev, "feat/**"]
+    branches: [main, dev, "feat/v*"]
     # Nothing a test reads: the plan and the changelog. (The tests read README.md and
     # files under docs/, so those still run CI.)
     paths-ignore: [".agents/**", "CHANGELOG.md"]
@@ -103,7 +107,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         # xtask is never published, but --workspace would still package it.
         run: cargo package --workspace --exclude xtask --locked
-      # xtask too: with xdevcmd in the artifact, a pushed branch is a whole test kit
+      # xtask too: with xdevcmd in the artifact, a run is a whole test kit
       # (xtask try) for a Mac or Windows machine, with no bench/ branch built by hand.
       - run: cargo build --release -p xdevcmd -p xtask
       # Now that there is a release build: its size, and that it holds no fault seam.

@@ -88,6 +88,14 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
 
 ## Do
 
+- **W0, the walker** (the owner, 2026-11-24, an exception to "no new features":
+  "đưa vào beta.3 luôn … lên trước refactor để xem luôn"): a small ASCII agent walks
+  the status line a step a second when `[general] animation` is on (off by default),
+  waits before a message, and goes on from where it stopped. New module `walker.rs`;
+  one field on `App` (86); drawn by `draw_status` on the 1 s heartbeat it already had.
+- W1 #72, W2 #73 merged 2026-11-24: width definitions all in `format.rs` (9),
+  `chars().count()` 40 → 14, none a width.
+
 ## Check
 
 ## Act

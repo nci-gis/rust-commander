@@ -113,6 +113,16 @@ test perf"). So:
   for; a cell is stale only when one of them changes. Test red without it.
 - **E5**: `data-safety.md` keeps 02, 06, 07 and says where CI runs the rest; README
   follows; `xtask manual`'s log takes the case list (its tests keep the seven).
+- **Red-team** (final round after the subtraction, 2026-11-24): SIGN WITH AMENDMENTS.
+  Amended: M-DS-05 cannot pass by skipping (CI sets `XDEVCMD_REQUIRE_OTHER_DEV`); a
+  folder of ten moved and killed; M-DS-04 with a real kill, a zeroed finished copy and
+  "1 found different"; M-DS-03 compared MiB by MiB; `CASE_PATHS` + `noreplace.rs`,
+  `file_ops.rs`, `modal.rs`, `app/modals.rs`; README, how-to-test, development.md.
+  ×10 again: run 45357438349, 4/4 runners; PR CI 45357443903 green 7/7.
+  Open, the owner's call: M-DS-01's replace through the trash is killed by a test on
+  Linux only (the test build replaces for good elsewhere, `plan.rs` `trash_keeps`, and
+  the freeze rules out changing it), so on macOS and Windows nothing covers it now;
+  `skills/qa/SKILL.md` still describes logging the disk cases (read-only to agents).
 
 ## Check
 

@@ -27,12 +27,8 @@ impl App {
                 let mut panes: Vec<FilePane> = tabs
                     .iter()
                     .map(|t| {
-                        let key = match t.sort.as_str() {
-                            "ext" => SortKey::Ext,
-                            "size" => SortKey::Size,
-                            "modified" => SortKey::Modified,
-                            _ => SortKey::Name,
-                        };
+                        // A word this version does not know sorts by name.
+                        let key = t.sort.parse().unwrap_or(SortKey::Name);
                         let sort = xdevcmd_core::Sort {
                             key,
                             reverse: t.reverse,
@@ -57,11 +53,7 @@ impl App {
                 Node::Leaf(id)
             }
             Saved::Split { axis, pct, a, b } => {
-                let axis = if axis == "rows" {
-                    Axis::Rows
-                } else {
-                    Axis::Cols
-                };
+                let axis = Axis::from_word(axis);
                 let a = self.build_saved(a, fallback);
                 let b = self.build_saved(b, fallback);
                 Node::split(axis, (*pct).clamp(10, 90), a, b)
@@ -122,13 +114,7 @@ impl App {
                             // A path that is not UTF-8 cannot go in TOML; that tab
                             // reopens at its pane's fallback instead.
                             path: f.cwd.to_str()?.to_string(),
-                            sort: match f.sort.key {
-                                SortKey::Name => "name",
-                                SortKey::Ext => "ext",
-                                SortKey::Size => "size",
-                                SortKey::Modified => "modified",
-                            }
-                            .to_string(),
+                            sort: f.sort.key.to_string(),
                             reverse: f.sort.reverse,
                             hidden: f.show_hidden,
                         })
@@ -140,7 +126,7 @@ impl App {
                 }
             }
             Node::Split { axis, pct, a, b } => Saved::Split {
-                axis: if *axis == Axis::Rows { "rows" } else { "cols" }.to_string(),
+                axis: axis.word().to_string(),
                 pct: *pct,
                 a: Box::new(self.save_node(a)),
                 b: Box::new(self.save_node(b)),

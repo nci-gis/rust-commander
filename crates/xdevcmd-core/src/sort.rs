@@ -10,6 +10,53 @@ pub enum SortKey {
     Modified,
 }
 
+impl SortKey {
+    pub const ALL: [SortKey; 4] = [
+        SortKey::Name,
+        SortKey::Ext,
+        SortKey::Size,
+        SortKey::Modified,
+    ];
+
+    /// The word the config file and the session keep: `name`, `ext`, `size`, `modified`.
+    /// One table (Round 035, W7): the config, the session's save and its load each had
+    /// their own match.
+    pub fn word(self) -> &'static str {
+        match self {
+            SortKey::Name => "name",
+            SortKey::Ext => "ext",
+            SortKey::Size => "size",
+            SortKey::Modified => "modified",
+        }
+    }
+
+    /// The word the status line shows: as [`SortKey::word`], but `date` for the time.
+    pub fn label(self) -> &'static str {
+        match self {
+            SortKey::Modified => "date",
+            k => k.word(),
+        }
+    }
+}
+
+impl std::fmt::Display for SortKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.word())
+    }
+}
+
+impl std::str::FromStr for SortKey {
+    type Err = String;
+
+    /// One of the words, or what is wrong: `expected name, ext, size or modified`.
+    fn from_str(s: &str) -> Result<Self, String> {
+        SortKey::ALL
+            .into_iter()
+            .find(|k| k.word() == s)
+            .ok_or_else(|| "expected name, ext, size or modified".to_string())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Sort {
     pub key: SortKey,
@@ -384,6 +431,16 @@ fn kana(u: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_sort_key_reads_back_its_word() {
+        for k in SortKey::ALL {
+            assert_eq!(k.to_string().parse::<SortKey>(), Ok(k));
+        }
+        assert_eq!(SortKey::Modified.label(), "date");
+        assert_eq!(SortKey::Name.label(), "name");
+        assert!("date".parse::<SortKey>().is_err());
+    }
     use std::path::PathBuf;
 
     fn e(name: &str, kind: Kind, size: u64) -> Entry {

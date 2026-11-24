@@ -406,12 +406,7 @@ impl App {
                 } else {
                     String::new()
                 };
-                let sort = match f.sort.key {
-                    SortKey::Name => "name",
-                    SortKey::Ext => "ext",
-                    SortKey::Size => "size",
-                    SortKey::Modified => "date",
-                };
+                let sort = f.sort.key.label();
                 format!(
                     " {}  ·  {} items  ·  sort {}{}{}{}",
                     f.summary(),

@@ -439,17 +439,11 @@ impl Default for Settings {
 
 /// Turn a parsed file into settings, or say exactly what is wrong with it.
 pub fn resolve(config: Config) -> Result<Settings, String> {
-    let sort_key = match config.files.sort.as_str() {
-        "name" => SortKey::Name,
-        "ext" => SortKey::Ext,
-        "size" => SortKey::Size,
-        "modified" => SortKey::Modified,
-        other => {
-            return Err(format!(
-                "[files] sort = \"{other}\": expected name, ext, size or modified"
-            ))
-        }
-    };
+    let sort_key: SortKey = config
+        .files
+        .sort
+        .parse()
+        .map_err(|e| format!("[files] sort = \"{}\": {e}", config.files.sort))?;
     if !(10..=90).contains(&config.terminal.height_percent) {
         return Err(format!(
             "[terminal] height_percent = {}: expected 10 to 90",

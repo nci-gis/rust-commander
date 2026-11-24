@@ -287,3 +287,14 @@ Plan B, and the Release path decision. Then the same day: beta.3's timebox (one 
 2026-11-30, the Plan B trigger) and the backlog's features kept for 0.4.x or 0.5; the
 beta.2 row says fuzz passed.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-24: Round 036 opened, end-to-end data-safety tests
+
+**Source**: the owner, 2026-11-24: "tạo 1 round riêng cho phần E2E, riêng 2, 6, và 7 vẫn
+giữ manual; số case ít lại để giảm block, và khi Dev nếu đụng vào phần này mới phải test
+lại".
+**What**: `plan/cycles/Round_036.md` (Planning): cases 01, 03, 04, 05 to CI on three
+systems, 02, 06, 07 by hand, a hand cell stale only when its own files change;
+`plan/ROADMAP.md`: its row under 0.4.x.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+

@@ -298,7 +298,10 @@ for it; your own commands (Shift+F9, `[[menu]]` in the [config](config.md)) can 
   and `read.me` on a drive that ignores case show as a case clash. A name composed on
   one side and decomposed on the other (a folder copied from macOS) may show as two.
 - **New names** (rename, new directory, new file, copy as) may not hold `/` or a control
-  character; on Windows not `< > : " | ? * \` either, nor end with a dot or a space.
+  character; on Windows a rename, a new file and copy as refuse `< > : " | ? * \` too,
+  and a name ending in a dot or a space. A new directory, and names Windows keeps for
+  devices (`CON`, `NUL`…), are not checked yet: see
+  [Known issues](known-issues.md#not-yet-will-change).
 
 ## Find, filter, compare
 

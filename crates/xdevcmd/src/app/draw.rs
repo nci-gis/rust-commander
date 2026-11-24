@@ -396,30 +396,28 @@ impl App {
     }
 
     /// The walker (`[general] animation`): a step a second across the whole screen, on
-    /// the row of the file panes' bottom edge (the focused one's, or the first file
-    /// pane's when a terminal has the focus). While it stands before a new message it is
+    /// the row of the lowest file pane's bottom edge ([`crate::walker::row`]). While it stands before a new message it is
     /// on the status line instead (`draw_status`).
     fn draw_walker(&self, frame: &mut Frame) {
         if !self.settings.config.general.animation {
             return;
         }
-        let is_files = |id: &PaneId| matches!(self.panes.get(id), Some(Pane::Files(_)));
-        let pane = self
-            .rects
-            .iter()
-            .find(|(id, _)| *id == self.focus && is_files(id))
-            .or_else(|| self.rects.iter().find(|(id, _)| is_files(id)))
-            .map(|(_, r)| *r);
+        let row = crate::walker::row(
+            self.rects
+                .iter()
+                .filter(|(id, _)| matches!(self.panes.get(id), Some(Pane::Files(_))))
+                .map(|(_, r)| *r),
+        );
         // The whole width: across both panes' edges (the owner, 2026-11-24).
         let screen = frame.area();
-        let lane = pane.map_or(0, |_| usize::from(screen.width));
+        let lane = row.map_or(0, |_| usize::from(screen.width));
         let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
         let mut w = self.walker.borrow_mut();
         let standing = w.tick(Instant::now(), lane, &self.status, hold);
-        if let Some(r) = pane.filter(|_| !standing && lane >= crate::walker::WIDTH) {
+        if let Some(y) = row.filter(|_| !standing && lane >= crate::walker::WIDTH) {
             frame.buffer_mut().set_string(
                 screen.x + w.pos() as u16,
-                r.y + r.height.saturating_sub(1),
+                y,
                 w.sprite(),
                 Style::new().fg(theme::t().accent),
             );

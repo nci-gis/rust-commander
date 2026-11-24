@@ -112,9 +112,39 @@ impl Walker {
     }
 }
 
+/// The row the walker walks on: the bottom edge of the lowest file pane, so it stays
+/// low on the screen whichever pane has the focus and however many there are (the
+/// owner, 2026-11-24). `None` without a file pane.
+pub fn row(file_panes: impl IntoIterator<Item = ratatui::layout::Rect>) -> Option<u16> {
+    file_panes
+        .into_iter()
+        .filter(|r| r.height > 0)
+        .map(|r| r.y + r.height - 1)
+        .max()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn it_walks_on_the_lowest_file_panes_edge() {
+        use ratatui::layout::Rect;
+        // Left whole height, right split in two: the left and lower right share the
+        // bottom row, the upper right's edge is higher.
+        let left = Rect::new(0, 1, 60, 30);
+        let up = Rect::new(60, 1, 60, 16);
+        let down = Rect::new(60, 17, 60, 14);
+        assert_eq!(row([up, left, down]), Some(30));
+        assert_eq!(row([up]), Some(16));
+        // Panes stacked: the lowest wins, not the tallest.
+        assert_eq!(
+            row([Rect::new(0, 0, 80, 20), Rect::new(0, 20, 80, 4)]),
+            Some(23)
+        );
+        assert_eq!(row([Rect::new(0, 5, 80, 0)]), None);
+        assert_eq!(row(Vec::<Rect>::new()), None);
+    }
     use xdevcmd_core::format::text_cells;
 
     #[test]

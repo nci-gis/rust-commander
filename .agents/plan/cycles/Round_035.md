@@ -1,6 +1,6 @@
 # Round 035: 0.4.0-beta.3: refactor, one definition per concept
 
-**Status**: In Progress (the owner, 2026-11-24: "start 035")
+**Status**: Review (Check written 2026-11-24; Complete after the release draft is read)
 **Part of**: v0.4.0, `ROADMAP.md`, the row for **0.4.0-beta.3** (refactor; the owner,
 2026-11-23), from the cosf R1–R7 synthesis §6.3 (`03_research/cosf/rounds/
 2026-11-19_tong-hop-r1-r7.md`, in the owner's cosf folder)
@@ -192,3 +192,24 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
   tag.
 
 ## Act
+
+Agreed by the owner (2026-11-24: "(1) + (2) okay với đề xuất"):
+
+**Learnings**:
+
+1. **An exception to a round's rules counts its follow-ups against the round.** W0
+   was one feature allowed into a refactor round; four more requests followed it the
+   same day. The next exception is written down with its follow-ups, each one a line
+   in Do, and stops when the round's timebox or checkpoint says so.
+2. **The fuzz crate is checked in CI** (`cargo check` in `fuzz/`, stable). It sits
+   outside the workspace, so a change to a file it compiles (W0's `config.rs`) broke
+   it unseen until the cut. Done in beta.4 (Round 037), on CI's first run there.
+3. **After a burst of merges, read the last CI run**: the concurrency group cancels
+   the others, so a red run in the middle is never seen (#72 to #75 on Windows).
+
+**Carried to beta.4** (the owner, the same day): names a new folder, a new file or a
+rename may not have on Windows, or on a FAT, exFAT or NTFS drive anywhere (`CON`,
+`NUL`, `COM1`…, and Windows' characters for a new folder), refused by one check, the
+one copy and move use (`plan::name_problem`). Known issues lists it until then.
+
+**Promotions**: none (the learnings are about running rounds; `PDCA.md` is the owner's).

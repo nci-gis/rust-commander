@@ -1,6 +1,6 @@
 # Round 036: end-to-end tests for data safety, fewer cases by hand
 
-**Status**: In Progress (the owner, 2026-11-24: "proceed", after Round 035's freeze at
+**Status**: Review (Check written 2026-11-24). Was: In Progress (the owner, 2026-11-24: "proceed", after Round 035's freeze at
 `f6e6202`; opened the same day: "tạo 1 round riêng cho phần E2E, riêng 2, 6, và 7 vẫn
 giữ manual")
 **Part of**: **0.4.0-beta.3** (the owner, 2026-11-24: "r36 làm cho beta.3 nhé, sau r35
@@ -146,4 +146,12 @@ test perf"). So:
 
 **Learnings**:
 
-**Promotions**:
+1. **A hand test is for what only a person can do** (a real device, a real network);
+   the rest runs in CI at markers, on all three systems. The beta.3 cut asked for 9
+   cells, not 21, after a round that touched the data path four times.
+2. **Staleness per case** (`CASE_PATHS`): a hand cell is asked for again only when one
+   of its own files changes; a list is reviewed with the red-team skill, and a change
+   to it needs a test.
+
+**Promotions**: none beyond those logged in Do (`reference/testing.md`,
+`skills/qa/SKILL.md`, on the owner's word).

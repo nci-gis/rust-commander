@@ -1,6 +1,7 @@
 //! Compare the panes, and synchronise them from the plan.
 
 use super::*;
+use xdevcmd_core::task::Poll;
 
 impl App {
     /// The two directories to compare: this pane's and the other's, both ordinary
@@ -97,13 +98,13 @@ impl App {
     /// Alt+Y: both trees, compared all the way down on a thread (a big tree or a network
     /// drive can take a while, and Esc stops it), then a plan to make them agree.
     pub(super) fn begin_sync(&mut self) {
-        use std::sync::atomic::{AtomicBool, AtomicU64};
+        use std::sync::atomic::AtomicU64;
         use std::sync::Arc;
         let Some((_, left, _, right, hidden)) = self.compare_pair() else {
             return;
         };
         if let Some(old) = self.comparing.take() {
-            old.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            old.task.stop();
         }
         // A screenshot (the tests) has no later frame to bring the result to: compare
         // there and then.
@@ -113,25 +114,20 @@ impl App {
                 Err(e) => self.status = format!("cannot compare: {e}"),
             };
         }
-        let stop = Arc::new(AtomicBool::new(false));
         let seen = Arc::new(AtomicU64::new(0));
-        let (tx, rx) = std::sync::mpsc::channel();
-        {
-            let (l, r, stop, seen) = (left.clone(), right.clone(), stop.clone(), seen.clone());
-            std::thread::spawn(move || {
-                let _ = tx.send(xdevcmd_core::compare::compare_until(
-                    &l, &r, true, hidden, &stop, &seen,
-                ));
-            });
-        }
+        let task = {
+            let (l, r, seen) = (left.clone(), right.clone(), seen.clone());
+            xdevcmd_core::task::Task::spawn(move |stop| {
+                xdevcmd_core::compare::compare_until(&l, &r, true, hidden, stop, &seen)
+            })
+        };
         self.status = "comparing the two trees\u{2026} Esc stops".into();
         self.comparing = Some(Comparing {
             left,
             right,
-            stop,
             seen,
             shown: 0,
-            rx,
+            task,
         });
     }
 
@@ -140,23 +136,30 @@ impl App {
         let Some(c) = self.comparing.as_mut() else {
             return false;
         };
-        match c.rx.try_recv() {
-            Ok(Some(Ok(diffs))) => {
+        match c.task.poll() {
+            Poll::Done(Some(Ok(diffs))) => {
                 let (left, right) = (c.left.clone(), c.right.clone());
                 self.comparing = None;
                 self.show_sync_plan(&left, &right, &diffs);
                 true
             }
-            Ok(Some(Err(e))) => {
+            Poll::Done(Some(Err(e))) => {
                 self.comparing = None;
                 self.status = format!("cannot compare: {e}");
                 true
             }
-            Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            // Stopped: Esc said so already.
+            Poll::Done(None) => {
                 self.comparing = None;
                 true
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            // Its status line said "comparing…" on, before (W8).
+            Poll::Died => {
+                self.comparing = None;
+                self.status = format!("comparing the two trees {}", crate::app::DIED);
+                true
+            }
+            Poll::Pending => {
                 let n = c.seen.load(std::sync::atomic::Ordering::Relaxed);
                 if n != c.shown {
                     c.shown = n;

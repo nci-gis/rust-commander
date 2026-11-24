@@ -813,4 +813,56 @@ impl App {
         self.last_undo = None;
         self.reload_all();
     }
+
+    // ── starting and forgetting jobs (moved from input.rs and modals.rs, so the data
+    // path's glue is in one file: qa's DATA_PATH lists this one, not those) ──────────
+
+    /// Forget an interrupted job (the Interrupted dialog's F): its kept parts removed.
+    pub(super) fn discard_interrupted(&mut self, it: &xdevcmd_core::journal::Interrupted) {
+        let f = xdevcmd_core::journal::discard(it);
+        let s = |n: usize| if n == 1 { "" } else { "s" };
+        self.status = match (f.removed, f.left.len()) {
+            (_, l) if l > 0 => format!(
+                "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
+                s(l),
+            ),
+            (0, _) => "the interrupted job forgotten: nothing more is done".into(),
+            (n, _) => format!(
+                "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
+                s(n),
+            ),
+        };
+    }
+
+    /// Start a synchronisation of `pairs` (compare's result), as a copy undo can reverse.
+    pub(super) fn start_sync(&mut self, pairs: Vec<(PathBuf, PathBuf, ops::Expect)>) {
+        let pairs_len = pairs.len();
+        let req = Request::sync(pairs);
+        self.expect_copy_undo(format!(
+            "synchronisation of {} item{}",
+            pairs_len,
+            if pairs_len == 1 { "" } else { "s" }
+        ));
+        self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
+    }
+
+    /// Start the job the open confirmation is about, unless its target cannot be written.
+    pub(super) fn start_confirmed(&mut self) {
+        // A click on [Enter] too: nothing can be written there.
+        if let Some(Modal::Confirm(c)) = &self.modal {
+            if c.table
+                .as_ref()
+                .is_some_and(|t| t.plan.target.writable == Some(false))
+            {
+                self.status =
+                    "you cannot write there: Tab for the other pane, Esc to cancel".into();
+                return;
+            }
+        }
+        if let Some(Modal::Confirm(c)) = self.modal.take() {
+            let kind = c.request.kind;
+            self.remember_job(&c.request);
+            self.modal = Some(Modal::Job(Job::new(kind, ops::start(c.request))));
+        }
+    }
 }

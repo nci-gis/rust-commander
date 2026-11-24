@@ -41,6 +41,8 @@ pub const DATA_PATH: &[&str] = &[
     "crates/xdevcmd-core/src/rename.rs",
     "crates/xdevcmd-core/src/attrs.rs",
     "crates/xdevcmd-core/src/document.rs",
+    // Starting, forgetting and finishing jobs; input.rs and modals.rs only dispatch to it
+    // (their UI changes do not make hand tests stale).
     "crates/xdevcmd/src/app/jobs.rs",
     "crates/xdevcmd/src/app/file_ops.rs",
     "crates/xdevcmd/src/app/archives.rs",

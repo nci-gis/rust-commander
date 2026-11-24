@@ -837,36 +837,13 @@ impl App {
             }
             Cmd::Resume(it) => self.resume(*it, false),
             Cmd::ResumeChecked(it) => self.resume(*it, true),
-            Cmd::Discard(it) => {
-                let f = xdevcmd_core::journal::discard(&it);
-                let s = |n: usize| if n == 1 { "" } else { "s" };
-                self.status = match (f.removed, f.left.len()) {
-                    (_, l) if l > 0 => format!(
-                        "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
-                        s(l),
-                    ),
-                    (0, _) => "the interrupted job forgotten: nothing more is done".into(),
-                    (n, _) => format!(
-                        "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
-                        s(n),
-                    ),
-                };
-            }
+            Cmd::Discard(it) => self.discard_interrupted(&it),
             Cmd::EditConfig(p) => {
                 self.recheck_config = Some(p.clone());
                 self.pending_edit = Some(p);
             }
             Cmd::Note(n) => self.status = n,
-            Cmd::Sync(pairs) => {
-                let pairs_len = pairs.len();
-                let req = Request::sync(pairs);
-                self.expect_copy_undo(format!(
-                    "synchronisation of {} item{}",
-                    pairs_len,
-                    if pairs_len == 1 { "" } else { "s" }
-                ));
-                self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
-            }
+            Cmd::Sync(pairs) => self.start_sync(pairs),
             Cmd::CopyText(t) => self.copy_text(t),
             Cmd::TabHistory(id) => {
                 if let Some(i) = self.tab_still_there(id) {

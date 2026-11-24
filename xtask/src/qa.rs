@@ -507,7 +507,7 @@ pub fn defs(root: &Path) -> String {
 pub const BIG_FILE: usize = 2_500;
 
 /// The fields of `struct App`, and every file whose code before its tests is over
-/// `BIG_FILE` lines (Round 035's measures of state and file size).
+/// `BIG_FILE` lines (a `tests.rs` is all tests) (Round 035's measures of state and file size).
 fn sizes(root: &Path, files: &[PathBuf]) -> String {
     let app = fs::read_to_string(root.join("crates/xdevcmd/src/app.rs")).unwrap_or_default();
     let fields = app
@@ -533,6 +533,8 @@ fn sizes(root: &Path, files: &[PathBuf]) -> String {
     let mut s = format!("struct App fields: {fields}\nfiles over {BIG_FILE} lines of code:\n");
     let mut big: Vec<(usize, String)> = files
         .iter()
+        // A `tests.rs` is a test module moved out of its parent's file: all tests.
+        .filter(|f| f.file_name().is_none_or(|n| n != "tests.rs"))
         .filter_map(|f| {
             let n = before_tests(&fs::read_to_string(f).ok()?).lines().count();
             (n > BIG_FILE).then(|| (n, f.strip_prefix(root).unwrap_or(f).display().to_string()))
@@ -805,8 +807,14 @@ mod tests {
         let code = "fn f() {}\n".repeat(BIG_FILE + 1);
         let tests = "#[cfg(test)]\nmod tests {\n".to_string() + &"\n".repeat(BIG_FILE);
         fs::write(src.join("big.rs"), &code).unwrap();
+        fs::write(src.join("tests.rs"), &code).unwrap();
         fs::write(src.join("small.rs"), "fn g() {}\n".to_string() + &tests).unwrap();
-        let files = vec![src.join("app.rs"), src.join("big.rs"), src.join("small.rs")];
+        let files = vec![
+            src.join("app.rs"),
+            src.join("big.rs"),
+            src.join("small.rs"),
+            src.join("tests.rs"),
+        ];
         let got = sizes(&root, &files);
         assert!(got.contains("struct App fields: 3\n"), "{got}");
         assert!(
@@ -820,6 +828,7 @@ mod tests {
             "{got}"
         );
         assert!(!got.contains("small.rs"), "{got}");
+        assert!(!got.contains("tests.rs"), "{got}");
         let _ = fs::remove_dir_all(&root);
     }
 

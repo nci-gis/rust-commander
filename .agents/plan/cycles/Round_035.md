@@ -32,53 +32,58 @@ control characters in names, refusal messages).
 
 ## Baseline at `v0.4.0-beta.2` (2026-11-24)
 
-| Measure | beta.2 | Target |
-|---|---|---|
-| `qa defs` root confinement | 2 | 2 (journal's own check is by design) |
-| `qa defs` path identity | 3 | 3 |
-| `qa defs` atomic write | 2 | **1** |
-| `qa defs` refusal of writes | 7 | **1** (one place builds the message) |
-| `qa defs` control characters in names | 10 | **≤ 2** |
-| `qa defs` home and state folders | 6 | **1** |
-| `qa defs` journal kinds | 1 | 1 |
-| `qa defs` display width and text fit (W1) | 8 (`format.rs` ×6, `commands.rs::width`, `links.rs::fit`) | **6, all in `format.rs`** |
-| `qa defs` chars counted (W1; a width when it sizes a column) | 40 | none used as a width (the rest named in W2's PR) |
-| `qa defs` `struct App` fields | 85 | < 60 (stretch < 40) |
-| `qa defs` files over 2,500 lines of code before tests | `ops.rs` 3,597 (6,565 with tests) | none |
-| deleted / added lines in `src` | 0.235 (#46–#65) | higher |
+| Measure | beta.2 | Target | beta.3 (`929361d`) |
+|---|---|---|---|
+| `qa defs` root confinement | 2 | 2 (journal's own check is by design) | 2 |
+| `qa defs` path identity | 3 | 3 | 3 |
+| `qa defs` atomic write | 2 | **1** | **1** ✓ |
+| `qa defs` refusal of writes | 7 | **1** (one place builds the message) | 3, one per role: the decision (`App::refused`), the wording (`Mode::turned_off`), what an action writes (`Action::writes`) |
+| `qa defs` control characters in names | 10 | **≤ 2** | **2** ✓ |
+| `qa defs` home and state folders | 6 | **1** | 3, all in `dirs.rs` (target 1 missed) |
+| `qa defs` journal kinds | 1 | 1 | 1 |
+| `qa defs` display width and text fit (W1) | 8 (`format.rs` ×6, `commands.rs::width`, `links.rs::fit`) | **6, all in `format.rs`** | 9, all in `format.rs` ✓ |
+| `qa defs` chars counted (W1; a width when it sizes a column) | 40 | none used as a width (the rest named in W2's PR) | 14, none a width ✓ |
+| `qa defs` `struct App` fields | 85 | < 60 (stretch < 40) | **57** ✓ (stretch < 40 not met) |
+| `qa defs` files over 2,500 lines of code before tests | `ops.rs` 3,597 (6,565 with tests) | none | none ✓ (`ops/copy.rs` ~1,420) |
+| deleted / added lines in `src` | 0.235 (#46–#65) | higher | 0.30 (W1–W8 alone 0.42; W9/W10 moves excluded) ✓ |
 
 ## Plan
 
 Order: what beta.4 touches first, then what the data path holds, the riskiest last.
 
-- [ ] **W1 Measure.** `qa defs` gains a *display width* concept (the functions that turn
+- [x] **W1 Measure.** `qa defs` gains a *display width* concept (the functions that turn
   text into columns), and a line count of `App`'s fields and of the largest files, so
   every PR shows its Δ. xtask only.
-- [ ] **W2 Display width and text fit** (§6.3 #3). One `width(&str)` and one family of
+- [x] **W2 Display width and text fit** (§6.3 #3). One `width(&str)` and one family of
   fit/elide in `format.rs`; `commands.rs::width`, `links.rs::fit` and the counts of
   `char`s used as columns go through it. Red test: a wide (CJK) and a combining (VI)
   name in each place a copy counted `char`s.
-- [ ] **W3 Control characters in names** (10 → ≤ 2). One `is_control_in_name` (and its
+- [x] **W3 Control characters in names** (10 → ≤ 2). One `is_control_in_name` (and its
   message, "a control character (U+XXXX)") for rename, mkdir, links, config, found
   paths and the terminal-safety check.
-- [ ] **W4 Refusal messages** (§6.3 #5's rest; 7 → 1). `Action::effect()` already sorts
+- [x] **W4 Refusal messages** (§6.3 #5's rest; 7 → 1). `Action::effect()` already sorts
   every action (H-05); the message text is built in one place from it, so beta.4
   translates it once.
-- [ ] **W5 Home, state and XDG folders** (§6.3 #2, H-09; 6 → 1). One module answers
+- [x] **W5 Home, state and XDG folders** (§6.3 #2, H-09; 6 → 1). One module answers
   "where is the home, the state, the config folder", on all three systems.
-- [ ] **W6 Atomic write** (§6.3 #4, H-06; 2 → 1). Session and document writes go
+- [x] **W6 Atomic write** (§6.3 #4, H-06; 2 → 1). Session and document writes go
   through one `save_bytes` (temp file, sync, no-replace or replace rename). Data path.
-- [ ] **W7 Text forms** (§6.3 #1 and #6). SortKey by `FromStr`/`Display`, Axis by
+- [x] **W7 Text forms** (§6.3 #1 and #6). SortKey by `FromStr`/`Display`, Axis by
   serde; the CLI options from one table, the parser tested against it.
-- [ ] **W8 One job type** (§6.3 #8) for the copy, delete, archive and search workers.
+- [x] **W8 One job type** (§6.3 #8) for the copy, delete, archive and search workers.
   Data path.
-- [ ] **W9 Split `ops.rs` and `App`'s state** (§6.3 #9), by component. Data path.
+- [x] **W9 Split `ops.rs` and `App`'s state** (§6.3 #9), by component. Data path.
   First to be cut if the timebox is near.
+- [x] **W10 OS primitives** (added 2026-11-24, the owner's option A after the design
+  review in `memory/2026-11-24-beta3-design-review.md`): `xdevcmd_core::os`, one
+  function per question, a body per platform inside it. Data path (journal lock).
 
 ### To check at the cut (as for beta.2)
 
 - [ ] The baseline table filled with beta.3's numbers.
-- [ ] CI green with no re-run; the new tests ×10 on Linux.
+- [x] CI green with no re-run; the new tests ×10 on Linux. 2026-11-24 on `929361d`: CI
+  45324179624 green, 7/7 jobs, first run; the 109 tests added since beta.2 ×10 on
+  Linux, 1,090 passed, none failed. To redo if the cut commit is later.
 - [ ] Hand-test ledger PASS at the cut commit (21 cells), the builds taken from the CI
   artifact of that commit (`docs/development.md`); plus one case: a copy killed on
   beta.2, continued on beta.3.

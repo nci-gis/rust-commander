@@ -290,7 +290,10 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
         .collect();
     assert!(
-        lines.contains(&format!("\ndone {}\n", hex(&s.a().join("a-tree/sub")))),
+        lines.contains(&format!(
+            "\ndone {}\n",
+            hex(&s.a().join("a-tree").join("sub"))
+        )),
         "a finished folder is in the journal:\n{lines}"
     );
     x.kill_hard();

@@ -233,7 +233,7 @@ impl App {
             .shell_prefix()
             .map(|c| format!("{} ", crate::keys::key_name(c.0, c.1)))
             .unwrap_or_default();
-        self.status = if whose == "this file pane" && self.term_shown {
+        self.status = if whose == "this file pane" && self.shell_pane.term_shown {
             format!(
                 "no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then {prefix}Alt+{n} picks its tabs"
             )
@@ -248,7 +248,7 @@ impl App {
         }
         if k.code == KeyCode::Esc {
             if let Some(c) = self.comparing.take() {
-                c.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                c.task.stop();
                 self.status = "comparison stopped".into();
                 return;
             }
@@ -298,8 +298,8 @@ impl App {
                 self.status = "search stopped".into();
                 return;
             }
-            if let Some((_, _, name, stop)) = self.pending_view.take() {
-                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some((task, _, name)) = self.pending_view.take() {
+                task.stop();
                 self.status = format!("stopped extracting {name}");
                 return;
             }
@@ -368,8 +368,7 @@ impl App {
             Action::OpenWith | Action::OpenWithMenu => " \u{2014} F3 views it",
             _ => "",
         };
-        mode.read_only()
-            .then(|| format!("{} mode \u{2014} {what} is turned off{next}", mode.label()))
+        mode.read_only().then(|| mode.turned_off(what, next))
     }
 
     /// Why `a` cannot run inside an archive, or `None`. Only reading and extracting
@@ -469,7 +468,7 @@ impl App {
             self.status = why;
             return;
         }
-        let full = self.screen;
+        let full = self.hits.screen;
         match a {
             Action::Quit => {
                 if self.ask_before_quitting() {
@@ -636,7 +635,7 @@ impl App {
             Action::Bottom => self.with_files(|f| f.go_end()),
             Action::Parent => self.with_files(|f| f.go_up()),
             Action::GoHome => {
-                if let Some(home) = crate::bookmarks::home_dir() {
+                if let Some(home) = xdevcmd_core::dirs::home() {
                     self.with_files(|f| f.set_cwd(&home));
                 } else {
                     self.status =
@@ -720,14 +719,11 @@ impl App {
         match c {
             Cmd::Act(a) => self.perform(a),
             Cmd::CopyPath | Cmd::CopyRelativePath if self.settings.mode == Mode::Restricted => {
-                self.status = "restricted mode \u{2014} the clipboard is turned off".into();
+                self.status = Mode::Restricted.turned_off("the clipboard", "");
             }
             // Bookmarks are saved to a file: "saves anything" is off in read-only.
             Cmd::AddBookmark(_) | Cmd::RemoveBookmark(_) if self.settings.mode.read_only() => {
-                self.status = format!(
-                    "{} mode \u{2014} that is turned off",
-                    self.settings.mode.label()
-                );
+                self.status = self.settings.mode.turned_off("that", "");
             }
             Cmd::CopyPath => self.copy_path(false),
             Cmd::CopyRelativePath => self.copy_path(true),
@@ -841,36 +837,13 @@ impl App {
             }
             Cmd::Resume(it) => self.resume(*it, false),
             Cmd::ResumeChecked(it) => self.resume(*it, true),
-            Cmd::Discard(it) => {
-                let f = xdevcmd_core::journal::discard(&it);
-                let s = |n: usize| if n == 1 { "" } else { "s" };
-                self.status = match (f.removed, f.left.len()) {
-                    (_, l) if l > 0 => format!(
-                        "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
-                        s(l),
-                    ),
-                    (0, _) => "the interrupted job forgotten: nothing more is done".into(),
-                    (n, _) => format!(
-                        "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
-                        s(n),
-                    ),
-                };
-            }
+            Cmd::Discard(it) => self.discard_interrupted(&it),
             Cmd::EditConfig(p) => {
                 self.recheck_config = Some(p.clone());
                 self.pending_edit = Some(p);
             }
             Cmd::Note(n) => self.status = n,
-            Cmd::Sync(pairs) => {
-                let pairs_len = pairs.len();
-                let req = Request::sync(pairs);
-                self.expect_copy_undo(format!(
-                    "synchronisation of {} item{}",
-                    pairs_len,
-                    if pairs_len == 1 { "" } else { "s" }
-                ));
-                self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
-            }
+            Cmd::Sync(pairs) => self.start_sync(pairs),
             Cmd::CopyText(t) => self.copy_text(t),
             Cmd::TabHistory(id) => {
                 if let Some(i) = self.tab_still_there(id) {

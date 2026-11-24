@@ -43,9 +43,13 @@ The file given with `--config PATH`. Otherwise xdevcmd takes the first of these 
 set, and reads only that file:
 
 1. `$XDEVCMD_CONFIG`, if set and not empty
-2. `$XDG_CONFIG_HOME/xdevcmd/config.toml`, if `XDG_CONFIG_HOME` is set and not empty
+2. `$XDG_CONFIG_HOME/xdevcmd/config.toml`, if `XDG_CONFIG_HOME` is a full path
 3. `%APPDATA%\xdevcmd\config.toml` (Windows)
 4. `~/.config/xdevcmd/config.toml`
+
+`~` is the first of `HOME` and `USERPROFILE` that is a full path. A relative folder in
+any of these is skipped (the XDG spec says so): it would point into whatever folder
+xdevcmd was started from. The state directory below follows the same rules.
 
 If the file it chose is missing, xdevcmd uses the defaults; it does not look further
 down the list. A missing file named with `--config` is an error.
@@ -71,6 +75,8 @@ autosave_secs = 5         # save them this often when they change: 5-3600, or 0 
 safe_operations = true    # copies via a temporary name; a killed run is cleaned up (security.md)
 fast_copy = true          # the system's fast copy: a clone, or the kernel's copy (security.md)
 menu_bar = true           # the File | View | Help bar
+animation = false         # a small agent walks across the file panes' bottom edge, a step a second
+animation_hold_secs = 5   # it stands before a new message this long, then walks on: 5-15
 
 [files]
 show_hidden = false

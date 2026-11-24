@@ -579,6 +579,36 @@ fn a_group_says_what_it_takes_and_enter_closes_it() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// The owner (2026-11-23, 24): with `[general] animation` a small agent walks across
+/// the screen on the file panes' bottom edge, and stands on the status line just before a new
+/// message; off (the default), it is nowhere.
+#[test]
+fn the_walker_walks_the_pane_edge_and_stands_before_a_message() {
+    let (a, b) = fixture();
+    let me = |s: &str| s.contains("[o_o]") || s.contains("[-_-]");
+    let off = shot_cfg_env("", &[], "", &a, &b);
+    assert!(!off.lines().any(me), "off by default\n{off}");
+    let on = "[general]\nanimation = true\n";
+    let s = shot_cfg_env(on, &[], "", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(!me(status), "not on the status line while it walks\n{s}");
+    let edge = s
+        .lines()
+        .find(|l| me(l))
+        .unwrap_or_else(|| panic!("walking somewhere\n{s}"));
+    assert!(
+        edge.contains('┘') && edge.contains('─'),
+        "on a pane's bottom edge\n{s}"
+    );
+    let s = shot_cfg_env(on, &[], "Ctrl+h", &a, &b);
+    let status = s.lines().rev().nth(1).unwrap_or_default();
+    let msg = status.find("hidden files").expect(&s);
+    let at = status.find("[o_o]").expect(&s);
+    assert!(at < msg, "before the message\n{s}");
+    assert_eq!(s.lines().filter(|l| me(l)).count(), 1, "in one place\n{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn a_group_of_keys_that_do_not_repeat_closes_after_one() {
     // Hidden files are toggled once, not again and again: Alt+G waits for its second

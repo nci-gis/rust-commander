@@ -59,6 +59,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+#[cfg(unix)]
+use crate::os::try_lock;
+use crate::os::{hostname, Lock};
+
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Journals this run offered and has not had an answer for, each with the probe that
@@ -102,22 +106,6 @@ pub fn run_tag() -> &'static str {
     })
 }
 
-/// This machine's name, to tell its journals from another's in a shared home directory.
-/// Empty when the system will not say.
-pub fn hostname() -> String {
-    #[cfg(unix)]
-    {
-        rustix::system::uname()
-            .nodename()
-            .to_string_lossy()
-            .into_owned()
-    }
-    #[cfg(not(unix))]
-    {
-        std::env::var("COMPUTERNAME").unwrap_or_default()
-    }
-}
-
 /// A job's journal. Removed when dropped: a job that ends while xdevcmd runs, finished,
 /// cancelled or failed, leaves nothing; only a killed process leaves its file.
 pub struct Journal {
@@ -130,33 +118,6 @@ pub struct Journal {
     broken: Option<String>,
     /// Lines written since the last sync.
     dirty: bool,
-}
-
-/// What trying a journal's lock found.
-#[derive(Debug, PartialEq, Eq)]
-enum Lock {
-    /// Ours now: the run that wrote it is gone.
-    Held,
-    /// Someone holds it: the run is alive. Unix only: on Windows a held journal does
-    /// not open at all.
-    #[cfg_attr(not(unix), allow(dead_code))]
-    Busy,
-    /// The file system has no locks. Unix only: on Windows the open is the lock.
-    #[cfg_attr(not(unix), allow(dead_code))]
-    Unsupported,
-}
-
-/// Try to take `file`'s lock without waiting.
-#[cfg(unix)]
-fn try_lock(file: &File) -> Lock {
-    use rustix::fs::{flock, FlockOperation};
-    match flock(file, FlockOperation::NonBlockingLockExclusive) {
-        Ok(()) => Lock::Held,
-        Err(e) if e == rustix::io::Errno::WOULDBLOCK => Lock::Busy,
-        // ENOLCK, EOPNOTSUPP: a file system without locks. Anything else is no better
-        // an answer, and the fallback is the cautious one.
-        Err(_) => Lock::Unsupported,
-    }
 }
 
 /// Open a journal so that, while it is open, nobody else can open it for writing.
@@ -766,16 +727,7 @@ fn pid_alive(run: &str) -> bool {
     let Some(pid) = run.split('x').next().and_then(|p| p.parse::<u32>().ok()) else {
         return true;
     };
-    #[cfg(unix)]
-    {
-        rustix::process::Pid::from_raw(pid as i32)
-            .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
+    crate::os::process_alive(pid)
 }
 
 /// Undo what one journal, left by run `run`, says was left half done.

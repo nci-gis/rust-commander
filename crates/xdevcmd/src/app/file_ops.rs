@@ -308,7 +308,7 @@ impl App {
             i.kind,
             InputKind::MkDir | InputKind::NewFile | InputKind::CopyAs { .. }
         ) {
-            if let Some(c) = crate::safety::control_char(&text) {
+            if let Some(c) = xdevcmd_core::controls::first(&text, &[]) {
                 let e = xdevcmd_core::rename::RenameError::BadChar(c);
                 self.modal = Some(Modal::Input(Input {
                     error: Some(e.to_string()),
@@ -552,7 +552,7 @@ impl App {
             self.status = "cannot make a temporary directory for the list of names".into();
             return;
         };
-        if let Err(e) = session::write_private(&list, text.as_bytes()) {
+        if let Err(e) = xdevcmd_core::document::save_state(&list, text.as_bytes()) {
             self.status = format!("cannot write the list of names: {e}");
             return;
         }
@@ -700,17 +700,25 @@ impl App {
             self.status = format!("that is a {kind}, not a file to checksum");
             return;
         }
-        let (tx, rx) = mpsc::channel();
         let p = path.clone();
-        std::thread::spawn(move || {
-            let stop = std::sync::atomic::AtomicBool::new(false);
-            let _ = tx.send(xdevcmd_core::sha256::file(&p, &stop));
-        });
+        self.start_hashing_with(path, move |stop| xdevcmd_core::sha256::file(&p, stop));
+    }
+
+    /// The checksum's worker: `work` on a thread of its own, its result read by the
+    /// loop. A seam for the test of a worker that dies.
+    pub(super) fn start_hashing_with(
+        &mut self,
+        path: PathBuf,
+        work: impl FnOnce(&std::sync::atomic::AtomicBool) -> std::io::Result<Option<String>>
+            + Send
+            + 'static,
+    ) {
+        let task = xdevcmd_core::task::Task::spawn(move |stop| work(stop));
         self.status = format!(
             "working out the SHA-256 of {}\u{2026}",
             Self::describe(std::slice::from_ref(&path))
         );
-        self.hashing = Some((path, rx));
+        self.hashing = Some((path, task));
     }
 
     pub(super) fn show_checksum(&mut self, path: &Path, result: std::io::Result<Option<String>>) {

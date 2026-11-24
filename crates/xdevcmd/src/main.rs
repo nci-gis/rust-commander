@@ -44,6 +44,7 @@ mod theme;
 mod usage;
 mod usermenu;
 mod viewer;
+mod walker;
 mod watch;
 mod wrap;
 
@@ -136,8 +137,15 @@ struct Cli {
 }
 
 fn parse_cli() -> std::result::Result<Cli, String> {
+    parse_args(std::env::args().skip(1))
+}
+
+/// The command line, its program name left out. Every option it takes is in
+/// `cli_docs::OPTIONS` (the help, the man page, the completions) and the other way
+/// round, which a test holds (Round 035, W7).
+fn parse_args(args: impl Iterator<Item = String>) -> std::result::Result<Cli, String> {
     let mut cli = Cli::default();
-    let mut args = std::env::args().skip(1);
+    let mut args = args;
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => cli.help = true,
@@ -464,7 +472,7 @@ fn main() -> Result<()> {
         // Ends as soon as the device attributes come, which every terminal answers;
         // long enough that a slow SSH link's replies are not left for crossterm to read
         // as keys.
-        app.probe = graphics::probe(Duration::from_millis(1500));
+        app.pics.probe = graphics::probe(Duration::from_millis(1500));
     }
     clock.mark("terminal check");
     app.startup = clock;
@@ -1017,6 +1025,56 @@ mod tests {
     use super::*;
 
     const PTS: &str = "/dev/pts/7";
+
+    fn args(a: &[&str]) -> std::result::Result<Cli, String> {
+        parse_args(a.iter().map(|s| (*s).to_string()))
+    }
+
+    /// The parser and the table the help, man page and completions come from cannot
+    /// drift apart: each option in the table is taken (with its argument, in both
+    /// spellings), and an option the parser takes that the table lacks is refused here
+    /// by name, the test helpers aside.
+    #[test]
+    fn every_option_in_the_table_is_parsed_and_no_other() {
+        use crate::cli_docs::{Arg, OPTIONS};
+        for (name, arg, _) in OPTIONS {
+            if *arg == Arg::None {
+                assert!(args(&[name]).is_ok(), "{name}");
+            } else {
+                assert!(
+                    args(&[name, "x"]).is_ok_and(|c| c.paths.is_empty()),
+                    "{name} x"
+                );
+                let joined = format!("{name}=x");
+                assert!(
+                    args(&[&joined]).is_ok_and(|c| c.paths.is_empty()),
+                    "{joined}"
+                );
+                assert!(args(&[name]).is_err(), "{name} without its argument");
+            }
+        }
+        // Spelled in the parser, not in the table: the short forms of two that are,
+        // and the test helpers (the help leaves them out on purpose).
+        let helpers = ["-h", "-V", "--keys=", "--screenshot"];
+        let src = include_str!("main.rs");
+        let body = &src[src.find("fn parse_args(").unwrap()..src.find("fn main()").unwrap()];
+        for quoted in body.split('"').skip(1).step_by(2) {
+            let name = quoted.trim_end_matches('=');
+            // An option is one word; a message ("--root needs a directory") is not.
+            if !name.starts_with('-')
+                || name.contains(' ')
+                || helpers.contains(&quoted)
+                || helpers.contains(&name)
+            {
+                continue;
+            }
+            assert!(
+                OPTIONS.iter().any(|(o, _, _)| *o == name),
+                "{name} is parsed but not in cli_docs::OPTIONS (the help, man page, completions)"
+            );
+        }
+        assert!(args(&["--no-such"]).is_err());
+    }
 
     #[test]
     fn only_the_panels_own_terminal_is_refused() {

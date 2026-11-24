@@ -111,16 +111,16 @@ impl App {
         };
         // The terminal's own pictures are decoded at its resolution, a cell's pixels each;
         // half blocks at two pixels a cell.
-        let own = self.graphics != crate::graphics::Protocol::Blocks && self.interactive;
+        let own = self.pics.graphics != crate::graphics::Protocol::Blocks && self.interactive;
         // Sixel is drawn pixel for pixel, so at the cell's own size. Kitty and iTerm2 fit
         // the picture to its cells themselves: sent at twice the density, it stays sharp
         // on a high-density screen and where the cell's size could only be guessed.
-        let density = if self.graphics == crate::graphics::Protocol::Sixel {
+        let density = if self.pics.graphics == crate::graphics::Protocol::Sixel {
             1
         } else {
             2
         };
-        let (cw, ch) = (self.cell_px.0 * density, self.cell_px.1 * density);
+        let (cw, ch) = (self.pics.cell_px.0 * density, self.pics.cell_px.1 * density);
         let size = if own {
             // At most 2048 pixels a side: what goes through SSH stays reasonable.
             let (w, h) = (
@@ -138,12 +138,16 @@ impl App {
             mtime,
             inner: (inner.width, inner.height),
             protocol: if own {
-                self.graphics
+                self.pics.graphics
             } else {
                 crate::graphics::Protocol::Blocks
             },
         };
-        let stale = self.quick_image.as_ref().is_none_or(|(k, _)| *k != key);
+        let stale = self
+            .pics
+            .quick_image
+            .as_ref()
+            .is_none_or(|(k, _)| *k != key);
         if stale {
             let (w, h) = if own {
                 (size.0 as usize, size.1 as usize)
@@ -158,33 +162,31 @@ impl App {
                     cells: (0, 0),
                     bytes: Vec::new(),
                 };
-                self.quick_image = Some((key.clone(), prepared));
-            } else if !self.decoding.as_ref().is_some_and(|(k, _)| *k == key) {
+                self.pics.quick_image = Some((key.clone(), prepared));
+            } else if !self.pics.decoding.as_ref().is_some_and(|(k, _)| *k == key) {
                 // Only once the cursor has stayed: a quick run down a directory of
                 // photos decodes and sends none of those passed over.
-                let since = match &self.settle {
+                let since = match &self.pics.settle {
                     Some((p, t)) if p == path => *t,
                     _ => {
                         let now = Instant::now();
-                        self.settle = Some((path.to_path_buf(), now));
+                        self.pics.settle = Some((path.to_path_buf(), now));
                         now
                     }
                 };
                 if since.elapsed() < SETTLE {
-                    self.settling = true;
+                    self.pics.settling = true;
                 } else {
-                    self.settle = None;
-                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.pics.settle = None;
                     let job = key.clone();
                     let cell = (cw, ch);
-                    std::thread::spawn(move || {
-                        let _ = tx.send(prepare(&job, w, h, bg, cell));
-                    });
-                    self.decoding = Some((key.clone(), rx));
+                    let task =
+                        xdevcmd_core::task::Task::spawn(move |_| prepare(&job, w, h, bg, cell));
+                    self.pics.decoding = Some((key.clone(), task));
                 }
             }
         }
-        let current = self.quick_image.as_ref().filter(|(k, _)| *k == key);
+        let current = self.pics.quick_image.as_ref().filter(|(k, _)| *k == key);
         let Some((_, Prepared { pic, cells, .. })) = current else {
             let inner = modal::frame_box(frame, area, "image", th.accent);
             modal::put(
@@ -219,7 +221,7 @@ impl App {
                 && cols <= inner.width
                 && rows <= inner.height
             {
-                self.graphic_want = Some(Graphic {
+                self.pics.graphic_want = Some(Graphic {
                     rect: Rect::new(
                         inner.x + (inner.width - cols) / 2,
                         inner.y + (inner.height - rows) / 2,
@@ -244,11 +246,12 @@ impl App {
         if let Ok(w) = terminal.backend_mut().window_size() {
             let (c, p) = (w.columns_rows, w.pixels);
             if c.width > 0 && c.height > 0 && p.width >= c.width && p.height >= c.height {
-                self.cell_px = (p.width / c.width, p.height / c.height);
-                self.cell_known = true;
+                self.pics.cell_px = (p.width / c.width, p.height / c.height);
+                self.pics.cell_known = true;
             }
         }
-        self.graphics = crate::graphics::effective(self.graphics_found, self.cell_known);
+        self.pics.graphics =
+            crate::graphics::effective(self.pics.graphics_found, self.pics.cell_known);
     }
 
     /// After a frame: put the picture it wants on screen in the terminal's own protocol,
@@ -261,42 +264,47 @@ impl App {
         use crate::graphics::{kitty_delete, kitty_place, kitty_unplace, Protocol};
         // Kept under a dialog, and the dialog has closed with nothing to show (quick
         // view closed meanwhile): freed, not left in the terminal.
-        if self.graphic_want.is_none()
-            && self.graphic_shown.is_none()
+        if self.pics.graphic_want.is_none()
+            && self.pics.graphic_shown.is_none()
             && self.modal.is_none()
-            && self.kitty_held.take().is_some()
-            && self.graphics == Protocol::Kitty
+            && self.pics.kitty_held.take().is_some()
+            && self.pics.graphics == Protocol::Kitty
         {
             terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
         }
-        if self.graphic_want == self.graphic_shown {
+        if self.pics.graphic_want == self.pics.graphic_shown {
             return Ok(());
         }
-        if let Some(old) = self.graphic_shown.take() {
-            if self.graphics == Protocol::Kitty {
+        if let Some(old) = self.pics.graphic_shown.take() {
+            if self.pics.graphics == Protocol::Kitty {
                 // Kept while a dialog covers it, or when only its place changes.
-                let same = self.graphic_want.as_ref().is_some_and(|w| w.key == old.key);
-                if same || (self.graphic_want.is_none() && self.modal.is_some()) {
+                let same = self
+                    .pics
+                    .graphic_want
+                    .as_ref()
+                    .is_some_and(|w| w.key == old.key);
+                if same || (self.pics.graphic_want.is_none() && self.modal.is_some()) {
                     terminal.backend_mut().raw(&kitty_unplace(KITTY_ID))?;
                 } else {
                     terminal.backend_mut().raw(&kitty_delete(KITTY_ID))?;
-                    self.kitty_held = None;
+                    self.pics.kitty_held = None;
                 }
             } else {
                 // An iTerm2 or sixel picture is cells: write again, through the backend,
                 // what this frame has in the cells it covered (draw() kept them), which
                 // ratatui's diff thinks are already on screen.
                 use ratatui::backend::Backend;
-                let under = std::mem::take(&mut self.under_graphic);
+                let under = std::mem::take(&mut self.pics.under_graphic);
                 terminal
                     .backend_mut()
                     .draw(under.iter().map(|(x, y, c)| (*x, *y, c)))?;
             }
         }
-        let Some(want) = self.graphic_want.clone() else {
+        let Some(want) = self.pics.graphic_want.clone() else {
             return Ok(());
         };
         let Some((_, prepared)) = self
+            .pics
             .quick_image
             .as_ref()
             .filter(|(k, p)| *k == want.key && p.pic.is_ok() && !p.bytes.is_empty())
@@ -305,17 +313,18 @@ impl App {
         };
         let r = want.rect;
         let mut bytes = format!("\x1b7\x1b[{};{}H", r.y + 1, r.x + 1).into_bytes();
-        if self.graphics == Protocol::Kitty && self.kitty_held.as_ref() == Some(&want.key) {
+        if self.pics.graphics == Protocol::Kitty && self.pics.kitty_held.as_ref() == Some(&want.key)
+        {
             bytes.extend(kitty_place(KITTY_ID, r.width, r.height));
         } else {
             bytes.extend_from_slice(&prepared.bytes);
-            if self.graphics == Protocol::Kitty {
-                self.kitty_held = Some(want.key.clone());
+            if self.pics.graphics == Protocol::Kitty {
+                self.pics.kitty_held = Some(want.key.clone());
             }
         }
         bytes.extend_from_slice(b"\x1b8");
         terminal.backend_mut().raw(&bytes)?;
-        self.graphic_shown = Some(want);
+        self.pics.graphic_shown = Some(want);
         Ok(())
     }
 }

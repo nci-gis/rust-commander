@@ -6,10 +6,7 @@ impl App {
     /// File → Settings….
     pub(super) fn open_settings(&mut self) {
         let cannot_save = if self.settings.mode.read_only() {
-            Some(format!(
-                "{} mode \u{2014} xdevcmd writes nothing, its settings included",
-                self.settings.mode.label()
-            ))
+            Some(self.settings.mode.writes_nothing())
         } else if let Outcome::Rejected { .. } = self.config_outcome {
             Some(
                 "config.toml has an error (Help \u{203a} Config in use says which): fix it by hand first"
@@ -39,10 +36,7 @@ impl App {
         }
         // The dialog offers no Save in these modes; refused here too, not on its word.
         if self.settings.mode.read_only() {
-            self.status = format!(
-                "{} mode \u{2014} xdevcmd writes nothing, settings included",
-                self.settings.mode.label()
-            );
+            self.status = self.settings.mode.writes_nothing();
             return;
         }
         let Some(path) = crate::config::path_in_use() else {
@@ -91,7 +85,7 @@ impl App {
                 return;
             }
         };
-        if let Err(e) = session::write_private(&path, text.as_bytes()) {
+        if let Err(e) = xdevcmd_core::document::save_state(&path, text.as_bytes()) {
             self.status = format!("cannot save {}: {e}", path.display());
             return;
         }
@@ -105,12 +99,13 @@ impl App {
         xdevcmd_core::ops::set_safe(s.config.general.safe_operations);
         xdevcmd_core::fastcopy::set_enabled(s.config.general.fast_copy);
         if self.interactive {
-            self.graphics_found = crate::graphics::detect(
+            self.pics.graphics_found = crate::graphics::detect(
                 &s.config.viewer.images,
                 |k| std::env::var(k).ok(),
-                &self.probe,
+                &self.pics.probe,
             );
-            self.graphics = crate::graphics::effective(self.graphics_found, self.cell_known);
+            self.pics.graphics =
+                crate::graphics::effective(self.pics.graphics_found, self.pics.cell_known);
         }
         let scrollback = s.config.terminal.scrollback;
         if let Some(p) = self.panel() {

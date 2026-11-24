@@ -29,12 +29,8 @@ impl std::fmt::Display for RenameError {
                     "a name cannot contain a path separator \u{2014} F6 moves files"
                 )
             }
-            RenameError::BadChar(c) if c.is_control() => {
-                write!(
-                    f,
-                    "a name cannot contain a control character (U+{:04X})",
-                    *c as u32
-                )
+            RenameError::BadChar(c) if crate::controls::is(*c) => {
+                write!(f, "a name cannot contain {}", crate::controls::named(*c))
             }
             RenameError::BadChar(c) => write!(f, "a name cannot contain {c:?}"),
             RenameError::Exists(n) => {
@@ -66,7 +62,7 @@ pub fn validate_name(name: &str) -> Result<(), RenameError> {
     }
     // A control character (a newline, ESC, DEL, C1) is legal in a Unix name and breaks
     // whatever later lists or pastes it: refused everywhere (the release bar, item 1).
-    if let Some(c) = name.chars().find(|c| *c == '/' || c.is_control()) {
+    if let Some(c) = name.chars().find(|&c| c == '/' || crate::controls::is(c)) {
         return Err(RenameError::BadChar(c));
     }
     #[cfg(windows)]

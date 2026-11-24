@@ -300,9 +300,8 @@ pub fn entry_style(e: &Entry) -> Style {
 
 #[cfg(unix)]
 pub fn is_executable(e: &Entry) -> bool {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(&e.path)
-        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .map(|m| xdevcmd_core::os::has_exec_bit(&m))
         .unwrap_or(false)
 }
 

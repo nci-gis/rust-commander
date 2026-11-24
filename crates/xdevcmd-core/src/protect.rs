@@ -64,14 +64,7 @@ pub fn protected(path: &Path, homes: &[PathBuf]) -> Option<Guarded> {
 /// set and as the system resolves them.
 pub fn homes() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for var in ["HOME", "USERPROFILE"] {
-        let Some(v) = std::env::var_os(var) else {
-            continue;
-        };
-        let p = PathBuf::from(v);
-        if !p.is_absolute() {
-            continue;
-        }
+    for p in crate::dirs::homes() {
         let p = made_plain(&p);
         if let Ok(real) = crate::paths::canonical(&p) {
             if !out.contains(&real) {

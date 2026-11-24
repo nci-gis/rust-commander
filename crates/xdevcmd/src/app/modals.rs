@@ -233,24 +233,7 @@ impl App {
                     }
                 }
             }
-            ModalAct::Start => {
-                // A click on [Enter] too: nothing can be written there.
-                if let Some(Modal::Confirm(c)) = &self.modal {
-                    if c.table
-                        .as_ref()
-                        .is_some_and(|t| t.plan.target.writable == Some(false))
-                    {
-                        self.status =
-                            "you cannot write there: Tab for the other pane, Esc to cancel".into();
-                        return;
-                    }
-                }
-                if let Some(Modal::Confirm(c)) = self.modal.take() {
-                    let kind = c.request.kind;
-                    self.remember_job(&c.request);
-                    self.modal = Some(Modal::Job(Job::new(kind, ops::start(c.request))));
-                }
-            }
+            ModalAct::Start => self.start_confirmed(),
             ModalAct::Apply => {
                 if let Some(Modal::Input(i)) = self.modal.take() {
                     self.apply_input(i);
@@ -415,7 +398,8 @@ impl App {
 
     /// Where a menu that belongs to the focused pane opens: just inside its corner.
     pub(super) fn pane_anchor(&self) -> (u16, u16) {
-        self.rects
+        self.hits
+            .rects
             .iter()
             .find(|(id, _)| *id == self.focus)
             .map(|(_, r)| (r.x + 2, r.y + 1))

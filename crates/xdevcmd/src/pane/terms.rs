@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use xdevcmd_core::format::Cells;
 
 use anyhow::Result;
 use ratatui::crossterm::event::KeyEvent;
@@ -756,7 +757,7 @@ impl TermPanel {
         let right = area.x + area.width;
         let mut cx = area.x;
         let put = |frame: &mut Frame, x: u16, text: &str, style: Style| -> u16 {
-            let w = text.chars().count() as u16;
+            let w = text.cells() as u16;
             if x < right {
                 frame.buffer_mut().set_line(
                     x,

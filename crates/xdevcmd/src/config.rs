@@ -137,6 +137,13 @@ pub struct General {
     /// APFS), else the kernel's copy on Linux, else xdevcmd's own read and write. Off,
     /// xdevcmd always reads and writes. See docs/security.md.
     pub fast_copy: bool,
+    /// A small agent walks across the file panes' bottom edge, a step a second, and stands on
+    /// the status line before a new message for a while. Off by default: a moving thing is not for everyone, and
+    /// over SSH each step is a little traffic.
+    pub animation: bool,
+    /// Seconds the walker stands before a new message before it walks on: 5 to 15.
+    /// The config file only, not Settings.
+    pub animation_hold_secs: u64,
 }
 
 impl Default for General {
@@ -149,6 +156,8 @@ impl Default for General {
             autosave_secs: 5,
             safe_operations: true,
             fast_copy: true,
+            animation: false,
+            animation_hold_secs: crate::walker::HOLD_SECS,
         }
     }
 }
@@ -314,6 +323,23 @@ impl Mode {
         self >= Mode::ReadOnly
     }
 
+    /// Why something is refused in this mode: `read-only mode — copying is turned off`.
+    /// Every mode refusal is worded here once (Round 035, W4), so beta.4 translates it
+    /// once; `next` is the safe thing to press instead, or empty.
+    pub fn turned_off(self, what: &str, next: &str) -> String {
+        format!("{} mode \u{2014} {what} is turned off{next}", self.label())
+    }
+
+    /// Why Settings cannot save in this mode. One wording: the dialog's note and the
+    /// refusal behind it had drifted apart ("its settings included" and "settings
+    /// included"; Round 035, W4).
+    pub fn writes_nothing(self) -> String {
+        format!(
+            "{} mode \u{2014} xdevcmd writes nothing, its settings included",
+            self.label()
+        )
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Mode::Normal => "normal",
@@ -413,17 +439,11 @@ impl Default for Settings {
 
 /// Turn a parsed file into settings, or say exactly what is wrong with it.
 pub fn resolve(config: Config) -> Result<Settings, String> {
-    let sort_key = match config.files.sort.as_str() {
-        "name" => SortKey::Name,
-        "ext" => SortKey::Ext,
-        "size" => SortKey::Size,
-        "modified" => SortKey::Modified,
-        other => {
-            return Err(format!(
-                "[files] sort = \"{other}\": expected name, ext, size or modified"
-            ))
-        }
-    };
+    let sort_key: SortKey = config
+        .files
+        .sort
+        .parse()
+        .map_err(|e| format!("[files] sort = \"{}\": {e}", config.files.sort))?;
     if !(10..=90).contains(&config.terminal.height_percent) {
         return Err(format!(
             "[terminal] height_percent = {}: expected 10 to 90",
@@ -456,6 +476,14 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
     if a != 0 && !(5..=3600).contains(&a) {
         return Err(format!(
             "[general] autosave_secs = {a}: expected 0 (off) or 5 to 3600"
+        ));
+    }
+    let h = config.general.animation_hold_secs;
+    if !crate::walker::HOLD_RANGE.contains(&h) {
+        return Err(format!(
+            "[general] animation_hold_secs = {h}: expected {} to {}",
+            crate::walker::HOLD_RANGE.start(),
+            crate::walker::HOLD_RANGE.end()
         ));
     }
     let ms = config.files.auto_refresh_ms;
@@ -955,22 +983,13 @@ pub(crate) fn color_name(c: Color) -> String {
     }
 }
 
-/// Where the config is looked for, first match wins.
+/// Where the config is looked for, first match wins: `$XDEVCMD_CONFIG`, else
+/// `config.toml` in the config folder ([`xdevcmd_core::dirs::config_dir`]).
 pub fn default_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("XDEVCMD_CONFIG").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
-    if let Some(x) = std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()) {
-        return Some(PathBuf::from(x).join("xdevcmd").join("config.toml"));
-    }
-    if cfg!(windows) {
-        if let Some(a) = std::env::var_os("APPDATA") {
-            return Some(PathBuf::from(a).join("xdevcmd").join("config.toml"));
-        }
-    }
-    // macOS included: terminal tools conventionally live in ~/.config, not in
-    // ~/Library/Application Support, and that is where a user will look.
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/xdevcmd/config.toml"))
+    xdevcmd_core::dirs::config_dir().map(|d| d.join("config.toml"))
 }
 
 /// What happened when loading, so the UI can say it.
@@ -1373,6 +1392,21 @@ mod tests {
         for bad in [99, 10000, 0] {
             let e = parse(&format!("[terminal]\nscrollback = {bad}\n")).unwrap_err();
             assert!(e.contains("scrollback") && e.contains("100 to 9999"), "{e}");
+        }
+    }
+
+    /// The owner (2026-11-24): 5 to 15 seconds, 5 by default, from the file only; a
+    /// value outside or of the wrong type is a mistake in the file, as any other.
+    #[test]
+    fn the_walker_holds_5_to_15_seconds() {
+        assert_eq!(parse("").unwrap().config.general.animation_hold_secs, 5);
+        for ok in [5, 15] {
+            let s = parse(&format!("[general]\nanimation_hold_secs = {ok}\n")).unwrap();
+            assert_eq!(s.config.general.animation_hold_secs, ok);
+        }
+        for bad in ["4", "16", "0", "\"ten\"", "-1"] {
+            let e = parse(&format!("[general]\nanimation_hold_secs = {bad}\n")).unwrap_err();
+            assert!(e.contains("animation_hold_secs"), "{bad}: {e}");
         }
     }
 

@@ -1,6 +1,7 @@
 //! Drawing: the menu bar, the frame, the status line and the key footer.
 
 use super::*;
+use xdevcmd_core::format::Cells;
 
 impl App {
     /// What the drop-down for menu `i` holds, built from the keymap and the mode in
@@ -112,18 +113,19 @@ impl App {
 
     pub(super) fn open_bar(&mut self, i: usize) {
         let x = self
+            .hits
             .bar_hits
             .iter()
             .find(|(j, _)| *j == i)
             .map(|(_, r)| r.x)
             .unwrap_or(0);
         // Below the bar when it is on screen; at the top otherwise (F9 with it off).
-        let y = u16::from(!self.bar_hits.is_empty());
+        let y = u16::from(!self.hits.bar_hits.is_empty());
         self.modal = Some(Modal::Menu(Menu::dropdown(i, self.bar_items(i), (x, y))));
     }
 
     pub(super) fn draw_bar(&mut self, frame: &mut Frame, area: Rect) {
-        self.bar_hits.clear();
+        self.hits.bar_hits.clear();
         if area.height == 0 {
             return;
         }
@@ -137,7 +139,7 @@ impl App {
         let mut x = area.x + 1;
         for (i, title) in BAR.iter().enumerate() {
             let text = format!(" {title} ");
-            let w = text.chars().count() as u16;
+            let w = text.cells() as u16;
             if x + w > area.x + area.width {
                 break;
             }
@@ -150,14 +152,14 @@ impl App {
                 Style::new().fg(th.fg)
             };
             buf.set_line(x, area.y, &Line::from(Span::styled(text, style)), w);
-            self.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
+            self.hits.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
             x += w + 1;
         }
         // Which xdevcmd this is, at the right: a shell started from the terminal panel
         // names the xdevcmd it came from by this number (main.rs, `own_panel`). Dim, and
         // only where the menus leave room.
         let me = format!("xdevcmd {} ", std::process::id());
-        let w = me.chars().count() as u16;
+        let w = me.cells() as u16;
         let end = area.x + area.width;
         if x + 2 + w <= end {
             buf.set_line(
@@ -212,13 +214,13 @@ impl App {
     pub fn draw(&mut self, frame: &mut Frame) {
         self.draw_frame(frame);
         // The cells under the picture the terminal shows, as this frame has them.
-        self.under_graphic.clear();
-        if let Some(r) = self.graphic_shown.as_ref().map(|g| g.rect) {
+        self.pics.under_graphic.clear();
+        if let Some(r) = self.pics.graphic_shown.as_ref().map(|g| g.rect) {
             let buf = frame.buffer_mut();
             for y in r.y..r.y + r.height {
                 for x in r.x..r.x + r.width {
                     if let Some(c) = buf.cell(ratatui::layout::Position::new(x, y)) {
-                        self.under_graphic.push((x, y, c.clone()));
+                        self.pics.under_graphic.push((x, y, c.clone()));
                     }
                 }
             }
@@ -226,10 +228,10 @@ impl App {
     }
 
     pub(super) fn draw_frame(&mut self, frame: &mut Frame) {
-        self.graphic_want = None;
-        self.settling = false;
+        self.pics.graphic_want = None;
+        self.pics.settling = false;
         let area = frame.area();
-        self.screen = area;
+        self.hits.screen = area;
         self.note_focus();
         for p in self.panes.values_mut() {
             if let Some(n) = p.as_files_mut().and_then(|f| f.notice.take()) {
@@ -250,7 +252,7 @@ impl App {
         .areas(area);
         self.draw_bar(frame, bar);
 
-        self.main = main;
+        self.hits.main = main;
         if self
             .zoom
             .is_some_and(|z| z != self.focus || !self.tree.contains(z))
@@ -266,7 +268,7 @@ impl App {
             Some(z) => rects.push((z, main)),
             None => self.tree.assign(main, &mut rects),
         }
-        self.rects = rects.clone();
+        self.hits.rects = rects.clone();
 
         // Quick view ends when its pane takes the focus or goes away.
         if self
@@ -301,6 +303,7 @@ impl App {
             match self.panes.get_mut(&id) {
                 Some(Pane::Files(f)) => {
                     let target = self
+                        .hits
                         .drag
                         .as_ref()
                         .is_some_and(|d| d.mode == DragMode::Files && d.hover == Some(id));
@@ -313,6 +316,7 @@ impl App {
 
         if let Some(s) = &self.search {
             let at = self
+                .hits
                 .rects
                 .iter()
                 .find(|(id, _)| *id == s.pane)
@@ -329,6 +333,7 @@ impl App {
         }
 
         self.note_status();
+        self.draw_walker(frame);
         self.draw_status(frame, status);
         self.draw_footer(frame, footer);
 
@@ -343,6 +348,7 @@ impl App {
         // The theme's light over the whole frame, but not over what the programs in the
         // terminal panels drew.
         let screens: Vec<Rect> = self
+            .hits
             .rects
             .iter()
             .filter_map(|(id, _)| match self.panes.get(id) {
@@ -393,6 +399,38 @@ impl App {
         self.modal = Some(Modal::View(Box::new(viewer)));
     }
 
+    /// The walker (`[general] animation`): a step a second across the whole screen, on
+    /// the row of the lowest file pane's bottom edge ([`crate::walker::row`]). While it stands before a new message it is
+    /// on the status line instead (`draw_status`).
+    fn draw_walker(&self, frame: &mut Frame) {
+        if !self.settings.config.general.animation {
+            return;
+        }
+        let row = crate::walker::row(
+            self.hits
+                .rects
+                .iter()
+                .filter(|(id, _)| matches!(self.panes.get(id), Some(Pane::Files(_))))
+                .map(|(_, r)| *r),
+        );
+        // The whole width: across both panes' edges (the owner, 2026-11-24).
+        let screen = frame.area();
+        let lane = row.map_or(0, |_| usize::from(screen.width));
+        let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
+        let mut w = self.walker.borrow_mut();
+        let standing = w.tick(Instant::now(), lane, &self.status, hold);
+        // Not over a search or filter line, which is drawn on the same edge.
+        let free = self.search.is_none();
+        if let Some(y) = row.filter(|_| free && !standing && lane >= crate::walker::WIDTH) {
+            frame.buffer_mut().set_string(
+                screen.x + w.pos() as u16,
+                y,
+                w.sprite(),
+                Style::new().fg(theme::t().accent),
+            );
+        }
+    }
+
     pub(super) fn draw_status(&self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {
             return;
@@ -405,12 +443,7 @@ impl App {
                 } else {
                     String::new()
                 };
-                let sort = match f.sort.key {
-                    SortKey::Name => "name",
-                    SortKey::Ext => "ext",
-                    SortKey::Size => "size",
-                    SortKey::Modified => "date",
-                };
+                let sort = f.sort.key.label();
                 format!(
                     " {}  ·  {} items  ·  sort {}{}{}{}",
                     f.summary(),
@@ -463,7 +496,7 @@ impl App {
         // An open two-key group is shown the same way, in the accent colour, so a key
         // waiting for its second is never a surprise.
         let group = self.group_badge();
-        let badges = badge.chars().count() + group.as_ref().map_or(0, |g| g.chars().count() + 1);
+        let badges = badge.cells() + group.as_ref().map_or(0, |g| g.cells() + 1);
         let left = format!("{}{left}", " ".repeat(badges));
         let right = format!("{} ", self.status);
 
@@ -472,14 +505,15 @@ impl App {
         let avail = area.width as usize;
         // The right half (messages) wins space, but a gap of two is always kept between
         // them: with both halves long they otherwise ran together, "…historytoo small".
-        let rw = right.chars().count().min(avail.saturating_sub(3));
+        let rw = right.cells().min(avail.saturating_sub(3));
         let lw = avail.saturating_sub(rw + 2);
         let gap = avail.saturating_sub(lw + rw).min(2);
+        let shown_left = elide_middle(&left, lw);
         buf.set_line(
             area.x,
             area.y,
             &Line::from(Span::styled(
-                elide_middle(&left, lw),
+                shown_left.clone(),
                 Style::new().fg(theme::t().fg),
             )),
             lw as u16,
@@ -493,6 +527,22 @@ impl App {
             )),
             rw as u16,
         );
+        // The walker stands here, just before a new message, for its hold; it walks
+        // on the file pane's bottom edge (`draw_walker`).
+        let w = self.walker.borrow();
+        let end = (lw + gap).saturating_sub(1);
+        if self.settings.config.general.animation
+            && w.standing()
+            && end >= shown_left.cells() + 1 + crate::walker::WIDTH
+        {
+            frame.buffer_mut().set_string(
+                area.x + (end - crate::walker::WIDTH) as u16,
+                area.y,
+                w.sprite(),
+                Style::new().fg(theme::t().accent),
+            );
+        }
+        drop(w);
         if !badge.is_empty() {
             let th = theme::t();
             frame.buffer_mut().set_line(
@@ -510,7 +560,7 @@ impl App {
         }
         if let Some(g) = group {
             let th = theme::t();
-            let x = area.x + badge.chars().count() as u16;
+            let x = area.x + badge.cells() as u16;
             frame.buffer_mut().set_line(
                 x,
                 area.y,
@@ -537,7 +587,7 @@ impl App {
             frame
                 .buffer_mut()
                 .set_style(area, Style::new().bg(theme::t().bg_bar));
-            self.footer_hits.clear();
+            self.hits.footer_hits.clear();
             return;
         }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still
@@ -570,7 +620,7 @@ impl App {
                 .strip_prefix('F')
                 .filter(|d| d.parse::<u8>().is_ok())
                 .unwrap_or(&key);
-            let w = (k.chars().count() + label.chars().count() + 3) as u16;
+            let w = (k.cells() + label.cells() + 3) as u16;
             if cx + w > area.x + area.width {
                 break;
             }
@@ -606,6 +656,6 @@ impl App {
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::new().bg(theme::t().bg_bar));
         buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-        self.footer_hits = hits;
+        self.hits.footer_hits = hits;
     }
 }

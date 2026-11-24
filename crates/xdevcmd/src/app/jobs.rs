@@ -446,7 +446,7 @@ impl App {
     /// Keep the system watching the directories on screen, and note the panes whose
     /// directory it says changed; they re-read on the next quiet moment.
     pub(super) fn watch_panes(&mut self, shown: &[PaneId], every: Duration) {
-        let Some(w) = self.watcher.as_mut() else {
+        let Some(w) = self.watch.watcher.as_mut() else {
             return;
         };
         let mut dirs = HashSet::new();
@@ -461,6 +461,7 @@ impl App {
                 }
                 // The system reports canonical paths (macOS's /tmp is /private/tmp).
                 let canon = self
+                    .watch
                     .canonical
                     .entry(f.cwd.clone())
                     .or_insert_with(|| f.cwd.canonicalize().unwrap_or_else(|_| f.cwd.clone()))
@@ -473,13 +474,13 @@ impl App {
         let changed = w.changed();
         for (id, canon) in owners {
             if changed.contains(&canon) {
-                self.to_reload.insert(id);
+                self.watch.to_reload.insert(id);
             } else if new.contains(&canon) {
-                self.to_check.insert(id);
+                self.watch.to_check.insert(id);
             }
         }
         // Forget what is no longer shown, so the map does not grow without end.
-        self.canonical.retain(|_, c| dirs.contains(c));
+        self.watch.canonical.retain(|_, c| dirs.contains(c));
     }
 
     /// A delete to the trash has finished: if it is still the last operation, undo
@@ -811,5 +812,57 @@ impl App {
         // One step: an undone operation is not undone again.
         self.last_undo = None;
         self.reload_all();
+    }
+
+    // ── starting and forgetting jobs (moved from input.rs and modals.rs, so the data
+    // path's glue is in one file: qa's DATA_PATH lists this one, not those) ──────────
+
+    /// Forget an interrupted job (the Interrupted dialog's F): its kept parts removed.
+    pub(super) fn discard_interrupted(&mut self, it: &xdevcmd_core::journal::Interrupted) {
+        let f = xdevcmd_core::journal::discard(it);
+        let s = |n: usize| if n == 1 { "" } else { "s" };
+        self.status = match (f.removed, f.left.len()) {
+            (_, l) if l > 0 => format!(
+                "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
+                s(l),
+            ),
+            (0, _) => "the interrupted job forgotten: nothing more is done".into(),
+            (n, _) => format!(
+                "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
+                s(n),
+            ),
+        };
+    }
+
+    /// Start a synchronisation of `pairs` (compare's result), as a copy undo can reverse.
+    pub(super) fn start_sync(&mut self, pairs: Vec<(PathBuf, PathBuf, ops::Expect)>) {
+        let pairs_len = pairs.len();
+        let req = Request::sync(pairs);
+        self.expect_copy_undo(format!(
+            "synchronisation of {} item{}",
+            pairs_len,
+            if pairs_len == 1 { "" } else { "s" }
+        ));
+        self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
+    }
+
+    /// Start the job the open confirmation is about, unless its target cannot be written.
+    pub(super) fn start_confirmed(&mut self) {
+        // A click on [Enter] too: nothing can be written there.
+        if let Some(Modal::Confirm(c)) = &self.modal {
+            if c.table
+                .as_ref()
+                .is_some_and(|t| t.plan.target.writable == Some(false))
+            {
+                self.status =
+                    "you cannot write there: Tab for the other pane, Esc to cancel".into();
+                return;
+            }
+        }
+        if let Some(Modal::Confirm(c)) = self.modal.take() {
+            let kind = c.request.kind;
+            self.remember_job(&c.request);
+            self.modal = Some(Modal::Job(Job::new(kind, ops::start(c.request))));
+        }
     }
 }

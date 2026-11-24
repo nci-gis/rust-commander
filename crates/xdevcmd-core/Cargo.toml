@@ -30,6 +30,10 @@ zune-jpeg = "0.5.15"
 # How many columns a character takes on the terminal (a CJK one two), for fitting names
 # into columns (format.rs). Already in the tree through ratatui.
 unicode-width = "0.2"
+# Where one drawn character ends (an emoji with its VS16, a family joined by ZWJ, a letter
+# with its accents), so a name is cut between them, never inside. Already in the tree
+# through ratatui.
+unicode-segmentation = "1"
 
 # O_NONBLOCK, to open a picture someone else may swap for a FIFO without hanging
 # (quick view). Already in the tree through ratatui.

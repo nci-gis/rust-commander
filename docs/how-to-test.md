@@ -13,8 +13,9 @@ for your system is missing from the release: step 1).
 **1. Download** from [Releases](https://github.com/nci-gis/rust-commander/releases), for
 your system: this version's `xdevcmd-…` archive; the previous version's (the release
 just below it on that page: for 0.4.0-beta.2, 0.4.0-beta.1), to compare with; and this
-version's `xdevcmd-bench-…` (it holds `xtask`, the test tool; `xtask --help`). Unpack
-each into a folder of its own. No `xdevcmd-bench-…` for your system? Its build failed
+version's `xdevcmd-testkit-…` (it holds `xtask`, the test tool; `xtask --help`; named
+`xdevcmd-bench-…` in 0.4.0-beta.2). Unpack each into a folder of its own. No
+`xdevcmd-testkit-…` for your system? Its build failed
 for that release, and the release notes say so. With Rust, build it from the release's
 tag: `git clone --branch <tag> https://github.com/nci-gis/rust-commander` then, in it,
 `cargo build --release --locked -p xtask`; it is `target/release/xtask`. The builds are not signed: the first start may need
@@ -84,8 +85,9 @@ again with the same `--launch` line and press **C**: "1 found different … copi
 
 **9. Check every file**: `xtask try --check`. The last line must be
 **PASS: every copy whole, no file lost or wrong**; it is saved as `check-<os>-<time>.txt`
-beside `xdevcmd-try`. To record the run: `xtask manual log`, and answer its questions
-(Enter takes what it offers). Then `xtask try --clean`.
+beside `xdevcmd-try`. Nothing to record: CI runs these checks on Linux, macOS and
+Windows for every release (the maintainer's `tests/kill.rs`); they are here to look for
+yourself. If one fails for you, send it (step 11). Then `xtask try --clean`.
 
 **10. Use it for a week** for your normal file work, where you would use Explorer,
 Finder, mc or Total Commander: copies and moves onto folders that share some names, F8

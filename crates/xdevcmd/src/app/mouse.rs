@@ -19,17 +19,17 @@ impl App {
         let p = Position::new(x, y);
 
         // A press the program in a shell took: the rest of that gesture is its too.
-        if let Some((key, r)) = self.mouse_to_shell {
+        if let Some((key, r)) = self.shell_pane.mouse_to_shell {
             use crate::pane::term::MouseEv;
             let mods = mouse_mods(m.modifiers);
             let ev = match m.kind {
                 MouseEventKind::Drag(b) => Some(MouseEv::Drag(button_number(b) | mods)),
                 MouseEventKind::Up(b) => {
-                    self.mouse_to_shell = None;
+                    self.shell_pane.mouse_to_shell = None;
                     Some(MouseEv::Release(button_number(b) | mods))
                 }
                 MouseEventKind::Down(_) => {
-                    self.mouse_to_shell = None;
+                    self.shell_pane.mouse_to_shell = None;
                     None
                 }
                 _ => None,
@@ -50,6 +50,7 @@ impl App {
 
         if let MouseEventKind::Down(MouseButton::Left) = m.kind {
             if let Some(i) = self
+                .hits
                 .bar_hits
                 .iter()
                 .find(|(_, r)| r.contains(p))
@@ -59,6 +60,7 @@ impl App {
             }
             // The key bar is a row of buttons, as in every orthodox manager.
             if let Some(a) = self
+                .hits
                 .footer_hits
                 .iter()
                 .find(|(_, r)| r.contains(p))
@@ -80,7 +82,7 @@ impl App {
                     if let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) {
                         f.drag_bar(y, grab);
                     }
-                    self.scrolling = Some((id, grab));
+                    self.hits.scrolling = Some((id, grab));
                     return;
                 }
             }
@@ -88,20 +90,20 @@ impl App {
             // borders, which are otherwise just part of each pane. The exception is a
             // button on the terminal's tab bar, which shares a row with that strip.
             let on_tab_button = self.panes.values().any(|p| match p {
-                Pane::Term(t) => self.term_shown && t.bar_button_at(x, y),
+                Pane::Term(t) => self.shell_pane.term_shown && t.bar_button_at(x, y),
                 Pane::Files(f) => f.bar_button_at(x, y),
             });
             // Nor a directory's name in a pane's title: a pane split off below (Alt+D)
             // has its title on the boundary's row, and a click there means that directory
             // (0.2.1 took it for a drag). The rest of the row still moves the boundary.
-            let shown: Vec<PaneId> = self.rects.iter().map(|(id, _)| *id).collect();
+            let shown: Vec<PaneId> = self.hits.rects.iter().map(|(id, _)| *id).collect();
             let on_crumb = self.panes.iter().any(|(id, p)| {
                 shown.contains(id) && p.as_files().is_some_and(|f| f.crumb_at(x, y).is_some())
             });
             let mut dividers = Vec::new();
             // Zoomed, the layout's borders are not on screen, so none can be grabbed.
             if !on_tab_button && !on_crumb && self.zoom.is_none() {
-                self.tree.dividers(self.main, &mut dividers);
+                self.tree.dividers(self.hits.main, &mut dividers);
             }
             // A double-click on a boundary shares it evenly between the two panes on
             // either side, and only those two; a single press starts a drag.
@@ -110,11 +112,12 @@ impl App {
                     self.tree.even(d.id);
                     self.status = "shared evenly between the two panes".into();
                 } else {
-                    self.resizing = Some((d, false));
+                    self.hits.resizing = Some((d, false));
                 }
                 return;
             }
             let inner = self
+                .shell_pane
                 .term_shown
                 .then(|| self.panel().map(|p| p.dividers()))
                 .flatten()
@@ -126,7 +129,7 @@ impl App {
                     }
                     self.status = "shared evenly between the two shells".into();
                 } else {
-                    self.resizing = Some((d, true));
+                    self.hits.resizing = Some((d, true));
                 }
                 return;
             }
@@ -137,7 +140,7 @@ impl App {
         let shift = m.modifiers.contains(KeyModifiers::SHIFT);
 
         match m.kind {
-            MouseEventKind::Down(MouseButton::Left) if Some(id) == self.term_id => {
+            MouseEventKind::Down(MouseButton::Left) if Some(id) == self.shell_pane.term_id => {
                 self.focus = id;
                 let click = self.panel().map(|p| p.on_click(x, y));
                 match click {
@@ -158,7 +161,7 @@ impl App {
             // guessing whose click it is; inside a shell a right-click is the program's
             // when it asked for the mouse, and otherwise left alone.
             MouseEventKind::Down(b @ (MouseButton::Right | MouseButton::Middle))
-                if Some(id) == self.term_id =>
+                if Some(id) == self.shell_pane.term_id =>
             {
                 self.focus = id;
                 if let Some(i) = self.panel().and_then(|p| p.tab_at(x, y)) {
@@ -169,7 +172,9 @@ impl App {
                     self.press_into_shell(x, y, button_number(b), m.modifiers);
                 }
             }
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if Some(id) == self.term_id => {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                if Some(id) == self.shell_pane.term_id =>
+            {
                 let up = m.kind == MouseEventKind::ScrollUp;
                 if let Some(p) = self.panel() {
                     p.wheel_at(x, y, up);
@@ -234,7 +239,7 @@ impl App {
                 let anchor_was_marked =
                     f.entries.get(i).is_some_and(|e| f.marked.contains(&e.path));
                 let marks_before = f.marked.clone();
-                self.drag = Some(Drag {
+                self.hits.drag = Some(Drag {
                     source: id,
                     anchor: i,
                     anchor_was_marked,
@@ -275,13 +280,13 @@ impl App {
     }
 
     pub(super) fn on_drag(&mut self, x: u16, y: u16) {
-        if let Some((id, grab)) = self.scrolling {
+        if let Some((id, grab)) = self.hits.scrolling {
             if let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) {
                 f.drag_bar(y, grab);
             }
             return;
         }
-        if let Some((d, in_panel)) = self.resizing {
+        if let Some((d, in_panel)) = self.hits.resizing {
             let pct = d.pct_at(x, y);
             if in_panel {
                 if let Some(p) = self.panel() {
@@ -298,7 +303,7 @@ impl App {
             };
             return;
         }
-        let Some(mut d) = self.drag.take() else {
+        let Some(mut d) = self.hits.drag.take() else {
             return;
         };
         let over = self.pane_at(x, y);
@@ -345,7 +350,7 @@ impl App {
         } else {
             d.hover = None;
         }
-        self.drag = Some(d);
+        self.hits.drag = Some(d);
     }
 
     /// What a drag-and-drop carries: the selection if a marked row was grabbed,
@@ -373,13 +378,15 @@ impl App {
     }
 
     pub(super) fn on_release(&mut self, x: u16, y: u16) {
-        if self.scrolling.take().is_some() {
+        if self.hits.scrolling.take().is_some() {
             return;
         }
-        if self.resizing.take().is_some() {
+        if self.hits.resizing.take().is_some() {
             return;
         }
-        let Some(d) = self.drag.take() else { return };
+        let Some(d) = self.hits.drag.take() else {
+            return;
+        };
         if d.mode != DragMode::Files {
             return;
         }
@@ -629,13 +636,13 @@ impl App {
             "Terminal here",
             k(Action::CdTerminalHere),
             Action::CdTerminalHere,
-            self.term_id.is_some(),
+            self.shell_pane.term_id.is_some(),
         ));
         items.push(Item::act(
             "Type into the shell",
             k(Action::TypeNames),
             Action::TypeNames,
-            self.term_id.is_some() && has_sel,
+            self.shell_pane.term_id.is_some() && has_sel,
         ));
         items.push(Item::act(
             "Refresh",
@@ -674,6 +681,7 @@ impl App {
         // A click on a menu-bar title switches menus, whatever menu is open.
         if left && matches!(self.modal, Some(Modal::Menu(_)) | Some(Modal::Usage)) {
             if let Some(i) = self
+                .hits
                 .bar_hits
                 .iter()
                 .find(|(_, r)| r.contains(p))
@@ -806,10 +814,10 @@ impl App {
     pub(super) fn register_click(&mut self, x: u16, y: u16) -> bool {
         let now = Instant::now();
         let double = matches!(
-            self.last_click,
+            self.hits.last_click,
             Some((t, px, py)) if px == x && py == y && now.duration_since(t) < DOUBLE_CLICK
         );
-        self.last_click = if double { None } else { Some((now, x, y)) };
+        self.hits.last_click = if double { None } else { Some((now, x, y)) };
         double
     }
 

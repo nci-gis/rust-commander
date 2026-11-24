@@ -77,11 +77,21 @@ the 150 ms budget, which is for `cargo xtask bench` on a release build).
 
 - **With Rust**, any commit: `cargo xtask bench --only …` (and `cargo xtask try …`) in
   the repository. The simplest for a developer.
-- **Without Rust, a release**: its `xdevcmd-bench-<tag>-<target>`, as testers do
-  ([How to test](how-to-test.md), step 1).
+- **Without Rust, a release**: its `xdevcmd-testkit-<tag>-<target>`
+  (`xdevcmd-bench-…` in 0.4.0-beta.2), as testers do ([How to test](how-to-test.md),
+  step 1).
 - **Without Rust, code not released yet** (maintainers only, before a cut): the ci run of
   the branch has `xtask` beside `xdevcmd` in its artifacts (below; the macOS ones run on
-  Intel and Apple Silicon).
+  Intel and Apple Silicon). With `gh`, the newest run of a branch:
+
+  ```bash
+  gh run list -R nci-gis/rust-commander -w ci -b <branch> -L 1        # its run id
+  gh run download <run id> -R nci-gis/rust-commander -n xdevcmd-Windows-dev
+  ```
+
+  The artifact is named `xdevcmd-<Windows|macOS|Linux|Linux-ARM64>-<branch>`, each `/`
+  of the branch written `-`, and kept 14 days. `xtask --version` names the commit, which
+  a hand-test row records.
 
 `--dir PATH` makes the trees on the
 drive being measured instead of the temporary directory. Away from the source, results
@@ -316,7 +326,7 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    on `dev` or `main`), waits for the `ci` run of the tag's commit (the one the push to
    `dev` started) and stops unless it passed (`scripts/ci-green.sh`), then builds the
    six archives and opens a **draft marked pre-release**. Read it, then Publish. A
-   tester's kit (`xdevcmd-bench-…`) may be missing: its build never holds the release.
+   tester's kit (`xdevcmd-testkit-…`) may be missing: its build never holds the release.
    Count the six; for each one missing, say in the notes which target, and that it can
    be built from the tag (How to test, step 1). Help →
    Documentation in that build links the tag's `docs/`.
@@ -326,8 +336,10 @@ A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1
 `git tag -d v0.4.0-beta.1`, and the draft deleted on GitHub) before it is published.
 A published pre-release is not deleted: the next one supersedes it.
 
-CI runs on pushes to `dev`, `main` and `feat/**` and on pull requests into `dev` and
-`main`, and builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
+CI runs on pushes to `dev`, `main` and the integration branches (`feat/v*`, such as
+`feat/v0.4.0-beta.3`), and on pull requests into `dev` and `main`; a working branch
+runs it by hand once a piece is done (`gh workflow run ci --ref <branch>`), not on each
+push. It also builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
 workflow runs only for a `v*` tag (a release on `main`, a pre-release on `dev` or
 `main`), or by hand to check a tag's rules. A change to the packaging
 (`release.yml`, `about.toml`, `about.hbs`) is therefore first exercised by the next
@@ -342,6 +354,13 @@ one file per area (data safety, undo and the trash, the plan table, running jobs
 start-up and the screen, each system and terminal). Each case has an ID, its platform,
 steps, the expected result from the user docs, and what counts as a fail; results go
 in the round's `Check`, one line per case. Testers follow [How to test](how-to-test.md).
+
+Data safety is split by what a machine can do (Round 036). Kills and continues (M-DS-01,
+03, 04, 05) run in CI on Linux, macOS and Windows (`crates/xdevcmd/tests/kill.rs`), each
+killed at a marker the fault seam sets, not after a time. A real stick pulled out, a
+share taken away and a hard NFS mount (M-DS-02, 06, 07) stay by hand, and `cargo xtask
+qa ledger` asks for one again only when a file that case vouches for has changed
+(`CASE_PATHS` in `xtask/src/qa.rs`).
 
 ## How the code is organised
 

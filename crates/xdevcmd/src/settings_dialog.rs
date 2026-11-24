@@ -12,6 +12,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
+use xdevcmd_core::format::Cells;
 
 use crate::config::Config;
 use crate::config_edit::Value;
@@ -119,6 +120,15 @@ const FIELDS: &[Field] = &[
         "menu_bar",
         "Menu bar",
         "File, View, Help on the top row; F9 opens it either way",
+        Kind::Bool,
+        true,
+    ),
+    f(
+        0,
+        "general",
+        "animation",
+        "Animation",
+        "a small agent walks across the file panes' bottom edge, a step a second",
         Kind::Bool,
         true,
     ),
@@ -343,6 +353,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("general", "restore_session") => c.general.restore_session.to_string(),
         ("general", "autosave_secs") => c.general.autosave_secs.to_string(),
         ("general", "menu_bar") => c.general.menu_bar.to_string(),
+        ("general", "animation") => c.general.animation.to_string(),
         ("general", "safe_operations") => c.general.safe_operations.to_string(),
         ("files", "enter") => c.files.enter.clone(),
         ("files", "filter") => c.files.filter.clone(),
@@ -382,6 +393,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
             c.general.autosave_secs = n().unwrap_or(c.general.autosave_secs)
         }
         ("general", "menu_bar") => c.general.menu_bar = b,
+        ("general", "animation") => c.general.animation = b,
         ("general", "safe_operations") => c.general.safe_operations = b,
         ("files", "enter") => c.files.enter = v.to_string(),
         ("files", "filter") => c.files.filter = v.to_string(),
@@ -626,7 +638,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
     d.row_hits.clear();
     let mut x = inner.x;
     for (i, t) in TABS.iter().enumerate() {
-        let w = t.chars().count() as u16 + 2;
+        let w = t.cells() as u16 + 2;
         d.tab_hits
             .push(Rect::new(x, inner.y, w, 1).intersection(inner));
         x += w + 1;
@@ -693,7 +705,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             put(frame, inner, y, &line, style);
             // The value starts after the mark (2) and the label and its space.
             let vx = inner.x + 2 + label_w as u16 + 1;
-            let vw = shown.chars().count() as u16;
+            let vw = shown.cells() as u16;
             let value = Rect::new(vx, row.y, vw, 1).intersection(row);
             let back = match f.kind {
                 Kind::Bool => Rect::default(),

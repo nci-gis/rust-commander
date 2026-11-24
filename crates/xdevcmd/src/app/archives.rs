@@ -202,9 +202,8 @@ impl App {
                 xdevcmd_core::archive::extract(&file, &inner, &prefix, &tmp, &mut ViewHooks(stop));
             return self.show_extracted(out, tmp, name);
         }
-        let (tx, rx) = mpsc::channel();
-        let (dir, flag) = (tmp.clone(), stop.clone());
-        std::thread::spawn(move || {
+        let dir = tmp.clone();
+        let task = xdevcmd_core::task::Task::spawn(move |flag| {
             let out = xdevcmd_core::archive::extract(
                 &file,
                 &inner,
@@ -216,10 +215,10 @@ impl App {
             if flag.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = std::fs::remove_dir_all(&dir);
             }
-            let _ = tx.send(out);
+            out
         });
         self.status = format!("extracting {name} to view it\u{2026} Esc stops it");
-        self.pending_view = Some((rx, tmp, name, stop));
+        self.pending_view = Some((task, tmp, name));
     }
 
     /// Open the viewer on an entry extracted for it, or say why not.

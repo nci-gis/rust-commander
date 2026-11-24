@@ -10,6 +10,33 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **A walker**, off by default: with `[general] animation = true` (or Settings,
+  General), a small agent walks across the screen on the file panes' bottom edge, a step a second; a new
+  message has it stand on the status line just before it for `animation_hold_secs`
+  (5 to 15, 5 by default; the config file only), then it walks the edge again.
+
+### Changed
+- **The test kit is `xdevcmd-testkit-…`** in a release (`xdevcmd-bench-…` until
+  0.4.0-beta.2): it holds `xtask`, for the tests by hand and the benchmark.
+
+### Fixed
+- **One rule for xdevcmd's folders**: the config, the state (session, journal, crash
+  logs) and Linux's trash are found the same way. A relative `HOME` or XDG folder is
+  skipped instead of pointing into the folder xdevcmd started from, `USERPROFILE` is
+  the home when `HOME` is not a full path, and a crash log writes `~` for every home
+  set (`HOME` and `USERPROFILE` both, on Windows). A session or journal that an
+  earlier version left under such a relative folder is not found any more: a job it
+  left half done is not offered at the next start.
+- **Wide and joined characters fit their columns**: a name with CJK, emoji (a joined
+  family, one with a variation selector) or decomposed Vietnamese is measured and cut
+  as the terminal draws it, in the lists, menus, F1 and the viewer's links; it no
+  longer comes out wider than its column or split inside a character.
+- **One wording** for a control character refused in a name ("a control character
+  (U+XXXX)") and for what read-only and restricted modes turn off.
+- **Links in a release's notes open**: they point at the tag's files, where the
+  CHANGELOG's relative links did not resolve on the release page.
+
 ## [0.4.0-beta.2] - 2026-11-23
 
 ### Added

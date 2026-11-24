@@ -64,21 +64,13 @@ impl Saved {
     }
 }
 
-/// `$XDEVCMD_STATE`, then `$XDG_STATE_HOME/xdevcmd`, `%LOCALAPPDATA%\xdevcmd` on Windows, then
-/// `~/.local/state/xdevcmd`.
+/// `$XDEVCMD_STATE` (the session file itself), else `session.toml` in the state folder
+/// ([`xdevcmd_core::dirs::state_dir`]).
 pub fn default_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("XDEVCMD_STATE").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
-    if let Some(x) = std::env::var_os("XDG_STATE_HOME").filter(|p| !p.is_empty()) {
-        return Some(PathBuf::from(x).join("xdevcmd").join("session.toml"));
-    }
-    if cfg!(windows) {
-        if let Some(a) = std::env::var_os("LOCALAPPDATA") {
-            return Some(PathBuf::from(a).join("xdevcmd").join("session.toml"));
-        }
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/xdevcmd/session.toml"))
+    xdevcmd_core::dirs::state_dir().map(|d| d.join("session.toml"))
 }
 
 /// Read the last session. Anything wrong — missing, unreadable, a version from some
@@ -95,37 +87,7 @@ pub fn load(path: &Path) -> Option<Session> {
 /// directories you work in.
 pub fn save(path: &Path, s: &Session) -> std::io::Result<()> {
     let text = toml::to_string_pretty(s).map_err(std::io::Error::other)?;
-    write_private(path, text.as_bytes())
-}
-
-/// Write `bytes` to `path` so that a crash halfway leaves the old file intact, and so
-/// that nobody else can read it at any moment — the file is created owner-only rather
-/// than created and then narrowed, which would leave a window where it was not.
-pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)?;
-    }
-    // One temporary name per process: two xdevcmd windows saving at once must not write
-    // into the same file.
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{}.tmp", std::process::id()));
-    let tmp = path.with_file_name(name);
-    // A leftover from a crash keeps whatever mode it had if merely truncated; start
-    // from nothing so the mode below is the one it gets.
-    let _ = std::fs::remove_file(&tmp);
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut f = opts.open(&tmp)?;
-    f.write_all(bytes)?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp, path)
+    xdevcmd_core::document::save_state(path, text.as_bytes())
 }
 
 /// Where xdevcmd keeps state other than the session: beside it.
@@ -204,6 +166,24 @@ mod tests {
             leftovers.is_empty(),
             "no temp file left behind: {leftovers:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// W6: the session is written as every replaced file is, through a hidden
+    /// `.xdevcmd-part-` name beside it, and none is left once it is saved.
+    #[test]
+    fn saving_twice_leaves_one_session_and_no_part_file() {
+        let dir = std::env::temp_dir().join(format!("xdevcmd-session-part-{}", std::process::id()));
+        let path = dir.join("state/session.toml");
+        save(&path, &sample()).unwrap();
+        save(&path, &sample()).unwrap();
+        assert_eq!(load(&path), Some(sample()));
+        let names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["session.toml"], "{names:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

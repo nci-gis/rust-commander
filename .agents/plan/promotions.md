@@ -287,3 +287,46 @@ Plan B, and the Release path decision. Then the same day: beta.3's timebox (one 
 2026-11-30, the Plan B trigger) and the backlog's features kept for 0.4.x or 0.5; the
 beta.2 row says fuzz passed.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-24: Round 036 opened, end-to-end data-safety tests
+
+**Source**: the owner, 2026-11-24: "tạo 1 round riêng cho phần E2E, riêng 2, 6, và 7 vẫn
+giữ manual; số case ít lại để giảm block, và khi Dev nếu đụng vào phần này mới phải test
+lại".
+**What**: `plan/cycles/Round_036.md` (Planning): cases 01, 03, 04, 05 to CI on three
+systems, 02, 06, 07 by hand, a hand cell stale only when its own files change;
+`plan/ROADMAP.md`: its row under 0.4.x. Then the same day (the owner: "r36 làm cho
+beta.3 nhé, sau r35 khi đã freeze code"; "giảm số files, hoặc file size lại vì ko phải
+test perf"): Round 036 is part of beta.3, after Round 035's freeze; kills at markers,
+small files; the 0.4.x row moved into beta.3's.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+
+## 2026-11-24: reference/config.md names the function that saves Settings now
+
+**Source**: the beta.3 red-team (data path): `.agents/reference/config.md:61` named
+`session::write_private`, removed by Round 035 W6. The owner, 2026-11-24: "ok sửa".
+**What**: `reference/config.md`: the line names `xdevcmd_core::document::save_state` (W6),
+with the old name for history. A read-only path, changed on the owner's word.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-24: rc.1 carries what the beta.3 reviews left open
+
+**Source**: the owner, 2026-11-24: "Các nit để sang rc: okay, bro ghi log lại để ko bị
+missed nhé".
+**What**: `memory/2026-11-24-beta3-review-carryover.md` lists the findings not fixed
+before the freeze (C1–C9 for rc.1, L1–L3 for beta.4, M1–M3); `plan/ROADMAP.md`'s rc.N
+row points to it.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-24: Round 036's flow in the read-only docs, and a test trash in the code
+
+**Source**: the owner, 2026-11-24: "bro sửa code luôn nhé, phạm vi nhỏ; mình approve để
+sửa các file docs để đúng với implement mới luôn".
+**What**: `reference/testing.md` (the shared harness, `tests/kill.rs`, the test trash)
+and `skills/qa/SKILL.md` (the ledger asks for M-DS-02, 06, 07, stale per case). In the
+code, past Round 035's freeze on the owner's word: `faults::test_trash`
+(`XDEVCMD_TEST_TRASH`, test builds only), read by `plan::trash_keeps` and
+`ops::send_to_trash`, so M-DS-01's replace through the trash is killed on every system.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+

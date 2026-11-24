@@ -144,7 +144,10 @@ pub fn parse_probe(bytes: &[u8]) -> Probe {
     let version = s.find("\x1bP>|").and_then(|i| {
         let rest = &s[i + 4..];
         let end = rest.find("\x1b\\")?;
-        let v: String = rest[..end].chars().filter(|c| !c.is_control()).collect();
+        let v: String = rest[..end]
+            .chars()
+            .filter(|&c| !xdevcmd_core::controls::is(c))
+            .collect();
         (!v.trim().is_empty()).then(|| v.trim().to_string())
     });
     // DA2: CSI > kind ; version ; … c

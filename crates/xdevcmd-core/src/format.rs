@@ -62,30 +62,37 @@ pub fn elide_middle(s: &str, width: usize) -> String {
 /// How [`elide_middle`] cuts `s` to `width` columns: `None` when it fits as it is, or how
 /// many characters it keeps from the start and from the end, around the ellipsis. The
 /// start gets the odd column; columns a wide character could not use go to the end.
+///
+/// Cut between drawn characters (grapheme clusters), never inside one: an accent stays
+/// with its letter, an emoji with its VS16 or ZWJ partners, each measured as a whole.
 pub fn elided(s: &str, width: usize) -> Option<(usize, usize)> {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.iter().map(|&c| cells(c)).sum::<usize>() <= width {
+    if text_cells(s) <= width {
         return None;
     }
+    // Each drawn character: its columns, and how many chars it is made of.
+    let g: Vec<(usize, usize)> = graphemes(s)
+        .map(|g| (text_cells(g), g.chars().count()))
+        .collect();
     let keep = width.saturating_sub(1);
-    let mut head = 0;
-    let mut used = 0;
-    while head < chars.len() && used + cells(chars[head]) <= keep.div_ceil(2) {
-        used += cells(chars[head]);
+    let (mut head, mut used, mut head_chars) = (0, 0, 0);
+    while head < g.len() && used + g[head].0 <= keep.div_ceil(2) {
+        used += g[head].0;
+        head_chars += g[head].1;
         head += 1;
     }
     let room = keep - used;
-    let mut tail = 0;
-    let mut tail_used = 0;
-    while tail < chars.len() - head && tail_used + cells(chars[chars.len() - 1 - tail]) <= room {
-        tail_used += cells(chars[chars.len() - 1 - tail]);
+    let (mut tail, mut tail_used, mut tail_chars) = (0, 0, 0);
+    while tail < g.len() - head && tail_used + g[g.len() - 1 - tail].0 <= room {
+        tail_used += g[g.len() - 1 - tail].0;
+        tail_chars += g[g.len() - 1 - tail].1;
         tail += 1;
     }
-    // An accent whose letter did not fit is not shown on its own.
-    while tail > 0 && cells(chars[chars.len() - tail]) == 0 {
-        tail -= 1;
-    }
-    Some((head, tail))
+    Some((head_chars, tail_chars))
+}
+
+/// The drawn characters of `s` (extended grapheme clusters).
+fn graphemes(s: &str) -> impl Iterator<Item = &str> {
+    unicode_segmentation::UnicodeSegmentation::graphemes(s, true)
 }
 
 /// `s` in exactly `width` columns, from the left: elided in the middle if longer, padded
@@ -107,13 +114,52 @@ pub fn fit_end(s: &str, width: usize) -> String {
     out
 }
 
-/// Columns a string takes on the terminal.
+/// Columns a string takes on the terminal. The one measure of text on screen: a CJK
+/// character takes two columns, a combining accent none, and an emoji sequence (❤️, a
+/// family joined by ZWJ) what the terminal and ratatui draw it as, which is not the sum
+/// of its characters. Never `chars().count()` for a width (Round 035, W2).
 pub fn text_cells(s: &str) -> usize {
-    s.chars().map(cells).sum()
+    unicode_width::UnicodeWidthStr::width(s)
 }
 
-fn cells(c: char) -> usize {
+/// `.cells()`: the columns of a `str` (or a `String`) on the terminal, as
+/// [`text_cells`]; read where a width is wanted, as `.chars().count()` was.
+pub trait Cells {
+    fn cells(&self) -> usize;
+}
+
+impl Cells for str {
+    fn cells(&self) -> usize {
+        text_cells(self)
+    }
+}
+
+/// Columns one character takes on the terminal: 2 for a wide one, 0 for an accent.
+pub fn char_cells(c: char) -> usize {
     unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// `s` cut to `width` columns, with `…` where it was cut: the end gives way. As
+/// [`elide_middle`], which keeps both ends, for text whose start says what it is.
+pub fn cut_end(s: &str, width: usize) -> String {
+    if text_cells(s) <= width {
+        return s.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for g in graphemes(s) {
+        let gw = text_cells(g);
+        if used + gw > width - 1 {
+            break;
+        }
+        out.push_str(g);
+        used += gw;
+    }
+    out.push('\u{2026}');
+    out
 }
 
 /// Make one line of a file safe to draw: tabs become spaces on a fixed grid, and other
@@ -144,6 +190,65 @@ pub fn display_line(s: &str, tab: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An emoji sequence is as wide as the terminal draws it, not the sum of its
+    /// characters (beta.3 review: ❤️ measured 1, a ZWJ family 6, both drawn 2).
+    #[test]
+    fn an_emoji_sequence_is_as_wide_as_it_is_drawn() {
+        assert_eq!(text_cells("\u{2764}\u{fe0f}"), 2);
+        assert_eq!(text_cells("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"), 2);
+        assert_eq!(text_cells("Vi\u{1ec7}t"), 4);
+        assert_eq!(text_cells("Vie\u{323}\u{302}t"), 4);
+        assert_eq!(text_cells("\u{65e5}\u{672c}"), 4);
+    }
+
+    /// Fitting and cutting never come out wider than asked and never split a drawn
+    /// character (beta.3 review of the fix above: they still summed per char).
+    #[test]
+    fn fitting_and_cutting_keep_emoji_and_accents_whole() {
+        let heart = "\u{2764}\u{fe0f}";
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        let names = [
+            format!("a{heart}"),
+            format!("{heart}{heart}b"),
+            format!("{family}xyz"),
+            format!("{family}{family}{family}"),
+            "Vie\u{323}\u{302}t Nam.txt".to_string(),
+            "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{540d}\u{524d}.md".to_string(),
+        ];
+        for name in &names {
+            for w in 1..=text_cells(name) + 1 {
+                let fit = fit_start(name, w);
+                assert_eq!(text_cells(&fit), w, "fit_start({name:?}, {w}) = {fit:?}");
+                let mid = elide_middle(name, w);
+                assert!(
+                    text_cells(&mid) <= w,
+                    "elide_middle({name:?}, {w}) = {mid:?}"
+                );
+                let end = cut_end(name, w);
+                assert!(text_cells(&end) <= w, "cut_end({name:?}, {w}) = {end:?}");
+                for out in [&mid, &end] {
+                    let kept: String = out.chars().filter(|&c| c != '\u{2026}').collect();
+                    for g in graphemes(&kept) {
+                        assert!(
+                            graphemes(name).any(|whole| whole == g),
+                            "{g:?} is part of a drawn character of {name:?}: {out:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cut_end_counts_columns_so_wide_characters_fit() {
+        // Six CJK characters are twelve columns: cut to seven, five fit with the `…`.
+        let c = cut_end("日本語のコマ", 7);
+        assert_eq!(c, "日本語\u{2026}");
+        assert!(text_cells(&c) <= 7);
+        assert_eq!(cut_end("日本語", 6), "日本語");
+        assert_eq!(cut_end("copy", 3), "co\u{2026}");
+    }
 
     #[test]
     fn small_sizes_stay_exact() {

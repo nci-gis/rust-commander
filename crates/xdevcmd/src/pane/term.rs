@@ -507,8 +507,8 @@ impl TermPane {
             });
         }
 
-        let reports = ShellReports::new(xdevcmd_core::journal::hostname(), cfg!(windows))
-            .with_pid(pid.clone());
+        let reports =
+            ShellReports::new(xdevcmd_core::os::hostname(), cfg!(windows)).with_pid(pid.clone());
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
             nz(rows),
             nz(cols),
@@ -1312,7 +1312,7 @@ fn foreground_of(_pid: u32) -> Fg {
 
 #[cfg(target_os = "linux")]
 fn short_dir(p: &Path) -> String {
-    if std::env::var_os("HOME").is_some_and(|h| Path::new(&h) == p) {
+    if xdevcmd_core::dirs::home().is_some_and(|h| h == p) {
         return "~".into();
     }
     p.file_name()
@@ -1948,13 +1948,12 @@ fn on_path(
     program: &std::ffi::OsStr,
     path: Option<&std::ffi::OsStr>,
 ) -> Option<std::path::PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     path.into_iter()
         .flat_map(std::env::split_paths)
         .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(program))
         .find(|c| {
-            std::fs::metadata(c).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            std::fs::metadata(c).is_ok_and(|m| m.is_file() && xdevcmd_core::os::has_exec_bit(&m))
         })
 }
 

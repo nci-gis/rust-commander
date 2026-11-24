@@ -1,12 +1,13 @@
 # Round 036: end-to-end tests for data safety, fewer cases by hand
 
-**Status**: Planning (opened by the owner, 2026-11-24: "tạo 1 round riêng cho phần E2E,
-riêng 2, 6, và 7 vẫn giữ manual")
+**Status**: In Progress (the owner, 2026-11-24: "proceed", after Round 035's freeze at
+`f6e6202`; opened the same day: "tạo 1 round riêng cho phần E2E, riêng 2, 6, và 7 vẫn
+giữ manual")
 **Part of**: **0.4.0-beta.3** (the owner, 2026-11-24: "r36 làm cho beta.3 nhé, sau r35
 khi đã freeze code"): after Round 035's code freeze and before the cut, so beta.3 is cut
 with 9 hand cells at most instead of 21. Test code and tooling only: the product's code
 is frozen, and nothing here changes what xdevcmd does.
-**Date started**: YYYY-MM-DD
+**Date started**: 2026-11-24
 **Date completed**: YYYY-MM-DD
 
 ## Goal
@@ -35,7 +36,7 @@ what that case vouches for, not after any change on the data path (the owner: "s
   `portable-pty` drives ConPTY. Kill with the child's own kill (TerminateProcess, as
   Task Manager's End task), paths and the shell for Windows. Red first: one kill test
   passing on Linux and failing to build on Windows today.
-- [ ] **E0 Kill at a marker, small files** (section below): the checkpoint size from the
+- [x] **E0 Kill at a marker, small files** (section below): the checkpoint size from the
   fault seam in test builds; the Linux tests that slow and kill on time moved to
   `Halt` markers. Test code and the `faults` seam only.
 - [ ] **E2 Cases 01, 03, 04 on all three systems.** The tests that exist for Linux (the
@@ -87,6 +88,15 @@ test perf"). So:
   needs a test, as the data path has since beta.3.
 
 ## Do
+
+- **E0** (2026-11-24): already so; nothing to change. Every data-safety kill test in
+  `tests/pty.rs` waits for state, not time: 01 and the planned copy for a `halt|rename`
+  marker, 05 for `halt|remove-source`, 03 for the journal's `ckpt` line (the per-chunk
+  delay only keeps the window open, ~0.25 s after the line). Files are few (1–4) and
+  small, except 03's 384 MiB, which is sparse: a checkpoint is 256 MiB (`ops::CHECKPOINT`)
+  and a smaller one would change product code, which the freeze rules out. Times here
+  (Linux): 01 4.7 s, planned copy 4.6 s, 05 4.3 s, 03 7.7 s, 04 2.3 s.
+  So the risk of a slow runner is the harness's patience, not when the kill lands.
 
 ## Check
 

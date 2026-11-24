@@ -186,6 +186,20 @@ is the walk, directories, the journal and waiting for answers. `small_ms` agains
 - `docs/keys.md`: `xdevcmd --print-keys > docs/keys.md`. A test fails if it is out of date.
 - The tagline in `README.md` is the `description` in `Cargo.toml`. A test checks it.
 - The GitHub About box: `scripts/sync-about.sh --apply`.
+- `lang/template.txt`: `cargo xtask lang template > lang/template.txt`, after adding or
+  changing a `tr!` or `Text::new`. A test fails if it is out of date.
+
+## Languages
+
+A text on screen is written `tr!("key", "English")` (`tr!("key", "{n} files", n = x)`
+with a value), or `Text::new("key", "English")` in a table; English is the fallback.
+How users make a language: [Languages](language.md).
+
+```sh
+cargo xtask lang template          # every key and its English (lang/template.txt)
+cargo xtask lang pseudo            # the same, each text in ⟦…⟧: what is still English
+cargo xtask lang check lang/vi.toml   # unknown keys, {names}, characters refused
+```
 
 ## Icon and logo
 

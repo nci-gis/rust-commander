@@ -8,6 +8,7 @@ the details are where you would meet the thing, behind the link. Not listed here
 
 | Issue | System | What to do | Planned | Details |
 |---|---|---|---|---|
+| In another language some words stay English: what a job did or will do ("1 would replace a file of another size"), sizes ("bytes"), `--help`, mistakes in `config.toml` | All | — | later | [Languages](language.md) |
 | The terminal's close button is not caught: a job in progress stops without tidying up | Windows | Quit with F10; after a close, the next start tidies up and offers to continue | later | [Security](security.md#limits) |
 | A prompt built into the shell, such as bash's `read -s`, looks like the shell's own prompt: Alt+C can be typed as its answer | Linux, macOS | Press Ctrl+C in the shell first, or turn on the prompt marks | later | [Shell](shell.md#before-anything-is-typed-into-the-shell) |
 | An open single quote in fish or PowerShell is not seen: a name typed in lands inside it | all | Press Ctrl+C in the shell first | later | [Shell](shell.md#before-anything-is-typed-into-the-shell) |

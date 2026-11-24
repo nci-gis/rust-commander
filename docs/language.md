@@ -85,6 +85,8 @@ where the screen cuts.
   (ESC, BEL …) or a direction override (U+202E …) that its English does not hold is
   not used: it shows in English. A language file is text from anyone, and what it says
   is drawn on your terminal. The same characters are left out of `$__name`.
+- Longer than the English: the key bar cuts its longest labels with `…` to keep all
+  ten keys; a dialog line too long for its box is shortened in the middle.
 - A file that is not valid TOML is skipped and named on the status line at start.
 - A language chosen by name and not found: English, and the status line says where it
   looked.

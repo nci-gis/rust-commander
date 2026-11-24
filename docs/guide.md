@@ -421,10 +421,11 @@ nine rows (digits alone are typed).
 save. With the mouse: click a tab, a check box, a value's ‹ or › (or the value, for the
 next), or Save; the wheel moves between rows. Only changed lines are written to
 `config.toml`; your comments stay. Rows marked *next start* apply after a restart. The
-Keys tab says how to rebind keys. In read-only and restricted mode it saves nothing.
+Languages tab lists the languages found ([Languages](language.md)); the Keys tab says how
+to rebind keys. In read-only and restricted mode it saves nothing.
 
 **Help → Config in use**, read-only: whether the file was loaded (or IGNORED, and why),
-the mode, and every setting, with `•` on what differs from the default. Type to filter;
+the mode, the language and those found, and every setting, with `•` on what differs from the default. Type to filter;
 a `[section]`'s name keeps the whole section.
 
 **Help → Documentation**: first the copy in `docs/` beside xdevcmd, if you installed from

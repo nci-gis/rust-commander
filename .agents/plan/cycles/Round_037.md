@@ -89,12 +89,16 @@ planned for 0.5.
   `xtask lang check` ok. Overflow: the key bar cuts its longest labels when that keeps
   every key (test `a_long_key_bar_is_cut_not_left_off`); dialog lines are elided by
   `put`; column headers by their width.
-- [ ] **W7 Docs**: `docs/config.md` (`language`), a page on adding a language.
+- [x] **W7 Docs**: `docs/config.md` (`language`), a page on adding a language.
   The owner (2026-11-24): `docs/language.md`, the settings, and how to make a language
   of one's own or a pseudo-language, freely. Done: the page, `lang/template.txt`
   shipped beside the program (every key and its English, kept current by a test, for a
   user with no source tree), and a code of one's own picked whole (`my-pseudo` was read
   as the locale `my`).
+  Reviewed 2026-11-25: guide (Settings' Languages tab, Config in use shows the
+  language), language.md (what a longer text does), known issues (the words still
+  English: core text, `--help`, config errors), development.md (`tr!`, `Text::new`,
+  `xtask lang`, the template kept current), CHANGELOG [Unreleased].
 - [x] **W8 Names Windows does not allow** (the owner, 2026-11-24, carried from Round
   035's Act): a new folder (F7), a new file and a rename refused by one check, the one
   copy and move use (`plan::name_problem`): Windows' characters, a dot or space at the

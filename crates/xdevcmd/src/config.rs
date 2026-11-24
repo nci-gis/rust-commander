@@ -141,6 +141,9 @@ pub struct General {
     /// message while it shows. Off by default: a moving thing is not for everyone, and
     /// over SSH each step is a little traffic.
     pub animation: bool,
+    /// Seconds the walker stands before a new message before it walks on: 5 to 15.
+    /// The config file only, not Settings.
+    pub animation_hold_secs: u64,
 }
 
 impl Default for General {
@@ -154,6 +157,7 @@ impl Default for General {
             safe_operations: true,
             fast_copy: true,
             animation: false,
+            animation_hold_secs: crate::walker::HOLD_SECS,
         }
     }
 }
@@ -478,6 +482,14 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
     if a != 0 && !(5..=3600).contains(&a) {
         return Err(format!(
             "[general] autosave_secs = {a}: expected 0 (off) or 5 to 3600"
+        ));
+    }
+    let h = config.general.animation_hold_secs;
+    if !crate::walker::HOLD_RANGE.contains(&h) {
+        return Err(format!(
+            "[general] animation_hold_secs = {h}: expected {} to {}",
+            crate::walker::HOLD_RANGE.start(),
+            crate::walker::HOLD_RANGE.end()
         ));
     }
     let ms = config.files.auto_refresh_ms;
@@ -1386,6 +1398,21 @@ mod tests {
         for bad in [99, 10000, 0] {
             let e = parse(&format!("[terminal]\nscrollback = {bad}\n")).unwrap_err();
             assert!(e.contains("scrollback") && e.contains("100 to 9999"), "{e}");
+        }
+    }
+
+    /// The owner (2026-11-24): 5 to 15 seconds, 5 by default, from the file only; a
+    /// value outside or of the wrong type is a mistake in the file, as any other.
+    #[test]
+    fn the_walker_holds_5_to_15_seconds() {
+        assert_eq!(parse("").unwrap().config.general.animation_hold_secs, 5);
+        for ok in [5, 15] {
+            let s = parse(&format!("[general]\nanimation_hold_secs = {ok}\n")).unwrap();
+            assert_eq!(s.config.general.animation_hold_secs, ok);
+        }
+        for bad in ["4", "16", "0", "\"ten\"", "-1"] {
+            let e = parse(&format!("[general]\nanimation_hold_secs = {bad}\n")).unwrap_err();
+            assert!(e.contains("animation_hold_secs"), "{bad}: {e}");
         }
     }
 

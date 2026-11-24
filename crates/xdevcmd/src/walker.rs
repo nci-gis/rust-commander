@@ -1,7 +1,8 @@
 //! The status line's walker: a small agent that walks along the status line, a step a
 //! second, when `[general] animation` is on (off by default). It walks the space
-//! between the panes' line and the message; while a message shows it waits just before
-//! it, and goes on from where it stopped once the message is gone.
+//! between the panes' line and the message. When a message comes it stands just
+//! before it for `[general] animation_hold_secs` (5 to 15, 5 by default), then goes
+//! back to walking from where it stopped, the message still showing.
 //!
 //! ASCII only: a sprite of ambiguous or emoji width would be drawn a column off on some
 //! terminals (Round 035, W2).
@@ -20,6 +21,11 @@ pub const WIDTH: usize = 6;
 
 const STEP: Duration = Duration::from_secs(1);
 
+/// How long it stands before a new message, by default (the owner, 2026-11-24).
+pub const HOLD_SECS: u64 = 5;
+/// The range `[general] animation_hold_secs` may take.
+pub const HOLD_RANGE: std::ops::RangeInclusive<u64> = 5..=15;
+
 #[derive(Debug, Default)]
 pub struct Walker {
     /// Columns from the start of its lane.
@@ -27,13 +33,30 @@ pub struct Walker {
     left: bool,
     steps: u64,
     last: Option<Instant>,
+    /// The message it went to stand before, and when; a new message starts it again.
+    held: Option<(String, Instant)>,
 }
 
 impl Walker {
-    /// One step if a second has passed since the last, within a lane `lane` columns
-    /// wide: it turns at either end. `held` (a message shows) keeps it where it is, and
-    /// the second starts again once the message is gone, so it does not jump.
-    pub fn tick(&mut self, now: Instant, lane: usize, held: bool) {
+    /// Where it is: `true` while it stands before `message` (the first `hold` of each
+    /// new message), `false` while it walks. It walks one step if a second has passed
+    /// since the last, within a lane `lane` columns wide, turning at either end; the
+    /// second starts again when it leaves a message, so it does not jump.
+    pub fn tick(&mut self, now: Instant, lane: usize, message: &str, hold: Duration) -> bool {
+        if message.is_empty() {
+            self.held = None;
+        } else if self.held.as_ref().is_none_or(|(m, _)| m != message) {
+            self.held = Some((message.to_string(), now));
+        }
+        let standing = self
+            .held
+            .as_ref()
+            .is_some_and(|(_, at)| now.saturating_duration_since(*at) < hold);
+        self.walk(now, lane, standing);
+        standing
+    }
+
+    fn walk(&mut self, now: Instant, lane: usize, held: bool) {
         let room = lane.saturating_sub(WIDTH);
         self.pos = self.pos.min(room);
         if held {
@@ -99,13 +122,13 @@ mod tests {
         let t0 = Instant::now();
         let mut w = Walker::default();
         let lane = WIDTH + 2;
-        w.tick(t0, lane, false);
+        w.walk(t0, lane, false);
         assert_eq!(w.pos(), 0, "the first frame only starts the clock");
-        w.tick(t0 + Duration::from_millis(500), lane, false);
+        w.walk(t0 + Duration::from_millis(500), lane, false);
         assert_eq!(w.pos(), 0, "not a second yet");
         let mut at = Vec::new();
         for s in 1..=6 {
-            w.tick(t0 + Duration::from_secs(s), lane, false);
+            w.walk(t0 + Duration::from_secs(s), lane, false);
             at.push(w.pos());
         }
         assert_eq!(at, [1, 2, 1, 0, 1, 2], "right to the end, back, and again");
@@ -117,17 +140,52 @@ mod tests {
         let mut w = Walker::default();
         let lane = 20;
         for s in 0..=3 {
-            w.tick(t0 + Duration::from_secs(s), lane, false);
+            w.walk(t0 + Duration::from_secs(s), lane, false);
         }
         assert_eq!(w.pos(), 3);
         for s in 4..=9 {
-            w.tick(t0 + Duration::from_secs(s), lane, true);
+            w.walk(t0 + Duration::from_secs(s), lane, true);
         }
         assert_eq!(w.pos(), 3, "held while the message shows");
-        w.tick(t0 + Duration::from_millis(9_500), lane, false);
+        w.walk(t0 + Duration::from_millis(9_500), lane, false);
         assert_eq!(w.pos(), 3, "the second starts again when the message goes");
-        w.tick(t0 + Duration::from_secs(11), lane, false);
+        w.walk(t0 + Duration::from_secs(11), lane, false);
         assert_eq!(w.pos(), 4, "and it goes on from where it stopped");
+    }
+
+    /// The owner (2026-11-24): before a message for the hold, then walking again, the
+    /// message still showing; a new message brings it back.
+    #[test]
+    fn it_stands_before_a_message_for_the_hold_then_walks_on() {
+        let t0 = Instant::now();
+        let hold = Duration::from_secs(HOLD_SECS);
+        let mut w = Walker::default();
+        for s in 0..=2 {
+            assert!(!w.tick(t0 + Duration::from_secs(s), 20, "", hold));
+        }
+        assert_eq!(w.pos(), 2);
+        for s in 3..8 {
+            assert!(
+                w.tick(t0 + Duration::from_secs(s), 20, "copied", hold),
+                "{s}"
+            );
+        }
+        assert_eq!(w.pos(), 2, "it did not walk while it stood");
+        assert!(
+            !w.tick(t0 + Duration::from_secs(8), 20, "copied", hold),
+            "the hold is over"
+        );
+        assert_eq!(w.pos(), 3, "walking again from where it stopped, a step a second");
+        assert!(!w.tick(t0 + Duration::from_secs(9), 20, "copied", hold));
+        assert_eq!(w.pos(), 4);
+        assert!(
+            w.tick(t0 + Duration::from_secs(10), 20, "deleted", hold),
+            "a new message"
+        );
+        assert!(
+            !w.tick(t0 + Duration::from_secs(11), 20, "", hold),
+            "no message"
+        );
     }
 
     #[test]
@@ -135,14 +193,14 @@ mod tests {
         let t0 = Instant::now();
         let mut w = Walker::default();
         for s in 0..=10 {
-            w.tick(t0 + Duration::from_secs(s), 30, false);
+            w.walk(t0 + Duration::from_secs(s), 30, false);
         }
         assert_eq!(w.pos(), 10);
-        w.tick(t0 + Duration::from_secs(11), WIDTH + 3, false);
+        w.walk(t0 + Duration::from_secs(11), WIDTH + 3, false);
         assert!(w.pos() <= 3, "pulled into the narrower lane: {}", w.pos());
         let mut still = Walker::default();
         for s in 0..=5 {
-            still.tick(t0 + Duration::from_secs(s), WIDTH, false);
+            still.walk(t0 + Duration::from_secs(s), WIDTH, false);
         }
         assert_eq!(still.pos(), 0);
     }

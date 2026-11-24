@@ -76,6 +76,7 @@ safe_operations = true    # copies via a temporary name; a killed run is cleaned
 fast_copy = true          # the system's fast copy: a clone, or the kernel's copy (security.md)
 menu_bar = true           # the File | View | Help bar
 animation = false         # a small agent walks along the status line, a step a second
+animation_hold_secs = 5   # it stands before a new message this long, then walks on: 5-15
 
 [files]
 show_hidden = false

@@ -257,12 +257,18 @@ impl App {
             }
         };
         if !xdevcmd_core::policy::get().allows(&canonical) {
-            return refuse(self, "that path is outside the root xdevcmd is confined to");
+            return refuse(
+                self,
+                &tr!(
+                    "shell.outside_root",
+                    "that path is outside the root xdevcmd is confined to"
+                ),
+            );
         }
         match act {
             viewer::LinkAct::Go => {
                 let Some(id) = self.last_files_id() else {
-                    return refuse(self, "no file pane to go there");
+                    return refuse(self, &tr!("shell.no_file_pane", "no file pane to go there"));
                 };
                 let Some(f) = self.panes.get_mut(&id).and_then(Pane::as_files_mut) else {
                     return;
@@ -366,7 +372,7 @@ impl App {
                 true,
             ),
             Item::cmd(
-                "Save history as\u{2026}",
+                tr!("menu.save_history_as", "Save history as\u{2026}"),
                 save,
                 Cmd::TabSaveHistory(id),
                 writes,
@@ -386,7 +392,10 @@ impl App {
                 ),
             },
             Item::cmd(
-                "List from the last command\u{2026}",
+                tr!(
+                    "menu.list_from_the_last_command",
+                    "List from the last command\u{2026}"
+                ),
                 "",
                 Cmd::TabList(id),
                 true,

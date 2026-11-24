@@ -19,13 +19,14 @@ impl App {
         }
         self.measure_cells(terminal);
         let pictures = match (self.pics.graphics, self.pics.graphics_found) {
-            (crate::graphics::Protocol::Kitty, _) => "Kitty",
-            (crate::graphics::Protocol::Iterm2, _) => "iTerm2",
-            (crate::graphics::Protocol::Sixel, _) => "sixel",
-            (_, crate::graphics::Protocol::Sixel) => {
+            (crate::graphics::Protocol::Kitty, _) => "Kitty".into(),
+            (crate::graphics::Protocol::Iterm2, _) => "iTerm2".into(),
+            (crate::graphics::Protocol::Sixel, _) => "sixel".into(),
+            (_, crate::graphics::Protocol::Sixel) => tr!(
+                "run.half_blocks_no_cell_size",
                 "half blocks (sixel needs the cell size, which the terminal did not give)"
-            }
-            (crate::graphics::Protocol::Blocks, _) => "half blocks",
+            ),
+            (crate::graphics::Protocol::Blocks, _) => tr!("run.half_blocks", "half blocks"),
         };
         let name = crate::graphics::terminal_name(|k| std::env::var(k).ok(), &self.pics.probe);
         self.usage.terminal = tr!(
@@ -392,7 +393,7 @@ impl App {
                         "run.extracting",
                         "extracting {name} {DIED}",
                         name = name,
-                        DIED = crate::app::DIED
+                        DIED = crate::app::died()
                     );
                     changed = true;
                 }
@@ -454,7 +455,7 @@ impl App {
                 // another file, or this one changed, is a new key and is tried.
                 Poll::Died => {
                     let failed = Prepared {
-                        pic: Err(DIED.to_string()),
+                        pic: Err(crate::app::died().into_owned()),
                         cells: (0, 0),
                         bytes: Vec::new(),
                     };
@@ -480,7 +481,7 @@ impl App {
                     "run.the_sha_256_of",
                     "the SHA-256 of {v} {DIED}",
                     v = Self::describe(std::slice::from_ref(&path)),
-                    DIED = crate::app::DIED
+                    DIED = crate::app::died()
                 );
                 changed = true;
             }

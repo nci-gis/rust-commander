@@ -219,7 +219,7 @@ impl App {
             ops::Kind::Delete if r.to_trash => {
                 // Undoable once it has finished and said where each item went.
                 self.trash_pending = Some(r.sources.clone());
-                Undo::Cannot(TRASH_RUNNING.into())
+                Undo::Cannot(trash_running())
             }
             ops::Kind::Delete => {
                 Undo::Cannot(tr!("jobs.a_permanent_delete", "a permanent delete").into())
@@ -512,7 +512,7 @@ impl App {
             return;
         };
         let ours = !s.trashed.is_empty() && s.trashed.iter().all(|t| sources.contains(&t.original));
-        let still_last = matches!(&self.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(w)) if w == TRASH_RUNNING);
+        let still_last = matches!(&self.last_undo, Some(xdevcmd_core::undo::Undo::Cannot(w)) if *w == trash_running());
         if ours && still_last {
             self.last_undo = Some(xdevcmd_core::undo::Undo::Trashed(s.trashed.clone()));
             self.trash_pending = None;
@@ -523,7 +523,7 @@ impl App {
     /// it is still running, so nothing older is undone behind it.
     pub(super) fn expect_copy_undo(&mut self, what: String) {
         self.copy_pending = Some(what);
-        self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot(COPY_RUNNING.into()));
+        self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot(copy_running()));
     }
 
     /// A copy has ended: if it is still the last operation, undo can now remove what it
@@ -536,7 +536,7 @@ impl App {
         let Some(what) = self.copy_pending.take() else {
             return;
         };
-        if !matches!(&self.last_undo, Some(Undo::Cannot(w)) if w == COPY_RUNNING) {
+        if !matches!(&self.last_undo, Some(Undo::Cannot(w)) if *w == copy_running()) {
             return;
         }
         self.last_undo = Some(if s.stopped {

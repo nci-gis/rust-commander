@@ -29,9 +29,13 @@ pub struct Context {
 
 /// A lossy name would be another file, or none: refused, as typing names refuses it.
 fn text(p: &Path) -> Result<String, String> {
-    p.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| "a name is not UTF-8 \u{2014} not typed".to_string())
+    p.to_str().map(str::to_string).ok_or_else(|| {
+        tr!(
+            "usermenu.not_utf8",
+            "a name is not UTF-8 \u{2014} not typed"
+        )
+        .into_owned()
+    })
 }
 
 fn name(p: &Path) -> Result<String, String> {
@@ -61,13 +65,21 @@ pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
             }
             'f' | 'F' => {
                 let Some(p) = &cx.current else {
-                    return Err(format!("%{code} needs a file under the cursor"));
+                    return Err(tr!(
+                        "usermenu.needs_file",
+                        "%{code} needs a file under the cursor",
+                        code = code
+                    ));
                 };
                 vec![if code == 'f' { name(p)? } else { text(p)? }]
             }
             's' | 'S' => {
                 if cx.selection.is_empty() {
-                    return Err(format!("%{code} needs something selected"));
+                    return Err(tr!(
+                        "usermenu.needs_selection",
+                        "%{code} needs something selected",
+                        code = code
+                    ));
                 }
                 cx.selection
                     .iter()
@@ -84,8 +96,10 @@ pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
                 }
             },
             other => {
-                return Err(format!(
-                    "%{other} is not a placeholder (%f %F %s %S %d %D %%)"
+                return Err(tr!(
+                    "usermenu.not_placeholder",
+                    "%{other} is not a placeholder (%f %F %s %S %d %D %%)",
+                    other = other
                 ))
             }
         };

@@ -10,9 +10,10 @@
 /// Why `s` must not be typed into a terminal, or `None` if it is safe to.
 pub fn unsafe_to_type(s: &str) -> Option<String> {
     xdevcmd_core::controls::first(s, &[]).map(|c| {
-        format!(
-            "the path contains {} \u{2014} not sent, it could run commands",
-            xdevcmd_core::controls::named(c)
+        tr!(
+            "safety.unsafe_to_type",
+            "the path contains {c} \u{2014} not sent, it could run commands",
+            c = xdevcmd_core::controls::named(c)
         )
     })
 }
@@ -22,9 +23,10 @@ pub fn unsafe_to_type(s: &str) -> Option<String> {
 /// into a terminal, as Ctrl+U and Enter did in a file name typed by Alt+C.
 pub fn unsafe_to_paste(text: &str) -> Option<String> {
     xdevcmd_core::controls::first(text, &['\n', '\t']).map(|c| {
-        format!(
-            "not copied: {} would act when pasted",
-            xdevcmd_core::controls::named(c)
+        tr!(
+            "safety.unsafe_to_paste",
+            "not copied: {c} would act when pasted",
+            c = xdevcmd_core::controls::named(c)
         )
     })
 }
@@ -105,8 +107,10 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         // cmd.exe has no quoting that stops %VAR% expansion, and a path cannot hold ".
         Shell::Cmd => {
             if let Some(c) = text.chars().find(|c| matches!(c, '%' | '"' | '!' | '^')) {
-                return Err(format!(
-                    "cmd.exe cannot be given text containing {c:?} safely \u{2014} not sent"
+                return Err(tr!(
+                    "safety.cmd_refuses",
+                    "cmd.exe cannot be given text containing {c} safely \u{2014} not sent",
+                    c = format!("{c:?}")
                 ));
             }
             format!("\"{text}\"")
@@ -126,7 +130,7 @@ pub fn quote(shell: &str, text: &str) -> Result<String, String> {
         // backslash off, and no form of it is inert both there and at a prompt
         // (red-team of the escaping, P0).
         Shell::Posix => {
-            refuse_breakouts(text, &["`"], "This shell")?;
+            refuse_breakouts(text, &["`"], &tr!("safety.this_shell", "This shell"))?;
             escaped(text)
         }
     })
@@ -157,8 +161,11 @@ fn escaped(text: &str) -> String {
 /// the user left open in `shell`.
 fn refuse_breakouts(text: &str, bad: &[&str], shell: &str) -> Result<(), String> {
     match bad.iter().find(|b| text.contains(*b)) {
-        Some(b) => Err(format!(
-            "{shell} cannot be given a name holding {b:?} safely \u{2014} not sent; rename it, or type it yourself"
+        Some(b) => Err(tr!(
+            "safety.breakout",
+            "{shell} cannot be given a name holding {b} safely \u{2014} not sent; rename it, or type it yourself",
+            shell = shell,
+            b = format!("{b:?}")
         )),
         None => Ok(()),
     }

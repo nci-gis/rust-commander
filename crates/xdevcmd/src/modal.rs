@@ -1058,10 +1058,7 @@ pub fn verb_text(kind: ops::Kind) -> String {
 
 /// A button's label as shown: its translation, else as given.
 pub fn button_word(label: &str) -> std::borrow::Cow<'_, str> {
-    BUTTON_WORDS
-        .iter()
-        .find(|t| t.en == label)
-        .map_or(std::borrow::Cow::Borrowed(label), |t| t.get())
+    crate::lang::pick(BUTTON_WORDS, label)
 }
 
 pub(crate) fn buttons(

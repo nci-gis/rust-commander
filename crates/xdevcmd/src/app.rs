@@ -338,9 +338,17 @@ struct Comparing {
 }
 
 /// What undo says while a delete to the trash is still running.
-const TRASH_RUNNING: &str = "a delete to the trash that is still running";
+fn trash_running() -> String {
+    tr!(
+        "undo.trash_running",
+        "a delete to the trash that is still running"
+    )
+    .into_owned()
+}
 /// What undo says while a copy is still running.
-const COPY_RUNNING: &str = "a copy that is still running";
+fn copy_running() -> String {
+    tr!("undo.copy_running", "a copy that is still running").into_owned()
+}
 /// Names to type into a new shell at its prompt; see `App::pending_type`.
 struct PendingType {
     key: ShellKey,
@@ -371,7 +379,9 @@ type Decoding = (PicKey, Task<Prepared>);
 
 /// What a background task that ended without its result says (W8): its thread
 /// panicked; the main loop names its crash log, as for any background panic.
-pub const DIED: &str = "stopped on an internal error";
+pub fn died() -> std::borrow::Cow<'static, str> {
+    tr!("task.died", "stopped on an internal error")
+}
 
 /// Where a confirmation's count goes until the count has been made.
 const COUNTING: &str = "counting\u{2026}";

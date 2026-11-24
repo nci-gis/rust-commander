@@ -183,7 +183,7 @@ impl App {
                 self.status = tr!(
                     "compare.comparing_the_two_trees",
                     "comparing the two trees {DIED}",
-                    DIED = crate::app::DIED
+                    DIED = crate::app::died()
                 );
                 true
             }

@@ -81,11 +81,14 @@ impl App {
         let (rows, capped, outside) = lists::tidy_rows(req.paths);
         if rows.is_empty() {
             let why = if outside > 0 {
-                "those paths are outside the root xdevcmd is confined to"
+                tr!(
+                    "lists.outside_root",
+                    "those paths are outside the root xdevcmd is confined to"
+                )
             } else {
-                "no paths in those lines"
+                tr!("lists.no_paths", "no paths in those lines")
             };
-            return self.note_in_viewer(why);
+            return self.note_in_viewer(&why);
         }
         let fallback = req.base.unwrap_or_else(|| self.focused_cwd());
         let root = lists::common_root(&rows, &fallback);

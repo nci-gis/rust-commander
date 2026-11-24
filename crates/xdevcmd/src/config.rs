@@ -323,6 +323,29 @@ pub enum Mode {
     Restricted,
 }
 
+/// What a mode can turn off, said in [`Mode::turned_off`]: the effects of actions
+/// (`Action::effect`) and the few things refused by name.
+const OFF_WORDS: &[crate::lang::Text] = &[
+    crate::lang::Text::new("mode.off.copying_and_moving", "copying and moving"),
+    crate::lang::Text::new("mode.off.deleting", "deleting"),
+    crate::lang::Text::new("mode.off.renaming", "renaming"),
+    crate::lang::Text::new("mode.off.creating_files", "creating files"),
+    crate::lang::Text::new("mode.off.synchronising", "synchronising"),
+    crate::lang::Text::new("mode.off.changing_permissions", "changing permissions"),
+    crate::lang::Text::new("mode.off.creating_directories", "creating directories"),
+    crate::lang::Text::new("mode.off.editing", "editing"),
+    crate::lang::Text::new(
+        "mode.off.opening_files_in_other_programs",
+        "opening files in other programs",
+    ),
+    crate::lang::Text::new("mode.off.undoing", "undoing"),
+    crate::lang::Text::new("mode.off.the_terminal", "the terminal"),
+    crate::lang::Text::new("mode.off.the_clipboard", "the clipboard"),
+    crate::lang::Text::new("mode.off.that", "that"),
+    crate::lang::Text::new("mode.off.running_programs", "running programs"),
+    crate::lang::Text::new("mode.off.f3_views_it", " \u{2014} F3 views it"),
+];
+
 impl Mode {
     pub fn read_only(self) -> bool {
         self >= Mode::ReadOnly
@@ -332,16 +355,32 @@ impl Mode {
     /// Every mode refusal is worded here once (Round 035, W4), so beta.4 translates it
     /// once; `next` is the safe thing to press instead, or empty.
     pub fn turned_off(self, what: &str, next: &str) -> String {
-        format!("{} mode \u{2014} {what} is turned off{next}", self.label())
+        tr!(
+            "mode.turned_off",
+            "{mode} mode \u{2014} {what} is turned off{next}",
+            mode = self.label_text(),
+            what = crate::lang::pick(OFF_WORDS, what),
+            next = crate::lang::pick(OFF_WORDS, next)
+        )
+    }
+
+    /// The mode's name, in the run's language.
+    pub fn label_text(self) -> std::borrow::Cow<'static, str> {
+        match self {
+            Mode::Normal => tr!("mode.normal", "normal"),
+            Mode::ReadOnly => tr!("mode.read_only", "read-only"),
+            Mode::Restricted => tr!("mode.restricted", "restricted"),
+        }
     }
 
     /// Why Settings cannot save in this mode. One wording: the dialog's note and the
     /// refusal behind it had drifted apart ("its settings included" and "settings
     /// included"; Round 035, W4).
     pub fn writes_nothing(self) -> String {
-        format!(
-            "{} mode \u{2014} xdevcmd writes nothing, its settings included",
-            self.label()
+        tr!(
+            "mode.writes_nothing",
+            "{mode} mode \u{2014} xdevcmd writes nothing, its settings included",
+            mode = self.label_text()
         )
     }
 

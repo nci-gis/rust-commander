@@ -418,6 +418,19 @@ pub fn rows(
     out
 }
 
+/// Why a row of F1 runs nothing, said when it is chosen; translated where said.
+const WHY_NOT_RUN: &[Text] = &[
+    Text::new("palette.why.note", "a note to read"),
+    Text::new(
+        "palette.why.viewer_key",
+        "the viewer's own key: press it there",
+    ),
+    Text::new("palette.why.gesture", "a mouse gesture"),
+    Text::new(
+        "palette.why.go_tab",
+        "needs the tab's digit: press the key itself",
+    ),
+];
 const NOTE: &str = "a note to read";
 const VIEWER_KEY: &str = "the viewer's own key: press it there";
 const GESTURE: &str = "a mouse gesture";
@@ -1017,6 +1030,7 @@ impl Commands {
         self.sel = Some(i);
         let r = &self.rows[row];
         if let Run::ReadOnly(why) = r.run {
+            let why = crate::lang::pick(WHY_NOT_RUN, why);
             self.message = Some(if r.key_text.is_empty() {
                 format!("{}: {why}", r.title)
             } else {

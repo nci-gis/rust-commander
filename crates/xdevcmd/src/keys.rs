@@ -1148,12 +1148,16 @@ pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
         Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
         _ => taken.join(""),
     };
-    let mut out = vec![format!(
-        "In the shell, xdevcmd takes only {listed}; every other key is the program's."
+    let mut out = vec![tr!(
+        "shell_keys.taken",
+        "In the shell, xdevcmd takes only {listed}; every other key is the program's.",
+        listed = listed
     )];
     if let Some(p) = prefix {
-        out.push(format!(
-            "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p}, Enter too, goes to the program with it; Esc cancels."
+        out.push(tr!(
+            "shell_keys.prefix",
+            "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p}, Enter too, goes to the program with it; Esc cancels.",
+            p = p
         ));
         // F1 from the shell, where F1 alone is the program's.
         let f1 = keymap
@@ -1161,8 +1165,10 @@ pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
             .into_iter()
             .find(|k| k.starts_with(&format!("{p} ")));
         if let Some(k) = f1 {
-            out.push(format!(
-                "{k} opens Commands (F1) from the shell, where F1 is the program's."
+            out.push(tr!(
+                "shell_keys.f1",
+                "{k} opens Commands (F1) from the shell, where F1 is the program's.",
+                k = k
             ));
         }
     }

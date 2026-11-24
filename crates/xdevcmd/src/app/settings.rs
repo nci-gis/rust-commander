@@ -9,8 +9,11 @@ impl App {
             Some(self.settings.mode.writes_nothing())
         } else if let Outcome::Rejected { .. } = self.config_outcome {
             Some(
-                "config.toml has an error (Help \u{203a} Config in use says which): fix it by hand first"
-                    .into(),
+                tr!(
+                    "settings.config_has_error",
+                    "config.toml has an error (Help \u{203a} Config in use says which): fix it by hand first"
+                )
+                .into(),
             )
         } else {
             None
@@ -201,7 +204,11 @@ impl App {
         let Outcome::Rejected { path, error } = &self.config_outcome else {
             return;
         };
-        let mut d = config_dialog(path, error, "could not be used");
+        let mut d = config_dialog(
+            path,
+            error,
+            &tr!("config.could_not_be_used", "could not be used"),
+        );
         // Read-only and restricted modes edit nothing, this file included.
         if self.refused(Action::Edit).is_some() {
             d.also = None;
@@ -217,7 +224,7 @@ impl App {
                 self.modal = Some(Modal::Ask(config_dialog(
                     &path,
                     &error,
-                    "still has a mistake",
+                    &tr!("config.still_has_a_mistake", "still has a mistake"),
                 )));
             }
             _ => {

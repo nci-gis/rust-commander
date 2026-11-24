@@ -265,9 +265,11 @@ impl App {
                             f.marked.clear();
                         }
                     }
-                    self.status =
+                    self.status = tr!(
+                        "jobs.background",
                         "running in the background \u{2014} it comes back if it has a question"
-                            .into();
+                    )
+                    .into();
                 }
             }
             ModalAct::SaveSettings => self.save_settings(),
@@ -484,9 +486,9 @@ impl App {
         self.modal = Some(Modal::Menu(Menu::new(
             Some(
                 if lists > 0 {
-                    "History and lists"
+                    tr!("history.title_lists", "History and lists")
                 } else {
-                    "History"
+                    tr!("history.title", "History")
                 }
                 .into(),
             ),

@@ -141,7 +141,11 @@ impl Links {
         };
         let mut said = describe(l);
         if let Some(p) = &self.remote {
-            said.before = format!("{p} is running: this is looked up on this machine \u{2014} ");
+            said.before = tr!(
+                "links.remote",
+                "{p} is running: this is looked up on this machine \u{2014} ",
+                p = p
+            );
         }
         said
     }
@@ -277,12 +281,13 @@ pub fn describe(l: &Link) -> Said {
         )
     };
     let from = match l.base {
-        Some(Base::Command) => " \u{b7} from its command's directory",
-        Some(Base::Now) => " \u{b7} from the shell's directory now",
-        Some(Base::Unmarked) => {
+        Some(Base::Command) => tr!("links.from_command", " \u{b7} from its command's directory"),
+        Some(Base::Now) => tr!("links.from_now", " \u{b7} from the shell's directory now"),
+        Some(Base::Unmarked) => tr!(
+            "links.from_now_unmarked",
             " \u{b7} from the shell's directory now: no prompt marks (docs/shell.md)"
-        }
-        None => "",
+        ),
+        None => "".into(),
     };
     Said {
         before: String::new(),

@@ -285,9 +285,14 @@ fn spawn_timed(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let program = cmd.get_program().to_string_lossy().into_owned();
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("cannot run {program}: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        tr!(
+            "opener.cannot_run",
+            "cannot run {program}: {e}",
+            program = program,
+            e = e
+        )
+    })?;
     std::thread::spawn(move || {
         let started = Instant::now();
         let mut said_opening = false;
@@ -299,7 +304,13 @@ fn spawn_timed(
                     // nothing: it took the file.
                     let ok = status.success() || program.eq_ignore_ascii_case("explorer.exe");
                     if !ok {
-                        let _ = report.send(format!("{program} could not open {what} ({status})"));
+                        let _ = report.send(tr!(
+                            "opener.could_not_open",
+                            "{program} could not open {what} ({status})",
+                            program = program,
+                            what = what,
+                            status = status
+                        ));
                     } else if !handed {
                         // After "handed", a later success adds nothing.
                         let _ = report.send(done);

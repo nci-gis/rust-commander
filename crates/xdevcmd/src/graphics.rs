@@ -215,7 +215,11 @@ pub fn terminal_name(var: impl Fn(&str) -> Option<String>, probe: &Probe) -> Str
     });
     let name = named.unwrap_or_else(|| match term.as_str() {
         "" => tr!("graphics.an_unknown_terminal", "an unknown terminal").to_string(),
-        t => format!("an unknown terminal (TERM={t})"),
+        t => tr!(
+            "graphics.unknown_term",
+            "an unknown terminal (TERM={t})",
+            t = t
+        ),
     });
     if get("SSH_CONNECTION").is_some() || get("SSH_TTY").is_some() {
         format!("{name}, over SSH")

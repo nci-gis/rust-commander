@@ -54,10 +54,16 @@ pub struct Field {
 
 /// The follow row's help: Linux reads the directory itself; elsewhere the shell must
 /// report it (docs/shell.md).
-const FOLLOW_HELP: &str = if cfg!(target_os = "linux") {
-    "At the prompt only; the pane going elsewhere never moves the shell"
+const FOLLOW_HELP: Text = if cfg!(target_os = "linux") {
+    Text::new(
+        "settings.terminal.follow.help",
+        "At the prompt only; the pane going elsewhere never moves the shell",
+    )
 } else {
-    "Needs the shell to report its directory (docs/shell.md); at the prompt only"
+    Text::new(
+        "settings.terminal.follow.help_reported",
+        "Needs the shell to report its directory (docs/shell.md); at the prompt only",
+    )
 };
 
 const fn f(
@@ -435,7 +441,7 @@ const FIELDS: &[Field] = &[
             "settings.terminal.follow.label",
             "Files follow the shell's cd",
         ),
-        Text::new("settings.terminal.follow.help", FOLLOW_HELP),
+        FOLLOW_HELP,
         Kind::Bool,
         true,
     ),
@@ -908,7 +914,10 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             frame,
             inner,
             inner.height.saturating_sub(3),
-            "The words on screen, from the next start. lang/<name>.toml files: see docs/config.md",
+            &tr!(
+                "settings.languages.note",
+                "The words on screen, from the next start. lang/<name>.toml files: see docs/config.md"
+            ),
             Style::new().fg(th.fg_dim),
         );
     } else {

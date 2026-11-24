@@ -436,6 +436,16 @@ impl Text {
     }
 }
 
+/// A word from a closed set, by its English: the table's translation, else as given.
+/// For words that reach one drawing or wording function from many places (button
+/// words, what a mode turns off), so the function translates them all at once.
+pub fn pick<'a>(table: &[Text], en: &'a str) -> Cow<'a, str> {
+    table
+        .iter()
+        .find(|t| t.en == en)
+        .map_or(Cow::Borrowed(en), |t| t.get())
+}
+
 /// `tr!("key", "English")` → the text; `tr!("key", "English {n}", n = value)` → the text
 /// with `{n}` filled in. The English is what shows without a translation.
 #[macro_export]

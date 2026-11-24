@@ -265,11 +265,15 @@ impl TermPanel {
         let tab = &self.tabs[self.active];
         if let Some((_, r)) = self.rects.iter().find(|(id, _)| *id == tab.focus) {
             let (have, need, what) = match axis {
-                Axis::Rows => (r.height, 2 * (2 + 3), "taller"),
-                Axis::Cols => (r.width, 2 * (2 + 12), "wider"),
+                Axis::Rows => (r.height, 2 * (2 + 3), tr!("terms.taller", "taller")),
+                Axis::Cols => (r.width, 2 * (2 + 12), tr!("terms.wider", "wider")),
             };
             if have < need {
-                anyhow::bail!("too small to split \u{2014} make the terminal {what} first");
+                anyhow::bail!(tr!(
+                    "terms.too_small",
+                    "too small to split \u{2014} make the terminal {what} first",
+                    what = what
+                ));
             }
         }
         let (id, t) = self.spawn(cwd)?;
@@ -429,7 +433,10 @@ impl TermPanel {
         };
         let mut said = format!("{verb} {} ({})", path.display(), mode.word());
         if shared {
-            said.push_str(" \u{2014} note: others can read that file");
+            said.push_str(&tr!(
+                "terms.others_can_read",
+                " \u{2014} note: others can read that file"
+            ));
         }
         Ok(said)
     }

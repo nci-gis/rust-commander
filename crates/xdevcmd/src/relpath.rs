@@ -57,9 +57,11 @@ pub fn said(texts: &[String], base: &Base) -> String {
         many => format!("{} paths", many.len()),
     };
     let to = match base {
-        Base::Repository(root) => format!(
-            "relative to the repository {}",
-            root.file_name()
+        Base::Repository(root) => tr!(
+            "relpath.repository",
+            "relative to the repository {name}",
+            name = root
+                .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string())
         ),

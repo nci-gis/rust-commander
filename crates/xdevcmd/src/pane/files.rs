@@ -1611,7 +1611,7 @@ impl FilePane {
                     as_secs = took.as_secs()
                 ));
             }
-            label.push_str(" \u{b7} Esc stops");
+            label.push_str(&tr!("sizes.esc_stops", " \u{b7} Esc stops"));
             return Some((label, None));
         }
         let r = self.results.as_ref().filter(|r| r.running())?;

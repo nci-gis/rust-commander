@@ -280,7 +280,11 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
             Style::new().fg(th.err).add_modifier(Modifier::BOLD),
         ),
     };
-    push(&mut out, heading("Config file"), true);
+    push(
+        &mut out,
+        heading(&tr!("config_view.config_file", "Config file")),
+        true,
+    );
     push(
         &mut out,
         Line::from(vec![Span::raw("    "), Span::styled(status, style)]),
@@ -399,7 +403,10 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
     push(
         &mut out,
         Line::from(Span::styled(
-            "  \u{2022} marks a value that differs from the default.",
+            tr!(
+                "config_view.differs",
+                "  \u{2022} marks a value that differs from the default."
+            ),
             Style::new().fg(th.fg_dim),
         )),
         false,

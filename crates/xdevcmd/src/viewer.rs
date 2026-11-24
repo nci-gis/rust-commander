@@ -320,9 +320,12 @@ impl Viewer {
             }
         }
         self.message = if forward {
-            "no more paths below \u{2014} Shift+Tab goes back"
+            tr!(
+                "viewer.no_more_below",
+                "no more paths below \u{2014} Shift+Tab goes back"
+            )
         } else {
-            "no more paths above"
+            tr!("viewer.no_more_above", "no more paths above")
         }
         .into();
     }

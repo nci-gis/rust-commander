@@ -75,7 +75,7 @@ autosave_secs = 5         # save them this often when they change: 5-3600, or 0 
 safe_operations = true    # copies via a temporary name; a killed run is cleaned up (security.md)
 fast_copy = true          # the system's fast copy: a clone, or the kernel's copy (security.md)
 menu_bar = true           # the File | View | Help bar
-animation = false         # a small agent walks along the status line, a step a second
+animation = false         # a small agent walks across the file panes' bottom edge, a step a second
 animation_hold_secs = 5   # it stands before a new message this long, then walks on: 5-15
 
 [files]

@@ -330,6 +330,7 @@ impl App {
         }
 
         self.note_status();
+        self.draw_walker(frame);
         self.draw_status(frame, status);
         self.draw_footer(frame, footer);
 
@@ -392,6 +393,37 @@ impl App {
             if n == 1 { "" } else { "s" }
         ));
         self.modal = Some(Modal::View(Box::new(viewer)));
+    }
+
+    /// The walker (`[general] animation`): a step a second across the whole screen, on
+    /// the row of the file panes' bottom edge (the focused one's, or the first file
+    /// pane's when a terminal has the focus). While it stands before a new message it is
+    /// on the status line instead (`draw_status`).
+    fn draw_walker(&self, frame: &mut Frame) {
+        if !self.settings.config.general.animation {
+            return;
+        }
+        let is_files = |id: &PaneId| matches!(self.panes.get(id), Some(Pane::Files(_)));
+        let pane = self
+            .rects
+            .iter()
+            .find(|(id, _)| *id == self.focus && is_files(id))
+            .or_else(|| self.rects.iter().find(|(id, _)| is_files(id)))
+            .map(|(_, r)| *r);
+        // The whole width: across both panes' edges (the owner, 2026-11-24).
+        let screen = frame.area();
+        let lane = pane.map_or(0, |_| usize::from(screen.width));
+        let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
+        let mut w = self.walker.borrow_mut();
+        let standing = w.tick(Instant::now(), lane, &self.status, hold);
+        if let Some(r) = pane.filter(|_| !standing && lane >= crate::walker::WIDTH) {
+            frame.buffer_mut().set_string(
+                screen.x + w.pos() as u16,
+                r.y + r.height.saturating_sub(1),
+                w.sprite(),
+                Style::new().fg(theme::t().accent),
+            );
+        }
     }
 
     pub(super) fn draw_status(&self, frame: &mut Frame, area: Rect) {
@@ -490,29 +522,22 @@ impl App {
             )),
             rw as u16,
         );
-        if self.settings.config.general.animation {
-            // Between the panes' line and the message, a column clear of each.
-            let start = shown_left.cells() + 1;
-            let end = (lw + gap).saturating_sub(1);
-            let lane = end.saturating_sub(start);
-            let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
-            let mut w = self.walker.borrow_mut();
-            let held = w.tick(Instant::now(), lane, &self.status, hold);
-            if lane >= crate::walker::WIDTH {
-                // Before a new message for the hold, else where it walked to.
-                let at = if held {
-                    end - crate::walker::WIDTH
-                } else {
-                    start + w.pos()
-                };
-                frame.buffer_mut().set_string(
-                    area.x + at as u16,
-                    area.y,
-                    w.sprite(),
-                    Style::new().fg(theme::t().accent),
-                );
-            }
+        // The walker stands here, just before a new message, for its hold; it walks
+        // on the file pane's bottom edge (`draw_walker`).
+        let w = self.walker.borrow();
+        let end = (lw + gap).saturating_sub(1);
+        if self.settings.config.general.animation
+            && w.standing()
+            && end >= shown_left.cells() + 1 + crate::walker::WIDTH
+        {
+            frame.buffer_mut().set_string(
+                area.x + (end - crate::walker::WIDTH) as u16,
+                area.y,
+                w.sprite(),
+                Style::new().fg(theme::t().accent),
+            );
         }
+        drop(w);
         if !badge.is_empty() {
             let th = theme::t();
             frame.buffer_mut().set_line(

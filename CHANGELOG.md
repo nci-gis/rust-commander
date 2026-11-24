@@ -11,10 +11,10 @@ that heading and starts a new, empty one here. -->
 ## [Unreleased] - ReleaseDate
 
 ### Added
-- **A walker on the status line**, off by default: with `[general] animation = true`
-  (or Settings, General), a small agent walks along the status line, a step a second;
-  a new message has it stand just before it for `animation_hold_secs` (5 to 15, 5 by
-  default; the config file only), then it walks on.
+- **A walker**, off by default: with `[general] animation = true` (or Settings,
+  General), a small agent walks across the screen on the file panes' bottom edge, a step a second; a new
+  message has it stand on the status line just before it for `animation_hold_secs`
+  (5 to 15, 5 by default; the config file only), then it walks the edge again.
 
 ### Changed
 - **The test kit is `xdevcmd-testkit-…`** in a release (`xdevcmd-bench-…` until

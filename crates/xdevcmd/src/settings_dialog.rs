@@ -128,7 +128,7 @@ const FIELDS: &[Field] = &[
         "general",
         "animation",
         "Animation",
-        "a small agent walks along the status line, a step a second",
+        "a small agent walks across the file panes' bottom edge, a step a second",
         Kind::Bool,
         true,
     ),

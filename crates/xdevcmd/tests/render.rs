@@ -579,37 +579,33 @@ fn a_group_says_what_it_takes_and_enter_closes_it() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
-/// The owner (2026-11-23): a small agent walks along the status line when
-/// `[general] animation` is on, waits just before a message, and is not there when off
-/// (the default).
+/// The owner (2026-11-23, 24): with `[general] animation` a small agent walks across
+/// the screen on the file panes' bottom edge, and stands on the status line just before a new
+/// message; off (the default), it is nowhere.
 #[test]
-fn the_walker_shows_only_when_animation_is_on_and_waits_before_a_message() {
+fn the_walker_walks_the_pane_edge_and_stands_before_a_message() {
     let (a, b) = fixture();
+    let me = |s: &str| s.contains("[o_o]") || s.contains("[-_-]");
     let off = shot_cfg_env("", &[], "", &a, &b);
-    let status = off.lines().rev().nth(1).unwrap_or_default();
-    assert!(
-        !status.contains("[o_o]") && !status.contains("[-_-]"),
-        "off by default\n{off}"
-    );
+    assert!(!off.lines().any(me), "off by default\n{off}");
     let on = "[general]\nanimation = true\n";
     let s = shot_cfg_env(on, &[], "", &a, &b);
     let status = s.lines().rev().nth(1).unwrap_or_default();
+    assert!(!me(status), "not on the status line while it walks\n{s}");
+    let edge = s
+        .lines()
+        .find(|l| me(l))
+        .unwrap_or_else(|| panic!("walking somewhere\n{s}"));
     assert!(
-        status.contains("[o_o]"),
-        "on, it walks the status line\n{s}"
+        edge.contains('┘') && edge.contains('─'),
+        "on a pane's bottom edge\n{s}"
     );
     let s = shot_cfg_env(on, &[], "Ctrl+h", &a, &b);
     let status = s.lines().rev().nth(1).unwrap_or_default();
     let msg = status.find("hidden files").expect(&s);
-    let me = status.find("[o_o]").expect(&s);
-    assert!(me < msg, "before the message\n{s}");
-    assert!(
-        status[me..msg]
-            .trim_start_matches(|c| c != ' ')
-            .trim()
-            .is_empty(),
-        "just before it\n{status}"
-    );
+    let at = status.find("[o_o]").expect(&s);
+    assert!(at < msg, "before the message\n{s}");
+    assert_eq!(s.lines().filter(|l| me(l)).count(), 1, "in one place\n{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 

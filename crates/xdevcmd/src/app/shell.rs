@@ -4,30 +4,36 @@ use super::*;
 
 impl App {
     pub(super) fn toggle_term(&mut self, area: Rect) {
-        match (self.term_id, self.term_shown) {
+        match (self.shell_pane.term_id, self.shell_pane.term_shown) {
             (Some(id), true) => {
                 // Remember the height it was dragged to, so showing it again restores it.
                 if let Node::Split { pct, .. } = &self.tree {
-                    self.term_height = 100 - *pct;
+                    self.shell_pane.term_height = 100 - *pct;
                 }
                 self.tree.remove_leaf(id);
-                self.term_shown = false;
+                self.shell_pane.term_shown = false;
                 if self.focus == id {
                     self.focus = self.file_panes().first().copied().unwrap_or(0);
                 }
             }
             (Some(id), false) => {
                 let old = std::mem::replace(&mut self.tree, Node::Leaf(id));
-                self.tree = Node::split(Axis::Rows, 100 - self.term_height, old, Node::Leaf(id));
-                self.term_shown = true;
+                self.tree = Node::split(
+                    Axis::Rows,
+                    100 - self.shell_pane.term_height,
+                    old,
+                    Node::Leaf(id),
+                );
+                self.shell_pane.term_shown = true;
                 self.focus = id;
             }
             (None, _) => {
                 let cwd = self
+                    .shell_pane
                     .next_shell_cwd
                     .take()
                     .unwrap_or_else(|| self.focused_cwd());
-                let pct = self.term_height;
+                let pct = self.shell_pane.term_height;
                 let rows = (area.height * pct / 100).saturating_sub(2).max(1);
                 let cols = area.width.saturating_sub(2).max(1);
                 let shell = self.settings.config.terminal.shell.clone();
@@ -37,10 +43,14 @@ impl App {
                         let id = self.alloc_id();
                         self.panes.insert(id, Pane::Term(Box::new(t)));
                         let old = std::mem::replace(&mut self.tree, Node::Leaf(id));
-                        self.tree =
-                            Node::split(Axis::Rows, 100 - self.term_height, old, Node::Leaf(id));
-                        self.term_id = Some(id);
-                        self.term_shown = true;
+                        self.tree = Node::split(
+                            Axis::Rows,
+                            100 - self.shell_pane.term_height,
+                            old,
+                            Node::Leaf(id),
+                        );
+                        self.shell_pane.term_id = Some(id);
+                        self.shell_pane.term_shown = true;
                     }
                     Err(e) => self.status = format!("no shell: {e}"),
                 }
@@ -51,12 +61,12 @@ impl App {
     /// The panel has no shells left: take it out of the layout entirely, so the next
     /// F12 starts a fresh one rather than showing an empty frame.
     pub(super) fn remove_terminal_panel(&mut self) {
-        if let Some(id) = self.term_id.take() {
-            if self.term_shown {
+        if let Some(id) = self.shell_pane.term_id.take() {
+            if self.shell_pane.term_shown {
                 self.tree.remove_leaf(id);
             }
             self.panes.remove(&id);
-            self.term_shown = false;
+            self.shell_pane.term_shown = false;
             if self.focus == id {
                 self.focus = self.file_panes().first().copied().unwrap_or(0);
             }
@@ -64,7 +74,7 @@ impl App {
     }
 
     pub(super) fn panel(&mut self) -> Option<&mut TermPanel> {
-        match self.panes.get_mut(&self.term_id?) {
+        match self.panes.get_mut(&self.shell_pane.term_id?) {
             Some(Pane::Term(p)) => Some(p),
             _ => None,
         }
@@ -73,8 +83,8 @@ impl App {
     /// A new terminal tab, showing the panel if it was hidden and creating it if there
     /// was none — in which case the panel's first tab is the new terminal.
     pub(super) fn new_terminal(&mut self) {
-        let full = self.screen;
-        match (self.term_id, self.term_shown) {
+        let full = self.hits.screen;
+        match (self.shell_pane.term_id, self.shell_pane.term_shown) {
             (None, _) => self.toggle_term(full),
             (Some(_), shown) => {
                 if !shown {
@@ -83,7 +93,7 @@ impl App {
                 if !self.terminal_room() {
                     // Still show and focus the panel: the request was "a terminal",
                     // and the ones already running are right there.
-                    if let Some(id) = self.term_id {
+                    if let Some(id) = self.shell_pane.term_id {
                         self.focus = id;
                     }
                     return;
@@ -94,7 +104,7 @@ impl App {
                 }
             }
         }
-        if let Some(id) = self.term_id {
+        if let Some(id) = self.shell_pane.term_id {
             self.focus = id;
         }
     }
@@ -112,12 +122,12 @@ impl App {
     }
 
     pub(super) fn cycle_terminal(&mut self, delta: isize) {
-        let Some(id) = self.term_id else {
+        let Some(id) = self.shell_pane.term_id else {
             self.status = "no terminal yet \u{2014} F12".into();
             return;
         };
-        if !self.term_shown {
-            let full = self.screen;
+        if !self.shell_pane.term_shown {
+            let full = self.hits.screen;
             self.toggle_term(full);
         }
         if let Some(p) = self.panel() {
@@ -161,9 +171,9 @@ impl App {
 
     /// Jump between the file panes and the shell, the way Ctrl+` works in an editor.
     pub(super) fn toggle_term_focus(&mut self, area: Rect) {
-        match self.term_id {
-            Some(id) if self.term_shown && self.focus != id => self.focus = id,
-            Some(id) if self.term_shown => {
+        match self.shell_pane.term_id {
+            Some(id) if self.shell_pane.term_shown && self.focus != id => self.focus = id,
+            Some(id) if self.shell_pane.term_shown => {
                 self.focus = self.file_panes().first().copied().unwrap_or(0);
                 let _ = id;
             }
@@ -172,7 +182,7 @@ impl App {
                 // means "take me to the shell": a new one that left you typing into
                 // the file panes would be a trap.
                 self.toggle_term(area);
-                if let Some(id) = self.term_id {
+                if let Some(id) = self.shell_pane.term_id {
                     self.focus = id;
                 }
             }
@@ -185,7 +195,7 @@ impl App {
     /// shell the panel last had in focus; `tab` names another tab's (the tab menu).
     /// The viewer is a dialog over everything, so Esc leaves focus where it was.
     pub(super) fn view_history(&mut self, tab: Option<usize>) {
-        if self.term_id.is_none() {
+        if self.shell_pane.term_id.is_none() {
             let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
             self.status = format!("no terminal yet \u{2014} {key}");
             return;
@@ -858,12 +868,12 @@ impl App {
     /// `cd` that is the whole job; names are typed into it once its prompt is up
     /// (`pending_type`, in `background`), or not at all if it does not come up in time.
     pub(super) fn open_shell_for(&mut self, s: ShellSend) {
-        if self.term_id.is_none() {
+        if self.shell_pane.term_id.is_none() {
             self.status = "that shell is gone \u{2014} nothing typed".into();
             return;
         }
-        if !self.term_shown {
-            let full = self.screen;
+        if !self.shell_pane.term_shown {
+            let full = self.hits.screen;
             self.toggle_term(full);
         }
         if !self.terminal_room() {
@@ -939,13 +949,13 @@ impl App {
     /// True when it moved a pane.
     pub(super) fn follow_shell(&mut self) -> bool {
         if !self.settings.config.terminal.follow {
-            self.follow_seen = None;
+            self.shell_pane.follow_seen = None;
             return false;
         }
-        if self.modal.is_some() || self.drag.is_some() || self.search.is_some() {
+        if self.modal.is_some() || self.hits.drag.is_some() || self.search.is_some() {
             return false;
         }
-        let seen = self.follow_seen.take();
+        let seen = self.shell_pane.follow_seen.take();
         let Some(panel) = self.panel_ref() else {
             return false;
         };
@@ -962,10 +972,10 @@ impl App {
         };
         let now = shell.idle_dir(&mut seq);
         let Some(dir) = now else {
-            self.follow_seen = Some((key, seq, last.flatten()));
+            self.shell_pane.follow_seen = Some((key, seq, last.flatten()));
             return false;
         };
-        self.follow_seen = Some((key, seq, Some(dir.clone())));
+        self.shell_pane.follow_seen = Some((key, seq, Some(dir.clone())));
         match last {
             Some(Some(was)) if was != dir => {}
             _ => return false,
@@ -997,12 +1007,12 @@ impl App {
     pub(super) fn press_into_shell(&mut self, x: u16, y: u16, button: u32, mods: KeyModifiers) {
         use crate::pane::term::MouseEv;
         let ev = MouseEv::Press(button | mouse_mods(mods));
-        self.mouse_to_shell = self.panel_ref().and_then(|p| p.mouse_at(x, y, ev));
+        self.shell_pane.mouse_to_shell = self.panel_ref().and_then(|p| p.mouse_at(x, y, ev));
     }
 
     /// The terminal panel, to read from.
     pub(super) fn panel_ref(&self) -> Option<&TermPanel> {
-        match self.panes.get(&self.term_id?) {
+        match self.panes.get(&self.shell_pane.term_id?) {
             Some(Pane::Term(p)) => Some(p),
             _ => None,
         }
@@ -1089,8 +1099,8 @@ impl App {
             self.status = format!("would run {name} in a terminal tab");
             return;
         }
-        let full = self.screen;
-        if self.term_id.is_none() || !self.term_shown {
+        let full = self.hits.screen;
+        if self.shell_pane.term_id.is_none() || !self.shell_pane.term_shown {
             self.toggle_term(full);
         }
         if !self.terminal_room() {
@@ -1101,7 +1111,7 @@ impl App {
             Some(Err(e)) => self.status = format!("cannot run {name}: {e}"),
             None => self.status = "no terminal panel".into(),
         }
-        if let Some(id) = self.term_id {
+        if let Some(id) = self.shell_pane.term_id {
             self.focus = id;
         }
     }

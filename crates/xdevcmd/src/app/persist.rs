@@ -16,8 +16,8 @@ impl App {
         app.tree = app.build_saved(&s.panes, &home);
         let files = app.file_panes();
         app.focus = files.get(s.focus).or(files.first()).copied().unwrap_or(0);
-        app.term_height = s.terminal.height_pct.clamp(10, 90);
-        app.restore_terminal = Some((s.terminal.clone(), s.terminal_focused));
+        app.shell_pane.term_height = s.terminal.height_pct.clamp(10, 90);
+        app.shell_pane.restore_terminal = Some((s.terminal.clone(), s.terminal_focused));
         Some(app)
     }
 
@@ -63,9 +63,9 @@ impl App {
 
     /// What is open now, as a session to save.
     pub fn snapshot(&mut self) -> Session {
-        let (files_tree, height) = match (&self.tree, self.term_shown) {
+        let (files_tree, height) = match (&self.tree, self.shell_pane.term_shown) {
             (Node::Split { pct, a, .. }, true) => ((**a).clone(), 100 - *pct),
-            _ => (self.tree.clone(), self.term_height),
+            _ => (self.tree.clone(), self.shell_pane.term_height),
         };
         let panes = self.save_node(&files_tree);
         let mut leaves = Vec::new();
@@ -82,7 +82,7 @@ impl App {
         } else {
             self.focus
         };
-        let shown = self.term_shown;
+        let shown = self.shell_pane.term_shown;
         let tabs = self.panel().map(|p| p.tab_dirs()).unwrap_or_default();
         Session {
             version: session::VERSION,

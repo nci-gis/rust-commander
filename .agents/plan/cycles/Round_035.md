@@ -109,6 +109,16 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
   its last run read, not assumed.
 - W1 #72, W2 #73 merged 2026-11-24: width definitions all in `format.rs` (9),
   `chars().count()` 40 → 14, none a width.
+- **Walker follow-ups, scope data for the Check**: after W0 came four requests, each a
+  PR (2026-11-24): hold on the status line 5–15 s (`animation_hold_secs`); walk on the
+  file pane's bottom edge; across the whole screen; on the *lowest* file pane's edge,
+  not the focused one's (#85, the owner's screenshot with the right side split). One
+  exception, five PRs.
+- **W9** (2026-11-24), moves only: #84 split `ops.rs` (3,597 code lines) into `ops/`
+  (largest `copy.rs`, ~1,420); checked by script that every original line range is in
+  its new file, equal modulo whitespace and `pub(super)`; 82 tests before and after.
+  `qa defs`: no file over 2,500 lines (a `tests.rs` counts as tests). Then 33 `App`
+  fields grouped into `Pictures`, `Hits`, `ShellPane`, `Watching`: App fields 86 → 57.
 
 ## Check
 

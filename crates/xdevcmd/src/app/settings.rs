@@ -99,12 +99,13 @@ impl App {
         xdevcmd_core::ops::set_safe(s.config.general.safe_operations);
         xdevcmd_core::fastcopy::set_enabled(s.config.general.fast_copy);
         if self.interactive {
-            self.graphics_found = crate::graphics::detect(
+            self.pics.graphics_found = crate::graphics::detect(
                 &s.config.viewer.images,
                 |k| std::env::var(k).ok(),
-                &self.probe,
+                &self.pics.probe,
             );
-            self.graphics = crate::graphics::effective(self.graphics_found, self.cell_known);
+            self.pics.graphics =
+                crate::graphics::effective(self.pics.graphics_found, self.pics.cell_known);
         }
         let scrollback = s.config.terminal.scrollback;
         if let Some(p) = self.panel() {

@@ -6,19 +6,19 @@ use xdevcmd_core::task::Poll;
 impl App {
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
         self.interactive = true;
-        self.watcher = crate::watch::Watcher::new();
-        self.graphics_found = crate::graphics::detect(
+        self.watch.watcher = crate::watch::Watcher::new();
+        self.pics.graphics_found = crate::graphics::detect(
             &self.settings.config.viewer.images,
             |k| std::env::var(k).ok(),
-            &self.probe,
+            &self.pics.probe,
         );
-        self.cell_known = crate::graphics::fixed_sixel_cell(|k| std::env::var(k).ok());
-        if let Some((h, w)) = self.probe.cell {
-            self.cell_px = (w, h);
-            self.cell_known = true;
+        self.pics.cell_known = crate::graphics::fixed_sixel_cell(|k| std::env::var(k).ok());
+        if let Some((h, w)) = self.pics.probe.cell {
+            self.pics.cell_px = (w, h);
+            self.pics.cell_known = true;
         }
         self.measure_cells(terminal);
-        let pictures = match (self.graphics, self.graphics_found) {
+        let pictures = match (self.pics.graphics, self.pics.graphics_found) {
             (crate::graphics::Protocol::Kitty, _) => "Kitty",
             (crate::graphics::Protocol::Iterm2, _) => "iTerm2",
             (crate::graphics::Protocol::Sixel, _) => "sixel",
@@ -27,7 +27,7 @@ impl App {
             }
             (crate::graphics::Protocol::Blocks, _) => "half blocks",
         };
-        let name = crate::graphics::terminal_name(|k| std::env::var(k).ok(), &self.probe);
+        let name = crate::graphics::terminal_name(|k| std::env::var(k).ok(), &self.pics.probe);
         self.usage.terminal = format!("{name} \u{b7} pictures: {pictures}");
         // The terminal closed (SIGHUP) or a polite kill (SIGTERM): the loop sees the flag
         // and ends tidily. A second signal ends xdevcmd at once, as the default would.
@@ -95,9 +95,9 @@ impl App {
         }
         // Shown, or kept by the terminal under a dialog: freed, or the terminal holds
         // the picture's data after xdevcmd is gone.
-        let shown = self.graphic_shown.take().is_some();
-        if (shown || self.kitty_held.take().is_some())
-            && self.graphics == crate::graphics::Protocol::Kitty
+        let shown = self.pics.graphic_shown.take().is_some();
+        if (shown || self.pics.kitty_held.take().is_some())
+            && self.pics.graphics == crate::graphics::Protocol::Kitty
         {
             let _ = terminal
                 .backend_mut()
@@ -187,7 +187,7 @@ impl App {
         // A job's progress moves on its own, with no message to say so; a picture
         // waiting for the cursor to settle starts decoding on a later frame.
         *dirty |= matches!(self.modal, Some(Modal::Job(_))) || !self.jobs.is_empty();
-        *dirty |= self.settling;
+        *dirty |= self.pics.settling;
         if *dirty || drawn.elapsed() >= HEARTBEAT {
             let t0 = Instant::now();
             terminal.draw(|f| self.draw(f))?;
@@ -228,9 +228,9 @@ impl App {
                 // A resize clears the screen: whatever picture was there is gone, and
                 // the cells may be a different size now.
                 Event::Resize(..) => {
-                    self.graphic_shown = None;
+                    self.pics.graphic_shown = None;
                     // Sent again, whole: a new transmission replaces the old one.
-                    self.kitty_held = None;
+                    self.pics.kitty_held = None;
                     self.measure_cells(terminal);
                 }
                 _ => {}
@@ -295,9 +295,9 @@ impl App {
         }
         // Not under an open dialog or a drag: a listing that shifted while you were
         // answering "delete these?" or dragging a row is the wrong moment to move it.
-        let quiet = self.modal.is_none() && self.drag.is_none();
+        let quiet = self.modal.is_none() && self.hits.drag.is_none();
         let every = Duration::from_millis(self.settings.config.files.auto_refresh_ms);
-        let shown: Vec<PaneId> = self.rects.iter().map(|(id, _)| *id).collect();
+        let shown: Vec<PaneId> = self.hits.rects.iter().map(|(id, _)| *id).collect();
         self.watch_panes(&shown, every);
         for (id, p) in self.panes.iter_mut() {
             if let Some(t) = p.as_tabs_mut() {
@@ -322,19 +322,20 @@ impl App {
                 }
                 if quiet && shown.contains(id) {
                     let f = t.active_mut();
-                    if self.to_reload.remove(id) {
+                    if self.watch.to_reload.remove(id) {
                         f.reload();
                         changed = true;
-                    } else if self.to_check.remove(id) {
+                    } else if self.watch.to_check.remove(id) {
                         // Just watched: a change from before the watch began.
                         changed |= f.check_now();
                     } else {
                         // Watched: the system says when it changes, and polling is only
                         // the safety net for what sends no events (network drives).
                         let watched = self
+                            .watch
                             .watcher
                             .as_ref()
-                            .zip(self.canonical.get(&f.cwd))
+                            .zip(self.watch.canonical.get(&f.cwd))
                             .is_some_and(|(w, c)| w.watching(c));
                         changed |= f.poll_changes(if watched { every * 10 } else { every });
                     }
@@ -407,17 +408,17 @@ impl App {
             }
         }
         changed |= self.poll_comparing();
-        if let Some((key, task)) = &self.decoding {
+        if let Some((key, task)) = &self.pics.decoding {
             match task.poll() {
                 Poll::Done(prepared) => {
-                    self.quick_image = Some((key.clone(), prepared));
-                    self.decoding = None;
+                    self.pics.quick_image = Some((key.clone(), prepared));
+                    self.pics.decoding = None;
                     changed = true;
                 }
                 // No picture; the preview says it is loading no more, and the next look
                 // tries again.
                 Poll::Died => {
-                    self.decoding = None;
+                    self.pics.decoding = None;
                     changed = true;
                 }
                 Poll::Pending => {}

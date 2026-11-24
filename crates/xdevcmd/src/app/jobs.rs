@@ -446,7 +446,7 @@ impl App {
     /// Keep the system watching the directories on screen, and note the panes whose
     /// directory it says changed; they re-read on the next quiet moment.
     pub(super) fn watch_panes(&mut self, shown: &[PaneId], every: Duration) {
-        let Some(w) = self.watcher.as_mut() else {
+        let Some(w) = self.watch.watcher.as_mut() else {
             return;
         };
         let mut dirs = HashSet::new();
@@ -461,6 +461,7 @@ impl App {
                 }
                 // The system reports canonical paths (macOS's /tmp is /private/tmp).
                 let canon = self
+                    .watch
                     .canonical
                     .entry(f.cwd.clone())
                     .or_insert_with(|| f.cwd.canonicalize().unwrap_or_else(|_| f.cwd.clone()))
@@ -473,13 +474,13 @@ impl App {
         let changed = w.changed();
         for (id, canon) in owners {
             if changed.contains(&canon) {
-                self.to_reload.insert(id);
+                self.watch.to_reload.insert(id);
             } else if new.contains(&canon) {
-                self.to_check.insert(id);
+                self.watch.to_check.insert(id);
             }
         }
         // Forget what is no longer shown, so the map does not grow without end.
-        self.canonical.retain(|_, c| dirs.contains(c));
+        self.watch.canonical.retain(|_, c| dirs.contains(c));
     }
 
     /// A delete to the trash has finished: if it is still the last operation, undo

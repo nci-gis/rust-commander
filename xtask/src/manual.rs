@@ -65,7 +65,7 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 .map_or(here, |root| crate::tryout::checks_dir(&root));
             let stdin = std::io::stdin();
             let mut out = std::io::stdout();
-            match ask_rows(&mut stdin.lock(), &mut out, &dir, &detected()) {
+            match ask_rows(CASES_MD, &mut stdin.lock(), &mut out, &dir, &detected()) {
                 Ok(rows) => {
                     let mut bad = 0;
                     for a in &rows {
@@ -279,15 +279,16 @@ fn answer(
 /// note, the terminal and shell (`found`, to confirm). A disk case takes the newest
 /// saved check in `dir`, and its result is offered from it. Nothing is written here.
 fn ask_rows(
+    cases_md: &str,
     input: &mut impl std::io::BufRead,
     out: &mut impl Write,
     dir: &Path,
     found: &(String, String),
 ) -> Result<Vec<LogArgs>, String> {
     let w = |out: &mut dyn Write, s: String| writeln!(out, "{s}").map_err(|e| e.to_string());
-    let ids = qa::case_ids(CASES_MD)?;
+    let ids = qa::case_ids(cases_md)?;
     let title = |id: &str| {
-        CASES_MD
+        cases_md
             .lines()
             .find_map(|l| l.strip_prefix(&format!("### {id} ")))
             .unwrap_or("")
@@ -310,13 +311,16 @@ fn ask_rows(
                 )?;
             }
         }
-        None => w(
+        // Only where a case is judged by `xtask try --check` (none since Round 036: CI
+        // runs M-DS-01, 03 and 04).
+        None if ids.iter().any(|i| area_of(i).is_some()) => w(
             out,
             format!(
                 "No check-*.txt in {}: run `xtask try --check` first for M-DS-01/03/04.",
                 dir.display()
             ),
         )?,
+        None => {}
     }
     for (n, id) in ids.iter().enumerate() {
         w(out, format!("  {}  {id}  {}", n + 1, title(id)))?;
@@ -465,13 +469,14 @@ fn field(s: &str) -> String {
 
 /// The row for `a`, or why it would not count (refused before it is written).
 fn row(
+    cases_md: &str,
     a: &LogArgs,
     version: &str,
     commit: &str,
     today: &str,
     check_text: Option<&str>,
 ) -> Result<String, String> {
-    let ids = qa::case_ids(CASES_MD)?;
+    let ids = qa::case_ids(cases_md)?;
     if !ids.contains(&a.case) {
         return Err(format!("{} is not a case: {}", a.case, ids.join(", ")));
     }
@@ -537,7 +542,14 @@ fn log(a: &LogArgs, version: &str) -> Result<String, String> {
         Some(p) => Some(std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?),
         None => None,
     };
-    let line = row(a, version, COMMIT, &crate::today(), check_text.as_deref())?;
+    let line = row(
+        CASES_MD,
+        a,
+        version,
+        COMMIT,
+        &crate::today(),
+        check_text.as_deref(),
+    )?;
     let to = a.to.clone().unwrap_or_else(|| match qa::repo_root() {
         Some(r) => r.join(RUNS),
         None => PathBuf::from("runs.tsv"),
@@ -564,6 +576,11 @@ fn append(to: &Path, line: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The cases as they were before Round 036 moved M-DS-01, 03, 04, 05 to CI: the
+    /// guided log and the row rules for a disk case are tested on them, as they would
+    /// serve a disk case again.
+    const SEVEN: &str = "### M-DS-01 Kill a copy that replaces files\n### M-DS-02 Pull a USB stick mid-copy\n### M-DS-03 A big copy, killed past a checkpoint\n### M-DS-04 A checked continue (C)\n### M-DS-05 Move across drives, killed\n### M-DS-06 A network share pulled mid-copy\n### M-DS-07 A hard NFS mount whose server is gone\n";
+
     fn args(case: &str, result: &str) -> LogArgs {
         LogArgs {
             case: case.into(),
@@ -582,7 +599,7 @@ mod tests {
         let found = ("Terminal.app".to_string(), "zsh".to_string());
         let ask = |input: &str| {
             let mut out = Vec::new();
-            let r = ask_rows(&mut input.as_bytes(), &mut out, &d, &found);
+            let r = ask_rows(SEVEN, &mut input.as_bytes(), &mut out, &d, &found);
             (r, String::from_utf8(out).unwrap())
         };
         // No check saved: a disk case cannot pass, a waiver still can.
@@ -627,7 +644,7 @@ mod tests {
             assert_eq!(a.terminal.as_deref(), Some("Terminal.app"));
             // Each row is one the ledger counts.
             let text = std::fs::read_to_string(a.check.as_ref().unwrap()).unwrap();
-            assert!(row(a, "0.4.0", "abcdef0", "2026-11-23", Some(&text)).is_ok());
+            assert!(row(SEVEN, a, "0.4.0", "abcdef0", "2026-11-23", Some(&text)).is_ok());
         }
         // A wrong answer is asked again; an unknown case is refused.
         let rows = ask("4\nx\nf\n\n\n\n").0.unwrap();
@@ -657,7 +674,7 @@ mod tests {
         let fail = "PASS     sources unchanged\nFAIL     replace-src onto replace-dst (check A)\nFAIL: a file lost, short or wrong.\n";
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let r = |a: &LogArgs, commit: &str, check: Option<&str>| {
-            row(a, "0.4.0-beta.2", commit, "2026-11-22", check)
+            row(SEVEN, a, "0.4.0-beta.2", commit, "2026-11-22", check)
         };
         // A disk case passes only with --check saying PASS.
         let mut a = args("M-DS-01", "PASS");
@@ -695,6 +712,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let to = d.join("runs.tsv");
         let line = row(
+            CASES_MD,
             &args("M-DS-02", "FAIL"),
             "0.4.0",
             "abcdef0",

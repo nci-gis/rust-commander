@@ -19,7 +19,8 @@ passed.
 
 Set it up as [How to test](../../../../docs/how-to-test.md) does, steps 1 to 3: the
 release's archives from Releases, the debug log on, the sandbox made with `xtask try`.
-Its checks A, B and C are M-DS-01, M-DS-03 and M-DS-04 here. Every option of the tool:
+Its checks A, B and C show by hand what CI runs as M-DS-01, 03 and 04 (no longer
+logged: see data-safety.md). Every option of the tool:
 `xtask try --help`, `xtask bench --help`. Use test data only (`~/tmp`, `C:\tmp`): the
 checks use the real trash.
 

@@ -274,6 +274,21 @@ pub fn wanted(setting: &str, get: &dyn Fn(&str) -> Option<String>) -> Option<Str
         .and_then(|v| code(&v))
 }
 
+/// The code to load: the setting itself when a language found has that code (a name of
+/// one's own may hold `-`, `_` or `.`: `my-pseudo`), else [`wanted`]'s reading of it as
+/// a locale (`vi_VN.UTF-8` is `vi`).
+fn pick_code(
+    setting: &str,
+    get: &dyn Fn(&str) -> Option<String>,
+    found: &[Language],
+) -> Option<String> {
+    let s = setting.trim();
+    if !s.is_empty() && !s.eq_ignore_ascii_case("auto") && found.iter().any(|l| l.code == s) {
+        return Some(s.to_string());
+    }
+    wanted(setting, get)
+}
+
 /// The folders language files are read from, the later winning: `lang/` beside the
 /// program, then `lang/` in the config folder.
 pub fn folders() -> Vec<PathBuf> {
@@ -383,14 +398,15 @@ pub fn chosen() -> Option<&'static Language> {
 /// wherever a text is missing. Later calls change nothing.
 pub fn init(setting: &str) -> Vec<String> {
     let get = |k: &str| std::env::var(k).ok();
-    let Some(code) = wanted(setting, &get) else {
+    let dirs = folders();
+    let found = languages(&dirs);
+    let Some(code) = pick_code(setting, &get, &found) else {
         let _ = CURRENT.set(Catalog::default());
         let _ = CHOSEN.set(None);
         return Vec::new();
     };
-    let dirs = folders();
     let (cat, mut problems) = load(&code, &dirs);
-    let _ = CHOSEN.set(languages(&dirs).into_iter().find(|l| l.code == code));
+    let _ = CHOSEN.set(found.into_iter().find(|l| l.code == code));
     // Asked for by name and found nowhere: say so (auto from the system stays quiet).
     let named = !setting.trim().is_empty() && !setting.trim().eq_ignore_ascii_case("auto");
     if cat.is_empty() && problems.is_empty() && named {
@@ -590,6 +606,33 @@ mod tests {
         );
         // A name of one's own: a pseudo-language.
         assert_eq!(wanted("xx", &none).as_deref(), Some("xx"));
+    }
+
+    #[test]
+    fn a_language_of_ones_own_is_picked_by_its_whole_name() {
+        let none = |_: &str| None;
+        let lang = |code: &str| Language {
+            code: code.into(),
+            name: code.into(),
+            files: Vec::new(),
+        };
+        let found = [lang("my-pseudo"), lang("pt_BR"), lang("vi")];
+        // Its whole name, '-', '_' and '.' included, when a file has it...
+        assert_eq!(
+            pick_code("my-pseudo", &none, &found).as_deref(),
+            Some("my-pseudo")
+        );
+        assert_eq!(pick_code("pt_BR", &none, &found).as_deref(), Some("pt_BR"));
+        // ...else read as a locale, as before.
+        assert_eq!(
+            pick_code("vi_VN.UTF-8", &none, &found).as_deref(),
+            Some("vi")
+        );
+        assert_eq!(
+            pick_code("auto", &|_: &str| Some("vi_VN".into()), &found).as_deref(),
+            Some("vi")
+        );
+        assert_eq!(pick_code("en", &none, &found), None);
     }
 
     #[test]

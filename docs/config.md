@@ -152,36 +152,13 @@ os = ["linux", "macos"]   # only on these systems
 
 ## Languages
 
-The words on screen are English unless a language file says otherwise. A language file
-is TOML, named for its language: `vi.toml`, `ja.toml`, or any name of your own (a
-pseudo-language is fine). xdevcmd reads `lang/` beside the program (a release has
-Vietnamese and a Japanese preview there), then `lang/` in its config folder, which wins:
-put a file there to add a language or to change a few words of one.
-
 ```toml
-# lang/vi.toml
-"$__name" = "Tiếng Việt"   # optional: the name shown (else the ISO name, else the file's)
-"$__code" = "vi"           # optional: the name `language` picks it by (else the file's)
-
-[keybar]
-copy = "Chép"
-quit = "Thoát"
-
-[menu]
-file = "Tệp"
+[general]
+language = "auto"   # the system's (LANG …); "en", "vi", "ja", or a language of your own
 ```
 
-- `language = "auto"` takes the system's (`LC_ALL`, `LC_MESSAGES`, `LANG`: `vi_VN.UTF-8`
-  is `vi`); `en`, `C` or nothing found is English. The choice is read at start.
-- A key left out shows in English. `{n}` and the like are filled in by xdevcmd: keep the
-  ones the English has; a text naming one it does not have shows in English. `{{` and
-  `}}` are a brace. `$__name` and `$__code` are cut to 32 characters.
-- A file that is not valid TOML is skipped and the status line says why at start.
-- **Help → Config in use** shows the language in use and the ones found.
-- To start a file with every key and its English: `cargo xtask lang template`; to check
-  one: `cargo xtask lang check my.toml` (from the source tree).
-- Only what the screen shows is translated, and not all of it yet; docs, `--help`,
-  config keys and saved sessions stay English.
+Or File → Settings… → Languages. Read at start. How to add a language, change a few
+words of one, or make a pseudo-language: [Languages](language.md).
 
 ## Colours
 

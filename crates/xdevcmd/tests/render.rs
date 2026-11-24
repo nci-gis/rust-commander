@@ -4970,7 +4970,12 @@ fn every_toml_example_in_the_docs_is_a_valid_config() {
     let dir = scratch("doc-toml");
     fs::create_dir_all(&dir).unwrap();
     let mut checked = 0;
-    for file in ["README.md", "docs/config.md", "docs/security.md"] {
+    for file in [
+        "README.md",
+        "docs/config.md",
+        "docs/security.md",
+        "docs/language.md",
+    ] {
         // A Windows checkout may have CRLF line ends; the examples are the same either way.
         let text = fs::read_to_string(format!("{REPO}/{file}"))
             .unwrap()

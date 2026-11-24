@@ -195,8 +195,22 @@ fn toml_key(k: &str) -> String {
     }
 }
 
+/// A TOML basic string on one line (`\n` escaped), so a file reads one key a line and a
+/// line-by-line edit (a pseudo-language by `sed`, docs/language.md) cannot break it.
 fn toml_string(s: &str) -> String {
-    toml::Value::String(s.to_string()).to_string()
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Every `tr!("key", "English"` and `Text::new("key", "English"` under `dirs`:
@@ -294,6 +308,29 @@ mod tests {
             .parent()
             .unwrap()
             .to_path_buf()
+    }
+
+    /// `lang/template.txt` ships beside the program: every key and its English, for a
+    /// user with no source tree to start a language of their own from.
+    #[test]
+    fn the_shipped_template_is_up_to_date() {
+        let want = template(&keys(&root()).unwrap());
+        let have = std::fs::read_to_string(root().join("lang/template.txt"))
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        assert!(
+            have == want,
+            "lang/template.txt is out of date: run `cargo xtask lang template > lang/template.txt`"
+        );
+        // One key a line, and each reads back as its English.
+        let table: toml::Table = want.parse().unwrap();
+        let mut flat = Vec::new();
+        flatten("", &table, &mut flat);
+        let keys = keys(&root()).unwrap();
+        for (k, v) in &flat {
+            assert_eq!(v.as_str(), keys.get(k).map(String::as_str), "{k}");
+        }
+        assert!(!want.contains("\"\"\""), "a multi-line string");
     }
 
     #[test]

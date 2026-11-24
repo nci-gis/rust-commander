@@ -1,7 +1,7 @@
 # Languages
 
 The words on screen (menus, key bar, dialogs, status line, F1) can be in another
-language. A release has Vietnamese and a Japanese preview; you can add your own. A
+language. A release has Vietnamese and Japanese; you can add your own. A
 language is one text file.
 
 Stays English: these docs, `--help`, config keys and their errors, and some messages of

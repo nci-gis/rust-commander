@@ -84,8 +84,11 @@ planned for 0.5.
   (the rest empty or a debug line); `xtask lang check` ok; screenshots at 80×24 (key bar
   shortened to fit: Đổi, Dời, TạoTM). Left English by design until W8's core text: job
   summaries, plan reasons, sizes ("bytes").
-- [ ] **W6 Japanese preview**: menus, key bar, status line, common dialogs; the rest falls
-  back to English, and About says the translation is a preview.
+- [ ] **W6 Japanese**: complete, not a preview (the owner, 2026-11-25: "dịch theo nghĩa
+  thông thường nhé, cả JA … chỉ cần có handle khi tràn/quá size"). 1,172 of 1,175 keys;
+  `xtask lang check` ok. Overflow: the key bar cuts its longest labels when that keeps
+  every key (test `a_long_key_bar_is_cut_not_left_off`); dialog lines are elided by
+  `put`; column headers by their width.
 - [ ] **W7 Docs**: `docs/config.md` (`language`), a page on adding a language.
   The owner (2026-11-24): `docs/language.md`, the settings, and how to make a language
   of one's own or a pseudo-language, freely. Done: the page, `lang/template.txt`

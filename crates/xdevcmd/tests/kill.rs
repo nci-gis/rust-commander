@@ -165,7 +165,12 @@ fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
         !s.b().join("d-older.txt").exists(),
         "held between the trash and the rename"
     );
-    let trashed = s.dir.join("data").join("Trash").join("files").join("d-older.txt");
+    let trashed = s
+        .dir
+        .join("data")
+        .join("Trash")
+        .join("files")
+        .join("d-older.txt");
     assert_eq!(std::fs::read_to_string(&trashed).unwrap(), "old");
 
     let mut x = Run::start_in(

@@ -114,11 +114,13 @@ impl Walker {
 
 /// The row the walker walks on: the bottom edge of the lowest file pane, so it stays
 /// low on the screen whichever pane has the focus and however many there are (the
-/// owner, 2026-11-24). `None` without a file pane.
+/// owner, 2026-11-24). `None` without a file pane at least three rows high.
 pub fn row(file_panes: impl IntoIterator<Item = ratatui::layout::Rect>) -> Option<u16> {
     file_panes
         .into_iter()
-        .filter(|r| r.height > 0)
+        // A box: a top edge, a row, a bottom edge. Lower than that, the bottom edge
+        // is the top one, and the pane's title is there.
+        .filter(|r| r.height >= 3)
         .map(|r| r.y + r.height - 1)
         .max()
 }
@@ -143,6 +145,11 @@ mod tests {
             Some(23)
         );
         assert_eq!(row([Rect::new(0, 5, 80, 0)]), None);
+        assert_eq!(
+            row([Rect::new(0, 5, 80, 2)]),
+            None,
+            "no room for a bottom edge"
+        );
         assert_eq!(row(Vec::<Rect>::new()), None);
     }
     use xdevcmd_core::format::text_cells;

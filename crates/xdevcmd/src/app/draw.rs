@@ -419,7 +419,9 @@ impl App {
         let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
         let mut w = self.walker.borrow_mut();
         let standing = w.tick(Instant::now(), lane, &self.status, hold);
-        if let Some(y) = row.filter(|_| !standing && lane >= crate::walker::WIDTH) {
+        // Not over a search or filter line, which is drawn on the same edge.
+        let free = self.search.is_none();
+        if let Some(y) = row.filter(|_| free && !standing && lane >= crate::walker::WIDTH) {
             frame.buffer_mut().set_string(
                 screen.x + w.pos() as u16,
                 y,

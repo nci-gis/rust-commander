@@ -135,6 +135,15 @@ pub fn check(
             notes.push(format!("{k}: the code has no such key"));
             continue;
         };
+        // As xdevcmd's lang::unsafe_char: a control character, or one that turns text
+        // around, not in the English. xdevcmd shows the English for that key.
+        if let Some(c) = t.chars().find(|&c| {
+            (c.is_control()
+                || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}'))
+                && !en.contains(c)
+        }) {
+            errors.push(format!("{k}: U+{:04X} could act on the terminal; not used", c as u32));
+        }
         match (params(t), params(en)) {
             (None, _) => errors.push(format!("{k}: a brace is not closed: {t:?}")),
             (Some(mine), Some(theirs)) => {

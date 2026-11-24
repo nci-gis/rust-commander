@@ -86,6 +86,8 @@ pub fn iso_name(code: &str) -> Option<&'static str> {
 
 /// `s` trimmed and [`fit`]; `None` if nothing is left.
 fn id(s: &str) -> Option<String> {
+    // Shown in Settings and Help: nothing that acts on the terminal ([`unsafe_char`]).
+    let s: String = s.chars().filter(|&c| !unsafe_char(c)).collect();
     let s = s.trim();
     (!s.is_empty()).then(|| fit(s))
 }
@@ -178,9 +180,14 @@ impl Catalog {
         self.texts.is_empty()
     }
 
-    /// The text for `key`: the translation, else `english`.
+    /// The text for `key`: the translation, else `english`. A translation holding a
+    /// character that could act on the terminal or reorder what it shows, and that its
+    /// English does not hold, is not used ([`safe`]).
     pub fn text<'a>(&'a self, key: &str, english: &'a str) -> &'a str {
-        self.texts.get(key).map_or(english, String::as_str)
+        match self.texts.get(key) {
+            Some(t) if safe(t, english) => t,
+            _ => english,
+        }
     }
 
     /// The text for `key` with its `{params}` filled in (`tr!` with params; its first
@@ -193,7 +200,7 @@ impl Catalog {
         english: &str,
         args: &[(&str, &dyn std::fmt::Display)],
     ) -> String {
-        if let Some(t) = self.texts.get(key) {
+        if let Some(t) = self.texts.get(key).filter(|t| safe(t, english)) {
             if let Some(s) = substitute(t, args) {
                 return s;
             }
@@ -287,6 +294,23 @@ fn pick_code(
         return Some(s.to_string());
     }
     wanted(setting, get)
+}
+
+/// Whether `c` may not come from a language file: a control character (ESC starts a
+/// terminal command: a title, the clipboard), or one that turns text around on screen
+/// (bidirectional overrides and isolates, so "delete" can read as another word).
+pub fn unsafe_char(c: char) -> bool {
+    xdevcmd_core::controls::is(c)
+        || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}')
+}
+
+/// A translation is used only if every such character in it is in its English too (a
+/// `\n` the English ends a line with): a language file is text from anyone, and what it
+/// says is drawn on the user's terminal.
+pub fn safe(text: &str, english: &str) -> bool {
+    text.chars()
+        .filter(|&c| unsafe_char(c))
+        .all(|c| english.contains(c))
 }
 
 /// The folders language files are read from, the later winning: `lang/` beside the
@@ -606,6 +630,34 @@ mod tests {
         );
         // A name of one's own: a pseudo-language.
         assert_eq!(wanted("xx", &none).as_deref(), Some("xx"));
+    }
+
+    #[test]
+    fn a_translation_that_could_act_on_the_terminal_is_not_used() {
+        let c = Catalog::parse(concat!(
+            "esc = \"x\\u001b]52;c;aGk=\\u0007\"\n",
+            "rtl = \"de\\u202eetel\"\n",
+            "nl = \"hai\\ndòng\"\n",
+            "ok = \"Chép\"\n",
+            "p = \"\\u001b{n}\"\n",
+        ))
+        .unwrap();
+        assert_eq!(c.text("esc", "Copy"), "Copy");
+        assert_eq!(c.text("rtl", "delete"), "delete");
+        assert_eq!(
+            c.text("nl", "one\nline"),
+            "hai\ndòng",
+            "a newline its English has"
+        );
+        assert_eq!(c.text("nl", "one line"), "one line");
+        assert_eq!(c.text("ok", "Copy"), "Chép");
+        let n = 3;
+        assert_eq!(c.fill("p", "{n} files", &[("n", &n)]), "3 files");
+        // A file's name for itself, shown in Settings: those characters left out.
+        assert_eq!(
+            id("Ti\u{1b}[2Jếng\u{202e} Việt").as_deref(),
+            Some("Ti[2Jếng Việt")
+        );
     }
 
     #[test]

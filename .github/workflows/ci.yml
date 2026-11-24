@@ -186,6 +186,9 @@ jobs:
       # The release builds xtask for its musl targets too (the bench archive): built,
       # not only checked, so a link error shows before a tag.
       - run: cargo build --release --locked -p xtask --target x86_64-unknown-linux-musl
+      # The fuzz crate is outside the workspace: a change to a file it compiles broke
+      # it unseen until the beta.3 cut (Round 035, Act).
+      - run: cargo check --manifest-path fuzz/Cargo.toml --lib --locked
 
   dependencies:
     name: dependencies (cargo-deny)

@@ -84,6 +84,14 @@ planned for 0.5.
 - [ ] **W6 Japanese preview**: menus, key bar, status line, common dialogs; the rest falls
   back to English, and About says the translation is a preview.
 - [ ] **W7 Docs**: `docs/config.md` (`language`), a page on adding a language.
+- [ ] **W8 Names Windows does not allow** (the owner, 2026-11-24, carried from Round
+  035's Act): a new folder (F7), a new file and a rename refused by one check, the one
+  copy and move use (`plan::name_problem`): Windows' characters, a dot or space at the
+  end, `CON`/`NUL`/`COM1`…, on Windows and on a FAT, exFAT or NTFS drive anywhere. Red
+  test first (F7 with `a:b` and `CON` on Windows CI; the rules on a FAT mount on Linux).
+  Remove the row from Known issues and the note in the Guide.
+- [x] **W9 The fuzz crate in CI** (Round 035's Act): `cargo check` in `fuzz/`, in the
+  cross-check job.
 
 ### To check at the cut
 

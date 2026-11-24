@@ -1,12 +1,12 @@
 # Round 035: 0.4.0-beta.3: refactor, one definition per concept
 
-**Status**: Review (Check written 2026-11-24; Complete after the release draft is read)
+**Status**: Complete (the owner, 2026-11-24, after the release draft was read)
 **Part of**: v0.4.0, `ROADMAP.md`, the row for **0.4.0-beta.3** (refactor; the owner,
 2026-11-23), from the cosf R1–R7 synthesis §6.3 (`03_research/cosf/rounds/
 2026-11-19_tong-hop-r1-r7.md`, in the owner's cosf folder)
 **Branch**: `feat/v0.4.0-beta.3`, from `dev` at `e3e528e` (Release 0.4.0-beta.2)
 **Date started**: 2026-11-24
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-24
 
 ## Goal
 
@@ -188,8 +188,12 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
     crate in CI (`cargo check` in `fuzz/`), so it cannot break silently again.
 - **CI in bursts** (Do): a burst of merges cancels all runs but the last; the branch
   was red on Windows unseen from #72 to #75. For the Act: read the last run of a burst.
-- Open: the release draft (assets `xdevcmd-testkit-*`, links in the notes), after the
-  tag.
+- **The release draft** (2026-11-24, tag `v0.4.0-beta.3` at `5624a4e`, release run
+  45439606639 green): pre-release; 6 `xdevcmd-…` and 6 `xdevcmd-testkit-…` archives and
+  `SHA256SUMS` (12 lines); the Linux musl pair downloaded, both checksums OK,
+  `--version` 0.4.0-beta.3, `docs/` and `themes/` inside, `xtask` in the kit. The notes
+  have no links this time. The tag was pushed by the owner: a tag push from this
+  session is refused (403), so `cargo release tag` ran here and the owner pushed it.
 
 ## Act
 

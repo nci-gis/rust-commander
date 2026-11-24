@@ -140,15 +140,30 @@ fn write_in(dir: &Path, text: &str) -> Option<PathBuf> {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);
     }
-    let text = home_as_tilde(text, home().as_deref());
+    let text = homes_as_tilde(text, &homes());
     o.open(&path).ok()?.write_all(text.as_bytes()).ok()?;
     prune(dir);
     Some(path)
 }
 
-/// The user's home directory, as the rest of xdevcmd finds it.
-fn home() -> Option<String> {
-    xdevcmd_core::dirs::home().map(|h| h.to_string_lossy().into_owned())
+/// Every home folder set (on Windows `HOME` and `USERPROFILE` may both be, and
+/// differ), as the rest of xdevcmd finds them.
+fn homes() -> Vec<String> {
+    xdevcmd_core::dirs::homes()
+        .iter()
+        .map(|h| h.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// `text` with every mention of each of `homes` written `~`, the longest first so one
+/// inside another is not cut in two. Whichever home a path is under, the user's name
+/// in it stays out of a log meant to be attached to a report.
+fn homes_as_tilde(text: &str, homes: &[String]) -> String {
+    let mut by_length: Vec<&String> = homes.iter().collect();
+    by_length.sort_by_key(|h| std::cmp::Reverse(h.len()));
+    by_length
+        .into_iter()
+        .fold(text.to_string(), |t, h| home_as_tilde(&t, Some(h)))
 }
 
 /// `text` with every mention of `home` written `~`. A home of `/` or shorter says
@@ -257,6 +272,19 @@ mod tests {
             assert_eq!(mode, 0o600, "the user's alone");
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn every_home_is_written_as_a_tilde() {
+        // Windows with Git Bash: HOME and USERPROFILE both set, and different. A path
+        // under either keeps no user name (beta.3 review: only HOME was hidden).
+        let text = r"at C:\Users\ann\src\x.rs and /c/msys/home/ann/y.rs";
+        let homes = [r"C:\Users\ann".to_string(), "/c/msys/home/ann".to_string()];
+        assert_eq!(homes_as_tilde(text, &homes), r"at ~\src\x.rs and ~/y.rs");
+        // One home inside the other: the longer one is replaced whole.
+        let nested = ["/home/ann".to_string(), "/home/ann/win".to_string()];
+        assert_eq!(homes_as_tilde("/home/ann/win/z", &nested), "~/z");
+        assert_eq!(homes_as_tilde("/x", &[]), "/x");
     }
 
     #[test]

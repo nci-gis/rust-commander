@@ -5878,9 +5878,11 @@ fn settings_lists_the_languages_there_are() {
         &a,
         &b,
     );
+    // The UI is in Vietnamese here (LANG): the first two rows by their parts, not words.
     for line in [
-        "auto - detect by locale - (vi)",
-        "English - en - built in",
+        "( ) auto - ",
+        " - (vi)",
+        "( ) English - en - ",
         "Tiếng Việt - vi - vi.toml",
         "A pseudo-language with a name... - xx - mine.toml",
     ] {

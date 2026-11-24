@@ -97,13 +97,31 @@ test perf"). So:
   and a smaller one would change product code, which the freeze rules out. Times here
   (Linux): 01 4.7 s, planned copy 4.6 s, 05 4.3 s, 03 7.7 s, 04 2.3 s.
   So the risk of a slow runner is the harness's patience, not when the kill lands.
+- **E1, E2** (2026-11-24): `tests/winpty` (the ConPTY harness of the two Windows tests)
+  became `tests/harness`, for all three systems: a scratch directory a killed run
+  leaves for the next, `kill_hard` (`kill -9`; TerminateProcess on Windows), the
+  journal's path encoding per system, a second device. `tests/kill.rs` holds the five
+  kill tests, moved from `pty.rs` (Unix only): M-DS-01 (planned copy at a rename; with
+  the trash on Linux only, the test build's trash being Linux's), M-DS-03 (no longer
+  Linux only), M-DS-04, M-DS-05. Windows found one test bug at once: a path joined
+  from `"a-tree/sub"` keeps its `/` where the journal writes `\` (CI 45352301675).
+- **E3**: already there. CI mounts a second device on every system (Linux tmpfs, macOS
+  a RAM disk, Windows the runner's other volume), and M-DS-05 ran on all four runners
+  (none said "skipped"). Not done: a loop-mounted FAT32 for FAT's rules on Linux; FAT
+  stays with M-DS-02 by hand.
+- **E4**: `CASE_PATHS` in `xtask/src/qa.rs`: 02, 06, 07 each name the files they vouch
+  for; a cell is stale only when one of them changes. Test red without it.
+- **E5**: `data-safety.md` keeps 02, 06, 07 and says where CI runs the rest; README
+  follows; `xtask manual`'s log takes the case list (its tests keep the seven).
 
 ## Check
 
-- [ ] CI runs 01, 03, 04, 05 on all three systems, ×10 green before they gate.
-- [ ] `qa ledger` asks for 02, 06, 07 only, and only where their files changed.
-- [ ] One deliberate change in a case's files makes its cells stale, and one outside
-  them does not (a test).
+- [x] CI runs 01, 03, 04, 05 on all three systems, ×10 green before they gate:
+  run 45354712957 (a throwaway workflow on `tmp/r36-x10`, never merged), 10 of 10 on
+  ubuntu, ubuntu ARM, macOS and Windows; 7–15 s a run.
+- [x] `qa ledger` asks for 02, 06, 07 only, and only where their files changed.
+- [x] One deliberate change in a case's files makes its cells stale, and one outside
+  them does not (a test): `a_hand_cell_goes_stale_only_when_its_own_files_change`.
 
 ## Act
 

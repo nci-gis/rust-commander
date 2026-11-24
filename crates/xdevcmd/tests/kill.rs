@@ -236,17 +236,15 @@ fn a_move_killed_before_removing_its_source_says_both_are_there() {
 /// lands after the first checkpoint (256 MiB) and before the end.
 #[test]
 fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::{Read, Write};
     let s = Scratch::new("kill-ckpt-kill");
     let src = s.a().join("big.bin");
     let size: u64 = 384 << 20;
     {
-        // Sparse, with marks at both ends and in the middle.
-        let mut f = std::fs::File::create(&src).unwrap();
-        f.set_len(size).unwrap();
-        for at in [0, 300 << 20, size - 4] {
-            f.seek(SeekFrom::Start(at)).unwrap();
-            f.write_all(b"MARK").unwrap();
+        // Every MiB its own bytes, so a hole, a chunk twice or one out of place shows.
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&src).unwrap());
+        for i in 0..size >> 20 {
+            f.write_all(&mib(i)).unwrap();
         }
     }
     // A folder copied first (folders come before files): its folders are told to the
@@ -312,13 +310,13 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         std::fs::read_to_string(s.b().join("a-tree/sub/f.txt")).unwrap(),
         "f"
     );
+    // The whole copy equals its source, MiB by MiB (the hand case's `cmp`).
     let mut got = std::fs::File::open(s.b().join("big.bin")).unwrap();
     assert_eq!(got.metadata().unwrap().len(), size);
-    for at in [0, 300 << 20, size - 4] {
-        let mut b = [0u8; 4];
-        got.seek(SeekFrom::Start(at)).unwrap();
-        got.read_exact(&mut b).unwrap();
-        assert_eq!(&b, b"MARK", "at {at}");
+    let mut buf = vec![0u8; 1 << 20];
+    for i in 0..size >> 20 {
+        got.read_exact(&mut buf).unwrap();
+        assert!(buf == mib(i), "MiB {i} differs from its source");
     }
     assert!(
         std::fs::read_dir(s.b()).unwrap().count() == 2,
@@ -345,9 +343,18 @@ fn a_big_copy_killed_after_a_checkpoint_goes_on_from_there() {
         .max()
         .unwrap_or(0);
     assert!(
-        resumed >= 256 << 20,
-        "taken over from the checkpoint: {resumed}"
+        (256 << 20..size).contains(&resumed),
+        "taken over from the checkpoint, and not the whole file: {resumed}"
     );
+}
+
+/// MiB number `i` of the checkpoint test's file: its number, then a pattern of it.
+fn mib(i: u64) -> Vec<u8> {
+    let mut b: Vec<u8> = (0..1u32 << 20)
+        .map(|n| (n as u64 ^ i.wrapping_mul(131)) as u8)
+        .collect();
+    b[..8].copy_from_slice(&i.to_le_bytes());
+    b
 }
 
 /// M-DS-04. After a power cut a file the journal calls done can hold the wrong bytes under its
@@ -396,4 +403,128 @@ fn a_checked_resume_repairs_a_file_the_journal_called_done() {
     // The job box ignores q: wait for its summary on the status line.
     x.wait_for_status("copied");
     x.quit();
+}
+
+/// M-DS-04 as the hand case did it, with a real kill: a copy of ten files killed at the
+/// seventh one's rename; one finished copy then gets zeros of its size and its source's
+/// date (a power cut can leave that under the real name); C at the next start reads
+/// what was copied, finds that one different, copies it again, and finishes the rest.
+#[test]
+fn a_copy_killed_then_a_checked_continue_finds_the_damaged_file() {
+    let s = Scratch::new("kill-check");
+    for n in 1..=10 {
+        s.file(&format!("a/f{n:02}.txt"), &format!("file {n} ").repeat(50));
+    }
+    let marker = s.dir.join("halted");
+    let spec = format!(
+        "halt|rename|{}|{}",
+        s.b().join("f07.txt").display(),
+        marker.display()
+    );
+    let mut x = Run::start_in(
+        &s,
+        &[s.a(), s.b()],
+        CFG,
+        &[("XDEVCMD_FAULTS", spec.as_str())],
+    );
+    x.wait_for("f10 ");
+    x.send(b"*");
+    x.wait_for("10 selected");
+    x.send(F5);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    wait_file(&marker, "the job held at f07's rename", |c| c.is_some());
+    x.kill_hard();
+    drop(x);
+    assert!(
+        !s.b().join("f07.txt").exists(),
+        "killed before f07 was in place"
+    );
+    // Damage one that was finished: same size and date as its source, no data.
+    let (src, dst) = (s.a().join("f02.txt"), s.b().join("f02.txt"));
+    let len = std::fs::metadata(&dst)
+        .expect("f02 copied before the kill")
+        .len();
+    std::fs::write(&dst, vec![0u8; len as usize]).unwrap();
+    let date = std::fs::metadata(&src).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&dst)
+        .unwrap()
+        .set_modified(date)
+        .unwrap();
+
+    let mut x = Run::start_in(&s, &[s.a(), s.b()], CFG, &[]);
+    x.wait_for("Interrupted");
+    x.wait_for("check (slow)");
+    x.send(b"c");
+    x.wait_for("1 found different");
+    for n in 1..=10 {
+        let name = format!("f{n:02}.txt");
+        assert_eq!(
+            std::fs::read(s.b().join(&name)).unwrap(),
+            std::fs::read(s.a().join(&name)).unwrap(),
+            "{name} equals its source"
+        );
+    }
+    x.quit();
+}
+
+/// M-DS-05 with a folder, as the hand case moved one: ten files moved to another device,
+/// killed before the fifth one's source goes. Every file is on one side or the other,
+/// or whole on both; none is on neither, and the next start says so.
+#[test]
+fn a_folder_moved_across_devices_and_killed_loses_no_file() {
+    let s = Scratch::new("kill-move-dir");
+    let Some(other) = other_device("kill-move-dir") else {
+        return;
+    };
+    std::fs::create_dir_all(s.a().join("d")).unwrap();
+    for n in 1..=10 {
+        s.file(&format!("a/d/m{n:02}.txt"), &format!("moved {n}"));
+    }
+    let marker = s.dir.join("halted");
+    let spec = format!(
+        "halt|remove-source|{}|{}",
+        s.a().join("d").join("m05.txt").display(),
+        marker.display()
+    );
+    let mut x = Run::start_in(
+        &s,
+        &[s.a(), other.clone()],
+        CFG,
+        &[("XDEVCMD_FAULTS", spec.as_str())],
+    );
+    x.send(DOWN);
+    x.send(F6);
+    x.wait_for("[Enter] go");
+    x.send(ENTER);
+    x.wait_for("copy then delete");
+    x.send(b"y");
+    wait_file(&marker, "the job held before m05's source goes", |c| {
+        c.is_some()
+    });
+    x.kill_hard();
+    drop(x);
+    let mut both = 0;
+    for n in 1..=10 {
+        let name = format!("m{n:02}.txt");
+        let want = format!("moved {n}");
+        let here = std::fs::read_to_string(s.a().join("d").join(&name)).ok();
+        let there = std::fs::read_to_string(other.join("d").join(&name)).ok();
+        assert!(
+            here.is_some() || there.is_some(),
+            "{name} is on neither side"
+        );
+        for side in [&here, &there].into_iter().flatten() {
+            assert_eq!(side, &want, "{name} is whole wherever it is");
+        }
+        both += usize::from(here.is_some() && there.is_some());
+    }
+    assert!(both >= 1, "m05 was killed with both copies there");
+    let mut x = Run::start_in(&s, &[s.a(), other.clone()], CFG, &[]);
+    x.wait_for("Interrupted");
+    x.wait_for("Both are kept");
+    drop(x);
+    let _ = std::fs::remove_dir_all(&other);
 }

@@ -47,6 +47,11 @@ pub const DATA_PATH: &[&str] = &[
     // (their UI changes do not make hand tests stale).
     "crates/xdevcmd/src/app/jobs.rs",
     "crates/xdevcmd/src/app/file_ops.rs",
+    // A running job's box: the retry countdown, the Failed question, Esc to stop
+    // (M-DS-06, 07). Only those cases list them (CASE_PATHS), so a change to the box
+    // does not make the other cases stale.
+    "crates/xdevcmd/src/modal.rs",
+    "crates/xdevcmd/src/app/modals.rs",
     "crates/xdevcmd/src/app/archives.rs",
     "crates/xdevcmd/src/tempfiles.rs",
     // A new trash or tempfile crate changes what a delete or a save does.
@@ -73,6 +78,7 @@ pub const CASE_PATHS: &[(&str, &[&str])] = &[
             "crates/xdevcmd-core/src/journal.rs",
             "crates/xdevcmd-core/src/entry.rs",
             "crates/xdevcmd/src/app/jobs.rs",
+            "crates/xdevcmd/src/app/file_ops.rs",
             "Cargo.lock",
         ],
     ),
@@ -85,9 +91,13 @@ pub const CASE_PATHS: &[(&str, &[&str])] = &[
             "crates/xdevcmd-core/src/os.rs",
             "crates/xdevcmd-core/src/plan.rs",
             "crates/xdevcmd-core/src/fastcopy.rs",
+            "crates/xdevcmd-core/src/noreplace.rs",
             "crates/xdevcmd-core/src/faults.rs",
             "crates/xdevcmd-core/src/journal.rs",
             "crates/xdevcmd/src/app/jobs.rs",
+            "crates/xdevcmd/src/app/file_ops.rs",
+            "crates/xdevcmd/src/modal.rs",
+            "crates/xdevcmd/src/app/modals.rs",
             "Cargo.lock",
         ],
     ),
@@ -101,6 +111,9 @@ pub const CASE_PATHS: &[(&str, &[&str])] = &[
             "crates/xdevcmd-core/src/fastcopy.rs",
             "crates/xdevcmd-core/src/faults.rs",
             "crates/xdevcmd/src/app/jobs.rs",
+            "crates/xdevcmd/src/app/file_ops.rs",
+            "crates/xdevcmd/src/modal.rs",
+            "crates/xdevcmd/src/app/modals.rs",
             "Cargo.lock",
         ],
     ),

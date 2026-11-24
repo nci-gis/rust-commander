@@ -85,8 +85,9 @@ again with the same `--launch` line and press **C**: "1 found different … copi
 
 **9. Check every file**: `xtask try --check`. The last line must be
 **PASS: every copy whole, no file lost or wrong**; it is saved as `check-<os>-<time>.txt`
-beside `xdevcmd-try`. To record the run: `xtask manual log`, and answer its questions
-(Enter takes what it offers). Then `xtask try --clean`.
+beside `xdevcmd-try`. Nothing to record: CI runs these checks on Linux, macOS and
+Windows for every release (the maintainer's `tests/kill.rs`); they are here to look for
+yourself. If one fails for you, send it (step 11). Then `xtask try --clean`.
 
 **10. Use it for a week** for your normal file work, where you would use Explorer,
 Finder, mc or Total Commander: copies and moves onto folders that share some names, F8

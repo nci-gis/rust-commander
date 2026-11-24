@@ -386,6 +386,11 @@ pub fn other_device(tag: &str) -> Option<PathBuf> {
             }
         }
     }
+    // CI sets this: a test that skipped there would pass without having run (the
+    // red-team of Round 036: a skip said on stderr is not seen in a passing run).
+    if std::env::var_os("XDEVCMD_REQUIRE_OTHER_DEV").is_some() {
+        panic!("{tag}: no second device, and XDEVCMD_REQUIRE_OTHER_DEV is set");
+    }
     eprintln!("{tag}: skipped, no second device (set XDEVCMD_TEST_OTHER_DEV)");
     None
 }

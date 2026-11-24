@@ -1,6 +1,6 @@
 # Round 035: 0.4.0-beta.3: refactor, one definition per concept
 
-**Status**: In Progress (the owner, 2026-11-24: "start 035")
+**Status**: Review (Check written 2026-11-24; Complete after the release draft is read)
 **Part of**: v0.4.0, `ROADMAP.md`, the row for **0.4.0-beta.3** (refactor; the owner,
 2026-11-23), from the cosf R1–R7 synthesis §6.3 (`03_research/cosf/rounds/
 2026-11-19_tong-hop-r1-r7.md`, in the owner's cosf folder)
@@ -155,4 +155,61 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
 
 ## Check
 
+- **Cut commit**: `ba363b8` (the freeze `66e6930` plus #98, fuzz crate and this file
+  only; nothing on the data path).
+- **Hand-test ledger PASS** (2026-11-24, `qa ledger` at the runs' commit): 9 cells,
+  not 21 (Round 036). M-DS-02 PASS on Linux, macOS and Windows; M-DS-06 PASS on Linux
+  and Windows, waived on macOS; M-DS-07 PASS on Linux, waived on macOS and Windows
+  (a hard NFS mount tested where the client is). All built from `ba363b8`, the owner.
+  The extra case (a copy killed on beta.2, continued on beta.3) was not run by hand:
+  CI's kill tests cover a killed copy continued, not across versions; old state read
+  by beta.3 is covered by the hand-spelled fixtures (Rules). To redo at rc.1 if wanted.
+- **Baseline**: filled at `929361d` (table above); the code after it changed tests,
+  review fixes and the OS module (W10), none of which moves those counts by design.
+- **Timebox**: met. W0–W10 and the freeze in one day (2026-11-24, #69–#98), six days
+  before 2026-11-30; the 2026-11-27 checkpoint never came into play.
+- **The walker, a rule broken on purpose (W0)**. What it cost, measured:
+  - *Time*: 4 of the round's 30 PRs (#74, #79, #83, #85), each small; none on the
+    critical path of W1–W10.
+  - *Scope*: it pulled in more. One exception became four follow-up requests in the
+    same day (hold, file-pane edge, whole screen, lowest pane), each a PR. A feature
+    asks for its next step at once; a refactor round does not.
+  - *Evidence*: did not go stale because of it. `walker.rs`, `draw.rs`, `config.rs`
+    and `settings_dialog.rs` are off the data path, and the ledger's staleness came
+    from W6, W8, W9, W10 and Round 036's trash seam, all on it.
+  - *A cost found late*: the fuzz crate stopped building (W0's `config.rs` reads
+    `crate::walker`, which `fuzz/src/lib.rs` did not compile), seen only when fuzz ran
+    at the cut (#98). Fuzz is outside the workspace and CI, so a feature that touches
+    config reaches it unseen.
+  - *Rules*: "no assertion changed" held (new tests only).
+  - **Reading**: the exception was cheap on evidence and time, and expensive in
+    attention (4 requests) and one late build break. For the Act: allow such an
+    exception only with its follow-ups counted against the round, and build the fuzz
+    crate in CI (`cargo check` in `fuzz/`), so it cannot break silently again.
+- **CI in bursts** (Do): a burst of merges cancels all runs but the last; the branch
+  was red on Windows unseen from #72 to #75. For the Act: read the last run of a burst.
+- Open: the release draft (assets `xdevcmd-testkit-*`, links in the notes), after the
+  tag.
+
 ## Act
+
+Agreed by the owner (2026-11-24: "(1) + (2) okay với đề xuất"):
+
+**Learnings**:
+
+1. **An exception to a round's rules counts its follow-ups against the round.** W0
+   was one feature allowed into a refactor round; four more requests followed it the
+   same day. The next exception is written down with its follow-ups, each one a line
+   in Do, and stops when the round's timebox or checkpoint says so.
+2. **The fuzz crate is checked in CI** (`cargo check` in `fuzz/`, stable). It sits
+   outside the workspace, so a change to a file it compiles (W0's `config.rs`) broke
+   it unseen until the cut. Done in beta.4 (Round 037), on CI's first run there.
+3. **After a burst of merges, read the last CI run**: the concurrency group cancels
+   the others, so a red run in the middle is never seen (#72 to #75 on Windows).
+
+**Carried to beta.4** (the owner, the same day): names a new folder, a new file or a
+rename may not have on Windows, or on a FAT, exFAT or NTFS drive anywhere (`CON`,
+`NUL`, `COM1`…, and Windows' characters for a new folder), refused by one check, the
+one copy and move use (`plan::name_problem`). Known issues lists it until then.
+
+**Promotions**: none (the learnings are about running rounds; `PDCA.md` is the owner's).

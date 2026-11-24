@@ -14,7 +14,11 @@ impl App {
             .and_then(Pane::as_files)
             .filter(|f| plain(f));
         let Some(me) = me else {
-            self.status = "compare works between two directories".into();
+            self.status = tr!(
+                "compare.compare_works_between_two_directories",
+                "compare works between two directories"
+            )
+            .into();
             return None;
         };
         let (left, hidden) = (me.cwd.clone(), me.show_hidden);
@@ -27,11 +31,19 @@ impl App {
         match (other, right) {
             (Some(o), Some(r)) if r != left => Some((self.focus, left, o, r, hidden)),
             (Some(_), Some(_)) => {
-                self.status = "both panes show the same directory".into();
+                self.status = tr!(
+                    "compare.both_panes_show_the_same_directory",
+                    "both panes show the same directory"
+                )
+                .into();
                 None
             }
             _ => {
-                self.status = "compare needs a second pane on a directory".into();
+                self.status = tr!(
+                    "compare.compare_needs_a_second_pane_on",
+                    "compare needs a second pane on a directory"
+                )
+                .into();
                 None
             }
         }
@@ -47,7 +59,7 @@ impl App {
         let diffs = match compare(&left, &right, false, hidden) {
             Ok(d) => d,
             Err(e) => {
-                self.status = format!("cannot compare: {e}");
+                self.status = tr!("compare.cannot_compare", "cannot compare: {e}", e = e);
                 return;
             }
         };
@@ -90,9 +102,7 @@ impl App {
                 unknown[0]
             ),
         };
-        self.status = format!(
-            "marked: {mine} here, {theirs} there, newer or missing on the other side{clash}{unknown} \u{b7} {same} the same"
-        );
+        self.status = tr!("compare.marked_here_there_newer_or_missing", "marked: {mine} here, {theirs} there, newer or missing on the other side{clash}{unknown} \u{b7} {same} the same", mine = mine, theirs = theirs, clash = clash, unknown = unknown, same = same);
     }
 
     /// Alt+Y: both trees, compared all the way down on a thread (a big tree or a network
@@ -111,7 +121,7 @@ impl App {
         if !self.interactive {
             return match xdevcmd_core::compare::compare(&left, &right, true, hidden) {
                 Ok(diffs) => self.show_sync_plan(&left, &right, &diffs),
-                Err(e) => self.status = format!("cannot compare: {e}"),
+                Err(e) => self.status = tr!("compare.cannot_compare", "cannot compare: {e}", e = e),
             };
         }
         let seen = Arc::new(AtomicU64::new(0));
@@ -121,7 +131,11 @@ impl App {
                 xdevcmd_core::compare::compare_until(&l, &r, true, hidden, stop, &seen)
             })
         };
-        self.status = "comparing the two trees\u{2026} Esc stops".into();
+        self.status = tr!(
+            "compare.comparing_the_two_trees_u_esc",
+            "comparing the two trees\u{2026} Esc stops"
+        )
+        .into();
         self.comparing = Some(Comparing {
             left,
             right,
@@ -145,7 +159,7 @@ impl App {
             }
             Poll::Done(Some(Err(e))) => {
                 self.comparing = None;
-                self.status = format!("cannot compare: {e}");
+                self.status = tr!("compare.cannot_compare", "cannot compare: {e}", e = e);
                 true
             }
             // Stopped: Esc said so already.
@@ -156,7 +170,11 @@ impl App {
             // Its status line said "comparing…" on, before (W8).
             Poll::Died => {
                 self.comparing = None;
-                self.status = format!("comparing the two trees {}", crate::app::DIED);
+                self.status = tr!(
+                    "compare.comparing_the_two_trees",
+                    "comparing the two trees {DIED}",
+                    DIED = crate::app::DIED
+                );
                 true
             }
             Poll::Pending => {

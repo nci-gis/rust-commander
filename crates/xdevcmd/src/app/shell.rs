@@ -52,7 +52,7 @@ impl App {
                         self.shell_pane.term_id = Some(id);
                         self.shell_pane.term_shown = true;
                     }
-                    Err(e) => self.status = format!("no shell: {e}"),
+                    Err(e) => self.status = tr!("shell.no_shell", "no shell: {e}", e = e),
                 }
             }
         }
@@ -100,7 +100,7 @@ impl App {
                 }
                 let cwd = self.focused_cwd();
                 if let Some(Err(e)) = self.panel().map(|p| p.add_tab(&cwd)) {
-                    self.status = format!("no shell: {e}");
+                    self.status = tr!("shell.no_shell", "no shell: {e}", e = e);
                 }
             }
         }
@@ -123,7 +123,11 @@ impl App {
 
     pub(super) fn cycle_terminal(&mut self, delta: isize) {
         let Some(id) = self.shell_pane.term_id else {
-            self.status = "no terminal yet \u{2014} F12".into();
+            self.status = tr!(
+                "shell.no_terminal_yet_u_f12",
+                "no terminal yet \u{2014} F12"
+            )
+            .into();
             return;
         };
         if !self.shell_pane.term_shown {
@@ -197,11 +201,15 @@ impl App {
     pub(super) fn view_history(&mut self, tab: Option<usize>) {
         if self.shell_pane.term_id.is_none() {
             let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
-            self.status = format!("no terminal yet \u{2014} {key}");
+            self.status = tr!(
+                "shell.no_terminal_yet_u",
+                "no terminal yet \u{2014} {key}",
+                key = key
+            );
             return;
         }
         let Some(h) = self.panel().and_then(|p| p.history(tab)) else {
-            self.status = "no such terminal tab".into();
+            self.status = tr!("shell.no_such_terminal_tab", "no such terminal tab").into();
             return;
         };
         self.history_dir = Some(h.cwd.unwrap_or_else(|| self.focused_cwd()));
@@ -302,7 +310,11 @@ impl App {
     pub(super) fn tab_still_there(&mut self, id: crate::pane::terms::TabId) -> Option<usize> {
         let i = self.panel().and_then(|p| p.tab_index(id));
         if i.is_none() {
-            self.status = "that terminal tab is gone".into();
+            self.status = tr!(
+                "shell.that_terminal_tab_is_gone",
+                "that terminal tab is gone"
+            )
+            .into();
         }
         i
     }
@@ -368,7 +380,11 @@ impl App {
         let pane_dir = self.focused_cwd();
         let Some(p) = self.panel() else { return };
         if let Some(l) = p.tab_log(i) {
-            self.status = format!("this tab is already logged to {}", l.path().display());
+            self.status = tr!(
+                "shell.this_tab_is_already_logged_to",
+                "this tab is already logged to {path}",
+                path = l.path().display()
+            );
             return;
         }
         let shell = p.tab_shell_name(i).unwrap_or_default();
@@ -584,7 +600,9 @@ impl App {
         if let Some(bytes) = v.doc.memory_bytes() {
             let len = bytes.len() as u64;
             match xdevcmd_core::document::save_bytes(&dest, bytes, false, true) {
-                Ok(()) => self.status = format!("saved to {}", dest.display()),
+                Ok(()) => {
+                    self.status = tr!("shell.saved_to", "saved to {dest}", dest = dest.display())
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     // The same question a copy asks, before anything is touched.
                     let on_disk = std::fs::metadata(&dest).map_or(0, |m| m.len());
@@ -626,7 +644,11 @@ impl App {
         let cwd = self.focused_cwd();
         let Some(panel) = self.panel_ref() else {
             let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
-            self.status = format!("no terminal yet \u{2014} {key}");
+            self.status = tr!(
+                "shell.no_terminal_yet_u",
+                "no terminal yet \u{2014} {key}",
+                key = key
+            );
             return;
         };
         let Some(target) = panel.focused_key() else {
@@ -634,7 +656,11 @@ impl App {
         };
         // A lossy name would be another directory, or none.
         let Some(text) = cwd.to_str() else {
-            self.status = "the directory's name is not UTF-8 \u{2014} not typed".into();
+            self.status = tr!(
+                "shell.the_directory_s_name_is_not",
+                "the directory's name is not UTF-8 \u{2014} not typed"
+            )
+            .into();
             return;
         };
         let line = match crate::safety::cd_command(&panel.shell_name(), text) {
@@ -661,13 +687,21 @@ impl App {
     pub(super) fn type_names(&mut self) {
         let paths = self.selection();
         if paths.is_empty() {
-            self.status = "nothing to type \u{2014} the cursor is on ..".into();
+            self.status = tr!(
+                "shell.nothing_to_type_u_the_cursor",
+                "nothing to type \u{2014} the cursor is on .."
+            )
+            .into();
             return;
         }
         let pane_dir = self.focused_cwd();
         let Some(panel) = self.panel_ref() else {
             let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
-            self.status = format!("no terminal yet \u{2014} {key}");
+            self.status = tr!(
+                "shell.no_terminal_yet_u",
+                "no terminal yet \u{2014} {key}",
+                key = key
+            );
             return;
         };
         let Some(target) = panel.focused_key() else {
@@ -710,7 +744,11 @@ impl App {
             .and_then(|p| p.shell(s.target))
             .map(crate::pane::TermPane::state)
         else {
-            self.status = "that shell is gone \u{2014} nothing typed".into();
+            self.status = tr!(
+                "shell.that_shell_is_gone_u_nothing",
+                "that shell is gone \u{2014} nothing typed"
+            )
+            .into();
             return;
         };
         // A line that ends in Enter (Alt+C's cd, a user-menu command) never goes after
@@ -857,7 +895,11 @@ impl App {
             return self.cd_beside_typed_text(s);
         }
         let Some(t) = self.panel_ref().and_then(|p| p.shell(s.target)) else {
-            self.status = "that shell is gone \u{2014} nothing typed".into();
+            self.status = tr!(
+                "shell.that_shell_is_gone_u_nothing",
+                "that shell is gone \u{2014} nothing typed"
+            )
+            .into();
             return;
         };
         t.type_text(&s.here, s.paste);
@@ -869,7 +911,11 @@ impl App {
     /// (`pending_type`, in `background`), or not at all if it does not come up in time.
     pub(super) fn open_shell_for(&mut self, s: ShellSend) {
         if self.shell_pane.term_id.is_none() {
-            self.status = "that shell is gone \u{2014} nothing typed".into();
+            self.status = tr!(
+                "shell.that_shell_is_gone_u_nothing",
+                "that shell is gone \u{2014} nothing typed"
+            )
+            .into();
             return;
         }
         if !self.shell_pane.term_shown {
@@ -882,22 +928,30 @@ impl App {
         let key = match self.panel().map(|p| p.add_tab(&s.dir)) {
             Some(Ok(k)) => k,
             Some(Err(e)) => {
-                self.status = format!("no shell: {e}");
+                self.status = tr!("shell.no_shell", "no shell: {e}", e = e);
                 return;
             }
             None => return,
         };
         match s.new_shell {
-            None => self.status = format!("a new shell in {}", tidy(&s.dir)),
+            None => {
+                self.status = tr!(
+                    "shell.a_new_shell_in",
+                    "a new shell in {v}",
+                    v = tidy(&s.dir)
+                )
+            }
             Some(text) => {
                 // One wait at a time: an earlier one still waiting is dropped, and said.
                 let dropped = match self.pending_type.take() {
                     Some(p) => format!(" ({} for the earlier new shell: not typed)", p.what),
                     None => String::new(),
                 };
-                self.status = format!(
-                    "a new shell in {} \u{2014} typing at its prompt{dropped}",
-                    tidy(&s.dir)
+                self.status = tr!(
+                    "shell.a_new_shell_in_u_typing",
+                    "a new shell in {v} \u{2014} typing at its prompt{dropped}",
+                    v = tidy(&s.dir),
+                    dropped = dropped
                 );
                 self.pending_type = Some(PendingType {
                     key,
@@ -922,11 +976,15 @@ impl App {
             .map(|t| (t.prompt_ready(), t));
         match ready {
             None => {
-                self.status = "the new shell ended before its prompt \u{2014} nothing typed".into();
+                self.status = tr!(
+                    "shell.the_new_shell_ended_before_its",
+                    "the new shell ended before its prompt \u{2014} nothing typed"
+                )
+                .into();
             }
             Some((true, t)) => {
                 t.type_text(&p.text, p.paste);
-                self.status = format!("new shell: {}", p.what);
+                self.status = tr!("shell.new_shell", "new shell: {what}", what = p.what);
             }
             Some((false, _)) if p.since.elapsed() >= PROMPT_WAIT => {
                 self.status = "a new shell is open, but its prompt did not show in time \u{2014} \
@@ -998,7 +1056,11 @@ impl App {
             return false;
         }
         f.set_cwd(&canonical);
-        self.status = format!("following the shell: {}", tidy(&canonical));
+        self.status = tr!(
+            "shell.following_the_shell",
+            "following the shell: {v}",
+            v = tidy(&canonical)
+        );
         true
     }
 
@@ -1036,19 +1098,27 @@ impl App {
     pub(super) fn go_shell_dir(&mut self) {
         let Some(panel) = self.panel_ref() else {
             let key = self.footer_key(Action::FocusTerminal).unwrap_or_default();
-            self.status = format!("no terminal yet \u{2014} {key}");
+            self.status = tr!(
+                "shell.no_terminal_yet_u",
+                "no terminal yet \u{2014} {key}",
+                key = key
+            );
             return;
         };
         match panel.shell_state() {
             ShellState::Busy(p) => {
-                self.status = format!(
-                    "{p} is running in the shell \u{2014} its directory is read at the prompt"
+                self.status = tr!(
+                    "shell.is_running_in_the_shell_u",
+                    "{p} is running in the shell \u{2014} its directory is read at the prompt",
+                    p = p
                 );
                 return;
             }
             ShellState::Remote(p) => {
-                self.status = format!(
-                    "{p} is running \u{2014} the shell's directory there is on another machine"
+                self.status = tr!(
+                    "shell.is_running_u_the_shell_s",
+                    "{p} is running \u{2014} the shell's directory there is on another machine",
+                    p = p
                 );
                 return;
             }
@@ -1057,16 +1127,28 @@ impl App {
         }
         // A reported directory (OSC 7, 9;9) may be used here: it only moves a pane.
         let Some(dir) = panel.shell_dir().map(|d| d.path) else {
-            self.status = "the shell's directory is not known \u{2014} see docs/shell.md".into();
+            self.status = tr!(
+                "shell.the_shell_s_directory_is_not",
+                "the shell's directory is not known \u{2014} see docs/shell.md"
+            )
+            .into();
             return;
         };
         if !dir.is_dir() {
-            self.status = format!("the shell's directory {} is not there any more", tidy(&dir));
+            self.status = tr!(
+                "shell.the_shell_s_directory_is_not_2",
+                "the shell's directory {v} is not there any more",
+                v = tidy(&dir)
+            );
             return;
         }
         let canonical = xdevcmd_core::paths::canonical(&dir).unwrap_or_else(|_| dir.clone());
         if !xdevcmd_core::policy::get().allows(&canonical) {
-            self.status = "the shell's directory is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "shell.the_shell_s_directory_is_outside",
+                "the shell's directory is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         let Some(f) = self
@@ -1077,11 +1159,19 @@ impl App {
             return;
         };
         if f.cwd == canonical && f.archive.is_none() && f.results.is_none() {
-            self.status = "already in the shell's directory".into();
+            self.status = tr!(
+                "shell.already_in_the_shell_s_directory",
+                "already in the shell's directory"
+            )
+            .into();
             return;
         }
         f.set_cwd(&canonical);
-        self.status = format!("the shell's directory: {}", tidy(&canonical));
+        self.status = tr!(
+            "shell.the_shell_s_directory",
+            "the shell's directory: {v}",
+            v = tidy(&canonical)
+        );
     }
 
     /// A program in a terminal tab of its own, started by argv (no shell), kept after
@@ -1096,7 +1186,11 @@ impl App {
             return;
         }
         if !self.interactive {
-            self.status = format!("would run {name} in a terminal tab");
+            self.status = tr!(
+                "shell.would_run_in_a_terminal_tab",
+                "would run {name} in a terminal tab",
+                name = name
+            );
             return;
         }
         let full = self.hits.screen;
@@ -1107,9 +1201,16 @@ impl App {
             return;
         }
         match self.panel().map(|p| p.add_program_tab(&cwd, &argv)) {
-            Some(Ok(())) => self.status = format!("running {name}"),
-            Some(Err(e)) => self.status = format!("cannot run {name}: {e}"),
-            None => self.status = "no terminal panel".into(),
+            Some(Ok(())) => self.status = tr!("shell.running", "running {name}", name = name),
+            Some(Err(e)) => {
+                self.status = tr!(
+                    "shell.cannot_run",
+                    "cannot run {name}: {e}",
+                    name = name,
+                    e = e
+                )
+            }
+            None => self.status = tr!("shell.no_terminal_panel", "no terminal panel").into(),
         }
         if let Some(id) = self.shell_pane.term_id {
             self.focus = id;

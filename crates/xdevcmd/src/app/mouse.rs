@@ -110,7 +110,11 @@ impl App {
             if let Some(d) = dividers.into_iter().find(|d| d.hit.contains(p)) {
                 if self.register_click(x, y) {
                     self.tree.even(d.id);
-                    self.status = "shared evenly between the two panes".into();
+                    self.status = tr!(
+                        "mouse.shared_evenly_between_the_two_panes",
+                        "shared evenly between the two panes"
+                    )
+                    .into();
                 } else {
                     self.hits.resizing = Some((d, false));
                 }
@@ -127,7 +131,11 @@ impl App {
                     if let Some(panel) = self.panel() {
                         panel.even(d.id);
                     }
-                    self.status = "shared evenly between the two shells".into();
+                    self.status = tr!(
+                        "mouse.shared_evenly_between_the_two_shells",
+                        "shared evenly between the two shells"
+                    )
+                    .into();
                 } else {
                     self.hits.resizing = Some((d, true));
                 }
@@ -322,9 +330,11 @@ impl App {
             d.mode = DragMode::Files;
             d.hover = Some(target);
             let n = self.drag_payload(&d).len();
-            self.status = format!(
-                "\u{21e2} {n} item{} \u{2014} release to copy or move",
-                if n == 1 { "" } else { "s" }
+            self.status = tr!(
+                "mouse.u_item_u_release_to_copy",
+                "\u{21e2} {n} item{v} \u{2014} release to copy or move",
+                n = n,
+                v = if n == 1 { "" } else { "s" }
             );
         } else if over == Some(d.source) && d.mode != DragMode::Files && !d.anchor_was_marked {
             if let Some(f) = self.panes.get_mut(&d.source).and_then(Pane::as_files_mut) {
@@ -391,7 +401,7 @@ impl App {
             return;
         }
         let Some(target) = d.hover else {
-            self.status = "drop cancelled".into();
+            self.status = tr!("mouse.drop_cancelled", "drop cancelled").into();
             return;
         };
         let sources = self.drag_payload(&d);
@@ -404,7 +414,7 @@ impl App {
             return;
         };
         if sources.is_empty() {
-            self.status = "nothing to drop".into();
+            self.status = tr!("mouse.nothing_to_drop", "nothing to drop").into();
             return;
         }
         if let Some(why) = self.refused(Action::Copy) {
@@ -433,7 +443,11 @@ impl App {
             .and_then(Pane::as_files)
             .map(|f| f.cwd.clone());
         if src_dir.as_ref() == Some(&dest) {
-            self.status = "that pane shows the same directory \u{2014} nothing to copy".into();
+            self.status = tr!(
+                "mouse.that_pane_shows_the_same_directory",
+                "that pane shows the same directory \u{2014} nothing to copy"
+            )
+            .into();
             return;
         }
         let what = Self::describe(&sources);
@@ -467,7 +481,7 @@ impl App {
             Item::sep(),
             Item::cancel("Cancel", "Esc"),
         ];
-        self.status = format!("drop into {name}?");
+        self.status = tr!("mouse.drop_into", "drop into {name}?", name = name);
         self.modal = Some(Modal::Menu(Menu::new(
             Some(format!("Drop into {name}")),
             items,
@@ -527,10 +541,25 @@ impl App {
         let mut items = Vec::new();
         if let Some(e) = &entry {
             if e.is_dir() {
-                items.push(Item::act("Open", k(Action::Open), Action::Open, true));
+                items.push(Item::act(
+                    tr!("mouse.open", "Open"),
+                    k(Action::Open),
+                    Action::Open,
+                    true,
+                ));
             } else {
-                items.push(Item::act("View", k(Action::View), Action::View, true));
-                items.push(Item::act("Edit", k(Action::Edit), Action::Edit, true));
+                items.push(Item::act(
+                    tr!("mouse.view", "View"),
+                    k(Action::View),
+                    Action::View,
+                    true,
+                ));
+                items.push(Item::act(
+                    tr!("mouse.edit", "Edit"),
+                    k(Action::Edit),
+                    Action::Edit,
+                    true,
+                ));
                 items.push(Item::act(
                     "Open with system app",
                     k(Action::OpenWith),
@@ -568,7 +597,12 @@ impl App {
                 Action::Permissions,
                 true,
             ));
-            items.push(Item::act("Rename", k(Action::Rename), Action::Rename, true));
+            items.push(Item::act(
+                tr!("mouse.rename", "Rename"),
+                k(Action::Rename),
+                Action::Rename,
+                true,
+            ));
             items.push(Item::sep());
         }
         items.push(Item::act(

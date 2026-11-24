@@ -62,7 +62,11 @@ impl App {
                 // What cannot be undone is never one Enter away: Enter is what a hand
                 // presses out of habit. Y, or a click on the button, says it.
                 KeyCode::Enter if c.permanent => {
-                    self.status = "press Y to delete permanently, Esc to cancel".into();
+                    self.status = tr!(
+                        "modals.press_y_to_delete_permanently_esc",
+                        "press Y to delete permanently, Esc to cancel"
+                    )
+                    .into();
                 }
                 KeyCode::Char('u' | 'U') if c.existing_line.is_some() => c.next_existing(),
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => act = ModalAct::Start,
@@ -278,7 +282,11 @@ impl App {
                         let last = t.len() - 1;
                         t.select(last);
                     }
-                    self.status = "searching \u{2014} Esc stops it, Ctrl+W closes the tab".into();
+                    self.status = tr!(
+                        "modals.searching_u_esc_stops_it_ctrl",
+                        "searching \u{2014} Esc stops it, Ctrl+W closes the tab"
+                    )
+                    .into();
                 }
             }
             ModalAct::None => {}
@@ -413,7 +421,11 @@ impl App {
         let list = f.history();
         let kept = crate::lists::all();
         if list.is_empty() && kept.is_empty() {
-            self.status = "no history in this tab yet".into();
+            self.status = tr!(
+                "modals.no_history_in_this_tab_yet",
+                "no history in this tab yet"
+            )
+            .into();
             return;
         }
         // The lists first (the active one at the top), then the directories.
@@ -438,7 +450,11 @@ impl App {
             .map(|(i, (label, cmd))| Item::cmd(label, digit(i), cmd, true))
             .collect();
         if items.is_empty() {
-            self.status = "no history in this tab yet".into();
+            self.status = tr!(
+                "modals.no_history_in_this_tab_yet",
+                "no history in this tab yet"
+            )
+            .into();
             return;
         }
         let lists = kept.iter().filter(|l| Some(l.id) != here).count();

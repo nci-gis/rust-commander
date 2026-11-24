@@ -201,7 +201,11 @@ impl App {
             KeyCode::Char(c) => c.to_digit(10).filter(|n| *n > 0),
             _ => None,
         }) else {
-            self.status = "go_tab needs a key ending in a digit, 1 to 9".into();
+            self.status = tr!(
+                "input.go_tab_needs_a_key_ending",
+                "go_tab needs a key ending in a digit, 1 to 9"
+            )
+            .into();
             return;
         };
         let i = n as usize - 1;
@@ -249,7 +253,7 @@ impl App {
         if k.code == KeyCode::Esc {
             if let Some(c) = self.comparing.take() {
                 c.task.stop();
-                self.status = "comparison stopped".into();
+                self.status = tr!("input.comparison_stopped", "comparison stopped").into();
                 return;
             }
         }
@@ -288,32 +292,48 @@ impl App {
             let key = self
                 .footer_key(Action::FocusTerminal)
                 .unwrap_or_else(|| "F12".into());
-            self.status = format!("the shell is {key} (Ctrl+O in mc)");
+            self.status = tr!(
+                "input.the_shell_is_ctrl_o_in",
+                "the shell is {key} (Ctrl+O in mc)",
+                key = key
+            );
             return;
         }
         // Esc in a filtered pane shows everything again: a filter left on is files you
         // cannot see, so taking it off should be the most obvious key there is.
         if action.is_none() && k.code == KeyCode::Esc && !self.focus_is_term() {
             if self.focused_files().is_some_and(|f| f.stop_search()) {
-                self.status = "search stopped".into();
+                self.status = tr!("input.search_stopped", "search stopped").into();
                 return;
             }
             if let Some((task, _, name)) = self.pending_view.take() {
                 task.stop();
-                self.status = format!("stopped extracting {name}");
+                self.status = tr!(
+                    "input.stopped_extracting",
+                    "stopped extracting {name}",
+                    name = name
+                );
                 return;
             }
             if self.focused_files().is_some_and(|f| f.stop_opening()) {
-                self.status = "stopped opening the archive".into();
+                self.status = tr!(
+                    "input.stopped_opening_the_archive",
+                    "stopped opening the archive"
+                )
+                .into();
                 return;
             }
             if let Some(dir) = self.focused_files().and_then(|f| f.stop_reading()) {
-                self.status = format!("stopped reading {} \u{2014} still here", tidy(&dir));
+                self.status = tr!(
+                    "input.stopped_reading_u_still_here",
+                    "stopped reading {v} \u{2014} still here",
+                    v = tidy(&dir)
+                );
                 return;
             }
             if let Some(f) = self.focused_files().filter(|f| f.filter.is_some()) {
                 f.set_filter(None);
-                self.status = "filter off".into();
+                self.status = tr!("input.filter_off", "filter off").into();
                 return;
             }
         }
@@ -489,12 +509,14 @@ impl App {
             Action::GoToPath => self.begin_goto(),
             Action::Back => {
                 if !self.focused_files().is_some_and(|f| f.go_back()) {
-                    self.status = "nothing to go back to".into();
+                    self.status =
+                        tr!("input.nothing_to_go_back_to", "nothing to go back to").into();
                 }
             }
             Action::Forward => {
                 if !self.focused_files().is_some_and(|f| f.go_forward()) {
-                    self.status = "nothing to go forward to".into();
+                    self.status =
+                        tr!("input.nothing_to_go_forward_to", "nothing to go forward to").into();
                 }
             }
             Action::History => self.open_history(),
@@ -508,7 +530,7 @@ impl App {
             Action::BulkRename => {
                 let files = self.selection_in_view();
                 if files.is_empty() {
-                    self.status = "nothing selected".into();
+                    self.status = tr!("input.nothing_selected", "nothing selected").into();
                 } else {
                     self.modal = Some(Modal::Rename(Box::new(RenameDialog::new(files))));
                 }
@@ -540,13 +562,21 @@ impl App {
             Action::Unpack => self.begin_unpack(),
             Action::QuickView => {
                 if self.quick_view.take().is_some() {
-                    self.status = "quick view off".into();
+                    self.status = tr!("input.quick_view_off", "quick view off").into();
                 } else if self.focus_is_term() {
                 } else if let Some(other) = self.other_file_pane() {
                     self.quick_view = Some((other, None));
-                    self.status = "quick view \u{b7} the other pane follows the cursor".into();
+                    self.status = tr!(
+                        "input.quick_view_u_the_other_pane",
+                        "quick view \u{b7} the other pane follows the cursor"
+                    )
+                    .into();
                 } else {
-                    self.status = "quick view needs a second pane".into();
+                    self.status = tr!(
+                        "input.quick_view_needs_a_second_pane",
+                        "quick view needs a second pane"
+                    )
+                    .into();
                 }
             }
             Action::FindFiles => {
@@ -571,7 +601,11 @@ impl App {
                 if let Some(f) = self.focused_files() {
                     f.toggle_hidden();
                     let on = f.show_hidden;
-                    self.status = format!("hidden files {}", if on { "shown" } else { "hidden" });
+                    self.status = tr!(
+                        "input.hidden_files",
+                        "hidden files {v}",
+                        v = if on { "shown" } else { "hidden" }
+                    );
                 }
             }
             Action::FocusNextPane => self.focus_next_file(),
@@ -595,7 +629,7 @@ impl App {
                 let inside =
                     self.focus_is_term() && self.panel().is_some_and(|p| p.move_boundary(axis, d));
                 if !inside && !self.tree.move_boundary(self.focus, axis, d) {
-                    self.status = "no border that way".into();
+                    self.status = tr!("input.no_border_that_way", "no border that way").into();
                 }
             }
             Action::Zoom => self.toggle_zoom(),
@@ -662,7 +696,7 @@ impl App {
                         f.activate();
                     });
                 } else {
-                    self.status = "not a directory".into();
+                    self.status = tr!("input.not_a_directory", "not a directory").into();
                 }
             }
             Action::Open => {
@@ -733,7 +767,11 @@ impl App {
                 if p.is_dir() {
                     self.with_files(|f| f.set_cwd(&p));
                 } else {
-                    self.status = format!("{} is not there any more", tidy(&p));
+                    self.status = tr!(
+                        "input.is_not_there_any_more",
+                        "{v} is not there any more",
+                        v = tidy(&p)
+                    );
                 }
             }
             Cmd::AddBookmark(p) => {
@@ -749,7 +787,11 @@ impl App {
             // Checked again here: a link can be pointed elsewhere between the menu that
             // offered this and the choice.
             Cmd::OpenFile(p) if !xdevcmd_core::policy::get().allows(&p) => {
-                self.status = "that file is outside the root xdevcmd is confined to".into();
+                self.status = tr!(
+                    "input.that_file_is_outside_the_root",
+                    "that file is outside the root xdevcmd is confined to"
+                )
+                .into();
             }
             Cmd::OpenFile(p) => self.launch(&p),
             Cmd::RunInTerminal { argv, .. }
@@ -757,7 +799,11 @@ impl App {
                     .first()
                     .is_some_and(|p| !xdevcmd_core::policy::get().allows(Path::new(p))) =>
             {
-                self.status = "that file is outside the root xdevcmd is confined to".into();
+                self.status = tr!(
+                    "input.that_file_is_outside_the_root",
+                    "that file is outside the root xdevcmd is confined to"
+                )
+                .into();
             }
             Cmd::RunInTerminal { argv, cwd } => self.run_in_terminal(argv, cwd),
             Cmd::ThemeMenu => self.theme_menu(),
@@ -862,9 +908,11 @@ impl App {
                         crate::viewer::Action::MakeList(req, _) => self.make_list(req, false),
                         _ => {
                             let key = self.footer_key(Action::TerminalHistory).unwrap_or_default();
-                            self.status = format!(
-                                "{} \u{2014} or {key}, drag over the lines, p",
-                                v.message()
+                            self.status = tr!(
+                                "input.u_or_drag_over_the_lines",
+                                "{message} \u{2014} or {key}, drag over the lines, p",
+                                message = v.message(),
+                                key = key
                             );
                         }
                     }
@@ -932,7 +980,11 @@ impl App {
                     "copy"
                 };
                 crate::refusal::Refusal::Loading(action).log();
-                self.status = "drop again when shown \u{2014} a folder is still opening".into();
+                self.status = tr!(
+                    "input.drop_again_when_shown_u_a",
+                    "drop again when shown \u{2014} a folder is still opening"
+                )
+                .into();
             }
             Cmd::Transfer { kind, sources, .. }
                 if kind == ops::Kind::Move && self.guard_refused(&sources) => {}
@@ -956,7 +1008,11 @@ impl App {
     pub(super) fn copy_text(&mut self, t: String) {
         if self.settings.mode == Mode::Restricted {
             // Short: it also has to fit beside the viewer's key hints.
-            self.status = "restricted mode: no clipboard".into();
+            self.status = tr!(
+                "input.restricted_mode_no_clipboard",
+                "restricted mode: no clipboard"
+            )
+            .into();
             return;
         }
         if let Some(why) = crate::safety::unsafe_to_paste(&t) {

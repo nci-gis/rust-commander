@@ -209,32 +209,41 @@ pub fn calls_in(dirs: &[PathBuf]) -> Vec<(String, String, String)> {
     }
     files.sort();
     for p in files {
-        let text = std::fs::read_to_string(&p).unwrap_or_default();
-        for (n, line) in text.lines().enumerate() {
-            // Comments show how to call it; they are not texts.
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
-            for opener in ["tr!(\"", "Text::new(\""] {
-                let mut rest = line;
-                while let Some(i) = rest.find(opener) {
-                    let after = &rest[i + opener.len()..];
-                    let Some(kend) = after.find('"') else { break };
-                    let key = &after[..kend];
-                    let english = after[kend + 1..]
-                        .trim_start()
-                        .strip_prefix(',')
-                        .map(str::trim_start)
-                        .and_then(|s| s.strip_prefix('"'))
-                        .and_then(literal);
-                    if let Some(english) = english {
-                        out.push((
-                            key.to_string(),
-                            english,
-                            format!("{}:{}", p.display(), n + 1),
-                        ));
-                    }
-                    rest = &after[kend..];
+        let raw = std::fs::read_to_string(&p).unwrap_or_default();
+        // Comments show how to call it; they are not texts. Lines kept, so numbers hold.
+        let text: String = raw
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("//") {
+                    ""
+                } else {
+                    l
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        // A call may span lines (rustfmt breaks long ones): read past whitespace.
+        for opener in ["tr!(", "Text::new("] {
+            let mut from = 0;
+            while let Some(i) = text[from..].find(opener).map(|i| from + i) {
+                from = i + opener.len();
+                let line = text[..i].matches('\n').count() + 1;
+                let after = text[from..].trim_start();
+                let Some(after) = after.strip_prefix('"') else {
+                    continue;
+                };
+                let Some(kend) = after.find('"') else {
+                    continue;
+                };
+                let key = &after[..kend];
+                let english = after[kend + 1..]
+                    .trim_start()
+                    .strip_prefix(',')
+                    .map(str::trim_start)
+                    .and_then(|s| s.strip_prefix('"'))
+                    .and_then(literal);
+                if let Some(english) = english {
+                    out.push((key.to_string(), english, format!("{}:{line}", p.display())));
                 }
             }
         }
@@ -252,6 +261,12 @@ fn literal(s: &str) -> Option<String> {
             '\\' => match chars.next()? {
                 'n' => out.push('\n'),
                 't' => out.push('\t'),
+                // `\u{b7}`: the character.
+                'u' => {
+                    let rest: String = chars.by_ref().take_while(|&c| c != '}').collect();
+                    let hex = rest.strip_prefix('{')?;
+                    out.push(char::from_u32(u32::from_str_radix(hex, 16).ok()?)?);
+                }
                 other => out.push(other),
             },
             c => out.push(c),
@@ -277,7 +292,7 @@ mod tests {
         std::fs::create_dir_all(d.join("sub")).unwrap();
         std::fs::write(
             d.join("sub/a.rs"),
-            "let x = tr!(\"k.one\", \"One \\\"q\\\"\");\nlet y = tr!(\"k.two\", \"{n} two\", n = 2); const T: Text = Text::new(\"k.three\", \"Three\");\n",
+            "let x = tr!(\"k.one\", \"One \\\"q\\\" \\u{b7}\");\nlet y = tr!(\"k.two\", \"{n} two\", n = 2); const T: Text = Text::new(\"k.three\", \"Three\");\n",
         )
         .unwrap();
         let got: Vec<(String, String)> = calls_in(std::slice::from_ref(&d))
@@ -285,7 +300,7 @@ mod tests {
             .map(|(k, e, _)| (k, e))
             .collect();
         let want = [
-            ("k.one", "One \"q\""),
+            ("k.one", "One \"q\" \u{b7}"),
             ("k.two", "{n} two"),
             ("k.three", "Three"),
         ];

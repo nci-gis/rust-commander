@@ -457,7 +457,7 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     frame.buffer_mut().set_line(
         inner.x + 1,
         inner.y + inner.height.saturating_sub(1),
-        &Line::from(Span::styled("Esc close", dim)),
+        &Line::from(Span::styled(tr!("usage.esc_close", "Esc close"), dim)),
         inner.width,
     );
 }

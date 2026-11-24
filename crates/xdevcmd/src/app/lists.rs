@@ -12,9 +12,7 @@ impl App {
     pub(super) fn show_list(&mut self, id: Option<lists::Id>) {
         let Some(id) = id.or_else(|| lists::active().map(|l| l.id)) else {
             let key = self.footer_key(Action::TerminalHistory).unwrap_or_default();
-            self.status = format!(
-                "no list yet \u{2014} Alt+F7 finds files; p in a shell's history ({key}) takes its paths"
-            );
+            self.status = tr!("lists.no_list_yet_u_alt_f7", "no list yet \u{2014} Alt+F7 finds files; p in a shell's history ({key}) takes its paths", key = key);
             return;
         };
         let Some(pane) = self.last_files_id() else {
@@ -105,9 +103,20 @@ impl App {
                     0 => String::new(),
                     n => format!(", {n} already there"),
                 };
-                self.status = format!("{added} added{had} \u{2014} checking them");
+                self.status = tr!(
+                    "lists.added_u_checking_them",
+                    "{added} added{had} \u{2014} checking them",
+                    added = added,
+                    had = had
+                );
             }
-            None => self.status = "that list is no longer kept".into(),
+            None => {
+                self.status = tr!(
+                    "lists.that_list_is_no_longer_kept",
+                    "that list is no longer kept"
+                )
+                .into()
+            }
         }
     }
 

@@ -422,7 +422,11 @@ impl App {
             ("delete", _) if it.to_trash => Request::delete(still, true),
             _ => {
                 let _ = xdevcmd_core::journal::discard(&it);
-                self.status = "nothing to resume: the job's journal is incomplete".into();
+                self.status = tr!(
+                    "jobs.nothing_to_resume_the_job_s",
+                    "nothing to resume: the job's journal is incomplete"
+                )
+                .into();
                 return;
             }
         };
@@ -537,7 +541,7 @@ impl App {
     /// Ctrl+Z: say what undoing would do, against the disk as it is now, and ask.
     pub(super) fn ask_undo(&mut self) {
         let Some(u) = &self.last_undo else {
-            self.status = "nothing to undo".into();
+            self.status = tr!("jobs.nothing_to_undo", "nothing to undo").into();
             return;
         };
         let plan = match u.plan() {
@@ -637,7 +641,11 @@ impl App {
             self.reload_all();
             return Some(out);
         };
-        self.status = "nothing renamed: safe operations cannot write their journal".into();
+        self.status = tr!(
+            "jobs.nothing_renamed_safe_operations_cannot_write",
+            "nothing renamed: safe operations cannot write their journal"
+        )
+        .into();
         self.modal = Some(Modal::Ask(modal::Ask {
             title: "Rename many".into(),
             body: vec![
@@ -778,13 +786,21 @@ impl App {
                 }
                 let request = Request::mv(back, into);
                 self.modal = Some(Modal::Job(Job::new(ops::Kind::Move, ops::start(request))));
-                self.status = format!("undoing the {}", u.describe());
+                self.status = tr!(
+                    "jobs.undoing_the",
+                    "undoing the {describe}",
+                    describe = u.describe()
+                );
             }
             Plan::Unmake { made, .. } => {
                 let mut job = Job::new(ops::Kind::Delete, xdevcmd_core::undo::unmake(made));
                 job.title = Some("Undo the copy".into());
                 self.modal = Some(Modal::Job(job));
-                self.status = format!("undoing the {}", u.describe());
+                self.status = tr!(
+                    "jobs.undoing_the",
+                    "undoing the {describe}",
+                    describe = u.describe()
+                );
             }
             Plan::Remove(p) => {
                 self.status = match xdevcmd_core::undo::remove(&p) {

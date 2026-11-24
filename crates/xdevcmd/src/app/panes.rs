@@ -99,7 +99,11 @@ impl App {
             return;
         }
         if self.file_panes().len() <= 1 {
-            self.status = "that is the last file pane".into();
+            self.status = tr!(
+                "panes.that_is_the_last_file_pane",
+                "that is the last file pane"
+            )
+            .into();
             return;
         }
         let gone = self.focus;
@@ -137,7 +141,11 @@ impl App {
         } else {
             self.zoom = Some(self.focus);
             let key = self.footer_key(Action::Zoom).unwrap_or_default();
-            self.status = format!("zoomed \u{b7} {key} to put it back");
+            self.status = tr!(
+                "panes.zoomed_u_to_put_it_back",
+                "zoomed \u{b7} {key} to put it back",
+                key = key
+            );
         }
     }
 
@@ -165,7 +173,7 @@ impl App {
             return;
         }
         let Some(other) = self.other_file_pane() else {
-            self.status = "there is no other pane".into();
+            self.status = tr!("panes.there_is_no_other_pane", "there is no other pane").into();
             return;
         };
         let (Some(a), Some(b)) = (self.panes.remove(&self.focus), self.panes.remove(&other)) else {
@@ -173,7 +181,7 @@ impl App {
         };
         self.panes.insert(self.focus, b);
         self.panes.insert(other, a);
-        self.status = "panes swapped".into();
+        self.status = tr!("panes.panes_swapped", "panes swapped").into();
     }
 
     pub(super) fn mirror_pane(&mut self) {
@@ -181,7 +189,7 @@ impl App {
             return;
         }
         let Some(other) = self.other_file_pane() else {
-            self.status = "there is no other pane".into();
+            self.status = tr!("panes.there_is_no_other_pane", "there is no other pane").into();
             return;
         };
         let cwd = self.focused_cwd();
@@ -198,6 +206,6 @@ impl App {
                 None => f.set_cwd(&cwd),
             }
         }
-        self.status = format!("both panes on {}", tidy(&cwd));
+        self.status = tr!("panes.both_panes_on", "both panes on {v}", v = tidy(&cwd));
     }
 }

@@ -118,7 +118,12 @@ pub(crate) fn field_line(edit: &LineEdit, focused: bool, width: usize) -> Line<'
 pub fn render(frame: &mut Frame, area: Rect, d: &mut FindDialog) {
     let th = theme::t();
     let r = centered(area, 64, 9);
-    let inner = frame_box(frame, r, "Find files", th.accent);
+    let inner = frame_box(
+        frame,
+        r,
+        &tr!("find_dialog.find_files", "Find files"),
+        th.accent,
+    );
     put(
         frame,
         inner,

@@ -23,7 +23,12 @@ impl App {
             return;
         };
         let note = |frame: &mut Frame, lines: Vec<String>| {
-            let inner = modal::frame_box(frame, area, "quick view", theme::t().accent);
+            let inner = modal::frame_box(
+                frame,
+                area,
+                &tr!("pictures.quick_view", "quick view"),
+                theme::t().accent,
+            );
             for (i, l) in lines.iter().enumerate() {
                 modal::put(
                     frame,

@@ -15,7 +15,11 @@ impl App {
             return self.view_in_archive();
         }
         let Some(path) = self.current_file() else {
-            self.status = "F3 views a file, not a directory".into();
+            self.status = tr!(
+                "open.f3_views_a_file_not_a",
+                "F3 views a file, not a directory"
+            )
+            .into();
             return;
         };
         self.view_path(&path);
@@ -25,7 +29,11 @@ impl App {
     pub(super) fn view_path(&mut self, path: &Path) {
         // A link inside the root can point anywhere; what it points at is what F3 reads.
         if !xdevcmd_core::policy::get().allows(path) {
-            self.status = "that file is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "open.that_file_is_outside_the_root",
+                "that file is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         match Document::open(path) {
@@ -38,17 +46,34 @@ impl App {
                 );
                 self.modal = Some(Modal::View(Box::new(viewer)));
             }
-            Err(e) => self.status = format!("cannot view {}: {e}", path.display()),
+            Err(e) => {
+                self.status = tr!(
+                    "open.cannot_view",
+                    "cannot view {path}: {e}",
+                    path = path.display(),
+                    e = e
+                )
+            }
         }
     }
 
     pub(super) fn begin_edit(&mut self) {
         match self.current_file() {
             Some(p) if !xdevcmd_core::policy::get().allows(&p) => {
-                self.status = "that file is outside the root xdevcmd is confined to".into();
+                self.status = tr!(
+                    "open.that_file_is_outside_the_root",
+                    "that file is outside the root xdevcmd is confined to"
+                )
+                .into();
             }
             Some(p) => self.pending_edit = Some(p),
-            None => self.status = "F4 edits a file, not a directory".into(),
+            None => {
+                self.status = tr!(
+                    "open.f4_edits_a_file_not_a",
+                    "F4 edits a file, not a directory"
+                )
+                .into()
+            }
         }
     }
 
@@ -72,7 +97,11 @@ impl App {
         // EDITOR may carry arguments, as in `code -w` or `emacsclient -nw`.
         let mut parts = spec.split_whitespace();
         let Some(program) = parts.next() else {
-            self.status = "EDITOR is set to an empty string".into();
+            self.status = tr!(
+                "open.editor_is_set_to_an_empty",
+                "EDITOR is set to an empty string"
+            )
+            .into();
             return Ok(());
         };
         let mut args: Vec<std::ffi::OsString> = parts.map(Into::into).collect();
@@ -129,11 +158,19 @@ impl App {
     /// Cancel the choice Enter makes.
     pub(super) fn open_with(&mut self) {
         let Some(path) = self.current_file() else {
-            self.status = "o opens a file \u{2014} Enter goes into a directory".into();
+            self.status = tr!(
+                "open.o_opens_a_file_u_enter",
+                "o opens a file \u{2014} Enter goes into a directory"
+            )
+            .into();
             return;
         };
         if !xdevcmd_core::policy::get().allows(&path) {
-            self.status = "that file is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "open.that_file_is_outside_the_root",
+                "that file is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         if opener::runs_something(&path) {
@@ -146,7 +183,11 @@ impl App {
     /// console program, a terminal tab (its output stays on screen), then the system.
     pub(super) fn ask_to_run(&mut self, path: PathBuf) {
         if !xdevcmd_core::policy::get().allows(&path) {
-            self.status = "that file is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "open.that_file_is_outside_the_root",
+                "that file is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         let name = Self::describe(std::slice::from_ref(&path));
@@ -169,7 +210,11 @@ impl App {
             Cmd::OpenFile(path),
             true,
         ));
-        self.status = format!("{name} is a program \u{2014} opening it runs it");
+        self.status = tr!(
+            "open.is_a_program_u_opening_it",
+            "{name} is a program \u{2014} opening it runs it",
+            name = name
+        );
         self.modal = Some(Modal::Menu(Menu::new(
             Some("Run it?".into()),
             items,
@@ -240,7 +285,11 @@ impl App {
                 true,
             ),
         ];
-        self.status = format!("{name}: not a type xdevcmd knows as a document \u{2014} open it?");
+        self.status = tr!(
+            "open.not_a_type_xdevcmd_knows_as",
+            "{name}: not a type xdevcmd knows as a document \u{2014} open it?",
+            name = name
+        );
         self.modal = Some(Modal::Menu(Menu::new(
             Some("Open it?".into()),
             items,
@@ -263,7 +312,11 @@ impl App {
     pub(super) fn apply_rule(&mut self, i: usize, path: PathBuf) {
         // Checked here as well as on Enter: Open with… and the mouse reach this too.
         if !xdevcmd_core::policy::get().allows(&path) {
-            self.status = "that file is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "open.that_file_is_outside_the_root",
+                "that file is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         let Some(rule) = self.settings.config.open.get(i).cloned() else {
@@ -286,7 +339,12 @@ impl App {
         }
         let name = Self::describe(std::slice::from_ref(&path));
         if !self.interactive {
-            self.status = format!("would open {name} with {}", rule.command[0]);
+            self.status = tr!(
+                "open.would_open_with",
+                "would open {name} with {v}",
+                name = name,
+                v = rule.command[0]
+            );
             return;
         }
         let mut cmd = std::process::Command::new(&argv[0]);
@@ -303,11 +361,19 @@ impl App {
     /// match it, the system's program, the viewer, the editor.
     pub(super) fn open_with_menu(&mut self) {
         let Some(path) = self.current_file() else {
-            self.status = "Open with\u{2026} is for a file".into();
+            self.status = tr!(
+                "open.open_with_u_is_for_a",
+                "Open with\u{2026} is for a file"
+            )
+            .into();
             return;
         };
         if !xdevcmd_core::policy::get().allows(&path) {
-            self.status = "that file is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "open.that_file_is_outside_the_root",
+                "that file is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         let ext = path
@@ -378,9 +444,11 @@ impl App {
         };
         // Under --screenshot nothing is started: say what would have been.
         if !self.interactive {
-            self.status = format!(
-                "would open {name} with {}",
-                cmd.get_program().to_string_lossy()
+            self.status = tr!(
+                "open.would_open_with_2",
+                "would open {name} with {to_string_lossy}",
+                name = name,
+                to_string_lossy = cmd.get_program().to_string_lossy()
             );
             return;
         }
@@ -445,7 +513,7 @@ impl App {
         let line = match crate::usermenu::expand(&item.command, &cx) {
             Ok(l) => l,
             Err(e) => {
-                self.status = format!("{}: {e}", item.label);
+                self.status = tr!("open.text", "{label}: {e}", label = item.label, e = e);
                 return;
             }
         };

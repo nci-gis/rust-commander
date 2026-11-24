@@ -125,7 +125,12 @@ impl ConfigView {
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let th = theme::t();
-        let inner = crate::modal::frame_box(frame, area, "Config in use", th.accent);
+        let inner = crate::modal::frame_box(
+            frame,
+            area,
+            &tr!("config_view.config_in_use", "Config in use"),
+            th.accent,
+        );
         if inner.height < 4 || inner.width < 20 {
             return;
         }

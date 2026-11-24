@@ -177,8 +177,21 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
                 Style::new().fg(th.fg)
             };
             Line::from(vec![
-                Span::styled(format!("\u{2039} {} \u{203a}", d.case.label()), s),
-                Span::styled("  \u{2190} \u{2192} to change", Style::new().fg(th.fg_dim)),
+                Span::styled(
+                    tr!(
+                        "rename_dialog.u_u",
+                        "\u{2039} {label} \u{203a}",
+                        label = d.case.label()
+                    ),
+                    s,
+                ),
+                Span::styled(
+                    tr!(
+                        "rename_dialog.u_u_to_change",
+                        "  \u{2190} \u{2192} to change"
+                    ),
+                    Style::new().fg(th.fg_dim),
+                ),
             ])
         } else {
             field_line(&d.edits[i], on, field_w)

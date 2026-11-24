@@ -117,7 +117,10 @@ impl App {
             Run::Extra(e @ (Extra::LogTab | Extra::StopLog)) => {
                 let active = self.panel().and_then(|p| p.tab_id(p.active_tab()));
                 match (active, e) {
-                    (None, _) => self.status = "no terminal is open".into(),
+                    (None, _) => {
+                        self.status =
+                            tr!("palette.no_terminal_is_open", "no terminal is open").into()
+                    }
                     (Some(id), Extra::LogTab) => self.perform_cmd(Cmd::TabLog(id)),
                     (Some(id), _) => self.perform_cmd(Cmd::TabStopLog(id)),
                 }
@@ -127,7 +130,7 @@ impl App {
         }
         // The command's own message, if it has one, says more than the key does.
         if let Some(h) = hint.filter(|_| self.status.is_empty()) {
-            self.status = format!("Next time: {h}");
+            self.status = tr!("palette.next_time", "Next time: {h}", h = h);
         }
         commands::remember(&mut self.recent_commands, &id);
         // Read-only modes write nothing, this included, and `restore_session = false`

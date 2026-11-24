@@ -32,7 +32,11 @@ impl App {
         };
         let changes = d.changed();
         if changes.is_empty() {
-            self.status = "settings: nothing changed".into();
+            self.status = tr!(
+                "settings.settings_nothing_changed",
+                "settings: nothing changed"
+            )
+            .into();
             return;
         }
         // The dialog offers no Save in these modes; refused here too, not on its word.
@@ -41,7 +45,11 @@ impl App {
             return;
         }
         let Some(path) = crate::config::path_in_use() else {
-            self.status = "nowhere to save: no config location (HOME is not set)".into();
+            self.status = tr!(
+                "settings.nowhere_to_save_no_config_location",
+                "nowhere to save: no config location (HOME is not set)"
+            )
+            .into();
             return;
         };
         // A config.toml that is a link (dotfiles managed with stow, chezmoi) is
@@ -62,13 +70,22 @@ impl App {
             Ok(b) => match String::from_utf8(b) {
                 Ok(t) => t,
                 Err(_) => {
-                    self.status = format!("{} is not UTF-8: change it by hand", path.display());
+                    self.status = tr!(
+                        "settings.is_not_utf_8_change_it",
+                        "{path} is not UTF-8: change it by hand",
+                        path = path.display()
+                    );
                     return;
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => {
-                self.status = format!("cannot read {}: {e}", path.display());
+                self.status = tr!(
+                    "settings.cannot_read",
+                    "cannot read {path}: {e}",
+                    path = path.display(),
+                    e = e
+                );
                 return;
             }
         };
@@ -79,15 +96,21 @@ impl App {
         let parsed = match crate::config::parse(&text) {
             Ok(s) if s.config == d.now => s,
             Ok(_) | Err(_) => {
-                self.status = format!(
-                    "{} is written in a way Settings cannot change safely: change it by hand",
-                    path.display()
+                self.status = tr!(
+                    "settings.is_written_in_a_way_settings",
+                    "{path} is written in a way Settings cannot change safely: change it by hand",
+                    path = path.display()
                 );
                 return;
             }
         };
         if let Err(e) = xdevcmd_core::document::save_state(&path, text.as_bytes()) {
-            self.status = format!("cannot save {}: {e}", path.display());
+            self.status = tr!(
+                "settings.cannot_save",
+                "cannot save {path}: {e}",
+                path = path.display(),
+                e = e
+            );
             return;
         }
         // The new settings, keeping what start-up decided: the mode (a flag may have
@@ -152,8 +175,10 @@ impl App {
             Ok(t) => {
                 theme::set(t);
                 self.theme_name = name.to_string();
-                self.status = format!(
-                    "theme: {name} \u{2014} [theme] name = \"{name}\" in config.toml keeps it"
+                self.status = tr!(
+                    "settings.theme_u_theme_name_in_config",
+                    "theme: {name} \u{2014} [theme] name = \"{name}\" in config.toml keeps it",
+                    name = name
                 );
             }
             Err(e) => self.status = e,
@@ -191,9 +216,10 @@ impl App {
                 )));
             }
             _ => {
-                self.status = format!(
-                    "{} is right now \u{2014} restart xdevcmd to use it",
-                    path.display()
+                self.status = tr!(
+                    "settings.is_right_now_u_restart_xdevcmd",
+                    "{path} is right now \u{2014} restart xdevcmd to use it",
+                    path = path.display()
                 );
             }
         }

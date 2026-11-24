@@ -19,7 +19,7 @@ impl App {
         choices: Vec<PathBuf>,
     ) {
         if inner.is_empty() {
-            self.status = "nothing selected".into();
+            self.status = tr!("archives.nothing_selected", "nothing selected").into();
             return;
         }
         // Browsing it, the listing is in memory already; from outside (Alt+F9) it is
@@ -88,7 +88,11 @@ impl App {
             return;
         };
         if !xdevcmd_core::policy::get().allows(&file) {
-            self.status = "that archive is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "archives.that_archive_is_outside_the_root",
+                "that archive is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         // The whole archive, named by the empty path: listing it to find its top level
@@ -96,7 +100,11 @@ impl App {
         let top = vec![String::new()];
         let choices = self.transfer_targets();
         let Some(dest) = choices.first().cloned() else {
-            self.status = "unpacking goes into another pane \u{2014} Alt+S splits one".into();
+            self.status = tr!(
+                "archives.unpacking_goes_into_another_pane_u",
+                "unpacking goes into another pane \u{2014} Alt+S splits one"
+            )
+            .into();
             return;
         };
         self.confirm_extract(file, top, String::new(), dest, choices);
@@ -106,7 +114,7 @@ impl App {
     pub(super) fn begin_pack(&mut self) {
         let sources = self.selection();
         if sources.is_empty() {
-            self.status = "nothing selected".into();
+            self.status = tr!("archives.nothing_selected", "nothing selected").into();
             return;
         }
         let dir = self.other_pane_cwd().unwrap_or_else(|| self.focused_cwd());
@@ -154,14 +162,20 @@ impl App {
             .and_then(|f| f.current().cloned())
             .filter(|e| !e.is_dir())
         else {
-            self.status = "F3 views a file, not a directory".into();
+            self.status = tr!(
+                "archives.f3_views_a_file_not_a",
+                "F3 views a file, not a directory"
+            )
+            .into();
             return;
         };
         if e.size > LIMIT {
             let k = self.footer_key(Action::Copy).unwrap_or_default();
-            self.status = format!(
-                "{} is too big to view from inside \u{2014} {k} extracts it",
-                e.name
+            self.status = tr!(
+                "archives.is_too_big_to_view_from",
+                "{name} is too big to view from inside \u{2014} {k} extracts it",
+                name = e.name,
+                k = k
             );
             return;
         }
@@ -172,7 +186,11 @@ impl App {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let Some(tmp) = crate::tempfiles::file(&format!("view-{n}")) else {
-            self.status = "cannot make a temporary directory".into();
+            self.status = tr!(
+                "archives.cannot_make_a_temporary_directory",
+                "cannot make a temporary directory"
+            )
+            .into();
             return;
         };
         let made = {
@@ -187,7 +205,11 @@ impl App {
             b.create(&tmp)
         };
         if let Err(err) = made {
-            self.status = format!("cannot make a temporary directory: {err}");
+            self.status = tr!(
+                "archives.cannot_make_a_temporary_directory_2",
+                "cannot make a temporary directory: {err}",
+                err = err
+            );
             return;
         }
         // The guard on writes is the engine's; viewing is reading, so it is allowed
@@ -217,7 +239,11 @@ impl App {
             }
             out
         });
-        self.status = format!("extracting {name} to view it\u{2026} Esc stops it");
+        self.status = tr!(
+            "archives.extracting_to_view_it_u_esc",
+            "extracting {name} to view it\u{2026} Esc stops it",
+            name = name
+        );
         self.pending_view = Some((task, tmp, name));
     }
 
@@ -238,7 +264,12 @@ impl App {
             }
             Err(err) => {
                 let _ = std::fs::remove_dir_all(&tmp);
-                self.status = format!("cannot view {name}: {err}");
+                self.status = tr!(
+                    "archives.cannot_view",
+                    "cannot view {name}: {err}",
+                    name = name,
+                    err = err
+                );
             }
         }
     }

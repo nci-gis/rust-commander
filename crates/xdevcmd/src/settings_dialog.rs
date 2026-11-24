@@ -689,7 +689,12 @@ impl SettingsDialog {
 pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
     let th = theme::t();
     let r = centered(area, 86, 22);
-    let inner = frame_box(frame, r, "Settings", th.accent);
+    let inner = frame_box(
+        frame,
+        r,
+        &tr!("settings_dialog.settings", "Settings"),
+        th.accent,
+    );
     // The tabs.
     let mut spans = Vec::new();
     d.tab_hits.clear();

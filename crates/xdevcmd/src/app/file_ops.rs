@@ -123,7 +123,7 @@ impl App {
     pub(super) fn begin_transfer(&mut self, kind: ops::Kind) {
         let sources = self.selection();
         if sources.is_empty() {
-            self.status = "nothing selected".into();
+            self.status = tr!("file_ops.nothing_selected", "nothing selected").into();
             return;
         }
         if kind == ops::Kind::Move && self.guard_refused(&sources) {
@@ -139,14 +139,22 @@ impl App {
                 .map(|a| a.inner(&sources))
                 .unwrap_or_default();
             let Some(dest) = choices.first().cloned() else {
-                self.status = "extracting goes into another pane \u{2014} Alt+S splits one".into();
+                self.status = tr!(
+                    "file_ops.extracting_goes_into_another_pane_u",
+                    "extracting goes into another pane \u{2014} Alt+S splits one"
+                )
+                .into();
                 return;
             };
             self.confirm_extract(file, inner, prefix, dest, choices);
             return;
         }
         let Some(dest) = choices.first().cloned() else {
-            self.status = "no second pane to copy to — Alt+S splits one".into();
+            self.status = tr!(
+                "file_ops.no_second_pane_to_copy_to",
+                "no second pane to copy to — Alt+S splits one"
+            )
+            .into();
             return;
         };
         let request = match kind {
@@ -191,7 +199,7 @@ impl App {
     pub(super) fn begin_delete(&mut self, permanent: bool) {
         let targets = self.selection();
         if targets.is_empty() {
-            self.status = "nothing selected".into();
+            self.status = tr!("file_ops.nothing_selected", "nothing selected").into();
             return;
         }
         if self.guard_refused(&targets) {
@@ -278,7 +286,7 @@ impl App {
             return;
         };
         let Some(e) = f.current().filter(|e| !e.is_parent()).cloned() else {
-            self.status = "nothing to rename here".into();
+            self.status = tr!("file_ops.nothing_to_rename_here", "nothing to rename here").into();
             return;
         };
         let (label, dir) = (format!("in {}", f.cwd.display()), f.cwd.clone());
@@ -323,7 +331,7 @@ impl App {
             InputKind::MkDir => {
                 let name = text.trim();
                 if name.is_empty() {
-                    self.status = "no name given".into();
+                    self.status = tr!("file_ops.no_name_given", "no name given").into();
                     return;
                 }
                 // Folders may be nested (`a/b`): control characters were refused above,
@@ -337,7 +345,11 @@ impl App {
                 // Under --root: the one check of a path to make (no `..` in what is still
                 // to make: create_dir_all would follow it out).
                 if !xdevcmd_core::policy::get().allows_at(&target) {
-                    self.status = "outside the root xdevcmd is confined to".into();
+                    self.status = tr!(
+                        "file_ops.outside_the_root_xdevcmd_is_confined",
+                        "outside the root xdevcmd is confined to"
+                    )
+                    .into();
                     return;
                 }
                 let existed = target.exists();
@@ -346,10 +358,12 @@ impl App {
                         if !existed {
                             self.last_undo = Some(xdevcmd_core::undo::Undo::MadeDir(first));
                         }
-                        self.status = format!("created {name}");
+                        self.status = tr!("file_ops.created", "created {name}", name = name);
                         self.reload_all();
                     }
-                    Err(e) => self.status = format!("mkdir failed: {e}"),
+                    Err(e) => {
+                        self.status = tr!("file_ops.mkdir_failed", "mkdir failed: {e}", e = e)
+                    }
                 }
             }
             InputKind::GoTo => {
@@ -401,16 +415,25 @@ impl App {
                 match made {
                     Ok(_) => {
                         self.last_undo = Some(xdevcmd_core::undo::Undo::MadeFile(target.clone()));
-                        self.status = format!("created {name}");
+                        self.status = tr!("file_ops.created", "created {name}", name = name);
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                         if target.is_dir() {
-                            self.status = format!("{name} is a directory");
+                            self.status = tr!(
+                                "file_ops.is_a_directory",
+                                "{name} is a directory",
+                                name = name
+                            );
                             return;
                         }
                     }
                     Err(e) => {
-                        self.status = format!("cannot create {name}: {e}");
+                        self.status = tr!(
+                            "file_ops.cannot_create",
+                            "cannot create {name}: {e}",
+                            name = name,
+                            e = e
+                        );
                         return;
                     }
                 }
@@ -420,7 +443,11 @@ impl App {
                     self.pending_edit = Some(target);
                 } else {
                     // A name that exists as a link out of the root.
-                    self.status = "that file is outside the root xdevcmd is confined to".into();
+                    self.status = tr!(
+                        "file_ops.that_file_is_outside_the_root",
+                        "that file is outside the root xdevcmd is confined to"
+                    )
+                    .into();
                 }
             }
             InputKind::CopyAs { from } => {
@@ -502,7 +529,7 @@ impl App {
                 let mark = *mark;
                 let pattern = xdevcmd_core::glob::Pattern::new(&text);
                 if pattern.is_empty() {
-                    self.status = "no pattern given".into();
+                    self.status = tr!("file_ops.no_pattern_given", "no pattern given").into();
                     return;
                 }
                 let n = self
@@ -525,7 +552,12 @@ impl App {
                         )]));
                     }
                     let old = from.file_name().map(|s| s.to_string_lossy().into_owned());
-                    self.status = format!("renamed {} \u{2192} {text}", old.unwrap_or_default());
+                    self.status = tr!(
+                        "file_ops.renamed_u",
+                        "renamed {unwrap_or_default} \u{2192} {text}",
+                        unwrap_or_default = old.unwrap_or_default(),
+                        text = text
+                    );
                     self.reload_all();
                     for p in self.panes.values_mut() {
                         if let Some(f) = p.as_files_mut() {
@@ -549,11 +581,19 @@ impl App {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let Some(list) = crate::tempfiles::file(&format!("rename-{n}.txt")) else {
-            self.status = "cannot make a temporary directory for the list of names".into();
+            self.status = tr!(
+                "file_ops.cannot_make_a_temporary_directory_for",
+                "cannot make a temporary directory for the list of names"
+            )
+            .into();
             return;
         };
         if let Err(e) = xdevcmd_core::document::save_state(&list, text.as_bytes()) {
-            self.status = format!("cannot write the list of names: {e}");
+            self.status = tr!(
+                "file_ops.cannot_write_the_list_of_names",
+                "cannot write the list of names: {e}",
+                e = e
+            );
             return;
         }
         self.pending_batch = Some((files, list.clone()));
@@ -567,19 +607,27 @@ impl App {
         let edited = match edited {
             Ok(t) => t,
             Err(e) => {
-                self.status = format!("cannot read the names back: {e}");
+                self.status = tr!(
+                    "file_ops.cannot_read_the_names_back",
+                    "cannot read the names back: {e}",
+                    e = e
+                );
                 return;
             }
         };
         let moves = match xdevcmd_core::batch_rename::plan(&files, &edited) {
             Ok(m) => m,
             Err(e) => {
-                self.status = format!("nothing renamed \u{2014} {e}");
+                self.status = tr!(
+                    "file_ops.nothing_renamed_u",
+                    "nothing renamed \u{2014} {e}",
+                    e = e
+                );
                 return;
             }
         };
         if moves.is_empty() {
-            self.status = "no names changed".into();
+            self.status = tr!("file_ops.no_names_changed", "no names changed").into();
             return;
         }
         let name = |p: &PathBuf| {
@@ -611,7 +659,7 @@ impl App {
             return;
         };
         let Some(e) = f.current().filter(|e| !e.is_parent()) else {
-            self.status = "nothing to copy here".into();
+            self.status = tr!("file_ops.nothing_to_copy_here", "nothing to copy here").into();
             return;
         };
         let dir = e
@@ -641,27 +689,42 @@ impl App {
             .and_then(|f| f.current().cloned())
             .filter(|e| !e.is_parent())
         else {
-            self.status = "nothing to link to here".into();
+            self.status = tr!(
+                "file_ops.nothing_to_link_to_here",
+                "nothing to link to here"
+            )
+            .into();
             return;
         };
         let Some(dest) = self.other_pane_cwd() else {
-            self.status = "a link goes into the other pane \u{2014} there is none".into();
+            self.status = tr!(
+                "file_ops.a_link_goes_into_the_other",
+                "a link goes into the other pane \u{2014} there is none"
+            )
+            .into();
             return;
         };
         let link = dest.join(&e.name);
         match xdevcmd_core::attrs::symlink(&e.path, &link) {
             Ok(()) => {
                 self.reload_all();
-                self.status = format!("{} \u{2192} {}", tidy(&link), tidy(&e.path));
+                self.status = tr!(
+                    "file_ops.u",
+                    "{v} \u{2192} {v2}",
+                    v = tidy(&link),
+                    v2 = tidy(&e.path)
+                );
             }
-            Err(err) => self.status = format!("no link made: {err}"),
+            Err(err) => {
+                self.status = tr!("file_ops.no_link_made", "no link made: {err}", err = err)
+            }
         }
     }
 
     pub(super) fn begin_permissions(&mut self) {
         let targets = self.selection();
         let Some(first) = targets.first() else {
-            self.status = "nothing selected".into();
+            self.status = tr!("file_ops.nothing_selected", "nothing selected").into();
             return;
         };
         let current = xdevcmd_core::attrs::current(first).unwrap_or_default();
@@ -685,11 +748,19 @@ impl App {
 
     pub(super) fn begin_checksum(&mut self) {
         let Some(path) = self.current_file() else {
-            self.status = "a checksum is of a file".into();
+            self.status = tr!(
+                "file_ops.a_checksum_is_of_a_file",
+                "a checksum is of a file"
+            )
+            .into();
             return;
         };
         if !xdevcmd_core::policy::get().allows(&path) {
-            self.status = "that file is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "file_ops.that_file_is_outside_the_root",
+                "that file is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         // Not a FIFO or a device: reading one would never end, or never start.
@@ -697,7 +768,11 @@ impl App {
             .ok()
             .and_then(|m| xdevcmd_core::special_kind(&m.file_type()).map(str::to_string));
         if let Some(kind) = special {
-            self.status = format!("that is a {kind}, not a file to checksum");
+            self.status = tr!(
+                "file_ops.that_is_a_not_a_file",
+                "that is a {kind}, not a file to checksum",
+                kind = kind
+            );
             return;
         }
         let p = path.clone();
@@ -714,9 +789,10 @@ impl App {
             + 'static,
     ) {
         let task = xdevcmd_core::task::Task::spawn(move |stop| work(stop));
-        self.status = format!(
-            "working out the SHA-256 of {}\u{2026}",
-            Self::describe(std::slice::from_ref(&path))
+        self.status = tr!(
+            "file_ops.working_out_the_sha_256_of",
+            "working out the SHA-256 of {v}\u{2026}",
+            v = Self::describe(std::slice::from_ref(&path))
         );
         self.hashing = Some((path, task));
     }
@@ -727,7 +803,12 @@ impl App {
             Ok(Some(h)) => h,
             Ok(None) => return,
             Err(e) => {
-                self.status = format!("cannot read {name}: {e}");
+                self.status = tr!(
+                    "file_ops.cannot_read",
+                    "cannot read {name}: {e}",
+                    name = name,
+                    e = e
+                );
                 return;
             }
         };

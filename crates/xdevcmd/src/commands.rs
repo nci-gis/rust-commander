@@ -1124,7 +1124,12 @@ impl Commands {
             }
         };
         self.frame = box_area;
-        let inner = crate::modal::frame_box(frame, box_area, "Commands", th.accent);
+        let inner = crate::modal::frame_box(
+            frame,
+            box_area,
+            &tr!("commands.commands", "Commands"),
+            th.accent,
+        );
         if inner.height < 2 || inner.width < 4 {
             self.list = Rect::ZERO;
             return;

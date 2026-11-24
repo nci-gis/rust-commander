@@ -4,6 +4,9 @@
 // a dependency, where cargo-deny's advisory check is watching.
 #![forbid(unsafe_code)]
 
+// First: its `tr!` is used by the modules after it (macro_use is textual).
+#[macro_use]
+mod lang;
 mod app;
 mod bookmarks;
 mod cli_docs;
@@ -20,8 +23,6 @@ mod git;
 mod graphics;
 mod keyfix;
 mod keys;
-#[macro_use]
-mod lang;
 mod layout;
 mod line_edit;
 mod links;

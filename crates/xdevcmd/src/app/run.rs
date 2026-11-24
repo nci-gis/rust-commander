@@ -70,7 +70,11 @@ impl App {
             }
         }
         if self.status.is_empty() && self.modal.is_none() {
-            self.status = format!("running in {}", self.usage.terminal);
+            self.status = tr!(
+                "run.running_in",
+                "running in {terminal}",
+                terminal = self.usage.terminal
+            );
             self.boot_note = Some(self.status.clone());
         }
 
@@ -164,9 +168,11 @@ impl App {
                 pictures: Vec::new(),
             }));
         } else {
-            self.status = format!(
-                "stopping: waiting for {n} job{} to clean up\u{2026}",
-                if n == 1 { "" } else { "s" }
+            self.status = tr!(
+                "run.stopping_waiting_for_job_to_clean",
+                "stopping: waiting for {n} job{v} to clean up\u{2026}",
+                n = n,
+                v = if n == 1 { "" } else { "s" }
             );
         }
         true
@@ -242,7 +248,11 @@ impl App {
             // renaming many lives in xdevcmd's own temporary directory.
             let own = crate::tempfiles::dir().is_some_and(|d| path.starts_with(&d));
             if !own && !xdevcmd_core::policy::get().allows(&path) {
-                self.status = "that file is outside the root xdevcmd is confined to".into();
+                self.status = tr!(
+                    "run.that_file_is_outside_the_root",
+                    "that file is outside the root xdevcmd is confined to"
+                )
+                .into();
                 self.pending_batch = None;
                 return Ok(());
             }
@@ -314,10 +324,7 @@ impl App {
                             0 => String::new(),
                             u => format!(", {u} unreadable"),
                         };
-                        self.status = format!(
-                            "{n} found \u{b7} {} looked at{skipped} \u{b7} Enter goes to a file, F3 views it",
-                            r.scanned
-                        );
+                        self.status = tr!("run.found_u_looked_at_u_enter", "{n} found \u{b7} {scanned} looked at{skipped} \u{b7} Enter goes to a file, F3 views it", n = n, scanned = r.scanned, skipped = skipped);
                     }
                 }
                 if quiet && shown.contains(id) {
@@ -363,7 +370,12 @@ impl App {
             Some(Poll::Died) => {
                 if let Some((_, tmp, name)) = self.pending_view.take() {
                     let _ = std::fs::remove_dir_all(&tmp);
-                    self.status = format!("extracting {name} {}", crate::app::DIED);
+                    self.status = tr!(
+                        "run.extracting",
+                        "extracting {name} {DIED}",
+                        name = name,
+                        DIED = crate::app::DIED
+                    );
                     changed = true;
                 }
             }
@@ -442,10 +454,11 @@ impl App {
             }
             Some((path, Poll::Died)) => {
                 self.hashing = None;
-                self.status = format!(
-                    "the SHA-256 of {} {}",
-                    Self::describe(std::slice::from_ref(&path)),
-                    crate::app::DIED
+                self.status = tr!(
+                    "run.the_sha_256_of",
+                    "the SHA-256 of {v} {DIED}",
+                    v = Self::describe(std::slice::from_ref(&path)),
+                    DIED = crate::app::DIED
                 );
                 changed = true;
             }

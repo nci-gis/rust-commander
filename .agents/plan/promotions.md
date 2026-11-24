@@ -295,6 +295,9 @@ giữ manual; số case ít lại để giảm block, và khi Dev nếu đụng 
 lại".
 **What**: `plan/cycles/Round_036.md` (Planning): cases 01, 03, 04, 05 to CI on three
 systems, 02, 06, 07 by hand, a hand cell stale only when its own files change;
-`plan/ROADMAP.md`: its row under 0.4.x.
+`plan/ROADMAP.md`: its row under 0.4.x. Then the same day (the owner: "r36 làm cho
+beta.3 nhé, sau r35 khi đã freeze code"; "giảm số files, hoặc file size lại vì ko phải
+test perf"): Round 036 is part of beta.3, after Round 035's freeze; kills at markers,
+small files; the 0.4.x row moved into beta.3's.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
 

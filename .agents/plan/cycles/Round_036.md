@@ -2,9 +2,10 @@
 
 **Status**: Planning (opened by the owner, 2026-11-24: "tạo 1 round riêng cho phần E2E,
 riêng 2, 6, và 7 vẫn giữ manual")
-**Part of**: v0.4.x, `ROADMAP.md` (After beta.2: 0.4.x). Test tooling, not a feature:
-when it runs is the owner's call; proposed after the beta.3 cut, so beta.3's hand tests
-are run as they stand.
+**Part of**: **0.4.0-beta.3** (the owner, 2026-11-24: "r36 làm cho beta.3 nhé, sau r35
+khi đã freeze code"): after Round 035's code freeze and before the cut, so beta.3 is cut
+with 9 hand cells at most instead of 21. Test code and tooling only: the product's code
+is frozen, and nothing here changes what xdevcmd does.
 **Date started**: YYYY-MM-DD
 **Date completed**: YYYY-MM-DD
 
@@ -34,6 +35,9 @@ what that case vouches for, not after any change on the data path (the owner: "s
   `portable-pty` drives ConPTY. Kill with the child's own kill (TerminateProcess, as
   Task Manager's End task), paths and the shell for Windows. Red first: one kill test
   passing on Linux and failing to build on Windows today.
+- [ ] **E0 Kill at a marker, small files** (section below): the checkpoint size from the
+  fault seam in test builds; the Linux tests that slow and kill on time moved to
+  `Halt` markers. Test code and the `faults` seam only.
 - [ ] **E2 Cases 01, 03, 04 on all three systems.** The tests that exist for Linux (the
   trash case, the checkpoint case) and for Linux and macOS (resume) run on macOS and
   Windows too, or say why a system cannot (named, not skipped silently). macOS: fast
@@ -51,10 +55,28 @@ what that case vouches for, not after any change on the data path (the owner: "s
   `docs/development.md` and the hand-test README follow. `xtask try` checks A–C stay
   for an owner who wants to look by hand, no longer required.
 
+## Small and timed by markers, not by speed
+
+Not a speed test (the owner, 2026-11-24: "giảm số files, hoặc file size lại vì ko phải
+test perf"). So:
+
+- **The kill lands at a marker, not after a while.** The fault seam's `Halt` writes a
+  marker file and blocks at the chosen step (past the trash, past a checkpoint's
+  journal line, after a move's copy and before its source goes); the test waits for
+  the marker and kills then. A slow runner only takes longer to get there; it cannot
+  kill too early or too late. Today's Linux checkpoint test slows each chunk and
+  kills on time: replaced by a marker.
+- **Few, small files.** 01: three files to replace; 04: about twenty small files; 05:
+  about ten. 03 needs a file past a checkpoint, which is 256 MiB today: the checkpoint
+  size is read from the fault seam in test builds (`faults` is a dev-dependency's
+  feature, never in a release, as `tests/budgets.rs` checks), so 03 copies a few MiB
+  with a checkpoint every 1 MiB.
+- Each test asserts it was killed at its marker, so a pass means the case was met.
+
 ## Risks
 
-- A kill test that is flaky on a slow Windows or macOS runner blocks every PR: run the
-  new ones ×10 on each system before they gate, and keep `wait_for` (no sleeps).
+- A kill test that is flaky on a slow Windows or macOS runner blocks every PR: kills at
+  markers (above), the new tests ×10 on each system before they gate, `wait_for` only.
 - A test can pass for the wrong reason (the kill landing before anything was written).
   Each test asserts that the kill landed where the case needs it (past the trash, past
   a checkpoint, mid-move), as the Linux ones do.

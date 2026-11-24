@@ -26,3 +26,6 @@ date_utc	built_from	version	os	terminal	shell	case	result	check	evidence	issue	n
 2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	linux	xterm-256color	bash	M-DS-02	PASS	-	-	-	-
 2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	linux	xterm-256color	bash	M-DS-06	PASS	-	-	-	-
 2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	linux	xterm-256color	bash	M-DS-07	PASS	-	-	-	-
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	macos	Terminal.app	zsh	M-DS-02	PASS	-	-	-	-
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	macos	Terminal.app	zsh	M-DS-06	WAIVED	-	-	-	refer test result on Windows and Linux
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	macos	Terminal.app	zsh	M-DS-07	WAIVED	-	-	-	refer result on Linux

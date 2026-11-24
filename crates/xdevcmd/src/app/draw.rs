@@ -395,9 +395,10 @@ impl App {
         self.modal = Some(Modal::View(Box::new(viewer)));
     }
 
-    /// The walker (`[general] animation`): a step a second along the bottom edge of the
-    /// focused file pane, or the first one when a terminal has the focus. While it
-    /// stands before a new message it is on the status line instead (`draw_status`).
+    /// The walker (`[general] animation`): a step a second across the whole screen, on
+    /// the row of the file panes' bottom edge (the focused one's, or the first file
+    /// pane's when a terminal has the focus). While it stands before a new message it is
+    /// on the status line instead (`draw_status`).
     fn draw_walker(&self, frame: &mut Frame) {
         if !self.settings.config.general.animation {
             return;
@@ -409,14 +410,15 @@ impl App {
             .find(|(id, _)| *id == self.focus && is_files(id))
             .or_else(|| self.rects.iter().find(|(id, _)| is_files(id)))
             .map(|(_, r)| *r);
-        // Inside the corners of the bottom edge.
-        let lane = pane.map_or(0, |r| usize::from(r.width.saturating_sub(2)));
+        // The whole width: across both panes' edges (the owner, 2026-11-24).
+        let screen = frame.area();
+        let lane = pane.map_or(0, |_| usize::from(screen.width));
         let hold = Duration::from_secs(self.settings.config.general.animation_hold_secs);
         let mut w = self.walker.borrow_mut();
         let standing = w.tick(Instant::now(), lane, &self.status, hold);
         if let Some(r) = pane.filter(|_| !standing && lane >= crate::walker::WIDTH) {
             frame.buffer_mut().set_string(
-                r.x + 1 + w.pos() as u16,
+                screen.x + w.pos() as u16,
                 r.y + r.height.saturating_sub(1),
                 w.sprite(),
                 Style::new().fg(theme::t().accent),

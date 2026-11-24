@@ -1,5 +1,5 @@
-//! The walker: a small agent that walks along the bottom edge of the file pane, a step
-//! a second, when `[general] animation` is on (off by default). When a message comes it
+//! The walker: a small agent that walks across the screen on the row of the file panes'
+//! bottom edge, a step a second, when `[general] animation` is on (off by default). When a message comes it
 //! goes to the status line and stands just before it for `[general]
 //! animation_hold_secs` (5 to 15, 5 by default), then goes back to walking the pane's
 //! edge from where it stopped, the message still showing.

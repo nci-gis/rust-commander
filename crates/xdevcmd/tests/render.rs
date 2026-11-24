@@ -579,8 +579,8 @@ fn a_group_says_what_it_takes_and_enter_closes_it() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
-/// The owner (2026-11-23, 24): with `[general] animation` a small agent walks the
-/// bottom edge of the file pane, and stands on the status line just before a new
+/// The owner (2026-11-23, 24): with `[general] animation` a small agent walks across
+/// the screen on the file panes' bottom edge, and stands on the status line just before a new
 /// message; off (the default), it is nowhere.
 #[test]
 fn the_walker_walks_the_pane_edge_and_stands_before_a_message() {
@@ -597,7 +597,7 @@ fn the_walker_walks_the_pane_edge_and_stands_before_a_message() {
         .find(|l| me(l))
         .unwrap_or_else(|| panic!("walking somewhere\n{s}"));
     assert!(
-        edge.starts_with('└') && edge.contains('─'),
+        edge.contains('┘') && edge.contains('─'),
         "on a pane's bottom edge\n{s}"
     );
     let s = shot_cfg_env(on, &[], "Ctrl+h", &a, &b);

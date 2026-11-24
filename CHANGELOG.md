@@ -10,6 +10,8 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.0-beta.3] - 2026-11-24
+
 ### Added
 - **A walker**, off by default: with `[general] animation = true` (or Settings,
   General), a small agent walks across the screen on the file panes' bottom edge, a step a second; a new

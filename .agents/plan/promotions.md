@@ -309,3 +309,13 @@ small files; the 0.4.x row moved into beta.3's.
 **What**: `reference/config.md`: the line names `xdevcmd_core::document::save_state` (W6),
 with the old name for history. A read-only path, changed on the owner's word.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-24: rc.1 carries what the beta.3 reviews left open
+
+**Source**: the owner, 2026-11-24: "Các nit để sang rc: okay, bro ghi log lại để ko bị
+missed nhé".
+**What**: `memory/2026-11-24-beta3-review-carryover.md` lists the findings not fixed
+before the freeze (C1–C9 for rc.1, L1–L3 for beta.4, M1–M3); `plan/ROADMAP.md`'s rc.N
+row points to it.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+

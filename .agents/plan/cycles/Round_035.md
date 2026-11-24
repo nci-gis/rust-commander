@@ -125,6 +125,13 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
   `qa defs`: no file over 2,500 lines (a `tests.rs` counts as tests). Then 33 `App`
   fields grouped into `Pictures`, `Hits`, `ShellPane`, `Watching`: App fields 86 → 57.
 
+- **Code freeze: `f6e6202`** (2026-11-24; CI 45349736217 green, 7/7 jobs). Reviewed by
+  three independent red-team rounds (data path; app, CI and xtask; the check of #90),
+  each SIGN WITH AMENDMENTS, the amendments fixed in #90, #93, #94; what they left open
+  is in `memory/2026-11-24-beta3-review-carryover.md` (rc.1, beta.4). From here the
+  product's code changes only for a bug a test finds; Round 036 changes test code and
+  tooling only. Hand-test evidence for the cut is built from this commit or later.
+
 ## Check
 
 ## Act

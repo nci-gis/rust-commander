@@ -16,6 +16,25 @@ pub enum Axis {
     Rows,
 }
 
+impl Axis {
+    /// The word the session keeps: `cols` or `rows`.
+    pub fn word(self) -> &'static str {
+        match self {
+            Axis::Cols => "cols",
+            Axis::Rows => "rows",
+        }
+    }
+
+    /// From the session's word; anything but `rows` is side by side, as before.
+    pub fn from_word(s: &str) -> Axis {
+        if s == Axis::Rows.word() {
+            Axis::Rows
+        } else {
+            Axis::Cols
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Node {
     Leaf(PaneId),

@@ -56,7 +56,7 @@ impl App {
             body: vec![
                 format!("{what}  from {name}"),
                 String::new(),
-                format!("to    {}", dest.display()),
+                tr!("dialog.to", "to    {dest}", dest = dest.display()),
                 count_line,
             ],
             danger: false,

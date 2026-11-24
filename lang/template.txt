@@ -365,7 +365,11 @@ type_to_filter_a_setting_a = " type to filter: a setting, a value, a [section]"
 u_u_scroll_u_esc_u = " ↑↓ scroll · Esc {v} · read-only: File → Settings… changes the common ones{more}"
 xdevcmd_print_config_writes_every_setting = "    xdevcmd --print-config   writes every setting;   xdevcmd --check-config   validates the file"
 
+[dialog]
+to = "to    {dest}"
+
 [draw]
+hidden = "  ·  hidden"
 items_sort = " {summary}  ·  {entries_len} items  ·  sort {sort}{v}{v2}{tab}"
 message_of_the_last_in_memory = "{n} message{s} of the last {MESSAGES}, in memory only — Esc back"
 no_messages_yet_n = "No messages yet.\n"
@@ -1083,7 +1087,9 @@ is_written_in_a_way_settings = "{path} is written in a way Settings cannot chang
 "keys.cli" = "xdevcmd --print-keys lists them all; xdevcmd --show-keys shows what a key sends."
 "keys.f1" = "Every key is on F1, with the name to rebind it by."
 "keys.how" = "To change one, write it under [keys] in config.toml:"
-"languages.note" = "The words on screen, from the next start. your own: see docs/language.md"
+"languages.auto" = "auto - detect by locale - ({code})"
+"languages.english" = "English - en - built in"
+"languages.note" = "The words on screen, from the next start. Your own language: see docs/language.md"
 nowhere_to_save_no_config_location = "nowhere to save: no config location (HOME is not set)"
 settings_nothing_changed = "settings: nothing changed"
 settings_saved_at_the_next_start = "settings saved; at the next start: {to_lowercase}"
@@ -1208,6 +1214,12 @@ taken = "In the shell, xdevcmd takes only {listed}; every other key is the progr
 
 [sizes]
 esc_stops = " · Esc stops"
+
+[sort]
+date = "date"
+ext = "ext"
+name = "name"
+size = "size"
 
 [task]
 died = "stopped on an internal error"

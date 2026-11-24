@@ -80,7 +80,10 @@ planned for 0.5.
 - [ ] **W4 Extract by area**, one commit per area, the user-facing count going down in
   each: key bar and menus; status line; dialogs (copy, move, delete, the plan table,
   Interrupted, Failed); errors and refusals; settings; help (F1) and `--help`.
-- [ ] **W5 Vietnamese**, complete; the owner reads it.
+- [ ] **W5 Vietnamese**, complete; the owner reads it. 2026-11-25: 1,172 of 1,175 keys
+  (the rest empty or a debug line); `xtask lang check` ok; screenshots at 80×24 (key bar
+  shortened to fit: Đổi, Dời, TạoTM). Left English by design until W8's core text: job
+  summaries, plan reasons, sizes ("bytes").
 - [ ] **W6 Japanese preview**: menus, key bar, status line, common dialogs; the rest falls
   back to English, and About says the translation is a preview.
 - [ ] **W7 Docs**: `docs/config.md` (`language`), a page on adding a language.

@@ -4,6 +4,14 @@ use super::*;
 use crate::lang::Text;
 use xdevcmd_core::format::Cells;
 
+/// The sort's word on the status line, by `SortKey::label`.
+const SORT_WORDS: &[Text] = &[
+    Text::new("sort.name", "name"),
+    Text::new("sort.ext", "ext"),
+    Text::new("sort.size", "size"),
+    Text::new("sort.date", "date"),
+];
+
 impl App {
     /// What the drop-down for menu `i` holds, built from the keymap and the mode in
     /// effect, so its hints are the keys you have and what is off is greyed out.
@@ -554,8 +562,8 @@ impl App {
                 } else {
                     String::new()
                 };
-                let sort = f.sort.key.label();
-                tr!("draw.items_sort", " {summary}  ·  {entries_len} items  ·  sort {sort}{v}{v2}{tab}", summary = f.summary(), entries_len = f.entries.len(), sort = sort, v = if f.sort.reverse { " ▲" } else { " ▼" }, v2 = if f.show_hidden { "  ·  hidden" } else { "" }, tab = tab)
+                let sort = crate::lang::pick(SORT_WORDS, f.sort.key.label());
+                tr!("draw.items_sort", " {summary}  ·  {entries_len} items  ·  sort {sort}{v}{v2}{tab}", summary = f.summary(), entries_len = f.entries.len(), sort = sort, v = if f.sort.reverse { " ▲" } else { " ▼" }, v2 = if f.show_hidden { tr!("draw.hidden", "  ·  hidden") } else { "".into() }, tab = tab)
             }
             Some(Pane::Term(p)) => tr!("draw.terminal_u_back_to_files_u", " terminal {v}/{tab_count}{v2}  \u{b7}  {unwrap_or_default} back to files  \u{b7}  {unwrap_or_default2} history", v = p.active_tab() + 1, tab_count = p.tab_count(), v2 = if p.split_count() > 1 {
                     format!("  \u{b7}  split {}/{}", p.focused_split(), p.split_count())

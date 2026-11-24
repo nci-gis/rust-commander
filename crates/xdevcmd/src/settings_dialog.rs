@@ -916,7 +916,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             inner.height.saturating_sub(3),
             &tr!(
                 "settings.languages.note",
-                "The words on screen, from the next start. your own: see docs/language.md"
+                "The words on screen, from the next start. Your own language: see docs/language.md"
             ),
             Style::new().fg(th.fg_dim),
         );

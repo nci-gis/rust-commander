@@ -332,7 +332,7 @@ impl Confirm {
         self.request.dest = Some(dest.clone());
         self.body.truncate(4);
         if let Some(line) = self.body.get_mut(2) {
-            *line = format!("to    {}", dest.display());
+            *line = tr!("dialog.to", "to    {dest}", dest = dest.display());
         }
         if self.source_dir.as_ref() == Some(&dest) {
             self.body.push(String::new());

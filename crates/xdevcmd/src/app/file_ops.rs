@@ -191,7 +191,7 @@ impl App {
             body: vec![
                 Self::describe(&sources),
                 String::new(),
-                format!("to    {}", dest.display()),
+                tr!("dialog.to", "to    {dest}", dest = dest.display()),
                 COUNTING.into(),
             ],
             danger: false,

@@ -384,15 +384,22 @@ fn first_line(s: &str) -> &str {
 /// Settings → Languages: (code, line) for each choice, `auto` first, then English, then
 /// every language a `lang/` folder has that reads: "<name> - <code> - <files>", each part
 /// at most 32 characters (the owner, 2026-11-24).
+/// Settings' first two rows, found by `xtask lang` as any `Text::new`.
+const AUTO_ROW: Text = Text::new(
+    "settings.languages.auto",
+    "auto - detect by locale - ({code})",
+);
+const ENGLISH_ROW: Text = Text::new("settings.languages.english", "English - en - built in");
+
 pub fn settings_rows() -> Vec<(String, String)> {
     let get = |k: &str| std::env::var(k).ok();
     let detected = wanted("auto", &get).unwrap_or_else(|| "en".into());
     let mut rows = vec![
         (
             "auto".to_string(),
-            format!("auto - detect by locale - ({})", fit(&detected)),
+            current().fill(AUTO_ROW.key, AUTO_ROW.en, &[("code", &fit(&detected))]),
         ),
-        ("en".to_string(), "English - en - built in".to_string()),
+        ("en".to_string(), ENGLISH_ROW.get().into_owned()),
     ];
     for l in languages(&folders()) {
         let files = l

@@ -432,6 +432,21 @@ fn kana(u: u32) -> u32 {
 mod tests {
     use super::*;
 
+    /// The words a beta.2 session holds, spelled by hand (lesson L19): a change to the
+    /// table that renamed one would make old sessions sort by name without a word.
+    #[test]
+    fn the_sort_words_beta2_saved_still_read() {
+        for (word, key) in [
+            ("name", SortKey::Name),
+            ("ext", SortKey::Ext),
+            ("size", SortKey::Size),
+            ("modified", SortKey::Modified),
+        ] {
+            assert_eq!(word.parse::<SortKey>(), Ok(key), "{word}");
+            assert_eq!(key.word(), word);
+        }
+    }
+
     #[test]
     fn each_sort_key_reads_back_its_word() {
         for k in SortKey::ALL {

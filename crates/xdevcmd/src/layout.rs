@@ -355,6 +355,15 @@ impl Divider {
 mod tests {
     use super::*;
 
+    /// The words a beta.2 session holds for a split, spelled by hand (lesson L19).
+    #[test]
+    fn the_split_words_beta2_saved_still_read() {
+        assert_eq!(Axis::from_word("rows"), Axis::Rows);
+        assert_eq!(Axis::from_word("cols"), Axis::Cols);
+        assert_eq!(Axis::Rows.word(), "rows");
+        assert_eq!(Axis::Cols.word(), "cols");
+    }
+
     fn widths(n: &Node, w: u16) -> Vec<u16> {
         let mut out = Vec::new();
         n.assign(Rect::new(0, 0, w, 10), &mut out);

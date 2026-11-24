@@ -415,7 +415,8 @@ impl App {
 
     /// Where a menu that belongs to the focused pane opens: just inside its corner.
     pub(super) fn pane_anchor(&self) -> (u16, u16) {
-        self.rects
+        self.hits
+            .rects
             .iter()
             .find(|(id, _)| *id == self.focus)
             .map(|(_, r)| (r.x + 2, r.y + 1))

@@ -406,9 +406,10 @@ pub struct App {
     panes: BTreeMap<PaneId, Pane>,
     focus: PaneId,
     next_id: PaneId,
-    rects: Vec<(PaneId, Rect)>,
-    term_id: Option<PaneId>,
-    term_shown: bool,
+    /// Where the last frame drew things, and what the mouse is doing with them.
+    hits: Hits,
+    /// The shell pane and the terminal it runs in.
+    shell_pane: ShellPane,
     status: String,
     /// The status line's past (item 46): each message as it was first shown, with its
     /// time, the newest last; at most [`MESSAGES`].
@@ -416,7 +417,6 @@ pub struct App {
     /// The status as last recorded in `messages`, so a message is kept once.
     noted: String,
     quit: bool,
-    last_click: Option<(Instant, u16, u16)>,
     modal: Option<Modal>,
     /// Set by F4. Handled in `run`, which is the only place that can hand the real
     /// terminal over to another program and take it back.
@@ -428,7 +428,6 @@ pub struct App {
     edit_at: Option<(u32, Option<u32>)>,
     settings: Settings,
     config_outcome: Outcome,
-    drag: Option<Drag>,
     /// Panes in the order they last had focus, most recent first. "The other pane"
     /// stops meaning anything once there are three, so it means "the one you were
     /// just in" instead.
@@ -436,10 +435,6 @@ pub struct App {
     /// The pane filling the screen, if one is zoomed. Cleared as soon as focus moves
     /// elsewhere, as tmux does: a hidden pane must never have the focus.
     zoom: Option<PaneId>,
-    /// The boundary being dragged; `true` when it is inside the terminal panel.
-    resizing: Option<(Divider, bool)>,
-    /// A file pane's scrollbar being dragged, and where on the thumb it was held.
-    scrolling: Option<(PaneId, u16)>,
     /// The group of two-key bindings open, by its first key: Alt+R, then arrows to
     /// resize, as many as wanted (see `on_key`). Open until a key outside it, Enter,
     /// Esc or the mouse; never by time, so the status line always tells the truth.
@@ -458,22 +453,9 @@ pub struct App {
     /// A copy still running, as undo will name it ("copy of a.txt"): once it ends, what
     /// it made becomes the undo (Round 031).
     copy_pending: Option<String>,
-    /// The key bar's buttons as last drawn.
-    footer_hits: Vec<(Action, Rect)>,
-    /// The panes' share of the frame as last drawn; dividers are measured against it.
-    main: Rect,
     /// False under --screenshot, where writing escape sequences to stdout would end up
     /// in the captured frame.
     interactive: bool,
-    /// The terminal panel's share of the height, in percent. Starts from the config,
-    /// then follows whatever it was last resized to, through hiding and the session.
-    term_height: u16,
-    /// From a restored session, consumed by `boot`: how the terminal was left.
-    restore_terminal: Option<(SavedTerminal, bool)>,
-    /// Where the next shell the panel creates should start, when not the focused pane.
-    next_shell_cwd: Option<PathBuf>,
-    /// The whole frame from the last draw. A new shell pane is sized from this.
-    screen: Rect,
     /// The quick search or filter line, while one is being typed.
     search: Option<Search>,
     /// `--cwd-file`: where to write the directory on quit, for a shell to cd to.
@@ -493,14 +475,8 @@ pub struct App {
     hashing: Option<(PathBuf, Task<std::io::Result<Option<String>>>)>,
     /// Alt+Y's deep compare, on a thread of its own: Esc stops it.
     comparing: Option<Comparing>,
-    /// The system's directory watcher (interactive runs only; tests poll).
-    watcher: Option<crate::watch::Watcher>,
-    /// Each shown directory's canonical path, as the watcher reports it.
-    canonical: HashMap<PathBuf, PathBuf>,
-    /// Panes whose directory changed, to re-read when no dialog or drag is up.
-    to_reload: HashSet<PaneId>,
-    /// Panes whose directory has just begun to be watched, to look at once.
-    to_check: HashSet<PaneId>,
+    /// Folders watched for changes, and the panes to reload or check.
+    watch: Watching,
     /// A file extracted from an archive so F3 can show it; removed when the viewer
     /// closes.
     view_temp: Option<PathBuf>,
@@ -522,16 +498,41 @@ pub struct App {
     /// shell" in the question before typing): that shell, the text, bracketed paste
     /// allowed, what it is, and since when.
     pending_type: Option<PendingType>,
-    /// `[terminal] follow`: the shell last looked at, its report count (where reports
-    /// are what there is), and the directory it was last seen idle in. The pane moves
-    /// only when that directory changes for the same shell: an edge, not a level.
-    follow_seen: Option<(ShellKey, u64, Option<PathBuf>)>,
-    /// A press inside a shell went to the program there (it asked for the mouse): the
-    /// drag and the release that follow go to it too, not to xdevcmd.
-    mouse_to_shell: Option<(ShellKey, Rect)>,
     /// Copy, move, delete, extract and pack jobs sent to the background (B in the
     /// progress box). One that asks a question comes back to the front.
     jobs: Vec<Job>,
+    /// Quick view's pictures: the terminal's protocol and cell, what is decoding,
+    /// what is on screen.
+    pub pics: Pictures,
+    /// The terminal's input, on its own thread; made by the first turn of the loop.
+    input: Option<KeyReader>,
+    /// Set by SIGHUP or SIGTERM: the terminal is gone, or someone asked us to end.
+    hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The "running in …" note shown at start, cleared by the first key or click.
+    boot_note: Option<String>,
+    /// How long start-up took, step by step ([`crate::startup`]); `timings`: said on
+    /// the status line too (`--timings`).
+    pub startup: crate::startup::Clock,
+    pub timings: bool,
+    /// What start-up says about the debug log (`XDEVCMD_DEBUG`): shown first, and kept
+    /// in Messages either way.
+    pub debug_note: Option<String>,
+    /// Quitting with jobs running: they were cancelled, and until this moment xdevcmd
+    /// waits for them to clean up, drawing as usual and taking no keys ([`App::stop_step`]).
+    stopping: Option<Instant>,
+    pub usage: crate::usage::Usage,
+    /// The status line's walker (`[general] animation`): moved as the line is drawn.
+    walker: std::cell::RefCell<crate::walker::Walker>,
+    /// F3 inside a big archive, extracting on a thread.
+    pending_view: Option<PendingView>,
+    /// The session as last written, and when the last check for changes ran.
+    saved: Option<Session>,
+    last_autosave: Instant,
+}
+
+/// Quick view's pictures: the terminal's protocol and cell, what is decoding,
+/// what is on screen.
+pub struct Pictures {
     /// Quick view's last picture: the file, the size it was shrunk for, the result.
     quick_image: Option<Shrunk>,
     /// A big photo takes a moment to decode: never on the drawing thread.
@@ -553,38 +554,63 @@ pub struct App {
     cell_known: bool,
     /// What the terminal answered at start-up about pictures (main.rs asks).
     pub probe: crate::graphics::Probe,
-    /// The terminal's input, on its own thread; made by the first turn of the loop.
-    input: Option<KeyReader>,
-    /// Set by SIGHUP or SIGTERM: the terminal is gone, or someone asked us to end.
-    hangup: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// The "running in …" note shown at start, cleared by the first key or click.
-    boot_note: Option<String>,
-    /// How long start-up took, step by step ([`crate::startup`]); `timings`: said on
-    /// the status line too (`--timings`).
-    pub startup: crate::startup::Clock,
-    pub timings: bool,
-    /// What start-up says about the debug log (`XDEVCMD_DEBUG`): shown first, and kept
-    /// in Messages either way.
-    pub debug_note: Option<String>,
-    /// Quitting with jobs running: they were cancelled, and until this moment xdevcmd
-    /// waits for them to clean up, drawing as usual and taking no keys ([`App::stop_step`]).
-    stopping: Option<Instant>,
     /// The picture this frame wants drawn by the terminal, and the one it shows now.
     graphic_want: Option<Graphic>,
     graphic_shown: Option<Graphic>,
     /// What the last frame has in the cells the shown picture covers, to write back
     /// when an iTerm2 or sixel picture (which is cells) is taken away.
     under_graphic: Vec<(u16, u16, ratatui::buffer::Cell)>,
+}
+
+/// Where the last frame drew things, and what the mouse is doing with them.
+struct Hits {
+    rects: Vec<(PaneId, Rect)>,
+    last_click: Option<(Instant, u16, u16)>,
+    drag: Option<Drag>,
+    /// The boundary being dragged; `true` when it is inside the terminal panel.
+    resizing: Option<(Divider, bool)>,
+    /// A file pane's scrollbar being dragged, and where on the thumb it was held.
+    scrolling: Option<(PaneId, u16)>,
+    /// The key bar's buttons as last drawn.
+    footer_hits: Vec<(Action, Rect)>,
+    /// The panes' share of the frame as last drawn; dividers are measured against it.
+    main: Rect,
+    /// The whole frame from the last draw. A new shell pane is sized from this.
+    screen: Rect,
     /// The menu bar's titles as last drawn, for clicks.
     bar_hits: Vec<(usize, Rect)>,
-    pub usage: crate::usage::Usage,
-    /// The status line's walker (`[general] animation`): moved as the line is drawn.
-    walker: std::cell::RefCell<crate::walker::Walker>,
-    /// F3 inside a big archive, extracting on a thread.
-    pending_view: Option<PendingView>,
-    /// The session as last written, and when the last check for changes ran.
-    saved: Option<Session>,
-    last_autosave: Instant,
+}
+
+/// The shell pane and the terminal it runs in.
+struct ShellPane {
+    term_id: Option<PaneId>,
+    term_shown: bool,
+    /// The terminal panel's share of the height, in percent. Starts from the config,
+    /// then follows whatever it was last resized to, through hiding and the session.
+    term_height: u16,
+    /// From a restored session, consumed by `boot`: how the terminal was left.
+    restore_terminal: Option<(SavedTerminal, bool)>,
+    /// Where the next shell the panel creates should start, when not the focused pane.
+    next_shell_cwd: Option<PathBuf>,
+    /// `[terminal] follow`: the shell last looked at, its report count (where reports
+    /// are what there is), and the directory it was last seen idle in. The pane moves
+    /// only when that directory changes for the same shell: an edge, not a level.
+    follow_seen: Option<(ShellKey, u64, Option<PathBuf>)>,
+    /// A press inside a shell went to the program there (it asked for the mouse): the
+    /// drag and the release that follow go to it too, not to xdevcmd.
+    mouse_to_shell: Option<(ShellKey, Rect)>,
+}
+
+/// Folders watched for changes, and the panes to reload or check.
+struct Watching {
+    /// The system's directory watcher (interactive runs only; tests poll).
+    watcher: Option<crate::watch::Watcher>,
+    /// Each shown directory's canonical path, as the watcher reports it.
+    canonical: HashMap<PathBuf, PathBuf>,
+    /// Panes whose directory changed, to re-read when no dialog or drag is up.
+    to_reload: HashSet<PaneId>,
+    /// Panes whose directory has just begun to be watched, to look at once.
+    to_check: HashSet<PaneId>,
 }
 
 /// xdevcmd's icon for About: 14 columns by 7 rows, about as tall as About's text, so the
@@ -644,25 +670,38 @@ impl App {
             panes,
             focus: 0,
             next_id: 2,
-            rects: Vec::new(),
-            term_id: None,
-            term_shown: false,
+            hits: Hits {
+                rects: Vec::new(),
+                last_click: None,
+                drag: None,
+                resizing: None,
+                scrolling: None,
+                footer_hits: Vec::new(),
+                main: Rect::ZERO,
+                screen: Rect::new(0, 0, 80, 24),
+                bar_hits: Vec::new(),
+            },
+            shell_pane: ShellPane {
+                term_id: None,
+                term_shown: false,
+                term_height: settings_height,
+                restore_terminal: None,
+                next_shell_cwd: None,
+                follow_seen: None,
+                mouse_to_shell: None,
+            },
             status: notice.unwrap_or_default(),
             messages: std::collections::VecDeque::new(),
             noted: String::new(),
             quit: false,
-            last_click: None,
             modal: None,
             pending_edit: None,
             recheck_config: None,
             edit_at: None,
             settings,
             config_outcome: outcome,
-            drag: None,
             mru: Vec::new(),
             zoom: None,
-            resizing: None,
-            scrolling: None,
             group: None,
             option_hinted: false,
             recent_commands,
@@ -670,13 +709,7 @@ impl App {
             last_undo: None,
             trash_pending: None,
             copy_pending: None,
-            footer_hits: Vec::new(),
-            main: Rect::ZERO,
             interactive: false,
-            term_height: settings_height,
-            restore_terminal: None,
-            next_shell_cwd: None,
-            screen: Rect::new(0, 0, 80, 24),
             search: None,
             cwd_file: None,
             quit_cd: false,
@@ -686,10 +719,12 @@ impl App {
             quick_view: None,
             hashing: None,
             comparing: None,
-            watcher: None,
-            canonical: HashMap::new(),
-            to_reload: HashSet::new(),
-            to_check: HashSet::new(),
+            watch: Watching {
+                watcher: None,
+                canonical: HashMap::new(),
+                to_reload: HashSet::new(),
+                to_check: HashSet::new(),
+            },
             view_temp: None,
             save_from: None,
             save_only: false,
@@ -697,20 +732,23 @@ impl App {
             pending_list: None,
             history_dir: None,
             pending_type: None,
-            follow_seen: None,
-            mouse_to_shell: None,
             jobs: Vec::new(),
-            quick_image: None,
-            decoding: None,
-            settle: None,
-            settling: false,
-            kitty_held: None,
-            graphics: crate::graphics::Protocol::Blocks,
-            graphics_found: crate::graphics::Protocol::Blocks,
-            cell_known: false,
-            // VT340's cell, which Windows Terminal and xterm also use for sixel.
-            cell_px: (10, 20),
-            probe: crate::graphics::Probe::default(),
+            pics: Pictures {
+                quick_image: None,
+                decoding: None,
+                settle: None,
+                settling: false,
+                kitty_held: None,
+                graphics: crate::graphics::Protocol::Blocks,
+                graphics_found: crate::graphics::Protocol::Blocks,
+                cell_known: false,
+                // VT340's cell, which Windows Terminal and xterm also use for sixel.
+                cell_px: (10, 20),
+                probe: crate::graphics::Probe::default(),
+                graphic_want: None,
+                graphic_shown: None,
+                under_graphic: Vec::new(),
+            },
             hangup: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             input: None,
             boot_note: None,
@@ -718,10 +756,6 @@ impl App {
             timings: false,
             debug_note: None,
             stopping: None,
-            graphic_want: None,
-            graphic_shown: None,
-            under_graphic: Vec::new(),
-            bar_hits: Vec::new(),
             usage: crate::usage::Usage::default(),
             walker: std::cell::RefCell::default(),
             pending_view: None,
@@ -733,11 +767,11 @@ impl App {
     /// Bring the layout up for an area of this size: creates the shell pane that is
     /// visible by default. Separate from `run` so a screenshot can do it too.
     pub fn boot(&mut self, area: Rect) {
-        self.screen = area;
+        self.hits.screen = area;
         // No startup hint in the status line: the key bar already shows F1, F10 and F12,
         // and a hint that vanished at the first message and never came back looked
         // random. The right of the status line is for messages only.
-        let restore = self.restore_terminal.take();
+        let restore = self.shell_pane.restore_terminal.take();
         if self.settings.mode == Mode::Restricted {
             return;
         }
@@ -750,7 +784,7 @@ impl App {
                         .iter()
                         .map(|d| session::resolve_dir(d, &fallback))
                         .take(self.settings.config.terminal.max_terminals);
-                    self.next_shell_cwd = dirs.next();
+                    self.shell_pane.next_shell_cwd = dirs.next();
                     self.toggle_term(area);
                     let rest: Vec<PathBuf> = dirs.collect();
                     if let Some(p) = self.panel() {
@@ -760,7 +794,7 @@ impl App {
                         p.cycle_tab(1); // back to the first tab
                     }
                     if focused {
-                        if let Some(id) = self.term_id {
+                        if let Some(id) = self.shell_pane.term_id {
                             self.focus = id;
                         }
                     }

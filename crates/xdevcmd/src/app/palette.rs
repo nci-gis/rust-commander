@@ -33,7 +33,7 @@ impl App {
             self.recent_commands.clone(),
             intro,
             size,
-            self.screen,
+            self.hits.screen,
         );
         c.from_menu = from_menu;
         c.option_hint = !self.option_hinted;

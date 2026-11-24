@@ -233,7 +233,7 @@ impl App {
             .shell_prefix()
             .map(|c| format!("{} ", crate::keys::key_name(c.0, c.1)))
             .unwrap_or_default();
-        self.status = if whose == "this file pane" && self.term_shown {
+        self.status = if whose == "this file pane" && self.shell_pane.term_shown {
             format!(
                 "no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then {prefix}Alt+{n} picks its tabs"
             )
@@ -468,7 +468,7 @@ impl App {
             self.status = why;
             return;
         }
-        let full = self.screen;
+        let full = self.hits.screen;
         match a {
             Action::Quit => {
                 if self.ask_before_quitting() {

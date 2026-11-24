@@ -106,8 +106,8 @@ impl App {
         terminal.swap_buffers();
         terminal.swap_buffers();
         // And with it any picture the terminal drew.
-        self.graphic_shown = None;
-        self.kitty_held = None;
+        self.pics.graphic_shown = None;
+        self.pics.kitty_held = None;
 
         let line = match at {
             Some((n, _)) if !passed => {
@@ -419,11 +419,11 @@ impl App {
         let Some(item) = self.settings.config.menu.get(i).cloned() else {
             return;
         };
-        let full = self.screen;
-        if self.term_id.is_none() || !self.term_shown {
+        let full = self.hits.screen;
+        if self.shell_pane.term_id.is_none() || !self.shell_pane.term_shown {
             self.toggle_term(full);
         }
-        let Some(id) = self.term_id else {
+        let Some(id) = self.shell_pane.term_id else {
             return;
         };
         let cx = crate::usermenu::Context {

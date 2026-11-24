@@ -472,7 +472,7 @@ fn main() -> Result<()> {
         // Ends as soon as the device attributes come, which every terminal answers;
         // long enough that a slow SSH link's replies are not left for crossterm to read
         // as keys.
-        app.probe = graphics::probe(Duration::from_millis(1500));
+        app.pics.probe = graphics::probe(Duration::from_millis(1500));
     }
     clock.mark("terminal check");
     app.startup = clock;

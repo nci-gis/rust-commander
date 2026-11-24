@@ -124,7 +124,8 @@ impl App {
     }
 
     pub(super) fn pane_at(&self, x: u16, y: u16) -> Option<PaneId> {
-        self.rects
+        self.hits
+            .rects
             .iter()
             .find(|(_, r)| r.contains(Position::new(x, y)))
             .map(|(id, _)| *id)

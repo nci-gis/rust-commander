@@ -113,18 +113,19 @@ impl App {
 
     pub(super) fn open_bar(&mut self, i: usize) {
         let x = self
+            .hits
             .bar_hits
             .iter()
             .find(|(j, _)| *j == i)
             .map(|(_, r)| r.x)
             .unwrap_or(0);
         // Below the bar when it is on screen; at the top otherwise (F9 with it off).
-        let y = u16::from(!self.bar_hits.is_empty());
+        let y = u16::from(!self.hits.bar_hits.is_empty());
         self.modal = Some(Modal::Menu(Menu::dropdown(i, self.bar_items(i), (x, y))));
     }
 
     pub(super) fn draw_bar(&mut self, frame: &mut Frame, area: Rect) {
-        self.bar_hits.clear();
+        self.hits.bar_hits.clear();
         if area.height == 0 {
             return;
         }
@@ -151,7 +152,7 @@ impl App {
                 Style::new().fg(th.fg)
             };
             buf.set_line(x, area.y, &Line::from(Span::styled(text, style)), w);
-            self.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
+            self.hits.bar_hits.push((i, Rect::new(x, area.y, w, 1)));
             x += w + 1;
         }
         // Which xdevcmd this is, at the right: a shell started from the terminal panel
@@ -213,13 +214,13 @@ impl App {
     pub fn draw(&mut self, frame: &mut Frame) {
         self.draw_frame(frame);
         // The cells under the picture the terminal shows, as this frame has them.
-        self.under_graphic.clear();
-        if let Some(r) = self.graphic_shown.as_ref().map(|g| g.rect) {
+        self.pics.under_graphic.clear();
+        if let Some(r) = self.pics.graphic_shown.as_ref().map(|g| g.rect) {
             let buf = frame.buffer_mut();
             for y in r.y..r.y + r.height {
                 for x in r.x..r.x + r.width {
                     if let Some(c) = buf.cell(ratatui::layout::Position::new(x, y)) {
-                        self.under_graphic.push((x, y, c.clone()));
+                        self.pics.under_graphic.push((x, y, c.clone()));
                     }
                 }
             }
@@ -227,10 +228,10 @@ impl App {
     }
 
     pub(super) fn draw_frame(&mut self, frame: &mut Frame) {
-        self.graphic_want = None;
-        self.settling = false;
+        self.pics.graphic_want = None;
+        self.pics.settling = false;
         let area = frame.area();
-        self.screen = area;
+        self.hits.screen = area;
         self.note_focus();
         for p in self.panes.values_mut() {
             if let Some(n) = p.as_files_mut().and_then(|f| f.notice.take()) {
@@ -251,7 +252,7 @@ impl App {
         .areas(area);
         self.draw_bar(frame, bar);
 
-        self.main = main;
+        self.hits.main = main;
         if self
             .zoom
             .is_some_and(|z| z != self.focus || !self.tree.contains(z))
@@ -267,7 +268,7 @@ impl App {
             Some(z) => rects.push((z, main)),
             None => self.tree.assign(main, &mut rects),
         }
-        self.rects = rects.clone();
+        self.hits.rects = rects.clone();
 
         // Quick view ends when its pane takes the focus or goes away.
         if self
@@ -302,6 +303,7 @@ impl App {
             match self.panes.get_mut(&id) {
                 Some(Pane::Files(f)) => {
                     let target = self
+                        .hits
                         .drag
                         .as_ref()
                         .is_some_and(|d| d.mode == DragMode::Files && d.hover == Some(id));
@@ -314,6 +316,7 @@ impl App {
 
         if let Some(s) = &self.search {
             let at = self
+                .hits
                 .rects
                 .iter()
                 .find(|(id, _)| *id == s.pane)
@@ -345,6 +348,7 @@ impl App {
         // The theme's light over the whole frame, but not over what the programs in the
         // terminal panels drew.
         let screens: Vec<Rect> = self
+            .hits
             .rects
             .iter()
             .filter_map(|(id, _)| match self.panes.get(id) {
@@ -403,7 +407,8 @@ impl App {
             return;
         }
         let row = crate::walker::row(
-            self.rects
+            self.hits
+                .rects
                 .iter()
                 .filter(|(id, _)| matches!(self.panes.get(id), Some(Pane::Files(_))))
                 .map(|(_, r)| *r),
@@ -580,7 +585,7 @@ impl App {
             frame
                 .buffer_mut()
                 .set_style(area, Style::new().bg(theme::t().bg_bar));
-            self.footer_hits.clear();
+            self.hits.footer_hits.clear();
             return;
         }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still
@@ -649,6 +654,6 @@ impl App {
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::new().bg(theme::t().bg_bar));
         buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-        self.footer_hits = hits;
+        self.hits.footer_hits = hits;
     }
 }

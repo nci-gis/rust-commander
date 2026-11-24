@@ -1,8 +1,8 @@
-//! The status line's walker: a small agent that walks along the status line, a step a
-//! second, when `[general] animation` is on (off by default). It walks the space
-//! between the panes' line and the message. When a message comes it stands just
-//! before it for `[general] animation_hold_secs` (5 to 15, 5 by default), then goes
-//! back to walking from where it stopped, the message still showing.
+//! The walker: a small agent that walks along the bottom edge of the file pane, a step
+//! a second, when `[general] animation` is on (off by default). When a message comes it
+//! goes to the status line and stands just before it for `[general]
+//! animation_hold_secs` (5 to 15, 5 by default), then goes back to walking the pane's
+//! edge from where it stopped, the message still showing.
 //!
 //! ASCII only: a sprite of ambiguous or emoji width would be drawn a column off on some
 //! terminals (Round 035, W2).
@@ -35,6 +35,8 @@ pub struct Walker {
     last: Option<Instant>,
     /// The message it went to stand before, and when; a new message starts it again.
     held: Option<(String, Instant)>,
+    /// What the last `tick` said: standing before a message, not walking.
+    standing: bool,
 }
 
 impl Walker {
@@ -53,7 +55,13 @@ impl Walker {
             .as_ref()
             .is_some_and(|(_, at)| now.saturating_duration_since(*at) < hold);
         self.walk(now, lane, standing);
+        self.standing = standing;
         standing
+    }
+
+    /// Whether, at the last `tick`, it stood before a message.
+    pub fn standing(&self) -> bool {
+        self.standing
     }
 
     fn walk(&mut self, now: Instant, lane: usize, held: bool) {

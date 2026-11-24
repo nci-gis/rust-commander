@@ -6,6 +6,7 @@
 //! Ranking reuses the quick filter's fuzzy score (`xdevcmd_core::fuzzy`), so typing
 //! here feels as it does in a pane.
 
+use crate::lang::Text;
 use std::collections::HashSet;
 
 use xdevcmd_core::format::{char_cells, cut_end, text_cells};
@@ -189,7 +190,7 @@ pub fn rows(
                 Run::Act(b.action)
             };
             out.push(Row {
-                title: b.title.to_string(),
+                title: b.title.get().into_owned(),
                 group: group.to_string(),
                 key_text: if live.is_empty() {
                     "(unbound)".to_string()
@@ -197,7 +198,7 @@ pub fn rows(
                     key_text(&live)
                 },
                 keys: live,
-                about: b.about.to_string(),
+                about: b.about.get().into_owned(),
                 note,
                 place: b.action.place(),
                 refused: refuse(&run),
@@ -205,7 +206,7 @@ pub fn rows(
                 rebound,
                 keys_name: Some(b.name),
                 id: b.name.to_string(),
-                name: format!("{group}: {}", b.title),
+                name: format!("{}: {}", group_label(group), b.title.get()),
                 parsed: Vec::new(),
                 hay: String::new(),
             });
@@ -213,19 +214,25 @@ pub fn rows(
         if group == "Files" {
             for (title, about, extra) in [
                 (
-                    "Copy path",
-                    "The selected paths (or this folder's), whole, to the clipboard",
+                    tr!("commands.copy_path", "Copy path"),
+                    tr!(
+                        "commands.the_selected_paths_or_this",
+                        "The selected paths (or this folder's), whole, to the clipboard"
+                    ),
                     Extra::CopyPath,
                 ),
                 (
-                    "Copy relative path",
-                    "The same, from the repository's root, or from this folder outside one",
+                    tr!("commands.copy_relative_path", "Copy relative path"),
+                    tr!(
+                        "commands.the_same_from_the_repository",
+                        "The same, from the repository's root, or from this folder outside one"
+                    ),
                     Extra::CopyRelativePath,
                 ),
             ] {
                 let run = Run::Extra(extra);
                 out.push(Row {
-                    title: title.into(),
+                    title: title.clone().into(),
                     group: group.into(),
                     keys: Vec::new(),
                     key_text: String::new(),
@@ -246,34 +253,49 @@ pub fn rows(
         if group == "General" {
             for (title, about, extra) in [
                 (
-                    "Settings\u{2026}",
-                    "The common settings, saved to config.toml",
+                    tr!("commands.settings_u_2026", "Settings\u{2026}"),
+                    tr!(
+                        "commands.the_common_settings_saved_to",
+                        "The common settings, saved to config.toml"
+                    ),
                     Extra::Settings,
                 ),
                 (
-                    "Theme\u{2026}",
-                    "Try a theme now; Settings saves it",
+                    tr!("commands.theme_u_2026", "Theme\u{2026}"),
+                    tr!(
+                        "commands.try_a_theme_now_settings",
+                        "Try a theme now; Settings saves it"
+                    ),
                     Extra::Theme,
                 ),
                 (
-                    "Config in use",
-                    "The loaded config file and the settings in effect, read-only",
+                    tr!("commands.config_in_use", "Config in use"),
+                    tr!(
+                        "commands.the_loaded_config_file_and",
+                        "The loaded config file and the settings in effect, read-only"
+                    ),
                     Extra::ConfigInUse,
                 ),
                 (
-                    "Documentation",
-                    "The docs for this version: the copy beside xdevcmd, and the link",
+                    tr!("commands.documentation", "Documentation"),
+                    tr!(
+                        "commands.the_docs_for_this_version",
+                        "The docs for this version: the copy beside xdevcmd, and the link"
+                    ),
                     Extra::Documentation,
                 ),
                 (
-                    "About xdevcmd",
-                    "Version, licence, where releases are",
+                    tr!("commands.about_xdevcmd", "About xdevcmd"),
+                    tr!(
+                        "commands.version_licence_where_releases_are",
+                        "Version, licence, where releases are"
+                    ),
                     Extra::About,
                 ),
             ] {
                 let run = Run::Extra(extra);
                 out.push(Row {
-                    title: title.into(),
+                    title: title.clone().into(),
                     group: group.into(),
                     keys: Vec::new(),
                     key_text: String::new(),
@@ -298,19 +320,19 @@ pub fn rows(
         let mut rows = Vec::new();
         for (title, about, extra) in [
             (
-                "Log tab to file\u{2026}",
-                "Everything the active terminal tab prints, to a file you name (text or raw); \u{25cf} on the tab",
+                tr!("commands.log_tab_to_file_u", "Log tab to file\u{2026}"),
+                tr!("commands.everything_the_active_terminal_tab", "Everything the active terminal tab prints, to a file you name (text or raw); \u{25cf} on the tab"),
                 Extra::LogTab,
             ),
             (
-                "Stop logging tab",
-                "End the active terminal tab's log; the file is flushed and closed",
+                tr!("commands.stop_logging_tab", "Stop logging tab"),
+                tr!("commands.end_the_active_terminal_tab", "End the active terminal tab's log; the file is flushed and closed"),
                 Extra::StopLog,
             ),
         ] {
             let run = Run::Extra(extra);
             rows.push(Row {
-                title: title.into(),
+                title: title.clone().into(),
                 group: "Terminal".into(),
                 keys: Vec::new(),
                 key_text: String::new(),
@@ -360,13 +382,14 @@ pub fn rows(
     for (group, place, why, rows) in FIXED {
         for (k, what) in *rows {
             // A note's label is its name; a key's description is.
+            let (k, what) = (k.get().into_owned(), what.get().into_owned());
             let (title, key, about) = if *why == NOTE {
-                (k.to_string(), String::new(), what.to_string())
+                (k, String::new(), what)
             } else {
-                (what.to_string(), k.to_string(), String::new())
+                (what, k, String::new())
             };
             out.push(Row {
-                name: format!("{group}: {title}"),
+                name: format!("{}: {title}", group_label(group)),
                 title,
                 group: group.to_string(),
                 keys: Vec::new(),
@@ -402,36 +425,36 @@ const GESTURE: &str = "a mouse gesture";
 /// The read-only sections: what the viewer and the mouse do, and the notes F1 always
 /// had. Group, where it applies, why it cannot run, and (key, what) rows.
 #[allow(clippy::type_complexity)]
-const FIXED: &[(&str, Place, &str, &[(&str, &str)])] = &[
+const FIXED: &[(&str, Place, &str, &[(Text, Text)])] = &[
     (
         "Viewer",
         Place::Viewer,
         VIEWER_KEY,
         &[
-            ("h", "Switch between text and hex"),
-            ("w", "Wrap long lines on or off"),
-            ("/", "Search; Enter to jump"),
-            ("n \u{b7} N", "Next / previous match"),
-            ("g \u{b7} G", "Top / bottom"),
+            (Text::new("help.viewer.h", "h"), Text::new("help.viewer.switch_between_text_and_hex", "Switch between text and hex")),
+            (Text::new("help.viewer.w", "w"), Text::new("help.viewer.wrap_long_lines_on_or", "Wrap long lines on or off")),
+            (Text::new("help.viewer.sym", "/"), Text::new("help.viewer.search_enter_to_jump", "Search; Enter to jump")),
+            (Text::new("help.viewer.n_u_b7_n", "n \u{b7} N"), Text::new("help.viewer.next_previous_match", "Next / previous match")),
+            (Text::new("help.viewer.g_u_b7_g", "g \u{b7} G"), Text::new("help.viewer.top_bottom", "Top / bottom")),
             (
-                ": \u{b7} Ctrl+G",
-                "Go to a line, or 50%; in hex an offset (0x1f00)",
+                Text::new("help.viewer.u_b7_ctrl_g", ": \u{b7} Ctrl+G"),
+                Text::new("help.viewer.go_to_a_line_or", "Go to a line, or 50%; in hex an offset (0x1f00)"),
             ),
-            ("F2", "Save as\u{2026}: a copy, or a shell's history (0600)"),
-            ("Drag", "Select lines with the mouse"),
-            ("y \u{b7} Y", "Copy the selection or top line / the screen"),
-            ("Esc \u{b7} q", "Close the viewer"),
+            (Text::new("help.viewer.f2", "F2"), Text::new("help.viewer.save_as_u_2026_a", "Save as\u{2026}: a copy, or a shell's history (0600)")),
+            (Text::new("help.viewer.drag", "Drag"), Text::new("help.viewer.select_lines_with_the_mouse", "Select lines with the mouse")),
+            (Text::new("help.viewer.y_u_b7_y", "y \u{b7} Y"), Text::new("help.viewer.copy_the_selection_or_top", "Copy the selection or top line / the screen")),
+            (Text::new("help.viewer.esc_u_b7_q", "Esc \u{b7} q"), Text::new("help.viewer.close_the_viewer", "Close the viewer")),
             (
-                "Tab \u{b7} Shift+Tab",
-                "A shell's history: the next / previous path in it",
-            ),
-            (
-                "Enter \u{b7} F3 \u{b7} F4",
-                "On a chosen path: go there / view / edit, at its line",
+                Text::new("help.viewer.tab_u_b7_shift_tab", "Tab \u{b7} Shift+Tab"),
+                Text::new("help.viewer.a_shell_s_history_the", "A shell's history: the next / previous path in it"),
             ),
             (
-                "p \u{b7} P",
-                "A shell's history: a list of its paths / add them to a list",
+                Text::new("help.viewer.enter_u_b7_f3_u", "Enter \u{b7} F3 \u{b7} F4"),
+                Text::new("help.viewer.on_a_chosen_path_go", "On a chosen path: go there / view / edit, at its line"),
+            ),
+            (
+                Text::new("help.viewer.p_u_b7_p", "p \u{b7} P"),
+                Text::new("help.viewer.a_shell_s_history_a", "A shell's history: a list of its paths / add them to a list"),
             ),
         ],
     ),
@@ -440,34 +463,34 @@ const FIXED: &[(&str, Place, &str, &[(&str, &str)])] = &[
         Place::Everywhere,
         GESTURE,
         &[
-            ("click", "Focus a pane, select a row"),
+            (Text::new("help.mouse.click", "click"), Text::new("help.mouse.focus_a_pane_select_a", "Focus a pane, select a row")),
             (
-                "double-click",
-                "What Enter does: enter a directory, open a file",
+                Text::new("help.mouse.double_click", "double-click"),
+                Text::new("help.mouse.what_enter_does_enter_a", "What Enter does: enter a directory, open a file"),
             ),
-            ("Ctrl+click", "Mark or unmark a row"),
-            ("drag down a pane", "Mark a range of rows"),
-            ("drag to the other pane", "Copy or move there (asks which)"),
-            ("drag a border", "Resize panes and the terminal"),
+            (Text::new("help.mouse.ctrl_click", "Ctrl+click"), Text::new("help.mouse.mark_or_unmark_a_row", "Mark or unmark a row")),
+            (Text::new("help.mouse.drag_down_a_pane", "drag down a pane"), Text::new("help.mouse.mark_a_range_of_rows", "Mark a range of rows")),
+            (Text::new("help.mouse.drag_to_the_other_pane", "drag to the other pane"), Text::new("help.mouse.copy_or_move_there_asks", "Copy or move there (asks which)")),
+            (Text::new("help.mouse.drag_a_border", "drag a border"), Text::new("help.mouse.resize_panes_and_the_terminal", "Resize panes and the terminal")),
             (
-                "double-click a border",
-                "Share it evenly between the panes beside it",
+                Text::new("help.mouse.double_click_a_border", "double-click a border"),
+                Text::new("help.mouse.share_it_evenly_between_the", "Share it evenly between the panes beside it"),
             ),
             (
-                "path in a pane's title",
-                "Click a directory's name to go there",
+                Text::new("help.mouse.path_in_a_pane_s", "path in a pane's title"),
+                Text::new("help.mouse.click_a_directory_s_name", "Click a directory's name to go there"),
             ),
-            ("right-click", "Context menu"),
-            ("header", "Sort by that column; again to reverse"),
-            ("key bar", "Click a key to run it"),
+            (Text::new("help.mouse.right_click", "right-click"), Text::new("help.mouse.context_menu", "Context menu")),
+            (Text::new("help.mouse.header", "header"), Text::new("help.mouse.sort_by_that_column_again", "Sort by that column; again to reverse")),
+            (Text::new("help.mouse.key_bar", "key bar"), Text::new("help.mouse.click_a_key_to_run", "Click a key to run it")),
             (
-                "terminal tab bar",
-                "Pick a tab; \u{00d7} closes it, + opens one; right-click: its menu",
+                Text::new("help.mouse.terminal_tab_bar", "terminal tab bar"),
+                Text::new("help.mouse.pick_a_tab_u_00d7", "Pick a tab; \u{00d7} closes it, + opens one; right-click: its menu"),
             ),
-            ("wheel", "Scroll; over a shell, back through its history"),
+            (Text::new("help.mouse.wheel", "wheel"), Text::new("help.mouse.scroll_over_a_shell_back", "Scroll; over a shell, back through its history")),
             (
-                "in a shell",
-                "Clicks, drags and wheel go to a program that asked for the mouse",
+                Text::new("help.mouse.in_a_shell", "in a shell"),
+                Text::new("help.mouse.clicks_drags_and_wheel_go", "Clicks, drags and wheel go to a program that asked for the mouse"),
             ),
         ],
     ),
@@ -477,24 +500,24 @@ const FIXED: &[(&str, Place, &str, &[(&str, &str)])] = &[
         NOTE,
         &[
             (
-                "Covered",
-                "F5 copy, F6 move, Shift+F5 copy as, Alt+Y sync, extract, Alt+F5 pack, Shift+F2 rename many (Settings \u{2192} General; on by default)",
+                Text::new("help.safe_operations.covered", "Covered"),
+                Text::new("help.safe_operations.f5_copy_f6_move_shift", "F5 copy, F6 move, Shift+F5 copy as, Alt+Y sync, extract, Alt+F5 pack, Shift+F2 rename many (Settings \u{2192} General; on by default)"),
             ),
             (
-                "How",
-                "A file is written under a hidden temporary name, renamed when complete",
+                Text::new("help.safe_operations.how", "How"),
+                Text::new("help.safe_operations.a_file_is_written_under", "A file is written under a hidden temporary name, renamed when complete"),
             ),
             (
-                "If killed",
-                "The next start removes what was left and offers to continue the job",
+                Text::new("help.safe_operations.if_killed", "If killed"),
+                Text::new("help.safe_operations.the_next_start_removes_what", "The next start removes what was left and offers to continue the job"),
             ),
             (
-                "Always",
-                "A replaced file stays whole until its copy is done; closing the terminal stops jobs, cleans up and saves the session",
+                Text::new("help.safe_operations.always", "Always"),
+                Text::new("help.safe_operations.a_replaced_file_stays_whole", "A replaced file stays whole until its copy is done; closing the terminal stops jobs, cleans up and saves the session"),
             ),
             (
-                "Not covered",
-                "Shift+F8 (nothing to keep), F4 (the editor writes)",
+                Text::new("help.safe_operations.not_covered", "Not covered"),
+                Text::new("help.safe_operations.shift_f8_nothing_to_keep", "Shift+F8 (nothing to keep), F4 (the editor writes)"),
             ),
         ],
     ),
@@ -504,19 +527,19 @@ const FIXED: &[(&str, Place, &str, &[(&str, &str)])] = &[
         NOTE,
         &[
             (
-                "Alt+R, then \u{2190}\u{2192}\u{2191}\u{2193}",
-                "Keys written \"Alt+r Left\": Alt+R, then Left, again and again",
+                Text::new("help.two_key_bindings.alt_r_then_u_2190", "Alt+R, then \u{2190}\u{2192}\u{2191}\u{2193}"),
+                Text::new("help.two_key_bindings.keys_written_alt_r_left", "Keys written \"Alt+r Left\": Alt+R, then Left, again and again"),
             ),
             (
-                "Enter \u{b7} Esc",
-                "Done resizing; so is any other key, or the mouse",
+                Text::new("help.two_key_bindings.enter_u_b7_esc", "Enter \u{b7} Esc"),
+                Text::new("help.two_key_bindings.done_resizing_so_is_any", "Done resizing; so is any other key, or the mouse"),
             ),
             (
-                "Other two-key bindings",
-                "Run once, then close; a badge on the status line shows one waiting",
+                Text::new("help.two_key_bindings.other_two_key_bindings", "Other two-key bindings"),
+                Text::new("help.two_key_bindings.run_once_then_close_a", "Run once, then close; a badge on the status line shows one waiting"),
             ),
-            ("xdevcmd --show-keys", "What each key really sends"),
-            ("More", TROUBLESHOOTING),
+            (Text::new("help.two_key_bindings.xdevcmd_show_keys", "xdevcmd --show-keys"), Text::new("help.two_key_bindings.what_each_key_really_sends", "What each key really sends")),
+            (Text::new("help.two_key_bindings.more", "More"), Text::new("help.troubleshooting", TROUBLESHOOTING)),
         ],
     ),
 ];
@@ -685,6 +708,34 @@ pub fn browse_small(rows: &[Row], ctx: Place, recent: &[String]) -> Vec<Item> {
     out
 }
 
+/// A group's name as shown, in the run's language; the group itself (`r.group`) stays
+/// English, as code and config compare it.
+pub fn group_label(group: &str) -> String {
+    const GROUPS: &[Text] = &[
+        Text::new("group.general", "General"),
+        Text::new("group.files", "Files"),
+        Text::new("group.navigate", "Navigate"),
+        Text::new("group.marks", "Marks"),
+        Text::new("group.panes", "Panes"),
+        Text::new("group.view", "View"),
+        Text::new("group.viewer", "Viewer"),
+        Text::new("group.terminal", "Terminal"),
+        Text::new("group.mouse", "Mouse"),
+        Text::new("group.shell", "Shell"),
+        Text::new("group.search", "Search"),
+        Text::new("group.your_commands", "Your commands"),
+        Text::new("group.select", "Select"),
+        Text::new("group.sort", "Sort"),
+        Text::new("group.tabs", "Tabs"),
+        Text::new("group.safe_operations", "Safe operations"),
+        Text::new("group.two_key_bindings", "Two-key bindings"),
+    ];
+    GROUPS
+        .iter()
+        .find(|t| t.en == group)
+        .map_or_else(|| group.to_string(), |t| t.get().into_owned())
+}
+
 /// The large window with nothing typed: every row under its group's name, to browse.
 pub fn browse_large(rows: &[Row]) -> Vec<Item> {
     let mut out = Vec::new();
@@ -692,7 +743,7 @@ pub fn browse_large(rows: &[Row]) -> Vec<Item> {
     for (i, r) in rows.iter().enumerate() {
         if group != Some(r.group.as_str()) {
             group = Some(&r.group);
-            out.push(Item::Heading(r.group.clone()));
+            out.push(Item::Heading(group_label(&r.group)));
         }
         out.push(Item::Row {
             row: i,
@@ -1496,9 +1547,9 @@ mod tests {
     fn every_binding_has_a_title_and_titles_are_unique() {
         let mut seen = HashSet::new();
         for b in keys::BINDINGS {
-            assert!(!b.title.is_empty(), "{} has no title", b.name);
+            assert!(!b.title.en.is_empty(), "{} has no title", b.name);
             assert!(
-                seen.insert(b.title),
+                seen.insert(b.title.en),
                 "two bindings are called {:?}",
                 b.title
             );

@@ -16,6 +16,7 @@ use xdevcmd_core::format::Cells;
 
 use crate::config::Config;
 use crate::config_edit::Value;
+use crate::lang::Text;
 use crate::modal::{buttons, centered, frame_box, put};
 use crate::theme;
 
@@ -37,8 +38,8 @@ pub struct Field {
     tab: usize,
     pub section: &'static str,
     pub key: &'static str,
-    label: &'static str,
-    help: &'static str,
+    label: Text,
+    help: Text,
     kind: Kind,
     /// Takes effect at once; otherwise at the next start.
     now: bool,
@@ -56,8 +57,8 @@ const fn f(
     tab: usize,
     section: &'static str,
     key: &'static str,
-    label: &'static str,
-    help: &'static str,
+    label: Text,
+    help: Text,
     kind: Kind,
     now: bool,
 ) -> Field {
@@ -77,8 +78,14 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "confirm_transfer",
-        "Ask before copy and move",
-        "Deleting always asks; this is about F5 and F6",
+        Text::new(
+            "settings.general.confirm_transfer.label",
+            "Ask before copy and move",
+        ),
+        Text::new(
+            "settings.general.confirm_transfer.help",
+            "Deleting always asks; this is about F5 and F6",
+        ),
         Kind::Bool,
         true,
     ),
@@ -86,8 +93,14 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "delete_to_trash",
-        "F8 moves to the trash",
-        "Shift+F8 always deletes for good",
+        Text::new(
+            "settings.general.delete_to_trash.label",
+            "F8 moves to the trash",
+        ),
+        Text::new(
+            "settings.general.delete_to_trash.help",
+            "Shift+F8 always deletes for good",
+        ),
         Kind::Bool,
         true,
     ),
@@ -95,8 +108,14 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "restore_session",
-        "Reopen panes and tabs",
-        "The panes, tabs and directories of last time, at the next start",
+        Text::new(
+            "settings.general.restore_session.label",
+            "Reopen panes and tabs",
+        ),
+        Text::new(
+            "settings.general.restore_session.help",
+            "The panes, tabs and directories of last time, at the next start",
+        ),
         Kind::Bool,
         true,
     ),
@@ -104,8 +123,14 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "autosave_secs",
-        "Save them every (seconds)",
-        "0: only on quit; otherwise closing the window keeps them too",
+        Text::new(
+            "settings.general.autosave_secs.label",
+            "Save them every (seconds)",
+        ),
+        Text::new(
+            "settings.general.autosave_secs.help",
+            "0: only on quit; otherwise closing the window keeps them too",
+        ),
         Kind::Pick(&["0", "5", "15", "30", "60", "300"]),
         true,
     ),
@@ -113,8 +138,11 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "safe_operations",
-        "Safe operations",
-        "copies via a temporary name; a killed run is cleaned up and offered again",
+        Text::new("settings.general.safe_operations.label", "Safe operations"),
+        Text::new(
+            "settings.general.safe_operations.help",
+            "copies via a temporary name; a killed run is cleaned up and offered again",
+        ),
         Kind::Bool,
         true,
     ),
@@ -122,8 +150,11 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "menu_bar",
-        "Menu bar",
-        "File, View, Help on the top row; F9 opens it either way",
+        Text::new("settings.general.menu_bar.label", "Menu bar"),
+        Text::new(
+            "settings.general.menu_bar.help",
+            "File, View, Help on the top row; F9 opens it either way",
+        ),
         Kind::Bool,
         true,
     ),
@@ -131,8 +162,11 @@ const FIELDS: &[Field] = &[
         0,
         "general",
         "animation",
-        "Animation",
-        "a small agent walks across the file panes' bottom edge, a step a second",
+        Text::new("settings.general.animation.label", "Animation"),
+        Text::new(
+            "settings.general.animation.help",
+            "a small agent walks across the file panes' bottom edge, a step a second",
+        ),
         Kind::Bool,
         true,
     ),
@@ -140,8 +174,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "enter",
-        "Enter on a file",
-        "open: with its program, as Total Commander; view: in xdevcmd's viewer",
+        Text::new("settings.files.enter.label", "Enter on a file"),
+        Text::new(
+            "settings.files.enter.help",
+            "open: with its program, as Total Commander; view: in xdevcmd's viewer",
+        ),
         Kind::Pick(&["open", "view"]),
         true,
     ),
@@ -149,8 +186,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "filter",
-        "Ctrl+F filter",
-        "fuzzy: letters in order, best first; plain: the text as typed",
+        Text::new("settings.files.filter.label", "Ctrl+F filter"),
+        Text::new(
+            "settings.files.filter.help",
+            "fuzzy: letters in order, best first; plain: the text as typed",
+        ),
         Kind::Pick(&["fuzzy", "plain"]),
         true,
     ),
@@ -158,8 +198,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "show_hidden",
-        "Show hidden files",
-        "Ctrl+H changes it in a pane",
+        Text::new("settings.files.show_hidden.label", "Show hidden files"),
+        Text::new(
+            "settings.files.show_hidden.help",
+            "Ctrl+H changes it in a pane",
+        ),
         Kind::Bool,
         false,
     ),
@@ -167,8 +210,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "sort",
-        "Sort by",
-        "Clicking a column header changes it in a pane",
+        Text::new("settings.files.sort.label", "Sort by"),
+        Text::new(
+            "settings.files.sort.help",
+            "Clicking a column header changes it in a pane",
+        ),
         Kind::Pick(&["name", "ext", "size", "modified"]),
         false,
     ),
@@ -176,8 +222,8 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "dirs_first",
-        "Directories first",
-        "",
+        Text::new("settings.files.dirs_first.label", "Directories first"),
+        Text::new("settings.files.dirs_first.help", ""),
         Kind::Bool,
         false,
     ),
@@ -185,8 +231,14 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "auto_refresh_ms",
-        "Look for changes every (ms)",
-        "0: never; press Ctrl+R to refresh by hand",
+        Text::new(
+            "settings.files.auto_refresh_ms.label",
+            "Look for changes every (ms)",
+        ),
+        Text::new(
+            "settings.files.auto_refresh_ms.help",
+            "0: never; press Ctrl+R to refresh by hand",
+        ),
         Kind::Pick(&["0", "500", "1000", "2000", "5000"]),
         true,
     ),
@@ -194,8 +246,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "max_panes",
-        "File panes at most",
-        "How many Alt+S / Alt+D may make, the two first included",
+        Text::new("settings.files.max_panes.label", "File panes at most"),
+        Text::new(
+            "settings.files.max_panes.help",
+            "How many Alt+S / Alt+D may make, the two first included",
+        ),
         Kind::Pick(&["2", "3", "4", "6", "8", "12", "16"]),
         true,
     ),
@@ -203,8 +258,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "icons",
-        "File icons",
-        "Needs a Nerd Font in the terminal",
+        Text::new("settings.files.icons.label", "File icons"),
+        Text::new(
+            "settings.files.icons.help",
+            "Needs a Nerd Font in the terminal",
+        ),
         Kind::Bool,
         false,
     ),
@@ -212,8 +270,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "ls_colors",
-        "Colours from LS_COLORS",
-        "Use the colours ls uses, instead of the theme's",
+        Text::new("settings.files.ls_colors.label", "Colours from LS_COLORS"),
+        Text::new(
+            "settings.files.ls_colors.help",
+            "Use the colours ls uses, instead of the theme's",
+        ),
         Kind::Bool,
         false,
     ),
@@ -221,8 +282,11 @@ const FIELDS: &[Field] = &[
         1,
         "files",
         "git_status",
-        "Git letters",
-        "Runs git: only where you trust the repositories (see security.md)",
+        Text::new("settings.files.git_status.label", "Git letters"),
+        Text::new(
+            "settings.files.git_status.help",
+            "Runs git: only where you trust the repositories (see security.md)",
+        ),
         Kind::Bool,
         false,
     ),
@@ -230,8 +294,8 @@ const FIELDS: &[Field] = &[
         1,
         "viewer",
         "wrap",
-        "Viewer wraps long lines",
-        "w changes it in the viewer",
+        Text::new("settings.viewer.wrap.label", "Viewer wraps long lines"),
+        Text::new("settings.viewer.wrap.help", "w changes it in the viewer"),
         Kind::Bool,
         true,
     ),
@@ -239,8 +303,8 @@ const FIELDS: &[Field] = &[
         1,
         "viewer",
         "tab_width",
-        "Viewer tab width",
-        "",
+        Text::new("settings.viewer.tab_width.label", "Viewer tab width"),
+        Text::new("settings.viewer.tab_width.help", ""),
         Kind::Pick(&["2", "4", "8"]),
         true,
     ),
@@ -248,8 +312,11 @@ const FIELDS: &[Field] = &[
         1,
         "viewer",
         "highlight",
-        "Viewer colours source",
-        "By language, up to 64 MiB (quick view 1 MiB); off under NO_COLOR",
+        Text::new("settings.viewer.highlight.label", "Viewer colours source"),
+        Text::new(
+            "settings.viewer.highlight.help",
+            "By language, up to 64 MiB (quick view 1 MiB); off under NO_COLOR",
+        ),
         Kind::Bool,
         true,
     ),
@@ -257,8 +324,11 @@ const FIELDS: &[Field] = &[
         1,
         "viewer",
         "images",
-        "Pictures in quick view",
-        "auto: the terminal's own pictures where it can; blocks: half blocks always",
+        Text::new("settings.viewer.images.label", "Pictures in quick view"),
+        Text::new(
+            "settings.viewer.images.help",
+            "auto: the terminal's own pictures where it can; blocks: half blocks always",
+        ),
         Kind::Pick(&["auto", "kitty", "iterm2", "sixel", "blocks"]),
         true,
     ),
@@ -266,8 +336,11 @@ const FIELDS: &[Field] = &[
         2,
         "theme",
         "name",
-        "Theme",
-        "Built in, or themes/<name>.toml beside config.toml; ←/→ to try them",
+        Text::new("settings.theme.name.label", "Theme"),
+        Text::new(
+            "settings.theme.name.help",
+            "Built in, or themes/<name>.toml beside config.toml; ←/→ to try them",
+        ),
         Kind::Themes,
         true,
     ),
@@ -275,8 +348,11 @@ const FIELDS: &[Field] = &[
         2,
         "theme",
         "colors",
-        "Colours",
-        "auto finds out; 256 for a terminal that shows wrong colours",
+        Text::new("settings.theme.colors.label", "Colours"),
+        Text::new(
+            "settings.theme.colors.help",
+            "auto finds out; 256 for a terminal that shows wrong colours",
+        ),
         Kind::Pick(&["auto", "truecolor", "256", "16"]),
         false,
     ),
@@ -284,8 +360,8 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "show",
-        "Terminal panel at start",
-        "F12 opens it either way",
+        Text::new("settings.terminal.show.label", "Terminal panel at start"),
+        Text::new("settings.terminal.show.help", "F12 opens it either way"),
         Kind::Bool,
         false,
     ),
@@ -293,8 +369,11 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "height_percent",
-        "Its height (%)",
-        "Drag its border to change it now",
+        Text::new("settings.terminal.height_percent.label", "Its height (%)"),
+        Text::new(
+            "settings.terminal.height_percent.help",
+            "Drag its border to change it now",
+        ),
         Kind::Pick(&["20", "25", "30", "35", "40", "50", "60"]),
         false,
     ),
@@ -302,8 +381,11 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "max_terminals",
-        "Shells at most",
-        "Across every terminal tab and split",
+        Text::new("settings.terminal.max_terminals.label", "Shells at most"),
+        Text::new(
+            "settings.terminal.max_terminals.help",
+            "Across every terminal tab and split",
+        ),
         Kind::Pick(&["1", "2", "3", "4", "6", "8", "12", "16"]),
         true,
     ),
@@ -311,9 +393,15 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "scrollback",
-        "History lines per shell",
+        Text::new(
+            "settings.terminal.scrollback.label",
+            "History lines per shell",
+        ),
         // Replaced when drawn by `scrollback_help`, which knows the screen's width.
-        "For the wheel and Shift+F12",
+        Text::new(
+            "settings.terminal.scrollback.help",
+            "For the wheel and Shift+F12",
+        ),
         Kind::Pick(&["100", "1000", "2000", "5000", "9999"]),
         true,
     ),
@@ -321,8 +409,14 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "send_when_idle",
-        "Type into an idle shell at once",
-        "Alt+C and typed names, when the shell is surely at its prompt; off asks first",
+        Text::new(
+            "settings.terminal.send_when_idle.label",
+            "Type into an idle shell at once",
+        ),
+        Text::new(
+            "settings.terminal.send_when_idle.help",
+            "Alt+C and typed names, when the shell is surely at its prompt; off asks first",
+        ),
         Kind::Bool,
         true,
     ),
@@ -330,8 +424,11 @@ const FIELDS: &[Field] = &[
         3,
         "terminal",
         "follow",
-        "Files follow the shell's cd",
-        FOLLOW_HELP,
+        Text::new(
+            "settings.terminal.follow.label",
+            "Files follow the shell's cd",
+        ),
+        Text::new("settings.terminal.follow.help", FOLLOW_HELP),
         Kind::Bool,
         true,
     ),
@@ -339,8 +436,11 @@ const FIELDS: &[Field] = &[
         LANGUAGES_TAB,
         "general",
         "language",
-        "Language",
-        "The words on screen; lang/<name>.toml beside xdevcmd or in its config folder",
+        Text::new("settings.general.language.label", "Language"),
+        Text::new(
+            "settings.general.language.help",
+            "The words on screen; lang/<name>.toml beside xdevcmd or in its config folder",
+        ),
         Kind::Languages,
         false,
     ),
@@ -571,11 +671,11 @@ impl SettingsDialog {
     }
 
     /// Changed settings that only take effect at the next start, by label.
-    pub fn need_restart(&self) -> Vec<&'static str> {
+    pub fn need_restart(&self) -> Vec<String> {
         self.changed()
             .into_iter()
             .filter(|(f, _)| !f.now)
-            .map(|(f, _)| f.label)
+            .map(|(f, _)| f.label.get().into_owned())
             .collect()
     }
 
@@ -805,12 +905,18 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
                 _ => tr!("settings_dialog.u_u", "\u{2039} {v} \u{203a}", v = v),
             };
             let changed = v != get(&d.before, f);
-            let when = if f.now { "" } else { "next start" };
+            let when = if f.now {
+                std::borrow::Cow::Borrowed("")
+            } else {
+                tr!("settings_dialog.next_start", "next start")
+            };
+            // Padded by columns, not characters: a translated label may be wide.
+            let pad = |t: &str, w: usize| format!("{t}{}", " ".repeat(w.saturating_sub(t.cells())));
             let line = format!(
-                "{}{:<label_w$} {:<18} {when}",
+                "{}{} {} {when}",
                 if changed { "\u{2022} " } else { "  " },
-                f.label,
-                shown
+                pad(&f.label.get(), label_w),
+                pad(&shown, 18),
             );
             let style = if i == d.row {
                 Style::new().fg(th.fg).bg(th.row_cursor_active)
@@ -841,7 +947,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
                 ("terminal", "scrollback") => {
                     scrollback_help(d.now.terminal.scrollback, area.width.saturating_sub(2))
                 }
-                _ => f.help.to_string(),
+                _ => f.help.get().into_owned(),
             };
             put(
                 frame,

@@ -8,6 +8,11 @@
 #[path = "../../crates/xdevcmd/src/pane/shell_report.rs"]
 pub mod shell_report;
 
+/// The language engine: keys.rs names its texts with it (beta.4). First, for `tr!`.
+#[macro_use]
+#[path = "../../crates/xdevcmd/src/lang.rs"]
+pub mod lang;
+
 /// The config file and theme files.
 #[path = "../../crates/xdevcmd/src/config.rs"]
 pub mod config;

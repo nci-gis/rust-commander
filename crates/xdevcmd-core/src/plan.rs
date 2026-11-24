@@ -437,6 +437,10 @@ pub fn target(dest: &Path) -> Target {
 ///   network drives have no Recycle Bin, and which a drive is cannot be asked without
 ///   the console API.
 pub fn trash_keeps(dir: &Path) -> Option<bool> {
+    // A test's own trash keeps whatever goes there ([`faults::test_trash`]).
+    if faults::test_trash().is_some() {
+        return Some(true);
+    }
     // The test build (the render and pty tests' binary): only Linux's trash follows
     // XDG_DATA_HOME into the test's sandbox; elsewhere a replace there would fill the
     // real Trash or Recycle Bin of whoever runs the tests.

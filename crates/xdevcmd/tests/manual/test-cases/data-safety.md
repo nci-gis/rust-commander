@@ -9,7 +9,7 @@ run at the cut commit is their evidence; nothing is logged for them here.
 
 | Case | Run by CI as |
 |---|---|
-| M-DS-01 Kill a copy that replaces files | `a_planned_copy_killed_then_continued_keeps_every_decision`; with the trash (Linux), `a_replace_killed_after_the_trash_is_finished_at_the_next_start` |
+| M-DS-01 Kill a copy that replaces files | `a_planned_copy_killed_then_continued_keeps_every_decision`; through the trash, `a_replace_killed_after_the_trash_is_finished_at_the_next_start` |
 | M-DS-03 A big copy, killed past a checkpoint | `a_big_copy_killed_after_a_checkpoint_goes_on_from_there` |
 | M-DS-04 A checked continue (C) | `a_checked_resume_repairs_a_file_the_journal_called_done` |
 | M-DS-05 Move across drives, killed | `a_move_killed_before_removing_its_source_says_both_are_there` |

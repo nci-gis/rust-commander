@@ -119,10 +119,15 @@ test perf"). So:
   "1 found different"; M-DS-03 compared MiB by MiB; `CASE_PATHS` + `noreplace.rs`,
   `file_ops.rs`, `modal.rs`, `app/modals.rs`; README, how-to-test, development.md.
   ×10 again: run 45357438349, 4/4 runners; PR CI 45357443903 green 7/7.
-  Open, the owner's call: M-DS-01's replace through the trash is killed by a test on
-  Linux only (the test build replaces for good elsewhere, `plan.rs` `trash_keeps`, and
-  the freeze rules out changing it), so on macOS and Windows nothing covers it now;
-  `skills/qa/SKILL.md` still describes logging the disk cases (read-only to agents).
+- **The trash on every system** (the owner, 2026-11-24: "bro sửa code luôn nhé, phạm vi
+  nhỏ"): a test build's trash is `XDEVCMD_TEST_TRASH` when set (`faults::test_trash`,
+  read by `plan::trash_keeps` and `ops::send_to_trash`; nothing in a release), so the
+  kill between the trash and the rename runs on macOS and Windows too. **A change to
+  product code past Round 035's freeze**, on the owner's word: `plan.rs`,
+  `ops/remove.rs` and `faults.rs` are on the data path, so hand evidence must be built
+  from this PR's merge or later (M-DS-02 and 06 list `plan.rs`; all three list `ops/`
+  and `faults.rs`). The read-only docs follow, on the owner's word too:
+  `reference/testing.md`, `skills/qa/SKILL.md` (logged in `promotions.md`).
 
 ## Check
 

@@ -6,7 +6,7 @@
 //!
 //! | Case | Test |
 //! |---|---|
-//! | M-DS-01 kill a copy that replaces | `a_planned_copy_killed_…`; with the trash, `a_replace_killed_…` (Linux: the test build's trash) |
+//! | M-DS-01 kill a copy that replaces | `a_planned_copy_killed_…`; through the trash, `a_replace_killed_…` |
 //! | M-DS-03 a big copy past a checkpoint | `a_big_copy_killed_after_a_checkpoint_…` |
 //! | M-DS-04 a checked continue | `a_checked_resume_repairs_…` |
 //! | M-DS-05 a move across devices | `a_move_killed_before_removing_its_source_…` (needs a second device) |
@@ -116,9 +116,8 @@ fn a_planned_copy_killed_then_continued_keeps_every_decision() {
 
 /// M-DS-01 with the trash. Round 031: killed after the old file went to the trash and before the new one was
 /// renamed in, the next start finishes the rename and says so; the old file is in the
-/// trash (the scratch one: XDG_DATA_HOME). Linux only: the test build puts a replaced
-/// file in the trash only there, where the trash is the test's own.
-#[cfg(target_os = "linux")]
+/// trash: the scratch one, `XDEVCMD_TEST_TRASH`, on every system (the real Trash or
+/// Recycle Bin stays out of it).
 #[test]
 fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
     let s = Scratch::new("kill-swap");
@@ -131,6 +130,12 @@ fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
         .set_modified(std::time::SystemTime::now() - Duration::from_secs(3600))
         .unwrap();
     let marker = s.dir.join("halted");
+    let trash = s
+        .dir
+        .join("data")
+        .join("Trash")
+        .to_string_lossy()
+        .into_owned();
     let spec = format!(
         "halt|rename|{}|{}",
         s.b().join("d-older.txt").display(),
@@ -140,7 +145,10 @@ fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
         &s,
         &[s.a(), s.b()],
         CFG,
-        &[("XDEVCMD_FAULTS", spec.as_str())],
+        &[
+            ("XDEVCMD_FAULTS", spec.as_str()),
+            ("XDEVCMD_TEST_TRASH", trash.as_str()),
+        ],
     );
     x.wait_for("d-older ");
     x.send(b"*");
@@ -157,10 +165,15 @@ fn a_replace_killed_after_the_trash_is_finished_at_the_next_start() {
         !s.b().join("d-older.txt").exists(),
         "held between the trash and the rename"
     );
-    let trashed = s.dir.join("data/Trash/files/d-older.txt");
+    let trashed = s.dir.join("data").join("Trash").join("files").join("d-older.txt");
     assert_eq!(std::fs::read_to_string(&trashed).unwrap(), "old");
 
-    let mut x = Run::start_in(&s, &[s.a(), s.b()], CFG, &[]);
+    let mut x = Run::start_in(
+        &s,
+        &[s.a(), s.b()],
+        CFG,
+        &[("XDEVCMD_TEST_TRASH", trash.as_str())],
+    );
     x.wait_for("1 replacement finished");
     assert_eq!(
         std::fs::read_to_string(s.b().join("d-older.txt")).unwrap(),

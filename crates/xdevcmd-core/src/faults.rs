@@ -87,6 +87,22 @@ pub(crate) fn skipped(_point: Point, _path: &Path) -> bool {
     false
 }
 
+/// A test's own trash (`XDEVCMD_TEST_TRASH`, a folder): in a test build a file a job
+/// replaces or deletes goes there, on every system, never to the real Trash or Recycle
+/// Bin of whoever runs the tests (Round 036: the replace through the trash killed on
+/// macOS and Windows too). `None` without it, and always in a release.
+#[cfg(any(test, feature = "faults"))]
+pub fn test_trash() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDEVCMD_TEST_TRASH").map(std::path::PathBuf::from)
+}
+
+/// No seam in this build: the trash is the system's.
+#[cfg(not(any(test, feature = "faults")))]
+#[inline(always)]
+pub fn test_trash() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// No seam in this build: a lookup finds what is there.
 #[cfg(not(any(test, feature = "faults")))]
 #[inline(always)]

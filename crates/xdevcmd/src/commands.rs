@@ -769,7 +769,7 @@ pub fn save_recent(recent: &[String]) -> std::io::Result<()> {
         recent: recent.to_vec(),
     })
     .map_err(std::io::Error::other)?;
-    crate::session::write_private(&p, text.as_bytes())
+    xdevcmd_core::document::save_state(&p, text.as_bytes())
 }
 
 // ── the palette ───────────────────────────────────────────────────────────────────

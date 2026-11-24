@@ -175,7 +175,11 @@ mod tests {
             !w.tick(t0 + Duration::from_secs(8), 20, "copied", hold),
             "the hold is over"
         );
-        assert_eq!(w.pos(), 3, "walking again from where it stopped, a step a second");
+        assert_eq!(
+            w.pos(),
+            3,
+            "walking again from where it stopped, a step a second"
+        );
         assert!(!w.tick(t0 + Duration::from_secs(9), 20, "copied", hold));
         assert_eq!(w.pos(), 4);
         assert!(

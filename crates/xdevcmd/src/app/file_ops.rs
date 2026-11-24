@@ -552,7 +552,7 @@ impl App {
             self.status = "cannot make a temporary directory for the list of names".into();
             return;
         };
-        if let Err(e) = session::write_private(&list, text.as_bytes()) {
+        if let Err(e) = xdevcmd_core::document::save_state(&list, text.as_bytes()) {
             self.status = format!("cannot write the list of names: {e}");
             return;
         }

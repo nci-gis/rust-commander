@@ -20,3 +20,9 @@ date_utc	built_from	version	os	terminal	shell	case	result	check	evidence	issue	n
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-01	PASS	PASS	check-mac-20261123-0918.txt	-	macOS (Intel)
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-03	PASS	PASS	check-mac-20261123-0918.txt	-	macOS (Intel)
 2026-11-23	66fc4b1ccfe14f884645fab5175fb9a99d1a393b	0.4.0-beta.1	macos	Mac Terminal	zsh	M-DS-04	PASS	PASS	check-mac-20261123-0918.txt	-	macOS (Intel)
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	windows	Windows Terminal	pwsh	M-DS-02	PASS	-	-	-	-
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	windows	Windows Terminal	pwsh	M-DS-06	PASS	-	-	-	-
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	windows	Windows Terminal	pwsh	M-DS-07	WAIVED	-	-	-	refer test result on Linux
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	linux	xterm-256color	bash	M-DS-02	PASS	-	-	-	-
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	linux	xterm-256color	bash	M-DS-06	PASS	-	-	-	-
+2026-11-24	ba363b8850b59a2ce1ef86e97fdcbe124dbc02b6	0.4.0-beta.2	linux	xterm-256color	bash	M-DS-07	PASS	-	-	-	-

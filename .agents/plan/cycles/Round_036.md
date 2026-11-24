@@ -137,6 +137,10 @@ test perf"). So:
 - [x] `qa ledger` asks for 02, 06, 07 only, and only where their files changed.
 - [x] One deliberate change in a case's files makes its cells stale, and one outside
   them does not (a test): `a_hand_cell_goes_stale_only_when_its_own_files_change`.
+- [x] The cut asked for 9 hand cells, not 21: built from `ba363b8`, 6 PASS and 3 waived
+  with reasons (06 on macOS, 07 on macOS and Windows);
+  `qa ledger` PASS (2026-11-24). Without this round the owner would have run 01, 03,
+  04, 05 on three systems again, since W6–W10 touched the data path.
 
 ## Act
 

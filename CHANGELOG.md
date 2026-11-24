@@ -24,8 +24,10 @@ that heading and starts a new, empty one here. -->
 - **One rule for xdevcmd's folders**: the config, the state (session, journal, crash
   logs) and Linux's trash are found the same way. A relative `HOME` or XDG folder is
   skipped instead of pointing into the folder xdevcmd started from, `USERPROFILE` is
-  the home when `HOME` is not a full path, and a crash log writes `~` for the same
-  home as the rest.
+  the home when `HOME` is not a full path, and a crash log writes `~` for every home
+  set (`HOME` and `USERPROFILE` both, on Windows). A session or journal that an
+  earlier version left under such a relative folder is not found any more: a job it
+  left half done is not offered at the next start.
 - **Links in a release's notes open**: they point at the tag's files, where the
   CHANGELOG's relative links did not resolve on the release page.
 

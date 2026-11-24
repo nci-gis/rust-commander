@@ -415,9 +415,16 @@ impl App {
                     self.pics.decoding = None;
                     changed = true;
                 }
-                // No picture; the preview says it is loading no more, and the next look
-                // tries again.
+                // No picture: the preview says why, and the same file is not decoded
+                // again (a picture that panics the decoder would do so every frame);
+                // another file, or this one changed, is a new key and is tried.
                 Poll::Died => {
+                    let failed = Prepared {
+                        pic: Err(DIED.to_string()),
+                        cells: (0, 0),
+                        bytes: Vec::new(),
+                    };
+                    self.pics.quick_image = Some((key.clone(), failed));
                     self.pics.decoding = None;
                     changed = true;
                 }

@@ -19,6 +19,12 @@ use std::process::Command;
 /// after the evidence was made leaves that evidence stale (lesson L7).
 pub const DATA_PATH: &[&str] = &[
     "crates/xdevcmd-core/src/ops.rs",
+    // ops.rs's modules (W9): the copy, move and delete themselves.
+    "crates/xdevcmd-core/src/ops",
+    // The file system's kind, the journal's lock, a cross-device move (W10).
+    "crates/xdevcmd-core/src/os.rs",
+    // Where the journal and the session are kept (W5).
+    "crates/xdevcmd-core/src/dirs.rs",
     "crates/xdevcmd-core/src/journal.rs",
     "crates/xdevcmd-core/src/plan.rs",
     "crates/xdevcmd-core/src/fastcopy.rs",
@@ -621,6 +627,25 @@ mod tests {
         note: &str,
     ) -> String {
         format!("2026-11-20T00:00Z\t{built}\t0.4.0-beta.2\t{os}\tterm\tsh\t{case}\t{result}\t{check}\t{ev}\t-\t{note}\n")
+    }
+
+    /// Every data-path entry exists, and a module file split into a folder of modules
+    /// names that folder too: `ops.rs` alone missed every change after W9 moved its code
+    /// into `ops/` (beta.3, found while planning Round 036).
+    #[test]
+    fn the_data_path_names_real_files_and_the_folders_of_split_modules() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        for p in DATA_PATH {
+            assert!(root.join(p).exists(), "{p} is gone: name where it went");
+            if let Some(stem) = p.strip_suffix(".rs") {
+                if root.join(stem).is_dir() {
+                    assert!(
+                        DATA_PATH.contains(&stem),
+                        "{p} has modules in {stem}/: list it"
+                    );
+                }
+            }
+        }
     }
 
     /// The ledger fires: evidence made before a data-path commit is STALE, a PASS that

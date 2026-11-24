@@ -443,6 +443,48 @@ fn starts_draws_both_panes_and_quits_cleanly() {
     xdevcmd.quit();
 }
 
+/// Beta.3 review: the walker walked over an open quick-search line, which is drawn on
+/// the same pane edge, and hid what was typed. While a search is open it stays away.
+#[test]
+fn the_walker_keeps_off_an_open_search_line() {
+    let s = Scratch::new("walker-search");
+    let cfg = s.file("walk.toml", "[general]\nanimation = true\n");
+    let cfg = cfg.to_string_lossy().into_owned();
+    let mut x = Session::start_env(
+        &s,
+        None,
+        &[s.left(), s.right()],
+        &[("XDEVCMD_CONFIG", &cfg)],
+    );
+    let me = |l: &str| l.contains("[o_o]") || l.contains("[-_-]");
+    x.send(b"\x13");
+    x.send(b"rep");
+    x.wait_for(" /  rep");
+    // The search's hint is a new message: the walker stands on the status line for
+    // its hold (5 s), then walks the edge again, where the search line is.
+    x.until_within(
+        Duration::from_secs(15),
+        "the walker back on the edge",
+        |scr| !scr.lines().rev().take(2).any(me),
+    );
+    let end = Instant::now() + Duration::from_secs(4);
+    while Instant::now() < end {
+        let scr = x.screen();
+        if let Some(line) = scr
+            .lines()
+            .find(|l| l.contains("\u{2514}") && l.contains(" / "))
+        {
+            assert!(
+                !me(line) && line.contains("rep"),
+                "the search line is kept\n{scr}"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    x.send(b"\x1b");
+    x.quit();
+}
+
 /// A config with a mistake (item 49): a dialog at start, never a silent fallback.
 /// Enter continues on the defaults and says so; q quits.
 #[test]

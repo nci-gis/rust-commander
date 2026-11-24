@@ -109,10 +109,11 @@ pub fn fit_end(s: &str, width: usize) -> String {
 }
 
 /// Columns a string takes on the terminal. The one measure of text on screen: a CJK
-/// character takes two columns, a combining accent none. Never `chars().count()` for a
-/// width (Round 035, W2).
+/// character takes two columns, a combining accent none, and an emoji sequence (❤️, a
+/// family joined by ZWJ) what the terminal and ratatui draw it as, which is not the sum
+/// of its characters. Never `chars().count()` for a width (Round 035, W2).
 pub fn text_cells(s: &str) -> usize {
-    s.chars().map(char_cells).sum()
+    unicode_width::UnicodeWidthStr::width(s)
 }
 
 /// `.cells()`: the columns of a `str` (or a `String`) on the terminal, as
@@ -183,6 +184,17 @@ pub fn display_line(s: &str, tab: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An emoji sequence is as wide as the terminal draws it, not the sum of its
+    /// characters (beta.3 review: ❤️ measured 1, a ZWJ family 6, both drawn 2).
+    #[test]
+    fn an_emoji_sequence_is_as_wide_as_it_is_drawn() {
+        assert_eq!(text_cells("\u{2764}\u{fe0f}"), 2);
+        assert_eq!(text_cells("\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"), 2);
+        assert_eq!(text_cells("Vi\u{1ec7}t"), 4);
+        assert_eq!(text_cells("Vie\u{323}\u{302}t"), 4);
+        assert_eq!(text_cells("\u{65e5}\u{672c}"), 4);
+    }
 
     #[test]
     fn cut_end_counts_columns_so_wide_characters_fit() {

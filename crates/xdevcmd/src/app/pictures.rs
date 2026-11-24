@@ -174,13 +174,11 @@ impl App {
                     self.settling = true;
                 } else {
                     self.settle = None;
-                    let (tx, rx) = std::sync::mpsc::channel();
                     let job = key.clone();
                     let cell = (cw, ch);
-                    std::thread::spawn(move || {
-                        let _ = tx.send(prepare(&job, w, h, bg, cell));
-                    });
-                    self.decoding = Some((key.clone(), rx));
+                    let task =
+                        xdevcmd_core::task::Task::spawn(move |_| prepare(&job, w, h, bg, cell));
+                    self.decoding = Some((key.clone(), task));
                 }
             }
         }

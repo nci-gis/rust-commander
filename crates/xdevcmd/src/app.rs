@@ -3,6 +3,7 @@ use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
+use xdevcmd_core::task::Task;
 
 use anyhow::Result;
 use ratatui::backend::{Backend, ClearType};
@@ -325,10 +326,9 @@ const KITTY_ID: u32 = 0x7864;
 struct Comparing {
     left: PathBuf,
     right: PathBuf,
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     seen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     shown: u64,
-    rx: Receiver<Option<std::io::Result<Vec<xdevcmd_core::compare::Diff>>>>,
+    task: Task<Option<std::io::Result<Vec<xdevcmd_core::compare::Diff>>>>,
 }
 
 /// What undo says while a delete to the trash is still running.
@@ -361,7 +361,11 @@ const STOP_WAIT: Duration = Duration::from_secs(5);
 type Shrunk = (PicKey, Prepared);
 
 /// A picture being decoded on a thread: what it is for, and where the result comes.
-type Decoding = (PicKey, Receiver<Prepared>);
+type Decoding = (PicKey, Task<Prepared>);
+
+/// What a background task that ended without its result says (W8): its thread
+/// panicked; the main loop names its crash log, as for any background panic.
+pub const DIED: &str = "stopped on an internal error";
 
 /// Where a confirmation's count goes until the count has been made.
 const COUNTING: &str = "counting\u{2026}";
@@ -385,12 +389,8 @@ impl xdevcmd_core::archive::Hooks for ViewHooks {
 
 /// An archive entry being extracted for F3: the result, its directory, its name, and
 /// the flag that stops it.
-type PendingView = (
-    Receiver<std::io::Result<()>>,
-    PathBuf,
-    String,
-    std::sync::Arc<std::sync::atomic::AtomicBool>,
-);
+/// An archive entry being extracted to view: the work, its temporary folder, its name.
+type PendingView = (Task<std::io::Result<()>>, PathBuf, String);
 
 /// The menu bar, left to right.
 pub const BAR: &[&str] = &["File", "View", "Help"];
@@ -490,7 +490,7 @@ pub struct App {
     /// Alt+Q: the pane showing a preview instead of its files, and what it shows.
     quick_view: Option<(PaneId, Option<Preview>)>,
     /// Alt+H: a checksum being worked out on its own thread.
-    hashing: Option<(PathBuf, Receiver<std::io::Result<Option<String>>>)>,
+    hashing: Option<(PathBuf, Task<std::io::Result<Option<String>>>)>,
     /// Alt+Y's deep compare, on a thread of its own: Esc stops it.
     comparing: Option<Comparing>,
     /// The system's directory watcher (interactive runs only; tests poll).
@@ -603,8 +603,8 @@ impl Drop for App {
         if let Some(t) = self.view_temp.take() {
             let _ = std::fs::remove_dir_all(&t);
         }
-        if let Some((_, tmp, _, stop)) = self.pending_view.take() {
-            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some((task, tmp, _)) = self.pending_view.take() {
+            task.stop();
             let _ = std::fs::remove_dir_all(&tmp);
         }
         // And everything else this run put in the temporary directory.

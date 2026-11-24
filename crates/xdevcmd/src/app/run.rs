@@ -1,6 +1,7 @@
 //! The event loop: run, one turn of it, background messages, stopping and signals.
 
 use super::*;
+use xdevcmd_core::task::Poll;
 
 impl App {
     pub fn run(mut self, terminal: &mut Term) -> Result<()> {
@@ -348,17 +349,24 @@ impl App {
         self.pump_background_jobs();
         changed |= modal_before != self.modal.is_some();
         self.autosave();
-        let viewed = self
-            .pending_view
-            .as_ref()
-            .and_then(|(rx, ..)| rx.try_recv().ok());
-        // Taken only once its result is in: a tuple would take it on every tick, and a
+        // Taken only once it has ended: a tuple would take it on every tick, and a
         // result that came after the first tick would never be read (#6).
-        if let Some(out) = viewed {
-            if let Some((_, tmp, name, _)) = self.pending_view.take() {
-                self.show_extracted(out, tmp, name);
-                changed = true;
+        let viewed = self.pending_view.as_ref().map(|(t, ..)| t.poll());
+        match viewed {
+            Some(Poll::Done(out)) => {
+                if let Some((_, tmp, name)) = self.pending_view.take() {
+                    self.show_extracted(out, tmp, name);
+                    changed = true;
+                }
             }
+            Some(Poll::Died) => {
+                if let Some((_, tmp, name)) = self.pending_view.take() {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    self.status = format!("extracting {name} {}", crate::app::DIED);
+                    changed = true;
+                }
+            }
+            Some(Poll::Pending) | None => {}
         }
         // The plan for the open confirmation: how far it has got, or the plan itself.
         if let Some(Modal::Confirm(c)) = self.modal.as_mut() {
@@ -399,23 +407,41 @@ impl App {
             }
         }
         changed |= self.poll_comparing();
-        if let Some((key, rx)) = &self.decoding {
-            if let Ok(prepared) = rx.try_recv() {
-                self.quick_image = Some((key.clone(), prepared));
-                self.decoding = None;
-                changed = true;
+        if let Some((key, task)) = &self.decoding {
+            match task.poll() {
+                Poll::Done(prepared) => {
+                    self.quick_image = Some((key.clone(), prepared));
+                    self.decoding = None;
+                    changed = true;
+                }
+                // No picture; the preview says it is loading no more, and the next look
+                // tries again.
+                Poll::Died => {
+                    self.decoding = None;
+                    changed = true;
+                }
+                Poll::Pending => {}
             }
         }
         let viewing = matches!(self.modal, Some(Modal::Usage));
         self.usage.tick(viewing);
-        let hashed = self
-            .hashing
-            .as_ref()
-            .and_then(|(p, rx)| rx.try_recv().ok().map(|r| (p.clone(), r)));
-        if let Some((path, result)) = hashed {
-            self.hashing = None;
-            self.show_checksum(&path, result);
-            changed = true;
+        let hashed = self.hashing.as_ref().map(|(p, t)| (p.clone(), t.poll()));
+        match hashed {
+            Some((path, Poll::Done(result))) => {
+                self.hashing = None;
+                self.show_checksum(&path, result);
+                changed = true;
+            }
+            Some((path, Poll::Died)) => {
+                self.hashing = None;
+                self.status = format!(
+                    "the SHA-256 of {} {}",
+                    Self::describe(std::slice::from_ref(&path)),
+                    crate::app::DIED
+                );
+                changed = true;
+            }
+            Some((_, Poll::Pending)) | None => {}
         }
         changed
     }

@@ -713,16 +713,12 @@ impl App {
             + Send
             + 'static,
     ) {
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let stop = std::sync::atomic::AtomicBool::new(false);
-            let _ = tx.send(work(&stop));
-        });
+        let task = xdevcmd_core::task::Task::spawn(move |stop| work(stop));
         self.status = format!(
             "working out the SHA-256 of {}\u{2026}",
             Self::describe(std::slice::from_ref(&path))
         );
-        self.hashing = Some((path, rx));
+        self.hashing = Some((path, task));
     }
 
     pub(super) fn show_checksum(&mut self, path: &Path, result: std::io::Result<Option<String>>) {

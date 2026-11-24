@@ -248,7 +248,7 @@ impl App {
         }
         if k.code == KeyCode::Esc {
             if let Some(c) = self.comparing.take() {
-                c.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                c.task.stop();
                 self.status = "comparison stopped".into();
                 return;
             }
@@ -298,8 +298,8 @@ impl App {
                 self.status = "search stopped".into();
                 return;
             }
-            if let Some((_, _, name, stop)) = self.pending_view.take() {
-                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some((task, _, name)) = self.pending_view.take() {
+                task.stop();
                 self.status = format!("stopped extracting {name}");
                 return;
             }

@@ -1,20 +1,22 @@
 name: ci
 
 on:
-  # The two long-lived branches and feat/ work branches: a feat/ branch is checked
-  # before its pull request exists (B6). A push to a branch with an open pull request
-  # runs twice (push and pull_request): the cost of not missing either.
-  # The integration branches only (feat/v0.4.0-beta.3 and the like): a working branch
-  # runs no CI per push (the owner, 2026-11-24: CI once a piece is done, not for each
-  # small change). A piece is checked when it merges into its integration branch, or
-  # earlier by hand: gh workflow run ci --ref <branch>.
+  # Pull requests into the long-lived branches and into an integration branch
+  # (feat/v0.4.0-beta.3 and the like) are checked before they merge (the owner,
+  # 2026-11-24: the normal flow). A push to those branches runs too, unless the merge
+  # message says [skip ci]: the owner decides by hand which merge is checked again.
+  # A working branch runs no CI per push; by hand: gh workflow run ci --ref <branch>.
+  # `feat/v[0-9]*`: a version, so `feat/viewer-…` is a working branch, not one of these.
   push:
-    branches: [main, dev, "feat/v*"]
+    branches: [main, dev, "feat/v[0-9]*"]
     # Nothing a test reads: the plan and the changelog. (The tests read README.md and
     # files under docs/, so those still run CI.)
     paths-ignore: [".agents/**", "CHANGELOG.md"]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, "feat/v[0-9]*"]
+    # As for a push. No branch requires a check, so a pull request that skips it is
+    # not left waiting.
+    paths-ignore: [".agents/**", "CHANGELOG.md"]
   # Actions -> ci -> Run workflow, or `gh workflow run ci --ref feat/topic`.
   workflow_dispatch:
   # Advisories are published after code is written. A weekly run catches a new one

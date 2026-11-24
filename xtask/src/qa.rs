@@ -25,6 +25,8 @@ pub const DATA_PATH: &[&str] = &[
     "crates/xdevcmd-core/src/os.rs",
     // Where the journal and the session are kept (W5).
     "crates/xdevcmd-core/src/dirs.rs",
+    // Which entries a copy skips (FIFOs, devices): `special_kind`.
+    "crates/xdevcmd-core/src/entry.rs",
     "crates/xdevcmd-core/src/journal.rs",
     "crates/xdevcmd-core/src/plan.rs",
     "crates/xdevcmd-core/src/fastcopy.rs",

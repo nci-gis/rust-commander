@@ -62,31 +62,37 @@ pub fn elide_middle(s: &str, width: usize) -> String {
 /// How [`elide_middle`] cuts `s` to `width` columns: `None` when it fits as it is, or how
 /// many characters it keeps from the start and from the end, around the ellipsis. The
 /// start gets the odd column; columns a wide character could not use go to the end.
+///
+/// Cut between drawn characters (grapheme clusters), never inside one: an accent stays
+/// with its letter, an emoji with its VS16 or ZWJ partners, each measured as a whole.
 pub fn elided(s: &str, width: usize) -> Option<(usize, usize)> {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.iter().map(|&c| char_cells(c)).sum::<usize>() <= width {
+    if text_cells(s) <= width {
         return None;
     }
+    // Each drawn character: its columns, and how many chars it is made of.
+    let g: Vec<(usize, usize)> = graphemes(s)
+        .map(|g| (text_cells(g), g.chars().count()))
+        .collect();
     let keep = width.saturating_sub(1);
-    let mut head = 0;
-    let mut used = 0;
-    while head < chars.len() && used + char_cells(chars[head]) <= keep.div_ceil(2) {
-        used += char_cells(chars[head]);
+    let (mut head, mut used, mut head_chars) = (0, 0, 0);
+    while head < g.len() && used + g[head].0 <= keep.div_ceil(2) {
+        used += g[head].0;
+        head_chars += g[head].1;
         head += 1;
     }
     let room = keep - used;
-    let mut tail = 0;
-    let mut tail_used = 0;
-    while tail < chars.len() - head && tail_used + char_cells(chars[chars.len() - 1 - tail]) <= room
-    {
-        tail_used += char_cells(chars[chars.len() - 1 - tail]);
+    let (mut tail, mut tail_used, mut tail_chars) = (0, 0, 0);
+    while tail < g.len() - head && tail_used + g[g.len() - 1 - tail].0 <= room {
+        tail_used += g[g.len() - 1 - tail].0;
+        tail_chars += g[g.len() - 1 - tail].1;
         tail += 1;
     }
-    // An accent whose letter did not fit is not shown on its own.
-    while tail > 0 && char_cells(chars[chars.len() - tail]) == 0 {
-        tail -= 1;
-    }
-    Some((head, tail))
+    Some((head_chars, tail_chars))
+}
+
+/// The drawn characters of `s` (extended grapheme clusters).
+fn graphemes(s: &str) -> impl Iterator<Item = &str> {
+    unicode_segmentation::UnicodeSegmentation::graphemes(s, true)
 }
 
 /// `s` in exactly `width` columns, from the left: elided in the middle if longer, padded
@@ -144,13 +150,13 @@ pub fn cut_end(s: &str, width: usize) -> String {
     }
     let mut out = String::new();
     let mut used = 0;
-    for c in s.chars() {
-        let cw = char_cells(c);
-        if used + cw > width - 1 {
+    for g in graphemes(s) {
+        let gw = text_cells(g);
+        if used + gw > width - 1 {
             break;
         }
-        out.push(c);
-        used += cw;
+        out.push_str(g);
+        used += gw;
     }
     out.push('\u{2026}');
     out
@@ -194,6 +200,44 @@ mod tests {
         assert_eq!(text_cells("Vi\u{1ec7}t"), 4);
         assert_eq!(text_cells("Vie\u{323}\u{302}t"), 4);
         assert_eq!(text_cells("\u{65e5}\u{672c}"), 4);
+    }
+
+    /// Fitting and cutting never come out wider than asked and never split a drawn
+    /// character (beta.3 review of the fix above: they still summed per char).
+    #[test]
+    fn fitting_and_cutting_keep_emoji_and_accents_whole() {
+        let heart = "\u{2764}\u{fe0f}";
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        let names = [
+            format!("a{heart}"),
+            format!("{heart}{heart}b"),
+            format!("{family}xyz"),
+            format!("{family}{family}{family}"),
+            "Vie\u{323}\u{302}t Nam.txt".to_string(),
+            "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{540d}\u{524d}.md".to_string(),
+        ];
+        for name in &names {
+            for w in 1..=text_cells(name) + 1 {
+                let fit = fit_start(name, w);
+                assert_eq!(text_cells(&fit), w, "fit_start({name:?}, {w}) = {fit:?}");
+                let mid = elide_middle(name, w);
+                assert!(
+                    text_cells(&mid) <= w,
+                    "elide_middle({name:?}, {w}) = {mid:?}"
+                );
+                let end = cut_end(name, w);
+                assert!(text_cells(&end) <= w, "cut_end({name:?}, {w}) = {end:?}");
+                for out in [&mid, &end] {
+                    let kept: String = out.chars().filter(|&c| c != '\u{2026}').collect();
+                    for g in graphemes(&kept) {
+                        assert!(
+                            graphemes(name).any(|whole| whole == g),
+                            "{g:?} is part of a drawn character of {name:?}: {out:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

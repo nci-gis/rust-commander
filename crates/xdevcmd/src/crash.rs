@@ -140,7 +140,7 @@ fn write_in(dir: &Path, text: &str) -> Option<PathBuf> {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);
     }
-    let text = homes_as_tilde(text, &homes());
+    let text = homes_as_tilde(text, &homes(), cfg!(windows));
     o.open(&path).ok()?.write_all(text.as_bytes()).ok()?;
     prune(dir);
     Some(path)
@@ -156,23 +156,67 @@ fn homes() -> Vec<String> {
 }
 
 /// `text` with every mention of each of `homes` written `~`, the longest first so one
-/// inside another is not cut in two. Whichever home a path is under, the user's name
-/// in it stays out of a log meant to be attached to a report.
-fn homes_as_tilde(text: &str, homes: &[String]) -> String {
+/// inside another is not cut in two. `fold`: letters' case does not matter (Windows).
+/// What it covers: each home as written, with `/` or `\\` between its names, followed
+/// by a separator or the end of a path. Not a home spelled another way (a short 8.3
+/// name, an MSYS `/c/Users/…` for `C:\\Users\\…`).
+fn homes_as_tilde(text: &str, homes: &[String], fold: bool) -> String {
     let mut by_length: Vec<&String> = homes.iter().collect();
     by_length.sort_by_key(|h| std::cmp::Reverse(h.len()));
     by_length
         .into_iter()
-        .fold(text.to_string(), |t, h| home_as_tilde(&t, Some(h)))
+        .fold(text.to_string(), |t, h| home_as_tilde(&t, Some(h), fold))
 }
 
-/// `text` with every mention of `home` written `~`. A home of `/` or shorter says
-/// nothing and is left alone (it would turn every path into `~`).
-fn home_as_tilde(text: &str, home: Option<&str>) -> String {
-    match home.map(|h| h.trim_end_matches(['/', '\\'])) {
-        Some(h) if h.len() > 1 => text.replace(h, "~"),
-        _ => text.to_string(),
+/// `text` with every mention of `home` written `~`: as written and with the other
+/// slash, only where a separator or the end of a path follows it (so `/home/anna` is
+/// not `/home/ann` + `a`). A home that names no user (`/`, a drive's root `C:\\`) is
+/// left alone: it would turn every path into `~`.
+fn home_as_tilde(text: &str, home: Option<&str>, fold: bool) -> String {
+    let Some(h) = home.map(|h| h.trim_end_matches(['/', '\\'])) else {
+        return text.to_string();
+    };
+    let drive_root = h.len() == 2 && h.ends_with(':');
+    if h.len() <= 1 || drive_root {
+        return text.to_string();
     }
+    let mut out = text.to_string();
+    for form in [h.to_string(), h.replace('\\', "/"), h.replace('/', "\\")] {
+        out = replace_home(&out, &form, fold);
+    }
+    out
+}
+
+/// Each `home` in `text` followed by a separator or a path's end, written `~`.
+fn replace_home(text: &str, home: &str, fold: bool) -> String {
+    let key = |s: &str| {
+        if fold {
+            s.to_ascii_lowercase()
+        } else {
+            s.to_string()
+        }
+    };
+    // ASCII case folding keeps every byte where it was, so offsets carry over.
+    let (hay, needle) = (key(text), key(home));
+    let ends_path = |c: Option<char>| {
+        c.is_none_or(|c| {
+            matches!(c, '/' | '\\' | ':' | '"' | '\'' | ')' | ']') || c.is_whitespace()
+        })
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut from = 0;
+    while let Some(at) = hay[from..].find(&needle).map(|i| from + i) {
+        let end = at + needle.len();
+        if ends_path(text[end..].chars().next()) {
+            out.push_str(&text[from..at]);
+            out.push('~');
+        } else {
+            out.push_str(&text[from..end]);
+        }
+        from = end;
+    }
+    out.push_str(&text[from..]);
+    out
 }
 
 /// Keep only the newest [`KEEP`] crash logs.
@@ -280,32 +324,62 @@ mod tests {
         // under either keeps no user name (beta.3 review: only HOME was hidden).
         let text = r"at C:\Users\ann\src\x.rs and /c/msys/home/ann/y.rs";
         let homes = [r"C:\Users\ann".to_string(), "/c/msys/home/ann".to_string()];
-        assert_eq!(homes_as_tilde(text, &homes), r"at ~\src\x.rs and ~/y.rs");
+        assert_eq!(
+            homes_as_tilde(text, &homes, false),
+            r"at ~\src\x.rs and ~/y.rs"
+        );
         // One home inside the other: the longer one is replaced whole.
         let nested = ["/home/ann".to_string(), "/home/ann/win".to_string()];
-        assert_eq!(homes_as_tilde("/home/ann/win/z", &nested), "~/z");
-        assert_eq!(homes_as_tilde("/x", &[]), "/x");
+        assert_eq!(homes_as_tilde("/home/ann/win/z", &nested, false), "~/z");
+        assert_eq!(homes_as_tilde("/x", &[], false), "/x");
+    }
+
+    /// Beta.3 review of the fix above: a home is a whole folder name, in either slash,
+    /// in any case on Windows; a drive's root is no home.
+    #[test]
+    fn a_home_is_matched_as_a_whole_folder_in_any_spelling_windows_allows() {
+        let win = [r"C:\Users\Ann".to_string()];
+        assert_eq!(homes_as_tilde(r"c:\users\ann\x", &win, true), r"~\x");
+        assert_eq!(homes_as_tilde("C:/Users/Ann/z", &win, true), "~/z");
+        assert_eq!(homes_as_tilde("at C:/Users/Ann", &win, true), "at ~");
+        // Case matters elsewhere.
+        assert_eq!(
+            homes_as_tilde("/Home/Ann/x", &["/home/ann".into()], false),
+            "/Home/Ann/x"
+        );
+        // Another user whose name starts with this one's is not touched.
+        let unix = ["/home/ann".to_string()];
+        assert_eq!(
+            homes_as_tilde("/home/anna/x /home/ann/y", &unix, false),
+            "/home/anna/x ~/y"
+        );
+        assert_eq!(homes_as_tilde("in /home/ann: x", &unix, false), "in ~: x");
+        // A home that is a drive's root names nobody.
+        assert_eq!(
+            homes_as_tilde(r"C:\x and C:\y", &[r"C:\".into()], true),
+            r"C:\x and C:\y"
+        );
     }
 
     #[test]
     fn the_home_directory_is_written_as_a_tilde() {
         let text = "panicked at /home/ann/.cargo/registry/src/x.rs:1\n  in /home/ann/work\n";
         assert_eq!(
-            home_as_tilde(text, Some("/home/ann")),
+            home_as_tilde(text, Some("/home/ann"), false),
             "panicked at ~/.cargo/registry/src/x.rs:1\n  in ~/work\n"
         );
         assert_eq!(
-            home_as_tilde(text, Some("/home/ann/")),
-            home_as_tilde(text, Some("/home/ann"))
+            home_as_tilde(text, Some("/home/ann/"), false),
+            home_as_tilde(text, Some("/home/ann"), false)
         );
         assert_eq!(
-            home_as_tilde("/x", Some("/")),
+            home_as_tilde("/x", Some("/"), false),
             "/x",
             "a home of / says nothing"
         );
-        assert_eq!(home_as_tilde("/x", None), "/x");
+        assert_eq!(home_as_tilde("/x", None, false), "/x");
         assert_eq!(
-            home_as_tilde(r"C:\Users\ann\src\x.rs", Some(r"C:\Users\ann")),
+            home_as_tilde(r"C:\Users\ann\src\x.rs", Some(r"C:\Users\ann"), false),
             r"~\src\x.rs"
         );
     }

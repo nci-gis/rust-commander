@@ -10,6 +10,24 @@ that heading and starts a new, empty one here. -->
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+- **Languages**: the words on screen in Vietnamese or Japanese, or a language of your
+  own: one TOML file in `lang/` ([docs/language.md](docs/language.md)). File →
+  Settings… → Languages lists those found; `[general] language` (default `auto`, the
+  system's). A release ships `lang/template.txt`, every text in English, to start
+  from. A text that could act on the terminal (a control character, a direction
+  override) is not used from a language file.
+
+### Fixed
+- **Names Windows does not allow are refused before they are made** by F7, a new file,
+  a rename, rename many, copy as, pack and save as, as copy and move refuse them:
+  `CON`, `NUL`, `COM1`…, `< > : " | ? * \`, a dot or space at the end. On Windows, and
+  on a FAT, exFAT or NTFS drive anywhere (on Linux and macOS too). Before, F7 left them
+  to Windows, which reported an error or trimmed the name.
+- **The key bar keeps every key in a longer language**: its longest labels are cut
+  with `…` when that fits all ten; on a narrow screen the last keys are left off, as
+  before.
+
 ## [0.4.0-beta.3] - 2026-11-24
 
 ### Added

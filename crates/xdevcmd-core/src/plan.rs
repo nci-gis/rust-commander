@@ -412,6 +412,12 @@ impl Target {
     }
 }
 
+/// Whether Windows' rules for names hold in the directory `dir`: on Windows, and on a
+/// FAT, exFAT or NTFS drive anywhere. Only the file system is looked at.
+pub fn windows_names_at(dir: &Path) -> bool {
+    cfg!(windows) || matches!(fs_kind(dir), Fs::Fat | Fs::Exfat | Fs::Ntfs)
+}
+
 /// Look at the directory `dest`: its file system, free space, whether this user can
 /// write there, whether it ignores case. Reads only.
 pub fn target(dest: &Path) -> Target {

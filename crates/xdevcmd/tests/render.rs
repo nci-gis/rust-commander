@@ -5847,6 +5847,36 @@ fn a_language_file_names_the_key_bar_and_the_menus() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// W8 (Round 037): F7 and a new file refuse what Windows does not allow, where its
+/// rules hold, as copy and move do; elsewhere such a name is made. (On a FAT, exFAT or
+/// NTFS drive the rules hold anywhere: `rename::check` is tested with them.)
+#[test]
+fn f7_and_a_new_file_refuse_names_windows_does_not_allow() {
+    let (a, b) = fixture();
+    let mut cases = vec![
+        ("F7,C,O,N,Enter", "CON"),
+        ("F7,a,:,b,Enter", "a:b"),
+        ("F7,x,.,Enter", "x."),
+    ];
+    if cfg!(windows) {
+        // New file opens the editor once made: only where it is refused.
+        cases.push(("Alt+q,n,u,l,.,t,x,t,Enter", "nul.txt"));
+    }
+    for (keys, name) in cases {
+        let s = shot_keys("110x24", keys, &a, &b);
+        if cfg!(windows) {
+            assert!(s.contains("cannot be used here"), "{name}\n{s}");
+        } else {
+            assert!(a.join(name).is_dir(), "{name} is a fine name here\n{s}");
+            fs::remove_dir(a.join(name)).unwrap();
+        }
+    }
+    // `..` is a way there, not a name: F7 still makes a folder beside this one.
+    shot_keys("110x24", "F7,.,.,/,s,i,b,Enter", &a, &b);
+    assert!(a.parent().unwrap().join("sib").is_dir(), "../sib");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// Beta.4: a language whose key bar is too long for the screen keeps all ten keys, the
 /// longest labels cut with `…` (the owner, 2026-11-25: "handle khi tràn").
 #[test]

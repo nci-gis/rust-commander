@@ -95,12 +95,19 @@ planned for 0.5.
   shipped beside the program (every key and its English, kept current by a test, for a
   user with no source tree), and a code of one's own picked whole (`my-pseudo` was read
   as the locale `my`).
-- [ ] **W8 Names Windows does not allow** (the owner, 2026-11-24, carried from Round
+- [x] **W8 Names Windows does not allow** (the owner, 2026-11-24, carried from Round
   035's Act): a new folder (F7), a new file and a rename refused by one check, the one
   copy and move use (`plan::name_problem`): Windows' characters, a dot or space at the
   end, `CON`/`NUL`/`COM1`…, on Windows and on a FAT, exFAT or NTFS drive anywhere. Red
   test first (F7 with `a:b` and `CON` on Windows CI; the rules on a FAT mount on Linux).
   Remove the row from Known issues and the note in the Guide.
+  Done 2026-11-25: `rename::check` / `name_for` (portable checks, then
+  `plan::name_problem` where `plan::windows_names_at`); used by rename, rename many,
+  F7 (each part of `a/b`), new file, copy as, and typed destinations (pack, save as,
+  log to). Tests: `windows_names_are_refused_where_windows_rules_hold` (red first),
+  `f7_and_a_new_file_refuse_names_windows_does_not_allow` (refused on Windows CI, made
+  elsewhere). No FAT mount in CI (the earlier note said there was: wrong); the FAT
+  case is covered by `check(name, true)`.
 - [x] **W9 The fuzz crate in CI** (Round 035's Act): `cargo check` in `fuzz/`, in the
   cross-check job.
 

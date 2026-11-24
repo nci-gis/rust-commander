@@ -626,10 +626,11 @@ impl App {
             )
             .into());
         }
-        // The name itself as Rename checks one: on Windows `<>:"|?*` and a trailing dot
-        // or space, which the system would refuse in its own words once the job ran.
+        // The name itself as Rename checks one: Windows' rules where they hold, which
+        // the system would refuse in its own words once the job ran.
         if let Some(name) = dest.file_name().and_then(|n| n.to_str()) {
-            if let Err(e) = xdevcmd_core::rename::validate_name(name) {
+            let dir = dest.parent().unwrap_or(std::path::Path::new("."));
+            if let Err(e) = xdevcmd_core::rename::name_for(dir, name) {
                 return Err(e.to_string());
             }
         }

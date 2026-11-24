@@ -9,7 +9,6 @@ the details are where you would meet the thing, behind the link. Not listed here
 | Issue | System | What to do | Planned | Details |
 |---|---|---|---|---|
 | The terminal's close button is not caught: a job in progress stops without tidying up | Windows | Quit with F10; after a close, the next start tidies up and offers to continue | later | [Security](security.md#limits) |
-| A name Windows keeps for a device (`CON`, `NUL`, `COM1`…) given to a new folder (F7), a new file or a rename, and any name Windows does not allow given to a new folder, are not refused before they are made, as copy and move refuse them: Windows reports an error, or may trim a dot or a space at the end | Windows; a FAT, exFAT or NTFS drive on Linux and macOS | Choose another name; look at the name made | later | [Guide](guide.md#file-names) |
 | A prompt built into the shell, such as bash's `read -s`, looks like the shell's own prompt: Alt+C can be typed as its answer | Linux, macOS | Press Ctrl+C in the shell first, or turn on the prompt marks | later | [Shell](shell.md#before-anything-is-typed-into-the-shell) |
 | An open single quote in fish or PowerShell is not seen: a name typed in lands inside it | all | Press Ctrl+C in the shell first | later | [Shell](shell.md#before-anything-is-typed-into-the-shell) |
 | The fish and PowerShell versions of the shell set-up (staying in the directory you quit in, prompt marks) have not been run | all | Tell us if they work for you | later | [Shell](shell.md#stay-in-the-directory-you-were-in) |

@@ -15,8 +15,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::rename::validate_name;
-
 /// The file to hand to an editor: one name per line, in the order given.
 pub fn names_text(paths: &[PathBuf]) -> String {
     let mut out = String::new();
@@ -47,8 +45,8 @@ pub fn plan(paths: &[PathBuf], edited: &str) -> Result<Vec<(PathBuf, PathBuf)>, 
         if *line == old {
             continue;
         }
-        validate_name(line).map_err(|e| format!("{line:?}: {e}"))?;
         let dir = p.parent().unwrap_or(Path::new("."));
+        crate::rename::name_for(dir, line).map_err(|e| format!("{line:?}: {e}"))?;
         let name = crate::rename::keep_bytes(p.file_name().unwrap_or_default(), line);
         moves.push((p.clone(), dir.join(name)));
     }

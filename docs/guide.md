@@ -297,11 +297,11 @@ for it; your own commands (Shift+F9, `[[menu]]` in the [config](config.md)) can 
 - **Compared as stored**: compare and sync match names by their exact bytes. `Read.me`
   and `read.me` on a drive that ignores case show as a case clash. A name composed on
   one side and decomposed on the other (a folder copied from macOS) may show as two.
-- **New names** (rename, new directory, new file, copy as) may not hold `/` or a control
-  character; on Windows a rename, a new file and copy as refuse `< > : " | ? * \` too,
-  and a name ending in a dot or a space. A new directory, and names Windows keeps for
-  devices (`CON`, `NUL`…), are not checked yet: see
-  [Known issues](known-issues.md#not-yet-will-change).
+- **New names** (rename, rename many, new directory, new file, copy as, pack, save as)
+  may not hold `/` or a control character. Where Windows' rules hold (on Windows, and
+  on a FAT, exFAT or NTFS drive anywhere) they also may not hold `< > : " | ? * \`,
+  end in a dot or a space, or be a name Windows keeps for a device (`CON`, `NUL`,
+  `COM1`…), as copy and move refuse them.
 
 ## Find, filter, compare
 

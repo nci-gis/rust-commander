@@ -373,8 +373,22 @@ impl App {
                     self.status = tr!("file_ops.no_name_given", "no name given").into();
                     return;
                 }
-                // Folders may be nested (`a/b`): control characters were refused above,
-                // in the whole text.
+                // Folders may be nested (`a/b`): each part is checked as a name where it
+                // goes, Windows' rules included where they hold (W8, Round 037). An empty
+                // part (`/` first, `a//b`), `.` and `..` are a way there, not a name: the
+                // root check below holds `..` in.
+                let seps: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+                let bad = name
+                    .split(seps)
+                    .filter(|p| !p.is_empty() && *p != "." && *p != "..")
+                    .find_map(|p| xdevcmd_core::rename::name_for(&i.dir, p).err());
+                if let Some(e) = bad {
+                    self.modal = Some(Modal::Input(Input {
+                        error: Some(e.to_string()),
+                        ..i
+                    }));
+                    return;
+                }
                 let target = i.dir.join(name);
                 if let Err(e) = xdevcmd_core::policy::guard_write() {
                     self.status = e.to_string();
@@ -433,7 +447,7 @@ impl App {
             }
             InputKind::NewFile => {
                 let name = text.trim();
-                if let Err(e) = xdevcmd_core::rename::validate_name(name) {
+                if let Err(e) = xdevcmd_core::rename::name_for(&i.dir, name) {
                     self.modal = Some(Modal::Input(Input {
                         error: Some(e.to_string()),
                         ..i
@@ -491,7 +505,7 @@ impl App {
             }
             InputKind::CopyAs { from } => {
                 let name = text.trim();
-                if let Err(e) = xdevcmd_core::rename::validate_name(name) {
+                if let Err(e) = xdevcmd_core::rename::name_for(&i.dir, name) {
                     self.modal = Some(Modal::Input(Input {
                         error: Some(e.to_string()),
                         ..i

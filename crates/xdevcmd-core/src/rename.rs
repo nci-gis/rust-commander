@@ -15,6 +15,8 @@ pub enum RenameError {
     BadChar(char),
     Exists(String),
     ReadOnly,
+    /// A name Windows does not allow, where its rules hold ([`check`]): the name, why.
+    NotHere(String, &'static str),
     Io(String),
 }
 
@@ -45,6 +47,9 @@ impl std::fmt::Display for RenameError {
                     "xdevcmd is in read-only mode \u{2014} nothing is renamed"
                 )
             }
+            RenameError::NotHere(n, why) => {
+                write!(f, "\"{n}\" cannot be used here: {why}")
+            }
             RenameError::Io(e) => write!(f, "{e}"),
         }
     }
@@ -65,18 +70,25 @@ pub fn validate_name(name: &str) -> Result<(), RenameError> {
     if let Some(c) = name.chars().find(|&c| c == '/' || crate::controls::is(c)) {
         return Err(RenameError::BadChar(c));
     }
-    #[cfg(windows)]
-    {
-        if let Some(c) = name.chars().find(|c| {
-            matches!(c, '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*') || (*c as u32) < 32
-        }) {
-            return Err(RenameError::BadChar(c));
-        }
-        if name.ends_with('.') || name.ends_with(' ') {
-            return Err(RenameError::Reserved(name.to_string()));
-        }
-    }
     Ok(())
+}
+
+/// [`validate_name`], then the rules of where the name goes: with `windows`, what
+/// Windows does not allow (`< > : " | ? * \\`, a dot or space at the end, `CON`,
+/// `NUL`, `COM1`…), by the rules copy and move use ([`crate::plan::name_problem`]).
+pub fn check(name: &str, windows: bool) -> Result<(), RenameError> {
+    validate_name(name)?;
+    match crate::plan::name_problem(std::ffi::OsStr::new(name), windows) {
+        None => Ok(()),
+        Some(crate::plan::Blocked::BadName(why)) => Err(RenameError::NotHere(name.into(), why)),
+        Some(_) => Err(RenameError::NotHere(name.into(), "it is too long")),
+    }
+}
+
+/// [`check`] for a new name in the directory `dir`: Windows' rules on Windows, and on a
+/// FAT, exFAT or NTFS drive anywhere. For F7, a new file, a rename, copy as.
+pub fn name_for(dir: &Path, name: &str) -> Result<(), RenameError> {
+    check(name, crate::plan::windows_names_at(dir))
 }
 
 /// Rename `path` to `new_name` in the same directory. Returns the new path.
@@ -144,7 +156,7 @@ pub fn rename(path: &Path, new_name: &str) -> Result<PathBuf, RenameError> {
     if crate::policy::read_only() {
         return Err(RenameError::ReadOnly);
     }
-    validate_name(new_name)?;
+    name_for(path.parent().unwrap_or(Path::new(".")), new_name)?;
     let old_name = path
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -183,6 +195,29 @@ impl From<io::Error> for RenameError {
 #[cfg(test)]
 mod tests {
     /// QA 2026-11-17: what was not edited keeps its bytes; a UTF-8 name is the text.
+    /// W8 (Round 037): what Windows does not allow is refused wherever its rules hold
+    /// (Windows, or a FAT, exFAT or NTFS drive anywhere), by the rules copy and move
+    /// use; elsewhere those names are fine.
+    #[test]
+    fn windows_names_are_refused_where_windows_rules_hold() {
+        for n in [
+            "CON", "nul.txt", "Com1", "LPT9.log", "a:b", "a?", "q\"x", "dot.", "space ",
+        ] {
+            let e = check(n, true).expect_err(n);
+            assert!(matches!(e, RenameError::NotHere(..)), "{n}: {e:?}");
+            assert!(e.to_string().contains(n.trim_end()), "{e}");
+            assert!(
+                check(n, false).is_ok(),
+                "{n} is a fine name off Windows' rules"
+            );
+        }
+        for n in ["CONSOLE", "COM0", "a.b", "báo cáo.txt", "日本語"] {
+            assert!(check(n, true).is_ok(), "{n}");
+        }
+        // The portable checks come first, either way.
+        assert_eq!(check("a/b", true), Err(RenameError::BadChar('/')));
+    }
+
     #[cfg(unix)]
     #[test]
     fn keep_bytes_keeps_what_was_not_edited() {

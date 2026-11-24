@@ -87,8 +87,28 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
 - [ ] Hand-test ledger PASS at the cut commit (21 cells), the builds taken from the CI
   artifact of that commit (`docs/development.md`); plus one case: a copy killed on
   beta.2, continued on beta.3.
-- [ ] Speed A/B against `v0.4.0-beta.2` (interleaved on a noisy machine).
-- [ ] Fuzz (six targets, 60 s each).
+- [x] Speed A/B against `v0.4.0-beta.2` (interleaved on a noisy machine). 2026-11-24,
+  this session's 2-core VM (load ~1), release xtask of each side, `--only` per case,
+  A then B, then B then A; medians, "B vs A" positive = B slower:
+
+  | Case | A | B | pass 1 | B | A | pass 2 |
+  |---|---|---|---|---|---|---|
+  | plan 10,000 | 17.7 ms | 17.3 ms | −3 % | 16.4 ms | 19.6 ms | −17 % |
+  | plan 100,000 | 181 ms | 202 ms | +12 % | 180 ms | 184 ms | −2 % |
+  | plan 200,000 | 381 ms | 393 ms | +3 % | 394 ms | 410 ms | −4 % |
+  | list 10,000 | 21.9 ms | 20.8 ms | −5 % | 21.7 ms | 20.4 ms | +7 % |
+  | list 100,000 | 250 ms | 233 ms | −7 % | 244 ms | 237 ms | +3 % |
+  | mixed (large + small) | 3.31 s | 3.73 s | +13 % | 3.41 s | 3.49 s | −2 % |
+
+  **Passes**: no case slower in both passes; the two that were slower in one (plan
+  100,000, mixed) are faster in the other, this VM's drift (Round 033: A against itself
+  +14 %). B is `66e6930`, the freeze after Round 036.
+- [x] Fuzz (six targets, 60 s each). 2026-11-24 at `66e6930`, stable with
+  `RUSTC_BOOTSTRAP=1` as for beta.2. **The fuzz crate did not build**: `config.rs` reads
+  `crate::walker` since W0, and `fuzz/src/lib.rs` (outside the workspace, no CI) did not
+  compile `walker.rs`; fixed in the PR that records this (fuzz crate only). Then: osc
+  3,677,508 runs, paths 955,130, config 489,560, theme 601,350, archive_name 2,624,957,
+  archive_list 113,324; no crash, `fuzz/artifacts/` empty.
 - [ ] The release draft: assets named `xdevcmd-testkit-*`, and the notes' links open.
 
 ## Do
@@ -125,7 +145,8 @@ Order: what beta.4 touches first, then what the data path holds, the riskiest la
   `qa defs`: no file over 2,500 lines (a `tests.rs` counts as tests). Then 33 `App`
   fields grouped into `Pictures`, `Hits`, `ShellPane`, `Watching`: App fields 86 → 57.
 
-- **Code freeze: `f6e6202`** (2026-11-24; CI 45349736217 green, 7/7 jobs). Reviewed by
+- **Code freeze: `66e6930`** (2026-11-24, after Round 036 and its test trash, on the
+  owner's word; CI 45373140431 green). Was: **`f6e6202`** (2026-11-24; CI 45349736217 green, 7/7 jobs). Reviewed by
   three independent red-team rounds (data path; app, CI and xtask; the check of #90),
   each SIGN WITH AMENDMENTS, the amendments fixed in #90, #93, #94; what they left open
   is in `memory/2026-11-24-beta3-review-carryover.md` (rc.1, beta.4). From here the

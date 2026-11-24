@@ -17,3 +17,7 @@ pub mod decor;
 pub mod keys;
 #[path = "../../crates/xdevcmd/src/theme.rs"]
 pub mod theme;
+/// The walker's hold range, which config.rs checks `animation_hold_secs` against
+/// (beta.3, W0).
+#[path = "../../crates/xdevcmd/src/walker.rs"]
+pub mod walker;

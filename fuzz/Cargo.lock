@@ -2179,7 +2179,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xdevcmd-core"
-version = "0.4.0-beta.1"
+version = "0.4.0-beta.2"
 dependencies = [
  "chrono",
  "flate2",
@@ -2189,6 +2189,7 @@ dependencies = [
  "rustix",
  "tar",
  "trash",
+ "unicode-segmentation",
  "unicode-width",
  "zip",
  "zune-jpeg",

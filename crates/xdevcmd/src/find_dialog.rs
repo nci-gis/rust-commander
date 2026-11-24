@@ -64,7 +64,12 @@ impl FindDialog {
         };
         match self.text.text() {
             t if t.is_empty() => names,
-            t => format!("{names} containing \"{t}\""),
+            t => tr!(
+                "find_dialog.containing",
+                "{names} containing \"{t}\"",
+                names = names,
+                t = t
+            ),
         }
     }
 

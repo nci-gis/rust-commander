@@ -99,14 +99,23 @@ impl App {
         // A group whose keys all repeat is a mode, left with Enter or Esc; any other
         // is a key to pick, after which it closes by itself.
         if self.group_repeats(first) {
-            format!("{} \u{b7} Enter or Esc: done", keys.join(" "))
+            tr!(
+                "input.u_enter_or_esc_done",
+                "{v} \u{b7} Enter or Esc: done",
+                v = keys.join(" ")
+            )
         } else if in_shell {
-            format!(
-                "then: {} \u{b7} a terminal key for this shell \u{b7} Esc: cancel",
-                keys.join(" ")
+            tr!(
+                "input.then_u_a_terminal_key_for",
+                "then: {v} \u{b7} a terminal key for this shell \u{b7} Esc: cancel",
+                v = keys.join(" ")
             )
         } else {
-            format!("then: {} \u{b7} Esc: cancel", keys.join(" "))
+            tr!(
+                "input.then_u_esc_cancel",
+                "then: {v} \u{b7} Esc: cancel",
+                v = keys.join(" ")
+            )
         }
     }
 
@@ -227,7 +236,7 @@ impl App {
             (c, "this file pane")
         };
         let has = if count == 1 {
-            "one tab".to_string()
+            tr!("input.one_tab", "one tab").into_owned()
         } else {
             format!("{count} tabs")
         };
@@ -238,11 +247,15 @@ impl App {
             .map(|c| format!("{} ", crate::keys::key_name(c.0, c.1)))
             .unwrap_or_default();
         self.status = if whose == "this file pane" && self.shell_pane.term_shown {
-            format!(
-                "no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then {prefix}Alt+{n} picks its tabs"
-            )
+            tr!("input.no_tab_has_u_f12_to", "no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then {prefix}Alt+{n} picks its tabs", n = n, whose = whose, has = has, prefix = prefix)
         } else {
-            format!("no tab {n}: {whose} has {has}")
+            tr!(
+                "input.no_tab_has",
+                "no tab {n}: {whose} has {has}",
+                n = n,
+                whose = whose,
+                has = has
+            )
         };
     }
 
@@ -420,8 +433,10 @@ impl App {
             return None;
         }
         let k = self.footer_key(Action::Copy).unwrap_or_default();
-        Some(format!(
-            "inside an archive you can view and extract ({k}) \u{2014} not that"
+        Some(tr!(
+            "input.inside_an_archive_you_can_view",
+            "inside an archive you can view and extract ({k}) \u{2014} not that",
+            k = k
         ))
     }
 
@@ -470,8 +485,11 @@ impl App {
             .next()
             .unwrap_or_else(|| "it".into());
         let dir = xdevcmd_core::format::elide_middle(&tidy(to), 20);
-        Some(format!(
-            "{key} again when shown \u{2014} {dir} still opening"
+        Some(tr!(
+            "input.again_when_shown_u_still_opening",
+            "{key} again when shown \u{2014} {dir} still opening",
+            key = key,
+            dir = dir
         ))
     }
 
@@ -538,8 +556,12 @@ impl App {
             Action::NewFile => {
                 let dir = self.focused_cwd();
                 self.modal = Some(Modal::Input(Input {
-                    title: "New file".into(),
-                    label: format!("in {} \u{b7} opens in the editor", dir.display()),
+                    title: tr!("input.new_file", "New file").into(),
+                    label: tr!(
+                        "input.in_u_opens_in_the_editor",
+                        "in {dir} \u{b7} opens in the editor",
+                        dir = dir.display()
+                    ),
                     edit: LineEdit::new(""),
                     kind: InputKind::NewFile,
                     dir,
@@ -589,9 +611,17 @@ impl App {
                 if let Some(f) = self.focused_files() {
                     let n = f.request_all_sizes();
                     self.status = match n {
-                        0 => "no directories here".into(),
-                        1 => "working out the size of 1 directory".into(),
-                        n => format!("working out the size of {n} directories"),
+                        0 => tr!("input.no_directories_here", "no directories here").into(),
+                        1 => tr!(
+                            "input.working_out_the_size_of_1",
+                            "working out the size of 1 directory"
+                        )
+                        .into(),
+                        n => tr!(
+                            "input.working_out_the_size_of_directories",
+                            "working out the size of {n} directories",
+                            n = n
+                        ),
                     };
                 }
             }
@@ -645,8 +675,11 @@ impl App {
                     t.close(i)
                 });
                 if closed == Some(false) {
-                    self.status =
-                        "that is the pane's only tab \u{2014} Alt+W closes the pane".into();
+                    self.status = tr!(
+                        "input.that_is_the_pane_s_only",
+                        "that is the pane's only tab \u{2014} Alt+W closes the pane"
+                    )
+                    .into();
                 }
             }
             // One pair of keys for tabs, acting on whatever has focus.
@@ -672,8 +705,11 @@ impl App {
                 if let Some(home) = xdevcmd_core::dirs::home() {
                     self.with_files(|f| f.set_cwd(&home));
                 } else {
-                    self.status =
-                        "no home directory: neither HOME nor USERPROFILE is a full path".into();
+                    self.status = tr!(
+                        "input.no_home_directory_neither_home_nor",
+                        "no home directory: neither HOME nor USERPROFILE is a full path"
+                    )
+                    .into();
                 }
             }
             Action::GoRoot => self.with_files(|f| {
@@ -782,7 +818,11 @@ impl App {
             }
             Cmd::RemoveBookmark(p) => {
                 self.bookmarks.retain(|b| *b != p);
-                self.save_bookmarks(format!("removed the bookmark for {}", tidy(&p)));
+                self.save_bookmarks(tr!(
+                    "input.removed_the_bookmark_for",
+                    "removed the bookmark for {v}",
+                    v = tidy(&p)
+                ));
             }
             // Checked again here: a link can be pointed elsewhere between the menu that
             // offered this and the choice.
@@ -837,24 +877,33 @@ impl App {
                         format!("{} licence", env!("CARGO_PKG_LICENSE")),
                         env!("CARGO_PKG_REPOSITORY").into(),
                         String::new(),
-                        "No network, no telemetry.".into(),
+                        tr!("input.no_network_no_telemetry", "No network, no telemetry.").into(),
                         // Empty in screenshots: no terminal was asked.
                         if self.usage.terminal.is_empty() {
                             String::new()
                         } else {
-                            format!("Running in {}", self.usage.terminal)
+                            tr!(
+                                "input.running_in",
+                                "Running in {terminal}",
+                                terminal = self.usage.terminal
+                            )
                         },
                         // xdevcmd never looks for updates itself (no network): where to.
-                        format!("Releases: {}/releases", env!("CARGO_PKG_REPOSITORY")),
+                        tr!(
+                            "input.releases_releases",
+                            "Releases: {v}/releases",
+                            v = env!("CARGO_PKG_REPOSITORY")
+                        ),
                     ],
                     danger: false,
                     yes: None,
                     buttons: Vec::new(),
                     also: None,
                     more: None,
-                    footnote: Some(format!(
-                        "Developed by {}",
-                        env!("CARGO_PKG_AUTHORS").replace(':', ", ")
+                    footnote: Some(tr!(
+                        "input.developed_by",
+                        "Developed by {v}",
+                        v = env!("CARGO_PKG_AUTHORS").replace(':', ", ")
                     )),
                     pictures: {
                         let bg = match theme::t().bg_panel {
@@ -946,9 +995,13 @@ impl App {
                     .and_then(|v| v.doc.memory_bytes())
                     .map(|b| xdevcmd_core::document::save_bytes(&dest, b, true, true));
                 self.status = match saved {
-                    Some(Ok(())) => format!("saved to {}, replacing it", dest.display()),
-                    Some(Err(e)) => format!("cannot save: {e}"),
-                    None => "nothing to save".into(),
+                    Some(Ok(())) => tr!(
+                        "input.saved_to_replacing_it",
+                        "saved to {dest}, replacing it",
+                        dest = dest.display()
+                    ),
+                    Some(Err(e)) => tr!("input.cannot_save", "cannot save: {e}", e = e),
+                    None => tr!("input.nothing_to_save", "nothing to save").into(),
                 };
             }
             Cmd::BatchRename(moves) => self.batch_rename(moves, xdevcmd_core::ops::safe()),
@@ -1027,8 +1080,16 @@ impl App {
         }
         let lines = t.lines().count().max(1);
         self.status = match lines {
-            1 => "copied 1 line to the clipboard".into(),
-            n => format!("copied {n} lines to the clipboard"),
+            1 => tr!(
+                "input.copied_1_line_to_the_clipboard",
+                "copied 1 line to the clipboard"
+            )
+            .into(),
+            n => tr!(
+                "input.copied_lines_to_the_clipboard",
+                "copied {n} lines to the clipboard",
+                n = n
+            ),
         };
     }
 
@@ -1070,8 +1131,16 @@ impl App {
         }
         self.status = match (&base, texts.as_slice()) {
             (Some(b), _) => crate::relpath::said(&texts, b),
-            (None, [one]) => format!("sent {one} to the clipboard"),
-            (None, many) => format!("sent {} paths to the clipboard", many.len()),
+            (None, [one]) => tr!(
+                "input.sent_to_the_clipboard",
+                "sent {one} to the clipboard",
+                one = one
+            ),
+            (None, many) => tr!(
+                "input.sent_paths_to_the_clipboard",
+                "sent {many_len} paths to the clipboard",
+                many_len = many.len()
+            ),
         };
     }
 

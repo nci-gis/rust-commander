@@ -352,9 +352,11 @@ const FIELDS: &[Field] = &[
 /// width now (the screen's, less its border); a wider window costs more.
 pub fn scrollback_help(lines: usize, cols: u16) -> String {
     let bytes = lines as u64 * u64::from(cols) * std::mem::size_of::<vt100::Cell>() as u64;
-    format!(
-        "Full, about {} a shell at {cols} columns; for shells started from now on",
-        xdevcmd_core::format::human_size(bytes)
+    tr!(
+        "settings_dialog.full_about_a_shell_at_columns",
+        "Full, about {v} a shell at {cols} columns; for shells started from now on",
+        v = xdevcmd_core::format::human_size(bytes),
+        cols = cols
     )
 }
 
@@ -800,7 +802,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
             let v = get(&d.now, f);
             let shown = match f.kind {
                 Kind::Bool => if v == "true" { "[x]" } else { "[ ]" }.to_string(),
-                _ => format!("\u{2039} {v} \u{203a}"),
+                _ => tr!("settings_dialog.u_u", "\u{2039} {v} \u{203a}", v = v),
             };
             let changed = v != get(&d.before, f);
             let when = if f.now { "" } else { "next start" };
@@ -852,7 +854,11 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
     }
     let hint = match &d.cannot_save {
         Some(why) => why.clone(),
-        None => "\u{2191}\u{2193} choose  \u{2190}\u{2192} or Space change  Tab next tab".into(),
+        None => tr!(
+            "settings_dialog.u_u_choose_u_u_or",
+            "\u{2191}\u{2193} choose  \u{2190}\u{2192} or Space change  Tab next tab"
+        )
+        .into(),
     };
     put(
         frame,

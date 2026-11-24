@@ -57,9 +57,11 @@ impl App {
             }
             self.pending_list = Some(req);
             self.modal = Some(Modal::Menu(Menu::new(
-                Some(format!(
-                    "Add {n} path{} to\u{2026}",
-                    if n == 1 { "" } else { "s" }
+                Some(tr!(
+                    "lists.add_path_to_u",
+                    "Add {n} path{s} to\u{2026}",
+                    n = n,
+                    s = if n == 1 { "" } else { "s" }
                 )),
                 items,
                 self.pane_anchor(),
@@ -101,7 +103,7 @@ impl App {
                 self.show_list(Some(id));
                 let had = match had {
                     0 => String::new(),
-                    n => format!(", {n} already there"),
+                    n => tr!("lists.already_there", ", {n} already there", n = n),
                 };
                 self.status = tr!(
                     "lists.added_u_checking_them",

@@ -377,25 +377,49 @@ impl TermPanel {
         mode: termlog::Mode,
     ) -> std::result::Result<String, String> {
         let Some(tab) = self.tabs.get(i) else {
-            return Err("that terminal tab is gone".into());
+            return Err(tr!(
+                "terms.that_terminal_tab_is_gone",
+                "that terminal tab is gone"
+            )
+            .into());
         };
         if let Some((_, l)) = tab.logged() {
-            return Err(format!(
-                "this tab is already logged to {}",
-                l.path().display()
+            return Err(tr!(
+                "terms.this_tab_is_already_logged_to",
+                "this tab is already logged to {path}",
+                path = l.path().display()
             ));
         }
         let Some(shell) = tab.terms.get(&tab.focus) else {
-            return Err("that terminal tab is gone".into());
+            return Err(tr!(
+                "terms.that_terminal_tab_is_gone",
+                "that terminal tab is gone"
+            )
+            .into());
         };
         if shell.has_exited() {
-            return Err("that shell has ended \u{2014} nothing more to log".into());
+            return Err(tr!(
+                "terms.that_shell_has_ended_u_nothing",
+                "that shell has ended \u{2014} nothing more to log"
+            )
+            .into());
         }
-        let (file, existed) =
-            termlog::open(path).map_err(|e| format!("cannot log to {}: {e}", path.display()))?;
+        let (file, existed) = termlog::open(path).map_err(|e| {
+            tr!(
+                "terms.cannot_log_to",
+                "cannot log to {path}: {e}",
+                path = path.display(),
+                e = e
+            )
+        })?;
         let shared = existed && termlog::readable_by_others(&file);
         let about = termlog::About {
-            label: format!("{} \u{b7} tab {}", shell.shell_name(), i + 1),
+            label: tr!(
+                "terms.u_tab",
+                "{shell_name} \u{b7} tab {v}",
+                shell_name = shell.shell_name(),
+                v = i + 1
+            ),
         };
         shell.set_log(Log::start(path.to_path_buf(), mode, Box::new(file), about));
         let verb = if existed {
@@ -432,9 +456,11 @@ impl TermPanel {
                     termlog::Status::Ended => Self::end_log(t, &mut out),
                     termlog::Status::Failed(why) => {
                         if !t.log_failure_said() {
-                            out.push(format!(
-                                "log stopped: {why} \u{2014} {}",
-                                l.path().display()
+                            out.push(tr!(
+                                "terms.log_stopped_u",
+                                "log stopped: {why} \u{2014} {path}",
+                                why = why,
+                                path = l.path().display()
                             ));
                         }
                     }
@@ -547,8 +573,13 @@ impl TermPanel {
         let i = tab.unwrap_or(self.active);
         let t = self.tabs.get(i)?;
         let shell = t.terms.get(&t.focus)?;
-        let label = format!("{} \u{b7} tab {}", shell.shell_name(), i + 1);
-        let title = format!("history \u{b7} {label}");
+        let label = tr!(
+            "terms.u_tab",
+            "{shell_name} \u{b7} tab {v}",
+            shell_name = shell.shell_name(),
+            v = i + 1
+        );
+        let title = tr!("terms.history_u", "history \u{b7} {label}", label = label);
         let remote = match shell.state() {
             crate::pane::term::ShellState::Remote(p) => Some(p),
             _ => None,

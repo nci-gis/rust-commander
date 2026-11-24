@@ -277,11 +277,12 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     let dim = Style::new().fg(th.fg_dim);
     let plain = Style::new().fg(th.fg);
     lines.push((
-        format!(
-            "xdevcmd {} \u{b7} pid {} \u{b7} up {}",
-            env!("CARGO_PKG_VERSION"),
-            std::process::id(),
-            uptime(u.started.elapsed())
+        tr!(
+            "usage.xdevcmd_u_pid_u_up",
+            "xdevcmd {v} \u{b7} pid {id} \u{b7} up {v2}",
+            v = env!("CARGO_PKG_VERSION"),
+            id = std::process::id(),
+            v2 = uptime(u.started.elapsed())
         ),
         dim,
     ));
@@ -290,7 +291,7 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         Some(p) => {
             let peak = p
                 .peak
-                .map(|b| format!(" \u{b7} peak {}", human_size(b)))
+                .map(|b| tr!("usage.u_peak", " \u{b7} peak {v}", v = human_size(b)))
                 .unwrap_or_default();
             lines.push((format!("memory     {}{peak}", human_size(p.rss)), plain));
             let mut rest = Vec::new();
@@ -301,37 +302,53 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
                 rest.push(format!("{t} threads"));
             }
             if let Some(f) = p.fds {
-                rest.push(format!("{f} open files"));
+                rest.push(tr!("usage.open_files", "{f} open files", f = f));
             }
             if !rest.is_empty() {
                 lines.push((format!("process    {}", rest.join(" \u{b7} ")), plain));
             }
         }
-        None if cfg!(windows) => lines.push(("memory     not measured on Windows yet".into(), dim)),
-        None => lines.push(("memory     measuring\u{2026}".into(), dim)),
+        None if cfg!(windows) => lines.push((
+            tr!(
+                "usage.memory_not_measured_on_windows_yet",
+                "memory     not measured on Windows yet"
+            )
+            .into(),
+            dim,
+        )),
+        None => lines.push((
+            tr!("usage.memory_measuring_u", "memory     measuring\u{2026}").into(),
+            dim,
+        )),
     }
     let (trend, style) = match u.trend() {
         Trend::WarmingUp(left) => (
-            format!(
-                "trend      settling in \u{2014} a verdict in about {}",
-                uptime(Duration::from_secs_f64(left))
+            tr!(
+                "usage.trend_settling_in_u_a_verdict",
+                "trend      settling in \u{2014} a verdict in about {v}",
+                v = uptime(Duration::from_secs_f64(left))
             ),
             dim,
         ),
-        Trend::Flat => ("trend      flat".to_string(), Style::new().fg(th.exec)),
+        Trend::Flat => (
+            tr!("usage.trend_flat", "trend      flat").into_owned(),
+            Style::new().fg(th.exec),
+        ),
         Trend::Growing { bytes, secs } => (
-            format!(
-                "trend      up {} in {} \u{2014} a leak if it keeps going",
-                human_size(bytes),
-                uptime(Duration::from_secs_f64(secs))
+            tr!(
+                "usage.trend_up_in_u_a_leak",
+                "trend      up {v} in {v2} \u{2014} a leak if it keeps going",
+                v = human_size(bytes),
+                v2 = uptime(Duration::from_secs_f64(secs))
             ),
             Style::new().fg(th.err).add_modifier(Modifier::BOLD),
         ),
         Trend::Falling { bytes, secs } => (
-            format!(
-                "trend      down {} in {}",
-                human_size(bytes),
-                uptime(Duration::from_secs_f64(secs))
+            tr!(
+                "usage.trend_down_in",
+                "trend      down {v} in {v2}",
+                v = human_size(bytes),
+                v2 = uptime(Duration::from_secs_f64(secs))
             ),
             Style::new().fg(th.exec),
         ),
@@ -354,7 +371,14 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         plain,
     ));
     if let Some((total, steps)) = &u.startup {
-        lines.push((format!("start-up   {total} to the first frame"), plain));
+        lines.push((
+            tr!(
+                "usage.start_up_to_the_first_frame",
+                "start-up   {total} to the first frame",
+                total = total
+            ),
+            plain,
+        ));
         lines.push((format!("           {steps}"), dim));
     }
     if !u.terminal.is_empty() {
@@ -362,18 +386,23 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     }
     let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
     lines.push((
-        format!(
-            "holding    {} \u{b7} {} \u{b7} {} listed \u{b7} {} \u{b7} {}",
-            n(h.panes, "pane", "panes"),
-            n(h.tabs, "tab", "tabs"),
-            n(h.listed, "row", "rows"),
-            n(h.shells, "shell", "shells"),
-            n(h.jobs, "job", "jobs"),
+        tr!(
+            "usage.holding_u_u_listed_u_u",
+            "holding    {v} \u{b7} {v2} \u{b7} {v3} listed \u{b7} {v4} \u{b7} {v5}",
+            v = n(h.panes, "pane", "panes"),
+            v2 = n(h.tabs, "tab", "tabs"),
+            v3 = n(h.listed, "row", "rows"),
+            v4 = n(h.shells, "shell", "shells"),
+            v5 = n(h.jobs, "job", "jobs")
         ),
         plain,
     ));
     lines.push((
-        "           each shell keeps at most 5000 lines of scrollback".into(),
+        tr!(
+            "usage.each_shell_keeps_at_most_5000",
+            "           each shell keeps at most 5000 lines of scrollback"
+        )
+        .into(),
         dim,
     ));
     lines.push((String::new(), plain));
@@ -419,11 +448,12 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
         shown.iter().max().copied().unwrap_or(0),
     );
     lines.push((
-        format!(
-            "resident memory, last {}: {} to {} (a bar every 2 s)",
-            uptime(Duration::from_secs(2 * shown.len() as u64)),
-            human_size(lo),
-            human_size(hi)
+        tr!(
+            "usage.resident_memory_last_to_a_bar",
+            "resident memory, last {v}: {v2} to {v3} (a bar every 2 s)",
+            v = uptime(Duration::from_secs(2 * shown.len() as u64)),
+            v2 = human_size(lo),
+            v3 = human_size(hi)
         ),
         dim,
     ));

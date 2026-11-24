@@ -28,7 +28,12 @@ impl App {
             (crate::graphics::Protocol::Blocks, _) => "half blocks",
         };
         let name = crate::graphics::terminal_name(|k| std::env::var(k).ok(), &self.pics.probe);
-        self.usage.terminal = format!("{name} \u{b7} pictures: {pictures}");
+        self.usage.terminal = tr!(
+            "run.u_pictures",
+            "{name} \u{b7} pictures: {pictures}",
+            name = name,
+            pictures = pictures
+        );
         // The terminal closed (SIGHUP) or a polite kill (SIGTERM): the loop sees the flag
         // and ends tidily. A second signal ends xdevcmd at once, as the default would.
         #[cfg(unix)]
@@ -145,12 +150,14 @@ impl App {
             self.stopping = None;
             let safe = self.settings.config.general.safe_operations;
             self.modal = Some(Modal::Ask(modal::Ask {
-                title: "Still stopping".into(),
+                title: tr!("run.still_stopping", "Still stopping").into(),
                 body: vec![
-                    format!(
-                        "{n} job{} has not stopped after {} seconds.",
-                        if n == 1 { "" } else { "s" },
-                        STOP_WAIT.as_secs()
+                    tr!(
+                        "run.job_has_not_stopped_after_seconds",
+                        "{n} job{s} has not stopped after {as_secs} seconds.",
+                        n = n,
+                        s = if n == 1 { "" } else { "s" },
+                        as_secs = STOP_WAIT.as_secs()
                     ),
                     if safe {
                         "Quitting now leaves its temporary file; the next start removes it."
@@ -160,7 +167,7 @@ impl App {
                     .into(),
                 ],
                 danger: true,
-                yes: Some(("quit anyway".into(), Cmd::QuitNow)),
+                yes: Some((tr!("run.quit_anyway", "quit anyway").into(), Cmd::QuitNow)),
                 buttons: Vec::new(),
                 also: None,
                 more: None,
@@ -295,11 +302,16 @@ impl App {
         // details went.
         if let Some(log) = crate::crash::take_background() {
             self.status = match log {
-                Some(p) => format!(
-                    "a background task failed \u{2014} details in {}",
-                    p.display()
+                Some(p) => tr!(
+                    "run.a_background_task_failed_u_details",
+                    "a background task failed \u{2014} details in {p}",
+                    p = p.display()
                 ),
-                None => "a background task failed (no crash log could be written)".into(),
+                None => tr!(
+                    "run.a_background_task_failed_no_crash",
+                    "a background task failed (no crash log could be written)"
+                )
+                .into(),
             };
             changed = true;
         }
@@ -322,7 +334,7 @@ impl App {
                         let n = f.entries.iter().filter(|e| !e.is_parent()).count();
                         let skipped = match r.unreadable {
                             0 => String::new(),
-                            u => format!(", {u} unreadable"),
+                            u => tr!("run.unreadable", ", {u} unreadable", u = u),
                         };
                         self.status = tr!("run.found_u_looked_at_u_enter", "{n} found \u{b7} {scanned} looked at{skipped} \u{b7} Enter goes to a file, F3 views it", n = n, scanned = r.scanned, skipped = skipped);
                     }
@@ -389,7 +401,11 @@ impl App {
                     match m {
                         xdevcmd_core::plan::Msg::Progress { items, .. } => {
                             if let Some(l) = c.body.get_mut(*line) {
-                                *l = format!("counting\u{2026} {items} so far");
+                                *l = tr!(
+                                    "run.counting_u_so_far",
+                                    "counting\u{2026} {items} so far",
+                                    items = items
+                                );
                             }
                             changed = true;
                         }

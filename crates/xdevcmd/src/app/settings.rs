@@ -141,11 +141,16 @@ impl App {
         self.set_theme(&name);
         let later = d.need_restart();
         self.status = if later.is_empty() {
-            format!("settings saved to {}", path.display())
+            tr!(
+                "settings.settings_saved_to",
+                "settings saved to {path}",
+                path = path.display()
+            )
         } else {
-            format!(
-                "settings saved; at the next start: {}",
-                later.join(", ").to_lowercase()
+            tr!(
+                "settings.settings_saved_at_the_next_start",
+                "settings saved; at the next start: {to_lowercase}",
+                to_lowercase = later.join(", ").to_lowercase()
             )
         };
     }
@@ -162,7 +167,7 @@ impl App {
             .chain(std::iter::once(Item::cancel("Cancel", "Esc")))
             .collect();
         self.modal = Some(Modal::Menu(Menu::new(
-            Some("Theme".into()),
+            Some(tr!("settings.theme", "Theme").into()),
             items,
             self.pane_anchor(),
         )));
@@ -232,20 +237,42 @@ fn config_dialog(path: &Path, error: &str, what: &str) -> modal::Ask {
     let mut body = vec![format!("{} {what}:", path.display()), String::new()];
     body.extend(error.lines().map(|l| format!("  {l}")));
     body.push(String::new());
-    body.push("xdevcmd runs with the default settings, and saves nothing over the file.".into());
-    body.push("Help \u{203a} Config in use shows it again.".into());
+    body.push(
+        tr!(
+            "settings.xdevcmd_runs_with_the_default_settings",
+            "xdevcmd runs with the default settings, and saves nothing over the file."
+        )
+        .into(),
+    );
+    body.push(
+        tr!(
+            "settings.help_u_config_in_use_shows",
+            "Help \u{203a} Config in use shows it again."
+        )
+        .into(),
+    );
     modal::Ask {
-        title: "Config not loaded".into(),
+        title: tr!("settings.config_not_loaded", "Config not loaded").into(),
         body,
         danger: false,
         yes: Some((
-            "continue with the defaults".into(),
-            Cmd::Note(format!(
-                "defaults in use \u{2014} {} {what} (Help \u{203a} Config in use)",
-                path.display()
+            tr!(
+                "settings.continue_with_the_defaults",
+                "continue with the defaults"
+            )
+            .into(),
+            Cmd::Note(tr!(
+                "settings.defaults_in_use_u_help_u",
+                "defaults in use \u{2014} {path} {what} (Help \u{203a} Config in use)",
+                path = path.display(),
+                what = what
             )),
         )),
-        also: Some(('e', "edit it".into(), Cmd::EditConfig(path.to_path_buf()))),
+        also: Some((
+            'e',
+            tr!("settings.edit_it", "edit it").into(),
+            Cmd::EditConfig(path.to_path_buf()),
+        )),
         more: Some(('q', "quit".into(), Cmd::QuitNow)),
         buttons: Vec::new(),
         footnote: None,

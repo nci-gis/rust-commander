@@ -140,14 +140,29 @@ impl App {
 
         let line = match at {
             Some((n, _)) if !passed => {
-                format!(" \u{2014} line {n} not passed: xdevcmd knows no line flag for {program}")
+                tr!(
+                    "open.u_line_not_passed_xdevcmd_knows",
+                    " \u{2014} line {n} not passed: xdevcmd knows no line flag for {program}",
+                    n = n,
+                    program = program
+                )
             }
             _ => String::new(),
         };
         self.status = match outcome {
             Ok(s) if s.success() => format!("{program} closed{line}"),
-            Ok(s) => format!("{program} exited with {s}"),
-            Err(e) => format!("cannot run {program}: {e}"),
+            Ok(s) => tr!(
+                "open.exited_with",
+                "{program} exited with {s}",
+                program = program,
+                s = s
+            ),
+            Err(e) => tr!(
+                "open.cannot_run",
+                "cannot run {program}: {e}",
+                program = program,
+                e = e
+            ),
         };
         self.reload_all();
         Ok(())
@@ -195,7 +210,11 @@ impl App {
         if opener::console_program(&path) {
             let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
             items.push(Item::cmd(
-                format!("Run {name} in a terminal tab"),
+                tr!(
+                    "open.run_in_a_terminal_tab",
+                    "Run {name} in a terminal tab",
+                    name = name
+                ),
                 "",
                 Cmd::RunInTerminal {
                     argv: vec![path.clone().into_os_string()],
@@ -205,7 +224,11 @@ impl App {
             ));
         }
         items.push(Item::cmd(
-            format!("Run {name} with the system"),
+            tr!(
+                "open.run_with_the_system",
+                "Run {name} with the system",
+                name = name
+            ),
             "",
             Cmd::OpenFile(path),
             true,
@@ -216,7 +239,7 @@ impl App {
             name = name
         );
         self.modal = Some(Modal::Menu(Menu::new(
-            Some("Run it?".into()),
+            Some(tr!("open.run_it", "Run it?").into()),
             items,
             self.pane_anchor(),
         )));
@@ -273,7 +296,11 @@ impl App {
         let items = vec![
             Item::cancel("Cancel", "Esc"),
             Item::cmd(
-                format!("Open {name} with the system's program"),
+                tr!(
+                    "open.open_with_the_system_s_program",
+                    "Open {name} with the system's program",
+                    name = name
+                ),
                 "",
                 Cmd::OpenFile(path),
                 true,
@@ -291,7 +318,7 @@ impl App {
             name = name
         );
         self.modal = Some(Modal::Menu(Menu::new(
-            Some("Open it?".into()),
+            Some(tr!("open.open_it", "Open it?").into()),
             items,
             self.pane_anchor(),
         )));
@@ -300,7 +327,11 @@ impl App {
     /// Enter could not open the file: view it, and say why where it will be seen — in
     /// the viewer, which covers the status line.
     pub(super) fn view_instead(&mut self, why: &str) {
-        let note = format!("{why}: viewing it instead");
+        let note = tr!(
+            "open.viewing_it_instead",
+            "{why}: viewing it instead",
+            why = why
+        );
         self.begin_view();
         if let Some(Modal::View(v)) = &mut self.modal {
             v.note(&note);
@@ -349,7 +380,12 @@ impl App {
         }
         let mut cmd = std::process::Command::new(&argv[0]);
         cmd.args(&argv[1..]);
-        let done = format!("opened {name} with {}", rule.command[0]);
+        let done = tr!(
+            "open.opened_with",
+            "opened {name} with {v}",
+            name = name,
+            v = rule.command[0]
+        );
         // Said when the opener hands it over (item 45), not before.
         self.status = match opener::spawn(cmd, name, done, self.notes.0.clone()) {
             Ok(()) => String::new(),
@@ -427,7 +463,7 @@ impl App {
         items.push(Item::cancel("Cancel", "Esc"));
         let name = Self::describe(std::slice::from_ref(&path));
         self.modal = Some(Modal::Menu(Menu::new(
-            Some(format!("Open {name} with")),
+            Some(tr!("open.open_with", "Open {name} with", name = name)),
             items,
             self.pane_anchor(),
         )));
@@ -476,7 +512,7 @@ impl App {
         items.push(Item::sep());
         items.push(Item::cancel("Cancel", "Esc"));
         self.modal = Some(Modal::Menu(Menu::new(
-            Some("Commands".into()),
+            Some(tr!("open.commands", "Commands").into()),
             items,
             self.pane_anchor(),
         )));
@@ -581,7 +617,13 @@ impl App {
         let mut body = Vec::new();
         match &local {
             Some(dir) => {
-                body.push("On this computer, beside xdevcmd:".to_string());
+                body.push(
+                    tr!(
+                        "open.on_this_computer_beside_xdevcmd",
+                        "On this computer, beside xdevcmd:"
+                    )
+                    .into_owned(),
+                );
                 body.push(format!("  {}", dir.display()));
                 body.push(String::new());
             }
@@ -594,21 +636,35 @@ impl App {
                 body.push(String::new());
             }
         }
-        body.push(format!(
-            "Online, for xdevcmd {}:",
-            env!("CARGO_PKG_VERSION")
+        body.push(tr!(
+            "open.online_for_xdevcmd",
+            "Online, for xdevcmd {v}:",
+            v = env!("CARGO_PKG_VERSION")
         ));
         body.push(format!("  {url}"));
         body.push(String::new());
         body.push(
-            "README.md gives the reading order; troubleshooting.md the known problems.".into(),
+            tr!(
+                "open.readme_md_gives_the_reading_order",
+                "README.md gives the reading order; troubleshooting.md the known problems."
+            )
+            .into(),
         );
-        body.push("xdevcmd opens no connection: copy the link into a browser.".into());
-        let copy = ("copy link".to_string(), Cmd::CopyText(url));
+        body.push(
+            tr!(
+                "open.xdevcmd_opens_no_connection_copy_the",
+                "xdevcmd opens no connection: copy the link into a browser."
+            )
+            .into(),
+        );
+        let copy = (
+            tr!("open.copy_link", "copy link").into_owned(),
+            Cmd::CopyText(url),
+        );
         let (yes, also) = match local {
             Some(dir) => (
                 (
-                    "read README.md".to_string(),
+                    tr!("open.read_readme_md", "read README.md").into_owned(),
                     Cmd::ViewFile(dir.join("README.md")),
                 ),
                 Some(('c', copy.0, copy.1)),
@@ -616,7 +672,7 @@ impl App {
             None => (copy, None),
         };
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Documentation".into(),
+            title: tr!("open.documentation", "Documentation").into(),
             body,
             danger: false,
             yes: Some(yes),

@@ -45,7 +45,13 @@ impl App {
     pub(super) fn count_label(files: u64, bytes: u64) -> String {
         let noun = if files == 1 { "file" } else { "files" };
         if bytes < 1024 {
-            format!("{files} {noun} \u{2022} {bytes} bytes")
+            tr!(
+                "file_ops.u_bytes",
+                "{files} {noun} \u{2022} {bytes} bytes",
+                files = files,
+                noun = noun,
+                bytes = bytes
+            )
         } else {
             format!("{files} {noun} \u{2022} {}", human_size(bytes))
         }
@@ -110,10 +116,22 @@ impl App {
             let name = xdevcmd_core::format::elide_middle(&tidy(t), 20);
             self.status = match guard {
                 Guard::Cwd => {
-                    format!("{name} holds a folder shown or in a shell \u{2014} not removed")
+                    tr!(
+                        "file_ops.holds_a_folder_shown_or_in",
+                        "{name} holds a folder shown or in a shell \u{2014} not removed",
+                        name = name
+                    )
                 }
-                Guard::NotPlain => format!("{name} names a folder by . or .. \u{2014} not touched"),
-                Guard::Root | Guard::Home => format!("{name} is never deleted or moved"),
+                Guard::NotPlain => tr!(
+                    "file_ops.names_a_folder_by_or_u",
+                    "{name} names a folder by . or .. \u{2014} not touched",
+                    name = name
+                ),
+                Guard::Root | Guard::Home => tr!(
+                    "file_ops.is_never_deleted_or_moved",
+                    "{name} is never deleted or moved",
+                    name = name
+                ),
             };
             return true;
         }
@@ -219,13 +237,23 @@ impl App {
                     ));
                 }
                 if targets.len() > 3 {
-                    body.push(format!("  \u{2026} and {} more", targets.len() - 3));
+                    body.push(tr!(
+                        "file_ops.u_and_more",
+                        "  \u{2026} and {v} more",
+                        v = targets.len() - 3
+                    ));
                 }
             }
             body.push(String::new());
-            body.push("Deleted permanently. This cannot be undone.".into());
+            body.push(
+                tr!(
+                    "file_ops.deleted_permanently_this_cannot_be_undone",
+                    "Deleted permanently. This cannot be undone."
+                )
+                .into(),
+            );
         } else {
-            body.push("Moved to the trash.".into());
+            body.push(tr!("file_ops.moved_to_the_trash", "Moved to the trash.").into());
         }
         // A list's names may come from any text a shell printed: say where from, so a
         // list made of the wrong output shows before anything is deleted.
@@ -237,9 +265,17 @@ impl App {
             .map(|r| {
                 let what = xdevcmd_core::format::elide_middle(&r.what, 50);
                 if r.find {
-                    format!("Found by: find {what}")
+                    tr!(
+                        "file_ops.found_by_find",
+                        "Found by: find {what}",
+                        what = what
+                    )
                 } else {
-                    format!("From the list: {what}")
+                    tr!(
+                        "file_ops.from_the_list",
+                        "From the list: {what}",
+                        what = what
+                    )
                 }
             });
         if let Some(from) = from {
@@ -248,9 +284,9 @@ impl App {
         }
         self.modal = Some(Modal::Confirm(Confirm {
             title: if permanent {
-                "Delete permanently".into()
+                tr!("file_ops.delete_permanently", "Delete permanently").into()
             } else {
-                "Delete".to_string()
+                tr!("file_ops.delete", "Delete").into_owned()
             },
             body,
             danger: true,
@@ -271,7 +307,7 @@ impl App {
     pub(super) fn begin_mkdir(&mut self) {
         let dir = self.focused_cwd();
         self.modal = Some(Modal::Input(Input {
-            title: "Create directory".into(),
+            title: tr!("file_ops.create_directory", "Create directory").into(),
             label: format!("in {}", dir.display()),
             edit: LineEdit::new(""),
             kind: InputKind::MkDir,
@@ -294,7 +330,7 @@ impl App {
             return;
         }
         self.modal = Some(Modal::Input(Input {
-            title: "Rename".into(),
+            title: tr!("file_ops.rename", "Rename").into(),
             label,
             edit: LineEdit::for_rename(&e.name, e.is_dir()),
             kind: InputKind::Rename {
@@ -466,7 +502,11 @@ impl App {
             }
             InputKind::Permissions { targets } => {
                 self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot(
-                    "a change of permissions".into(),
+                    tr!(
+                        "file_ops.a_change_of_permissions",
+                        "a change of permissions"
+                    )
+                    .into(),
                 ));
                 let setting = match xdevcmd_core::attrs::parse(&text) {
                     Ok(s) => s,
@@ -495,8 +535,17 @@ impl App {
                 }
                 self.reload_all();
                 self.status = match first_err {
-                    None => format!("permissions set on {done}"),
-                    Some(e) => format!("set on {done}, not on the rest \u{2014} {e}"),
+                    None => tr!(
+                        "file_ops.permissions_set_on",
+                        "permissions set on {done}",
+                        done = done
+                    ),
+                    Some(e) => tr!(
+                        "file_ops.set_on_not_on_the_rest",
+                        "set on {done}, not on the rest \u{2014} {e}",
+                        done = done,
+                        e = e
+                    ),
                 };
             }
             InputKind::Pack { sources } => {
@@ -516,7 +565,13 @@ impl App {
                 };
                 if xdevcmd_core::archive::format_of(&dest).is_none() {
                     self.modal = Some(Modal::Input(Input {
-                        error: Some("the name must end in .zip, .tar, .tar.gz or .tgz".into()),
+                        error: Some(
+                            tr!(
+                                "file_ops.the_name_must_end_in_zip",
+                                "the name must end in .zip, .tar, .tar.gz or .tgz"
+                            )
+                            .into(),
+                        ),
                         ..i
                     }));
                     return;
@@ -537,7 +592,11 @@ impl App {
                     .map_or(0, |f| f.mark_matching(&pattern, mark));
                 let verb = if mark { "marked" } else { "unmarked" };
                 self.status = match n {
-                    0 => format!("nothing matches {}", text.trim()),
+                    0 => tr!(
+                        "file_ops.nothing_matches",
+                        "nothing matches {trim}",
+                        trim = text.trim()
+                    ),
                     n => format!("{verb} {n} matching {}", text.trim()),
                 };
             }
@@ -642,7 +701,12 @@ impl App {
             .collect();
         let n = moves.len();
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: format!("Rename {n} file{}", if n == 1 { "" } else { "s" }),
+            title: tr!(
+                "file_ops.rename_file",
+                "Rename {n} file{s}",
+                n = n,
+                s = if n == 1 { "" } else { "s" }
+            ),
             body,
             danger: false,
             yes: Some(("rename".into(), Cmd::BatchRename(moves))),
@@ -668,8 +732,12 @@ impl App {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| f.cwd.clone());
         self.modal = Some(Modal::Input(Input {
-            title: "Copy as".into(),
-            label: format!("a second copy of {}, beside it", e.name),
+            title: tr!("file_ops.copy_as", "Copy as").into(),
+            label: tr!(
+                "file_ops.a_second_copy_of_beside_it",
+                "a second copy of {name}, beside it",
+                name = e.name
+            ),
             edit: LineEdit::for_rename(&e.name, e.is_dir()),
             kind: InputKind::CopyAs {
                 from: e.path.clone(),
@@ -681,7 +749,9 @@ impl App {
     }
 
     pub(super) fn make_symlink(&mut self) {
-        self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot("making a link".into()));
+        self.last_undo = Some(xdevcmd_core::undo::Undo::Cannot(
+            tr!("file_ops.making_a_link", "making a link").into(),
+        ));
         let Some(e) = self
             .panes
             .get(&self.focus)
@@ -729,14 +799,18 @@ impl App {
         };
         let current = xdevcmd_core::attrs::current(first).unwrap_or_default();
         let many = if targets.len() > 1 {
-            format!(" \u{b7} applies to all {}", targets.len())
+            tr!(
+                "file_ops.u_applies_to_all",
+                " \u{b7} applies to all {targets_len}",
+                targets_len = targets.len()
+            )
         } else {
             String::new()
         };
         let label = format!("{}{many}", xdevcmd_core::attrs::describe(first));
         let dir = self.focused_cwd();
         self.modal = Some(Modal::Input(Input {
-            title: "Permissions".into(),
+            title: tr!("file_ops.permissions", "Permissions").into(),
             label,
             edit: LineEdit::for_rename(&current, true),
             kind: InputKind::Permissions { targets },
@@ -839,19 +913,27 @@ impl App {
                 .into_owned();
             body.push(String::new());
             body.push(if want == hex {
-                format!("\u{2714} matches {side}")
+                tr!("file_ops.u_matches", "\u{2714} matches {side}", side = side)
             } else {
-                format!("\u{2718} DOES NOT MATCH {side}: {want}")
+                tr!(
+                    "file_ops.u_does_not_match",
+                    "\u{2718} DOES NOT MATCH {side}: {want}",
+                    side = side,
+                    want = want
+                )
             });
             break;
         }
         let bad = body.iter().any(|l| l.contains("DOES NOT MATCH"));
         self.status.clear();
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Checksum".into(),
+            title: tr!("file_ops.checksum", "Checksum").into(),
             body,
             danger: bad,
-            yes: Some(("copy to clipboard".into(), Cmd::CopyText(hex))),
+            yes: Some((
+                tr!("file_ops.copy_to_clipboard", "copy to clipboard").into(),
+                Cmd::CopyText(hex),
+            )),
             buttons: Vec::new(),
             also: None,
             more: None,

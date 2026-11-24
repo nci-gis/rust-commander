@@ -117,7 +117,7 @@ pub fn render(frame: &mut Frame, area: Rect, s: &Search, count: usize) {
     } else if s.found {
         format!(" {count} ")
     } else {
-        " no match ".to_string()
+        tr!("search.no_match", " no match ").into_owned()
     };
     let room = (w as usize).saturating_sub(label.cells() + tail.cells() + 1);
     let chars = s.edit.chars();

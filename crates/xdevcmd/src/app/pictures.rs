@@ -41,7 +41,14 @@ impl App {
         };
         let Some(e) = cur.filter(|e| !e.is_parent()) else {
             *shown = None;
-            return note(frame, vec!["nothing under the cursor".into()]);
+            return note(
+                frame,
+                vec![tr!(
+                    "pictures.nothing_under_the_cursor",
+                    "nothing under the cursor"
+                )
+                .into()],
+            );
         };
         if e.is_dir() {
             *shown = None;
@@ -49,7 +56,11 @@ impl App {
                 frame,
                 vec![
                     e.name.clone(),
-                    "a directory \u{2014} Space works out its size".into(),
+                    tr!(
+                        "pictures.a_directory_u_space_works_out",
+                        "a directory \u{2014} Space works out its size"
+                    )
+                    .into(),
                 ],
             );
         }
@@ -59,9 +70,10 @@ impl App {
                 frame,
                 vec![
                     e.name.clone(),
-                    format!(
-                        "{} \u{2014} too big to preview, F3 views it",
-                        human_size(e.size)
+                    tr!(
+                        "pictures.u_too_big_to_preview_f3",
+                        "{v} \u{2014} too big to preview, F3 views it",
+                        v = human_size(e.size)
                     ),
                 ],
             );
@@ -70,7 +82,11 @@ impl App {
             *shown = None;
             return note(
                 frame,
-                vec!["outside the root xdevcmd is confined to".into()],
+                vec![tr!(
+                    "pictures.outside_the_root_xdevcmd_is_confined",
+                    "outside the root xdevcmd is confined to"
+                )
+                .into()],
             );
         }
         if xdevcmd_core::image::is_image(&e.path) {
@@ -205,7 +221,12 @@ impl App {
         };
         let cells = *cells;
         let title = match pic {
-            Ok(p) => format!("image {}\u{d7}{}", p.source.0, p.source.1),
+            Ok(p) => tr!(
+                "pictures.image_u",
+                "image {v}\u{d7}{v2}",
+                v = p.source.0,
+                v2 = p.source.1
+            ),
             Err(_) => "image".into(),
         };
         let inner = modal::frame_box(frame, area, &title, th.accent);

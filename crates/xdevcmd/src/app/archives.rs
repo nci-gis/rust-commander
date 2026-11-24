@@ -52,7 +52,7 @@ impl App {
             .into_owned();
         let request = Request::extract(file, inner, prefix, dest.clone());
         self.modal = Some(Modal::Confirm(Confirm {
-            title: "Extract".into(),
+            title: tr!("archives.extract", "Extract").into(),
             body: vec![
                 format!("{what}  from {name}"),
                 String::new(),
@@ -83,8 +83,11 @@ impl App {
             .current_file()
             .filter(|p| xdevcmd_core::archive::format_of(p).is_some())
         else {
-            self.status =
-                "Alt+F9 unpacks a .zip, .tar or .tar.gz \u{2014} the cursor is not on one".into();
+            self.status = tr!(
+                "archives.alt_f9_unpacks_a_zip_tar",
+                "Alt+F9 unpacks a .zip, .tar or .tar.gz \u{2014} the cursor is not on one"
+            )
+            .into();
             return;
         };
         if !xdevcmd_core::policy::get().allows(&file) {
@@ -133,11 +136,12 @@ impl App {
         // The name selected, so typing replaces it; the extension is the format.
         let edit = LineEdit::for_rename(&format!("{stem}.zip"), false);
         self.modal = Some(Modal::Input(Input {
-            title: "Pack".into(),
-            label: format!(
-                "{} into {} \u{b7} .zip .tar .tar.gz",
-                Self::describe(&sources),
-                dir.display()
+            title: tr!("archives.pack", "Pack").into(),
+            label: tr!(
+                "archives.into_u_zip_tar_tar_gz",
+                "{v} into {dir} \u{b7} .zip .tar .tar.gz",
+                v = Self::describe(&sources),
+                dir = dir.display()
             ),
             edit,
             kind: InputKind::Pack { sources },

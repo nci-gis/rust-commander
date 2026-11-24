@@ -317,7 +317,12 @@ pub fn some_names(paths: &[PathBuf]) -> String {
         .collect();
     match paths.len().saturating_sub(SHOWN) {
         0 => names.join(", "),
-        more => format!("{} and {more} more", names.join(", ")),
+        more => tr!(
+            "lists.and_more",
+            "{v} and {more} more",
+            v = names.join(", "),
+            more = more
+        ),
     }
 }
 

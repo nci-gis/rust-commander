@@ -114,8 +114,11 @@ impl App {
         let max = self.settings.config.terminal.max_terminals;
         let running = self.panel().map_or(0, |p| p.shell_count());
         if running >= max {
-            self.status =
-                format!("at most {max} terminals \u{2014} [terminal] max_terminals in config.toml");
+            self.status = tr!(
+                "shell.at_most_terminals_u_terminal_max",
+                "at most {max} terminals \u{2014} [terminal] max_terminals in config.toml",
+                max = max
+            );
             return false;
         }
         true
@@ -159,9 +162,9 @@ impl App {
         let notes = p.take_notes();
         if gone > 0 {
             self.status = if gone == 1 {
-                "shell exited".into()
+                tr!("shell.shell_exited", "shell exited").into()
             } else {
-                format!("{gone} shells exited")
+                tr!("shell.shells_exited", "{gone} shells exited", gone = gone)
             };
         }
         if let Some(last) = notes.last() {
@@ -221,11 +224,17 @@ impl App {
         let note = if h.full_screen {
             // The shell's lines are behind the program's screen, and vt100 keeps no
             // history for that screen: say so rather than count a screenful as history.
-            "a full-screen program is running \u{2014} its screen only \u{2014} Esc back".into()
+            tr!(
+                "shell.a_full_screen_program_is_running",
+                "a full-screen program is running \u{2014} its screen only \u{2014} Esc back"
+            )
+            .into()
         } else {
-            format!(
-                "{lines} line{}, in memory only \u{2014} Esc back",
-                if lines == 1 { "" } else { "s" }
+            tr!(
+                "shell.line_in_memory_only_u_esc",
+                "{lines} line{s}, in memory only \u{2014} Esc back",
+                lines = lines,
+                s = if lines == 1 { "" } else { "s" }
             )
         };
         viewer.note(&note);
@@ -285,14 +294,26 @@ impl App {
                     viewer.note_path(crate::links::Said {
                         before: String::new(),
                         path: tidy(&canonical),
-                        after: " \u{2014} Esc back to the history".into(),
+                        after: tr!(
+                            "shell.u_esc_back_to_the_history",
+                            " \u{2014} Esc back to the history"
+                        )
+                        .into(),
                     });
                     if let Some(Modal::View(h)) = self.modal.take() {
                         self.return_to = Some(h);
                     }
                     self.modal = Some(Modal::View(Box::new(viewer)));
                 }
-                Err(e) => refuse(self, &format!("cannot view {}: {e}", tidy(&canonical))),
+                Err(e) => refuse(
+                    self,
+                    &tr!(
+                        "shell.cannot_view",
+                        "cannot view {v}: {e}",
+                        v = tidy(&canonical),
+                        e = e
+                    ),
+                ),
             },
             viewer::LinkAct::Edit => {
                 if let Some(why) = self.refused(Action::Edit) {
@@ -329,7 +350,7 @@ impl App {
         let save = if history.is_empty() {
             String::new()
         } else {
-            format!("{history}, F2")
+            tr!("shell.f2", "{history}, F2", history = history)
         };
         let writes = self.refused(Action::CopyAs).is_none();
         // The tab's identity, not its position: shells are reaped every turn while the
@@ -359,7 +380,7 @@ impl App {
             Item::cmd("Close tab", "\u{00d7}", Cmd::TabClose(id), true),
         ];
         self.modal = Some(Modal::Menu(Menu::new(
-            Some(format!("Terminal {}", i + 1)),
+            Some(tr!("shell.terminal", "Terminal {v}", v = i + 1)),
             items,
             (x, y),
         )));
@@ -396,7 +417,11 @@ impl App {
             .unwrap_or(pane_dir);
         let name = xdevcmd_core::termlog::file_name(&shell);
         self.modal = Some(Modal::Input(Input {
-            title: format!("Log terminal {} to file", i + 1),
+            title: tr!(
+                "shell.log_terminal_to_file",
+                "Log terminal {v} to file",
+                v = i + 1
+            ),
             label: log_label(false),
             edit: LineEdit::new(&dir.join(name).display().to_string()),
             kind: InputKind::LogTo {
@@ -449,10 +474,13 @@ impl App {
         let Some(i) = self.tab_still_there(id) else {
             return;
         };
-        self.status = self
-            .panel()
-            .and_then(|p| p.stop_log(i))
-            .unwrap_or_else(|| "this tab is not being logged".into());
+        self.status = self.panel().and_then(|p| p.stop_log(i)).unwrap_or_else(|| {
+            tr!(
+                "shell.this_tab_is_not_being_logged",
+                "this tab is not being logged"
+            )
+            .into()
+        });
     }
 
     /// What the terminal panel's logs have to say, on the status line. Whether
@@ -523,8 +551,8 @@ impl App {
         };
         self.save_from = Some(v);
         self.modal = Some(Modal::Input(Input {
-            title: "Save as".into(),
-            label: format!("{what}, to:"),
+            title: tr!("shell.save_as", "Save as").into(),
+            label: tr!("shell.to", "{what}, to:", what = what),
             edit: LineEdit::new(&dir.join(name).display().to_string()),
             kind: InputKind::SaveAs,
             dir,
@@ -543,9 +571,10 @@ impl App {
         // name could later be typed into a shell or pasted. In the whole text, before
         // the trim: a tab or a newline at either end is not a space to drop (T5, H-08).
         if let Some(c) = xdevcmd_core::controls::first(&raw, &[]) {
-            return Err(format!(
-                "{} in the name \u{2014} remove it",
-                xdevcmd_core::controls::named(c)
+            return Err(tr!(
+                "shell.in_the_name_u_remove_it",
+                "{v} in the name \u{2014} remove it",
+                v = xdevcmd_core::controls::named(c)
             ));
         }
         let typed = raw.trim();
@@ -559,7 +588,11 @@ impl App {
         // Under --root: the one check of a path to make (links resolved, a link left
         // there that leads out is outside, no `..` in what is still to make).
         if !xdevcmd_core::policy::get().allows_at(&dest) {
-            return Err("outside the root xdevcmd is confined to".into());
+            return Err(tr!(
+                "shell.outside_the_root_xdevcmd_is_confined",
+                "outside the root xdevcmd is confined to"
+            )
+            .into());
         }
         // The name itself as Rename checks one: on Windows `<>:"|?*` and a trailing dot
         // or space, which the system would refuse in its own words once the job ran.
@@ -569,12 +602,20 @@ impl App {
             }
         }
         if dest.is_dir() {
-            return Err("that is a directory \u{2014} add a file name".into());
+            return Err(tr!(
+                "shell.that_is_a_directory_u_add",
+                "that is a directory \u{2014} add a file name"
+            )
+            .into());
         }
         // Said plainly here, before a job is started that would end in the system's
         // own words for it.
         if !dest.parent().is_some_and(Path::is_dir) {
-            return Err("that folder does not exist".into());
+            return Err(tr!(
+                "shell.that_folder_does_not_exist",
+                "that folder does not exist"
+            )
+            .into());
         }
         Ok(Some(dest))
     }
@@ -607,15 +648,18 @@ impl App {
                     // The same question a copy asks, before anything is touched.
                     let on_disk = std::fs::metadata(&dest).map_or(0, |m| m.len());
                     self.modal = Some(Modal::Ask(modal::Ask {
-                        title: "Already exists".into(),
+                        title: tr!("shell.already_exists", "Already exists").into(),
                         body: vec![
                             dest.display().to_string(),
                             String::new(),
-                            format!("on disk   {}", human_size(on_disk)),
+                            tr!("shell.on_disk", "on disk   {v}", v = human_size(on_disk)),
                             format!("incoming  {}", human_size(len)),
                         ],
                         danger: true,
-                        yes: Some(("Replace".into(), Cmd::SaveReplacing(dest))),
+                        yes: Some((
+                            tr!("shell.replace", "Replace").into(),
+                            Cmd::SaveReplacing(dest),
+                        )),
                         buttons: Vec::new(),
                         also: None,
                         more: None,
@@ -623,13 +667,17 @@ impl App {
                         pictures: Vec::new(),
                     }));
                 }
-                Err(e) => refuse(self, i, format!("cannot save: {e}")),
+                Err(e) => refuse(self, i, tr!("shell.cannot_save", "cannot save: {e}", e = e)),
             }
             return;
         }
         let from = v.doc.path.clone();
         let (Some(dir), Some(name)) = (dest.parent(), dest.file_name()) else {
-            return refuse(self, i, "not a file name".into());
+            return refuse(
+                self,
+                i,
+                tr!("shell.not_a_file_name", "not a file name").into(),
+            );
         };
         let mut req = Request::copy(vec![from], dir.to_path_buf());
         req.rename_to = Some(name.to_os_string());
@@ -767,47 +815,53 @@ impl App {
             return self.send_here(s);
         }
         let new_shell = if s.new_shell.is_some() {
-            format!("Open a new shell in {} and type it there?", tidy(&s.dir))
+            tr!(
+                "shell.open_a_new_shell_in_and",
+                "Open a new shell in {v} and type it there?",
+                v = tidy(&s.dir)
+            )
         } else {
-            format!("Open a new shell in {} instead?", tidy(&s.dir))
+            tr!(
+                "shell.open_a_new_shell_in_instead",
+                "Open a new shell in {v} instead?",
+                v = tidy(&s.dir)
+            )
         };
-        let what = format!(
-            "To type: {}",
-            xdevcmd_core::format::elide_middle(&s.what, 70)
+        let what = tr!(
+            "shell.to_type",
+            "To type: {v}",
+            v = xdevcmd_core::format::elide_middle(&s.what, 70)
         );
         let (title, mut body) = match &state {
             ShellState::Busy(p) => (
                 "A program is running",
-                vec![format!(
-                    "{p} is running in this terminal \u{2014} xdevcmd does not type into a program."
-                )],
+                vec![tr!("shell.is_running_in_this_terminal_u", "{p} is running in this terminal \u{2014} xdevcmd does not type into a program.", p = p)],
             ),
             ShellState::Remote(p) => (
                 "The shell is on another machine",
-                vec![format!(
-                    "{p} is running in this terminal \u{2014} the shell there is on another machine."
-                )],
+                vec![tr!("shell.is_running_in_this_terminal_u_2", "{p} is running in this terminal \u{2014} the shell there is on another machine.", p = p)],
             ),
             ShellState::Unknown => (
                 "Type into the shell?",
                 vec![
-                    "xdevcmd cannot tell whether a program is running in this shell.".into(),
-                    "docs/shell.md shows the prompt snippet that lets it tell.".into(),
+                    tr!("shell.xdevcmd_cannot_tell_whether_a_program", "xdevcmd cannot tell whether a program is running in this shell.").into(),
+                    tr!("shell.docs_shell_md_shows_the_prompt", "docs/shell.md shows the prompt snippet that lets it tell.").into(),
                 ],
             ),
             ShellState::Idle if !long => (
                 "Type into the shell?",
                 vec![
-                    "The shell is at its prompt.".into(),
-                    "Settings \u{2192} Terminal can send without asking.".into(),
+                    tr!("shell.the_shell_is_at_its_prompt", "The shell is at its prompt.").into(),
+                    tr!("shell.settings_u_terminal_can_send_without", "Settings \u{2192} Terminal can send without asking.").into(),
                 ],
             ),
-            ShellState::Idle => ("Type into the shell?", vec!["The shell is at its prompt.".into()]),
+            ShellState::Idle => ("Type into the shell?", vec![tr!("shell.the_shell_is_at_its_prompt", "The shell is at its prompt.").into()]),
         };
         if long {
-            body.push(format!(
-                "It is {} bytes \u{2014} some shells drop a line over 4 KB without a word.",
-                s.here.len()
+            body.push(tr!(
+                "shell.it_is_bytes_u_some_shells",
+                "It is {here_len} bytes \u{2014} some shells drop a line over 4 KB without a word.",
+                here_len = s.here.len()
             ));
         }
         body.push(String::new());
@@ -815,14 +869,23 @@ impl App {
         body.push(new_shell);
         let s = Box::new(s);
         let (yes, also) = match decision {
-            Decision::AskNewShell => (("open a new shell".to_string(), Cmd::ShellNew(s)), None),
+            Decision::AskNewShell => (
+                (
+                    tr!("shell.open_a_new_shell", "open a new shell").into_owned(),
+                    Cmd::ShellNew(s),
+                ),
+                None,
+            ),
             _ => {
                 let here = s.clone();
                 (
-                    ("open a new shell".to_string(), Cmd::ShellNew(s)),
+                    (
+                        tr!("shell.open_a_new_shell", "open a new shell").into_owned(),
+                        Cmd::ShellNew(s),
+                    ),
                     Some((
                         's',
-                        "send to this shell".to_string(),
+                        tr!("shell.send_to_this_shell", "send to this shell").into_owned(),
                         Cmd::ShellSendHere(here),
                     )),
                 )
@@ -866,9 +929,17 @@ impl App {
             let r = crate::refusal::Refusal::Busy;
             r.log();
             self.status = if cfg!(unix) {
-                format!("Ctrl+C clears shell {n}'s line \u{2014} all shell tabs in use")
+                tr!(
+                    "shell.ctrl_c_clears_shell_s_line",
+                    "Ctrl+C clears shell {n}'s line \u{2014} all shell tabs in use",
+                    n = n
+                )
             } else {
-                "close a shell tab \u{2014} all in use".into()
+                tr!(
+                    "shell.close_a_shell_tab_u_all",
+                    "close a shell tab \u{2014} all in use"
+                )
+                .into()
             };
             return;
         }
@@ -876,14 +947,24 @@ impl App {
         let mut s = s;
         if s.new_shell.is_some() {
             // Said again when its text is typed there, which replaces this status.
-            s.what = format!("{} \u{2014} shell {n} keeps its typed text", s.what);
+            s.what = tr!(
+                "shell.u_shell_keeps_its_typed_text",
+                "{what} \u{2014} shell {n} keeps its typed text",
+                what = s.what,
+                n = n
+            );
         }
         self.open_shell_for(s);
         let after = self.panel_ref().map_or(before, TermPanel::tab_count);
         if after > before {
             crate::refusal::Refusal::DirtyLine.log();
-            self.status =
-                format!("new shell {after} in {dir} \u{2014} shell {n} keeps its typed text");
+            self.status = tr!(
+                "shell.new_shell_in_u_shell_keeps",
+                "new shell {after} in {dir} \u{2014} shell {n} keeps its typed text",
+                after = after,
+                dir = dir,
+                n = n
+            );
         }
     }
 
@@ -944,7 +1025,11 @@ impl App {
             Some(text) => {
                 // One wait at a time: an earlier one still waiting is dropped, and said.
                 let dropped = match self.pending_type.take() {
-                    Some(p) => format!(" ({} for the earlier new shell: not typed)", p.what),
+                    Some(p) => tr!(
+                        "shell.for_the_earlier_new_shell_not",
+                        " ({what} for the earlier new shell: not typed)",
+                        what = p.what
+                    ),
                     None => String::new(),
                 };
                 self.status = tr!(
@@ -1221,8 +1306,16 @@ impl App {
 /// The Log to file prompt's label: which mode, and how to switch.
 pub(super) fn log_label(raw: bool) -> String {
     if raw {
-        "raw bytes, as received (Tab: text), appended to:".into()
+        tr!(
+            "shell.raw_bytes_as_received_tab_text",
+            "raw bytes, as received (Tab: text), appended to:"
+        )
+        .into()
     } else {
-        "text, escapes removed (Tab: raw), appended to:".into()
+        tr!(
+            "shell.text_escapes_removed_tab_raw_appended",
+            "text, escapes removed (Tab: raw), appended to:"
+        )
+        .into()
     }
 }

@@ -148,9 +148,17 @@ impl Viewer {
     pub fn open(doc: Document, wrap: bool, tab_width: usize) -> Self {
         let mode = if doc.binary { Mode::Hex } else { Mode::Text };
         let message = if doc.binary {
-            "binary file — showing hex".to_string()
+            tr!(
+                "viewer.binary_file_showing_hex",
+                "binary file — showing hex"
+            )
+            .into_owned()
         } else if !doc.fully_indexed {
-            "very large file — showing the first part".to_string()
+            tr!(
+                "viewer.very_large_file_showing_the_first",
+                "very large file — showing the first part"
+            )
+            .into_owned()
         } else {
             String::new()
         };
@@ -202,10 +210,11 @@ impl Viewer {
         };
         if self.doc.len > max {
             if self.message.is_empty() {
-                self.message = format!(
-                    "{} file over {} \u{2014} not coloured",
-                    lang.name(),
-                    human_size(max)
+                self.message = tr!(
+                    "viewer.file_over_u_not_coloured",
+                    "{name} file over {v} \u{2014} not coloured",
+                    name = lang.name(),
+                    v = human_size(max)
                 );
             }
             return self;
@@ -327,13 +336,20 @@ impl Viewer {
             return Action::Stay;
         };
         if let Some(p) = &links.remote {
-            self.message = format!(
-                "{p} is running in this shell: its output names another machine's files \u{2014} no list made"
-            );
+            self.message = tr!("viewer.is_running_in_this_shell_its", "{p} is running in this shell: its output names another machine's files \u{2014} no list made", p = p);
             return Action::Stay;
         }
         let picked = match self.selected() {
-            Some((a, b)) => Some((a..b + 1, None, format!("lines {}\u{2013}{}", a + 1, b + 1))),
+            Some((a, b)) => Some((
+                a..b + 1,
+                None,
+                tr!(
+                    "viewer.lines_u",
+                    "lines {v}\u{2013}{v2}",
+                    v = a + 1,
+                    v2 = b + 1
+                ),
+            )),
             None => links
                 .selected
                 .and_then(|(i, _)| links.command_at(i, total))
@@ -363,7 +379,7 @@ impl Viewer {
             }
         }
         if paths.is_empty() {
-            self.message = "no paths in those lines".into();
+            self.message = tr!("viewer.no_paths_in_those_lines", "no paths in those lines").into();
             return Action::Stay;
         }
         let links = self.links.as_ref().expect("checked above");
@@ -410,7 +426,11 @@ impl Viewer {
             return false;
         }
         if !self.doc.indexing() && !self.doc.fully_indexed && self.message.is_empty() {
-            self.message = "very large file \u{2014} showing the first part".into();
+            self.message = tr!(
+                "viewer.very_large_file_u_showing_the",
+                "very large file \u{2014} showing the first part"
+            )
+            .into();
         }
         true
     }
@@ -509,9 +529,11 @@ impl Viewer {
                 let held = self.held.take();
                 if let (Some(Held::Select), Some((a, b))) = (held, self.selected()) {
                     let n = b - a + 1;
-                    self.message = format!(
-                        "{n} line{} selected \u{2014} y copies, Esc clears",
-                        if n == 1 { "" } else { "s" }
+                    self.message = tr!(
+                        "viewer.line_selected_u_y_copies_esc",
+                        "{n} line{s} selected \u{2014} y copies, Esc clears",
+                        n = n,
+                        s = if n == 1 { "" } else { "s" }
                     );
                 }
             }
@@ -547,7 +569,11 @@ impl Viewer {
 
     fn search(&mut self, backwards: bool) {
         let Some(n) = self.needle.clone() else {
-            self.message = "nothing to search for yet — press /".into();
+            self.message = tr!(
+                "viewer.nothing_to_search_for_yet_press",
+                "nothing to search for yet — press /"
+            )
+            .into();
             return;
         };
         match self.doc.find(&n, self.top, backwards) {
@@ -557,19 +583,13 @@ impl Viewer {
             }
             None if self.doc.indexing() => {
                 // The rest is not indexed yet: said, not "no more matches".
-                self.message = format!(
-                    "/{n} \u{2014} not in the {} lines indexed so far; still indexing, try again",
-                    self.doc.line_count()
-                )
+                self.message = tr!("viewer.u_not_in_the_lines_indexed", "/{n} \u{2014} not in the {line_count} lines indexed so far; still indexing, try again", n = n, line_count = self.doc.line_count())
             }
             None if !self.doc.fully_indexed => {
                 // "no more matches" would be a lie: we never looked at the rest.
-                self.message = format!(
-                    "/{n} — not in the first {} lines, and this file is too large to index further",
-                    self.doc.line_count()
-                )
+                self.message = tr!("viewer.not_in_the_first_lines_and", "/{n} — not in the first {line_count} lines, and this file is too large to index further", n = n, line_count = self.doc.line_count())
             }
-            None => self.message = format!("/{n} — no more matches"),
+            None => self.message = tr!("viewer.no_more_matches", "/{n} — no more matches", n = n),
         }
     }
 
@@ -596,17 +616,29 @@ impl Viewer {
             number(t, 10).map(|n| n.saturating_sub(1))
         };
         let Some(row) = target else {
-            self.message = format!("not {unit}: {t} \u{2014} a number, or 50%");
+            self.message = tr!(
+                "viewer.not_u_a_number_or_50",
+                "not {unit}: {t} \u{2014} a number, or 50%",
+                unit = unit,
+                t = t
+            );
             return;
         };
         self.selection = None;
         if row > last as u64 {
             self.top = last;
             self.message = match self.mode {
-                Mode::Text => format!("{t} is past the end \u{2014} line {rows} is the last"),
-                Mode::Hex => format!(
-                    "{t} is past the end \u{2014} the file is {} bytes",
-                    self.doc.len
+                Mode::Text => tr!(
+                    "viewer.is_past_the_end_u_line",
+                    "{t} is past the end \u{2014} line {rows} is the last",
+                    t = t,
+                    rows = rows
+                ),
+                Mode::Hex => tr!(
+                    "viewer.is_past_the_end_u_the",
+                    "{t} is past the end \u{2014} the file is {len} bytes",
+                    t = t,
+                    len = self.doc.len
                 ),
             };
         } else {
@@ -614,7 +646,11 @@ impl Viewer {
             self.message.clear();
             // Lines count from 1; 0 goes to the first and says why it is not line 0.
             if self.mode == Mode::Text && number(t, 10) == Some(0) {
-                self.message = "lines start at 1 \u{2014} this is line 1".into();
+                self.message = tr!(
+                    "viewer.lines_start_at_1_u_this",
+                    "lines start at 1 \u{2014} this is line 1"
+                )
+                .into();
             }
         }
     }
@@ -678,13 +714,21 @@ impl Viewer {
                 }
                 (KeyCode::Enter, Some(l)) => return Action::Link(LinkAct::Go, l),
                 (KeyCode::F(3 | 4), Some(l)) if l.dir => {
-                    self.message = "a directory \u{2014} Enter goes there".into();
+                    self.message = tr!(
+                        "viewer.a_directory_u_enter_goes_there",
+                        "a directory \u{2014} Enter goes there"
+                    )
+                    .into();
                     return Action::Stay;
                 }
                 (KeyCode::F(3), Some(l)) => return Action::Link(LinkAct::View, l),
                 (KeyCode::F(4), Some(l)) => return Action::Link(LinkAct::Edit, l),
                 (KeyCode::Enter, None) => {
-                    self.message = "Tab chooses a path in the output".into();
+                    self.message = tr!(
+                        "viewer.tab_chooses_a_path_in_the",
+                        "Tab chooses a path in the output"
+                    )
+                    .into();
                     return Action::Stay;
                 }
                 (KeyCode::Char('p'), _) => return self.list_request(false),
@@ -721,7 +765,11 @@ impl Viewer {
                 if self.mode == Mode::Text {
                     if let Err(e) = self.doc.ensure_lines() {
                         self.mode = Mode::Hex;
-                        self.message = format!("cannot show as text: {e}");
+                        self.message = tr!(
+                            "viewer.cannot_show_as_text",
+                            "cannot show as text: {e}",
+                            e = e
+                        );
                         return Action::Stay;
                     }
                 }
@@ -736,7 +784,11 @@ impl Viewer {
                 };
             }
             KeyCode::Char('y' | 'Y') if self.mode == Mode::Hex => {
-                self.message = "copy works in text view \u{2014} h".into();
+                self.message = tr!(
+                    "viewer.copy_works_in_text_view_u",
+                    "copy works in text view \u{2014} h"
+                )
+                .into();
             }
             KeyCode::Char(c @ ('y' | 'Y')) => {
                 let (from, n) = match (c, self.selected()) {
@@ -780,10 +832,11 @@ impl Viewer {
         self.index_moved();
         // While the rest is indexed, the count is what is known so far (A03).
         let lines = if self.doc.indexing() {
-            format!(
-                "{} lines so far, indexing {}%",
-                self.doc.line_count(),
-                self.doc.indexed_percent()
+            tr!(
+                "viewer.lines_so_far_indexing",
+                "{line_count} lines so far, indexing {indexed_percent}%",
+                line_count = self.doc.line_count(),
+                indexed_percent = self.doc.indexed_percent()
             )
         } else {
             format!("{} lines", self.doc.line_count())
@@ -809,7 +862,12 @@ impl Viewer {
                 Style::new().fg(theme::t().fg),
             ),
             Span::styled(
-                format!("  \u{b7} {kind} \u{b7} {scale} "),
+                tr!(
+                    "viewer.u_u",
+                    "  \u{b7} {kind} \u{b7} {scale} ",
+                    kind = kind,
+                    scale = scale
+                ),
                 Style::new().fg(theme::t().fg_dim),
             ),
         ]);

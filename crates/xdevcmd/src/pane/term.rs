@@ -187,7 +187,7 @@ pub fn state_of(
         };
     }
     match (mark, sees_foreground, fg) {
-        (Some(Mark::Running), _, _) => ShellState::Busy("a command".into()),
+        (Some(Mark::Running), _, _) => ShellState::Busy(tr!("term.a_command", "a command").into()),
         (_, true, Fg::Shell) | (Some(Mark::Prompt), false, _) => ShellState::Idle,
         // Where the system should say and could not (its answer unreadable): never
         // idle on a guess.
@@ -496,7 +496,7 @@ impl TermPane {
                             Err(e) => format!("lost: {e}"),
                         }
                     }
-                    Err(e) => format!("could not start: {e}"),
+                    Err(e) => tr!("term.could_not_start", "could not start: {e}", e = e),
                 };
                 if let Ok(mut e) = ended.lock() {
                     *e = Some(how);
@@ -770,7 +770,13 @@ impl TermPane {
     /// Whether something may be typed into this shell now; see [`state_of`].
     pub fn state(&self) -> ShellState {
         if self.has_exited() {
-            return ShellState::Busy("nothing \u{2014} the shell has ended".into());
+            return ShellState::Busy(
+                tr!(
+                    "term.nothing_u_the_shell_has_ended",
+                    "nothing \u{2014} the shell has ended"
+                )
+                .into(),
+            );
         }
         state_of(
             self.keep,
@@ -1096,7 +1102,11 @@ impl TermPane {
         let state = if self.has_exited() {
             " (exited)".to_string()
         } else if back > 0 {
-            format!("  \u{2191} {back} lines back")
+            tr!(
+                "term.u_lines_back",
+                "  \u{2191} {back} lines back",
+                back = back
+            )
         } else {
             String::new()
         };
@@ -1104,7 +1114,13 @@ impl TermPane {
             Span::raw(" "),
             Span::styled(
                 match self.activity() {
-                    Some(doing) => format!("\u{2302} {} \u{b7} {doing}{state}", self.label),
+                    Some(doing) => tr!(
+                        "term.u_u",
+                        "\u{2302} {label} \u{b7} {doing}{state}",
+                        label = self.label,
+                        doing = doing,
+                        state = state
+                    ),
                     None => format!("\u{2302} {}{}", self.label, state),
                 },
                 theme::title_style(active),
@@ -1134,9 +1150,11 @@ impl TermPane {
         // close it, rather than leaving a screen that looks alive.
         if self.keep && self.has_exited() {
             let how = self.ended().unwrap_or_else(|| "ended".into());
-            let note = format!(
-                " {} ended ({how}) \u{2014} Enter or Esc closes ",
-                self.label
+            let note = tr!(
+                "term.ended_u_enter_or_esc_closes",
+                " {label} ended ({how}) \u{2014} Enter or Esc closes ",
+                label = self.label,
+                how = how
             );
             let y = inner.y + inner.height - 1;
             frame.buffer_mut().set_string(
@@ -1215,7 +1233,7 @@ fn fg_from_stat(stat: &str, comm: impl Fn(i32) -> Option<String>) -> Fg {
             .map(|c| c.trim().to_string())
             .unwrap_or_default();
         return Fg::Program(if name.is_empty() {
-            "a program".into()
+            tr!("term.a_program", "a program").into()
         } else {
             name
         });
@@ -1255,7 +1273,7 @@ fn foreground_of(pid: u32) -> Fg {
         let args = || ps(&["-o", "args=", "-p", &group]).unwrap_or_default();
         let name = program_name(&comm, args);
         return Fg::Program(if name.is_empty() {
-            "a program".into()
+            tr!("term.a_program", "a program").into()
         } else {
             name
         });

@@ -380,7 +380,7 @@ impl App {
     /// bottom, where it opens.
     pub(super) fn show_messages(&mut self) {
         let text: String = if self.messages.is_empty() {
-            "No messages yet.\n".into()
+            tr!("draw.no_messages_yet_n", "No messages yet.\n").into()
         } else {
             self.messages
                 .iter()
@@ -392,9 +392,12 @@ impl App {
         let v = &self.settings.config.viewer;
         let mut viewer = crate::viewer::Viewer::open(doc, v.wrap, v.tab_width);
         viewer.show_end();
-        viewer.note(&format!(
-            "{n} message{} of the last {MESSAGES}, in memory only \u{2014} Esc back",
-            if n == 1 { "" } else { "s" }
+        viewer.note(&tr!(
+            "draw.message_of_the_last_in_memory",
+            "{n} message{s} of the last {MESSAGES}, in memory only \u{2014} Esc back",
+            n = n,
+            s = if n == 1 { "" } else { "s" },
+            MESSAGES = MESSAGES
         ));
         self.modal = Some(Modal::View(Box::new(viewer)));
     }
@@ -439,37 +442,22 @@ impl App {
             Some(Pane::Files(tabs)) => {
                 let f = tabs.active();
                 let tab = if tabs.len() > 1 {
-                    format!("  \u{b7}  tab {}/{}", tabs.active_index() + 1, tabs.len())
+                    tr!("draw.u_tab", "  \u{b7}  tab {v}/{tabs_len}", v = tabs.active_index() + 1, tabs_len = tabs.len())
                 } else {
                     String::new()
                 };
                 let sort = f.sort.key.label();
-                format!(
-                    " {}  ·  {} items  ·  sort {}{}{}{}",
-                    f.summary(),
-                    f.entries.len(),
-                    sort,
-                    if f.sort.reverse { " ▲" } else { " ▼" },
-                    if f.show_hidden { "  ·  hidden" } else { "" },
-                    tab
-                )
+                tr!("draw.items_sort", " {summary}  ·  {entries_len} items  ·  sort {sort}{v}{v2}{tab}", summary = f.summary(), entries_len = f.entries.len(), sort = sort, v = if f.sort.reverse { " ▲" } else { " ▼" }, v2 = if f.show_hidden { "  ·  hidden" } else { "" }, tab = tab)
             }
-            Some(Pane::Term(p)) => format!(
-                " terminal {}/{}{}  \u{b7}  {} back to files  \u{b7}  {} history",
-                p.active_tab() + 1,
-                p.tab_count(),
-                if p.split_count() > 1 {
+            Some(Pane::Term(p)) => tr!("draw.terminal_u_back_to_files_u", " terminal {v}/{tab_count}{v2}  \u{b7}  {unwrap_or_default} back to files  \u{b7}  {unwrap_or_default2} history", v = p.active_tab() + 1, tab_count = p.tab_count(), v2 = if p.split_count() > 1 {
                     format!("  \u{b7}  split {}/{}", p.focused_split(), p.split_count())
                 } else {
                     String::new()
-                },
-                self.footer_key(Action::FocusTerminal).unwrap_or_default(),
-                self.footer_key(Action::TerminalHistory).unwrap_or_default()
-            ),
+                }, unwrap_or_default = self.footer_key(Action::FocusTerminal).unwrap_or_default(), unwrap_or_default2 = self.footer_key(Action::TerminalHistory).unwrap_or_default()),
             None => String::new(),
         };
         let left = if self.zoom.is_some() {
-            format!("{left}  \u{b7}  zoomed")
+            tr!("draw.u_zoomed", "{left}  \u{b7}  zoomed", left = left)
         } else {
             left
         };
@@ -480,10 +468,13 @@ impl App {
                 (d + j.bytes_done, t + j.total_bytes)
             });
             let pct = (done * 100).checked_div(total).unwrap_or(0);
-            format!(
-                "{left}  \u{b7}  \u{27f3} {} job{} {pct}%",
-                self.jobs.len(),
-                if self.jobs.len() == 1 { "" } else { "s" }
+            tr!(
+                "draw.u_u_job",
+                "{left}  \u{b7}  \u{27f3} {jobs_len} job{s} {pct}%",
+                left = left,
+                jobs_len = self.jobs.len(),
+                s = if self.jobs.len() == 1 { "" } else { "s" },
+                pct = pct
             )
         };
         // The mode is never something you have to remember: it sits at the left of

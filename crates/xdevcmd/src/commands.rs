@@ -150,13 +150,13 @@ pub fn rows(
                 .collect();
             let rebound = live.iter().cloned().collect::<HashSet<_>>() != defaults;
             let note = if b.action.is_global() {
-                Some("works in the shell".to_string())
+                Some(tr!("commands.works_in_the_shell", "works in the shell").into_owned())
             } else if b.action.opens_from_shell() {
                 // Alt+X F1: F1 alone is the program's there.
                 shell_prefix.as_ref().and_then(|p| {
                     live.iter()
                         .find(|k| k.starts_with(&format!("{p} ")))
-                        .map(|k| format!("in the shell: {k}"))
+                        .map(|k| tr!("commands.in_the_shell", "in the shell: {k}", k = k))
                 })
             } else {
                 // After the prefix only single keys work: Alt+X Alt+R is not a group in
@@ -166,10 +166,21 @@ pub fn rows(
                     .filter(|_| b.action.acts_on_shell())
                     .map(|p| match live.iter().find(|k| !k.contains(' ')) {
                         Some(_) if live.iter().all(|k| !k.contains(' ')) => {
-                            format!("in the shell: {p} first")
+                            tr!(
+                                "commands.in_the_shell_first",
+                                "in the shell: {p} first",
+                                p = p
+                            )
                         }
-                        Some(one) => format!("in the shell: {p} {one}"),
-                        None => "not from the shell".to_string(),
+                        Some(one) => tr!(
+                            "commands.in_the_shell_2",
+                            "in the shell: {p} {one}",
+                            p = p,
+                            one = one
+                        ),
+                        None => {
+                            tr!("commands.not_from_the_shell", "not from the shell").into_owned()
+                        }
                     })
             };
             let run = if b.action == Action::GoTab {
@@ -304,14 +315,14 @@ pub fn rows(
                 keys: Vec::new(),
                 key_text: String::new(),
                 about: about.into(),
-                note: Some("also on the tab's right-click menu".into()),
+                note: Some(tr!("commands.also_on_the_tab_s_right", "also on the tab's right-click menu").into()),
                 place: Place::Everywhere,
                 refused: refuse(&run),
                 run,
                 rebound: false,
                 keys_name: None,
                 id: extra.id().into(),
-                name: format!("Terminal: {title}"),
+                name: tr!("commands.terminal", "Terminal: {title}", title = title),
                 parsed: Vec::new(),
                 hay: String::new(),
             });
@@ -970,7 +981,13 @@ impl Commands {
             let to = match self.size {
                 Size::Small if self.can_grow() => Size::Large,
                 Size::Small => {
-                    self.message = Some("the screen is too small for the large size".into());
+                    self.message = Some(
+                        tr!(
+                            "commands.the_screen_is_too_small_for",
+                            "the screen is too small for the large size"
+                        )
+                        .into(),
+                    );
                     return Outcome::Stay;
                 }
                 Size::Large => Size::Small,

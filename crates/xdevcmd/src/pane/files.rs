@@ -376,12 +376,24 @@ impl FilePane {
     /// False, with a notice, if the list is no longer kept or outside the root.
     pub fn open_list(&mut self, id: crate::lists::Id, record: bool) -> bool {
         let Some(l) = crate::lists::get(id) else {
-            self.notice = Some("that list is no longer kept".into());
+            self.notice = Some(
+                tr!(
+                    "files.that_list_is_no_longer_kept",
+                    "that list is no longer kept"
+                )
+                .into(),
+            );
             return false;
         };
         let root = xdevcmd_core::paths::canonical(&l.root).unwrap_or_else(|_| l.root.clone());
         if !xdevcmd_core::policy::get().allows(&root) {
-            self.notice = Some("that list is outside the root xdevcmd is confined to".into());
+            self.notice = Some(
+                tr!(
+                    "files.that_list_is_outside_the_root",
+                    "that list is outside the root xdevcmd is confined to"
+                )
+                .into(),
+            );
             return false;
         }
         let left = self.place();
@@ -563,9 +575,10 @@ impl FilePane {
                 s.cancel();
             }
             finished = true;
-            self.notice = Some(format!(
-                "stopped at {} found \u{2014} narrow the search to see the rest",
-                find::MAX_FOUND
+            self.notice = Some(tr!(
+                "files.stopped_at_found_u_narrow_the",
+                "stopped at {MAX_FOUND} found \u{2014} narrow the search to see the rest",
+                MAX_FOUND = find::MAX_FOUND
             ));
         }
         if finished {
@@ -576,13 +589,20 @@ impl FilePane {
                 let went = crate::lists::checked(id, &r.gone);
                 let left = self.all.iter().any(|e| !e.is_parent()) || !found.is_empty();
                 if !went.is_empty() {
-                    self.notice = Some(format!(
-                        "{} gone since: {}",
-                        went.len(),
-                        crate::lists::some_names(&went)
+                    self.notice = Some(tr!(
+                        "files.gone_since",
+                        "{went_len} gone since: {v}",
+                        went_len = went.len(),
+                        v = crate::lists::some_names(&went)
                     ));
                 } else if !left {
-                    self.notice = Some("none of those names is a file or directory here".into());
+                    self.notice = Some(
+                        tr!(
+                            "files.none_of_those_names_is_a",
+                            "none of those names is a file or directory here"
+                        )
+                        .into(),
+                    );
                 }
             }
         }
@@ -630,7 +650,13 @@ impl FilePane {
         self.reading = None;
         // A link inside the root to an archive outside it: its contents are outside.
         if !xdevcmd_core::policy::get().allows(file) {
-            self.notice = Some("that archive is outside the root xdevcmd is confined to".into());
+            self.notice = Some(
+                tr!(
+                    "files.that_archive_is_outside_the_root",
+                    "that archive is outside the root xdevcmd is confined to"
+                )
+                .into(),
+            );
             return;
         }
         let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
@@ -646,7 +672,11 @@ impl FilePane {
             let _ = tx.send(archive::list_until(&path, &flag));
         });
         let name = file.file_name().unwrap_or_default().to_string_lossy();
-        self.notice = Some(format!("opening {name}\u{2026} Esc stops it"));
+        self.notice = Some(tr!(
+            "files.opening_u_esc_stops_it",
+            "opening {name}\u{2026} Esc stops it",
+            name = name
+        ));
         self.opening = Some(Opening {
             file: file.to_path_buf(),
             rx,
@@ -675,10 +705,7 @@ impl FilePane {
         match listed {
             Ok(listing) => {
                 if listing.unsafe_names > 0 {
-                    self.notice = Some(format!(
-                        "{} entries with names outside the archive are hidden and will not be extracted",
-                        listing.unsafe_names
-                    ));
+                    self.notice = Some(tr!("files.entries_with_names_outside_the_archive", "{unsafe_names} entries with names outside the archive are hidden and will not be extracted", unsafe_names = listing.unsafe_names));
                 }
                 self.archive = Some(ArchiveView {
                     file: file.to_path_buf(),
@@ -692,7 +719,11 @@ impl FilePane {
                 self.reload();
             }
             Err(e) => {
-                self.notice = Some(format!("cannot open the archive: {e}"));
+                self.notice = Some(tr!(
+                    "files.cannot_open_the_archive",
+                    "cannot open the archive: {e}",
+                    e = e
+                ));
             }
         }
     }
@@ -1135,9 +1166,10 @@ impl FilePane {
             Some(i) => self.cursor = i,
             None => {
                 self.cursor = 0;
-                self.notice = Some(format!(
-                    "{} is not shown here (hidden or filtered out?)",
-                    name.to_string_lossy()
+                self.notice = Some(tr!(
+                    "files.is_not_shown_here_hidden_or",
+                    "{to_string_lossy} is not shown here (hidden or filtered out?)",
+                    to_string_lossy = name.to_string_lossy()
                 ));
             }
         }
@@ -1167,9 +1199,7 @@ impl FilePane {
         let Some((rx, count)) = read_on_thread(path, resolve, time_only, self.show_hidden) else {
             // Not for the periodic look: it simply comes again later.
             if why != ReadFor::Check {
-                self.notice = Some(format!(
-                    "{READS_MAX} directory reads are still waiting on slow drives \u{2014} try again when they end"
-                ));
+                self.notice = Some(tr!("files.directory_reads_are_still_waiting_on", "{READS_MAX} directory reads are still waiting on slow drives \u{2014} try again when they end", READS_MAX = READS_MAX));
             }
             return None;
         };
@@ -1276,9 +1306,10 @@ impl FilePane {
         let policy = xdevcmd_core::policy::get();
         if !policy.allows(&canonical) {
             if let Some(root) = &policy.root {
-                self.notice = Some(format!(
-                    "outside {} \u{2014} xdevcmd is confined there",
-                    root.display()
+                self.notice = Some(tr!(
+                    "files.outside_u_xdevcmd_is_confined_there",
+                    "outside {root} \u{2014} xdevcmd is confined there",
+                    root = root.display()
                 ));
             }
             return false;
@@ -1380,7 +1411,13 @@ impl FilePane {
             return;
         }
         if xdevcmd_core::policy::get().is_root(&self.cwd) {
-            self.notice = Some("this is the top \u{2014} xdevcmd is confined here".into());
+            self.notice = Some(
+                tr!(
+                    "files.this_is_the_top_u_xdevcmd",
+                    "this is the top \u{2014} xdevcmd is confined here"
+                )
+                .into(),
+            );
             return;
         }
         if let Some(parent) = self.cwd.parent().map(Path::to_path_buf) {
@@ -1568,7 +1605,11 @@ impl FilePane {
                 label.push_str(&format!(" {}", digits(n as u64)));
             }
             if took.as_secs() > 0 {
-                label.push_str(&format!(" \u{b7} {} s", took.as_secs()));
+                label.push_str(&tr!(
+                    "files.u_s",
+                    " \u{b7} {as_secs} s",
+                    as_secs = took.as_secs()
+                ));
             }
             label.push_str(" \u{b7} Esc stops");
             return Some((label, None));
@@ -1576,16 +1617,22 @@ impl FilePane {
         let r = self.results.as_ref().filter(|r| r.running())?;
         if r.find {
             Some((
-                format!(
-                    "searching\u{2026} {} looked at \u{b7} Esc stops",
-                    digits(r.scanned)
+                tr!(
+                    "files.searching_u_looked_at_u_esc",
+                    "searching\u{2026} {v} looked at \u{b7} Esc stops",
+                    v = digits(r.scanned)
                 ),
                 None,
             ))
         } else {
             let done = r.scanned.min(r.total as u64);
             Some((
-                format!("checking {} of {}", digits(done), digits(r.total as u64)),
+                tr!(
+                    "files.checking_of",
+                    "checking {v} of {v2}",
+                    v = digits(done),
+                    v2 = digits(r.total as u64)
+                ),
                 Some(done as f64 / r.total.max(1) as f64),
             ))
         }
@@ -1651,23 +1698,40 @@ impl FilePane {
             .unwrap_or_default();
         if let Some(a) = &self.archive {
             let name = a.file.file_name().unwrap_or_default().to_string_lossy();
-            filter = format!(" \u{25b8} {name}/{} {filter}", a.prefix);
+            filter = tr!(
+                "files.u",
+                " \u{25b8} {name}/{prefix} {filter}",
+                name = name,
+                prefix = a.prefix,
+                filter = filter
+            );
         }
         if let Some(r) = &self.results {
             let n = self.all.iter().filter(|e| !e.is_parent()).count();
             if r.find {
                 let state = if r.running() {
-                    format!("searching\u{2026} {} looked at", r.scanned)
+                    tr!(
+                        "files.searching_u_looked_at",
+                        "searching\u{2026} {scanned} looked at",
+                        scanned = r.scanned
+                    )
                 } else {
                     format!("{n} found")
                 };
-                filter = format!(" find {} \u{b7} {state} {filter}", r.what);
+                filter = tr!(
+                    "files.find_u",
+                    " find {what} \u{b7} {state} {filter}",
+                    what = r.what,
+                    state = state,
+                    filter = filter
+                );
             } else {
                 let state = if r.running() {
-                    format!(
-                        "checking\u{2026} {} of {}",
-                        r.scanned.max(n as u64),
-                        r.total
+                    tr!(
+                        "files.checking_u_of",
+                        "checking\u{2026} {v} of {total}",
+                        v = r.scanned.max(n as u64),
+                        total = r.total
                     )
                 } else {
                     n.to_string()
@@ -1676,12 +1740,27 @@ impl FilePane {
                 // so the count (first) and this (last) are what stay.
                 let mut left_out = String::new();
                 if r.capped {
-                    left_out.push_str(&format!(" \u{b7} capped at {}", crate::lists::ROWS));
+                    left_out.push_str(&tr!(
+                        "files.u_capped_at",
+                        " \u{b7} capped at {ROWS}",
+                        ROWS = crate::lists::ROWS
+                    ));
                 }
                 if r.outside > 0 {
-                    left_out.push_str(&format!(" \u{b7} {} outside the root", r.outside));
+                    left_out.push_str(&tr!(
+                        "files.u_outside_the_root",
+                        " \u{b7} {outside} outside the root",
+                        outside = r.outside
+                    ));
                 }
-                filter = format!(" list {state} \u{b7} {}{left_out} {filter}", r.what);
+                filter = tr!(
+                    "files.list_u",
+                    " list {state} \u{b7} {what}{left_out} {filter}",
+                    state = state,
+                    what = r.what,
+                    left_out = left_out,
+                    filter = filter
+                );
             }
         }
         let fw = filter

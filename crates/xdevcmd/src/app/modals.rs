@@ -54,8 +54,11 @@ impl App {
                         .as_ref()
                         .is_some_and(|t| t.plan.target.writable == Some(false)) =>
             {
-                self.status =
-                    "you cannot write there: Tab for the other pane, Esc to cancel".into();
+                self.status = tr!(
+                    "modals.you_cannot_write_there_tab_for",
+                    "you cannot write there: Tab for the other pane, Esc to cancel"
+                )
+                .into();
             }
             Some(Modal::Confirm(c)) => match k.code {
                 KeyCode::Tab => c.next_destination(),
@@ -300,9 +303,17 @@ impl App {
         let before = f.filter.clone();
         self.search = Some(Search::new(self.focus, filter, before));
         self.status = if filter {
-            "type to filter \u{b7} Enter keeps it \u{b7} Esc puts it back".into()
+            tr!(
+                "modals.type_to_filter_u_enter_keeps",
+                "type to filter \u{b7} Enter keeps it \u{b7} Esc puts it back"
+            )
+            .into()
         } else {
-            "type to jump \u{b7} \u{2191}\u{2193} next match \u{b7} Enter or Esc to stop".into()
+            tr!(
+                "modals.type_to_jump_u_u_u",
+                "type to jump \u{b7} \u{2191}\u{2193} next match \u{b7} Enter or Esc to stop"
+            )
+            .into()
         };
     }
 
@@ -377,8 +388,12 @@ impl App {
             start.push(std::path::MAIN_SEPARATOR);
         }
         self.modal = Some(Modal::Input(Input {
-            title: "Go to".into(),
-            label: "a directory, or a file to land on \u{b7} ~ is home \u{b7} Tab completes".into(),
+            title: tr!("modals.go_to", "Go to").into(),
+            label: tr!(
+                "modals.a_directory_or_a_file_to",
+                "a directory, or a file to land on \u{b7} ~ is home \u{b7} Tab completes"
+            )
+            .into(),
             edit: LineEdit::new(&start),
             kind: InputKind::GoTo,
             dir,
@@ -394,7 +409,11 @@ impl App {
         let dir = self.focused_cwd();
         self.modal = Some(Modal::Input(Input {
             title: if mark { "Mark" } else { "Unmark" }.into(),
-            label: "names matching \u{b7} *.jpg *.png \u{b7} a trailing / for directories".into(),
+            label: tr!(
+                "modals.names_matching_u_jpg_png_u",
+                "names matching \u{b7} *.jpg *.png \u{b7} a trailing / for directories"
+            )
+            .into(),
             // Selected, so typing replaces it and Enter alone means everything.
             edit: LineEdit::for_rename("*", true),
             kind: InputKind::Pattern { mark },
@@ -434,10 +453,11 @@ impl App {
             .iter()
             .filter(|l| Some(l.id) != here)
             .map(|l| {
-                let label = format!(
-                    "list \u{b7} {} \u{b7} {}",
-                    xdevcmd_core::format::elide_middle(&l.source, 50),
-                    l.rows.len()
+                let label = tr!(
+                    "modals.list_u_u",
+                    "list \u{b7} {v} \u{b7} {rows_len}",
+                    v = xdevcmd_core::format::elide_middle(&l.source, 50),
+                    rows_len = l.rows.len()
                 );
                 (label, Cmd::ShowList(l.id))
             })
@@ -505,14 +525,14 @@ impl App {
         let writable = !self.settings.mode.read_only();
         if self.bookmarks.contains(&cwd) {
             items.push(Item::cmd(
-                format!("Remove {}", tidy(&cwd)),
+                tr!("modals.remove", "Remove {v}", v = tidy(&cwd)),
                 "",
                 Cmd::RemoveBookmark(cwd),
                 writable,
             ));
         } else {
             items.push(Item::cmd(
-                format!("Bookmark {}", tidy(&cwd)),
+                tr!("modals.bookmark", "Bookmark {v}", v = tidy(&cwd)),
                 "",
                 Cmd::AddBookmark(cwd),
                 writable,
@@ -520,7 +540,7 @@ impl App {
         }
         items.push(Item::cancel("Cancel", "Esc"));
         self.modal = Some(Modal::Menu(Menu::new(
-            Some("Hotlist".into()),
+            Some(tr!("modals.hotlist", "Hotlist").into()),
             items,
             self.pane_anchor(),
         )));
@@ -529,7 +549,11 @@ impl App {
     pub(super) fn save_bookmarks(&mut self, done: String) {
         self.status = match bookmarks::save(&self.bookmarks) {
             Ok(()) => done,
-            Err(e) => format!("bookmarks not saved: {e}"),
+            Err(e) => tr!(
+                "modals.bookmarks_not_saved",
+                "bookmarks not saved: {e}",
+                e = e
+            ),
         };
     }
 }

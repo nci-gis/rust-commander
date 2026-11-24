@@ -152,7 +152,12 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
         h,
     );
     let n = d.files.len();
-    let title = format!("Rename {n} file{}", if n == 1 { "" } else { "s" });
+    let title = tr!(
+        "rename_dialog.rename_file",
+        "Rename {n} file{s}",
+        n = n,
+        s = if n == 1 { "" } else { "s" }
+    );
     let inner = frame_box(frame, r, &title, th.accent);
     if inner.height < 3 || inner.width < LABEL_W + 4 {
         return;
@@ -209,9 +214,17 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
     // What is wrong, if anything, and what Enter would do.
     let (said, style) = match &d.plan {
         Err(e) => (format!("\u{2716} {e}"), Style::new().fg(th.err)),
-        Ok(m) if m.is_empty() => ("no name changes yet".into(), Style::new().fg(th.fg_dim)),
+        Ok(m) if m.is_empty() => (
+            tr!("rename_dialog.no_name_changes_yet", "no name changes yet").into(),
+            Style::new().fg(th.fg_dim),
+        ),
         Ok(m) => (
-            format!("Enter renames {} of {n}", m.len()),
+            tr!(
+                "rename_dialog.enter_renames_of",
+                "Enter renames {m_len} of {n}",
+                m_len = m.len(),
+                n = n
+            ),
             Style::new().fg(th.accent),
         ),
     };

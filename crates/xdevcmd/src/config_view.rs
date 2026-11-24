@@ -198,14 +198,11 @@ impl ConfigView {
         } else {
             String::new()
         };
-        let hint = format!(
-            " \u{2191}\u{2193} scroll \u{b7} Esc {} \u{b7} read-only: File \u{2192} Settings\u{2026} changes the common ones{more}",
-            if self.edit.text().is_empty() {
+        let hint = tr!("config_view.u_u_scroll_u_esc_u", " \u{2191}\u{2193} scroll \u{b7} Esc {v} \u{b7} read-only: File \u{2192} Settings\u{2026} changes the common ones{more}", v = if self.edit.text().is_empty() {
                 "close"
             } else {
                 "clear"
-            }
-        );
+            }, more = more);
         frame.buffer_mut().set_style(
             Rect::new(inner.x, y, inner.width, 1),
             Style::new().bg(th.bg_bar),
@@ -254,13 +251,26 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
         ),
         Outcome::NoFile => (
             match config::default_path() {
-                Some(p) => format!("none      {}  \u{2014} defaults in use", p.display()),
-                None => "no config location \u{2014} using defaults".to_string(),
+                Some(p) => tr!(
+                    "config_view.none_u_defaults_in_use",
+                    "none      {p}  \u{2014} defaults in use",
+                    p = p.display()
+                ),
+                None => tr!(
+                    "config_view.no_config_location_u_using_defaults",
+                    "no config location \u{2014} using defaults"
+                )
+                .into_owned(),
             },
             Style::new().fg(th.fg_dim),
         ),
         Outcome::Rejected { path, error } => (
-            format!("IGNORED   {}: {error}", path.display()),
+            tr!(
+                "config_view.ignored",
+                "IGNORED   {path}: {error}",
+                path = path.display(),
+                error = error
+            ),
             Style::new().fg(th.err).add_modifier(Modifier::BOLD),
         ),
     };
@@ -312,7 +322,7 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
     // The words on screen (beta.4): the language in use and the others there are.
     let found = crate::lang::languages(&crate::lang::folders());
     let in_use = crate::lang::chosen().map_or_else(
-        || "English".to_string(),
+        || tr!("config_view.english", "English").into_owned(),
         |l| format!("{} ({})", l.name, l.code),
     );
     let others = found
@@ -327,7 +337,7 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
             Span::styled(in_use, Style::new().fg(th.fg)),
             Span::styled(
                 if others.is_empty() {
-                    "   no lang/*.toml found".to_string()
+                    tr!("config_view.no_lang_toml_found", "   no lang/*.toml found").into_owned()
                 } else {
                     format!("   found: {others}")
                 },

@@ -145,9 +145,11 @@ impl App {
         }
         let mut body = Vec::new();
         if n > 0 {
-            body.push(format!(
-                "{n} job{} still running in the background.",
-                if n == 1 { " is" } else { "s are" }
+            body.push(tr!(
+                "jobs.job_still_running_in_the_background",
+                "{n} job{v} still running in the background.",
+                n = n,
+                v = if n == 1 { " is" } else { "s are" }
             ));
             body.push(
                 "Quitting cancels them; a file being written is removed, not left half done."
@@ -162,14 +164,16 @@ impl App {
                 .collect::<Vec<_>>()
                 .join(", ");
             let more = programs.len().saturating_sub(3);
-            body.push(format!(
-                "Running in the terminal: {shown}{}. Quitting ends {}.",
-                if more > 0 {
+            body.push(tr!(
+                "jobs.running_in_the_terminal_quitting_ends",
+                "Running in the terminal: {shown}{v}. Quitting ends {v2}.",
+                shown = shown,
+                v = if more > 0 {
                     format!(" and {more} more")
                 } else {
                     String::new()
                 },
-                if programs.len() == 1 { "it" } else { "them" }
+                v2 = if programs.len() == 1 { "it" } else { "them" }
             ));
         }
         let yes = if n > 0 {
@@ -178,7 +182,7 @@ impl App {
             "quit anyway"
         };
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Quit?".into(),
+            title: tr!("jobs.quit", "Quit?").into(),
             body,
             danger: true,
             yes: Some((yes.into(), Cmd::QuitAnyway)),
@@ -202,7 +206,11 @@ impl App {
                 rename_to: r.rename_to.clone(),
             },
             ops::Kind::Copy => {
-                self.expect_copy_undo(format!("copy of {}", Self::describe(&r.sources)));
+                self.expect_copy_undo(tr!(
+                    "jobs.copy_of",
+                    "copy of {v}",
+                    v = Self::describe(&r.sources)
+                ));
                 return;
             }
             ops::Kind::Delete if r.to_trash => {
@@ -210,8 +218,10 @@ impl App {
                 self.trash_pending = Some(r.sources.clone());
                 Undo::Cannot(TRASH_RUNNING.into())
             }
-            ops::Kind::Delete => Undo::Cannot("a permanent delete".into()),
-            ops::Kind::Extract => Undo::Cannot("an extraction".into()),
+            ops::Kind::Delete => {
+                Undo::Cannot(tr!("jobs.a_permanent_delete", "a permanent delete").into())
+            }
+            ops::Kind::Extract => Undo::Cannot(tr!("jobs.an_extraction", "an extraction").into()),
             ops::Kind::Pack => Undo::Cannot("packing".into()),
         });
     }
@@ -229,29 +239,32 @@ impl App {
         let cleaned: usize = found.iter().map(|i| i.cleaned).sum();
         let restored: usize = found.iter().map(|i| i.restored).sum();
         let stranded: Vec<_> = found.iter().flat_map(|i| i.stranded.clone()).collect();
-        let mut body = vec!["The last run of xdevcmd ended in the middle of a job.".to_string()];
+        let mut body = vec![tr!(
+            "jobs.the_last_run_of_xdevcmd_ended",
+            "The last run of xdevcmd ended in the middle of a job."
+        )
+        .into_owned()];
         if cleaned > 0 {
-            body.push(format!(
-                "{cleaned} unfinished temporary file{} removed.",
-                plural(cleaned)
+            body.push(tr!(
+                "jobs.unfinished_temporary_file_removed",
+                "{cleaned} unfinished temporary file{v} removed.",
+                cleaned = cleaned,
+                v = plural(cleaned)
             ));
         }
         if restored > 0 {
-            body.push(format!(
-                "{restored} file{} put back under {} own name (rename many).",
-                plural(restored),
-                if restored == 1 { "its" } else { "their" }
+            body.push(tr!(
+                "jobs.file_put_back_under_own_name",
+                "{restored} file{v} put back under {v2} own name (rename many).",
+                restored = restored,
+                v = plural(restored),
+                v2 = if restored == 1 { "its" } else { "their" }
             ));
         }
         let swapped: Vec<_> = found.iter().flat_map(|i| i.swapped.clone()).collect();
         if !swapped.is_empty() {
             let n = swapped.len();
-            body.push(format!(
-                "{n} replacement{} finished: the new file{} put in place, the old one{} in the trash:",
-                plural(n),
-                if n == 1 { "" } else { "s" },
-                if n == 1 { " is" } else { "s are" },
-            ));
+            body.push(tr!("jobs.replacement_finished_the_new_file_put", "{n} replacement{v} finished: the new file{s} put in place, the old one{v2} in the trash:", n = n, v = plural(n), s = if n == 1 { "" } else { "s" }, v2 = if n == 1 { " is" } else { "s are" }));
             for p in swapped.iter().take(3) {
                 body.push(format!("  {}", tidy(p)));
             }
@@ -259,22 +272,24 @@ impl App {
         let both: Vec<_> = found.iter().flat_map(|i| i.moved.clone()).collect();
         if !both.is_empty() {
             let n = both.len();
-            body.push(format!(
-                "{n} file{} of a move had been copied completely, and {} source{} still there:",
-                plural(n),
-                if n == 1 { "its" } else { "their" },
-                if n == 1 { " is" } else { "s are" },
-            ));
+            body.push(tr!("jobs.file_of_a_move_had_been", "{n} file{v} of a move had been copied completely, and {v2} source{v3} still there:", n = n, v = plural(n), v2 = if n == 1 { "its" } else { "their" }, v3 = if n == 1 { " is" } else { "s are" }));
             for (src, dst) in both.iter().take(3) {
                 body.push(format!("  {}  and  {}", tidy(src), tidy(dst)));
             }
-            body.push("Both are kept; nothing was removed.".into());
+            body.push(
+                tr!(
+                    "jobs.both_are_kept_nothing_was_removed",
+                    "Both are kept; nothing was removed."
+                )
+                .into(),
+            );
         }
         for (tmp, orig) in stranded.iter().take(3) {
-            body.push(format!(
-                "Could not put back {} as {} (the name is taken).",
-                tidy(tmp),
-                tidy(orig)
+            body.push(tr!(
+                "jobs.could_not_put_back_as_the",
+                "Could not put back {v} as {v2} (the name is taken).",
+                v = tidy(tmp),
+                v2 = tidy(orig)
             ));
         }
         // A permanent delete is not offered again (`offered`). One job at a time: any
@@ -300,53 +315,46 @@ impl App {
                 .map(|d| format!(" to {}", tidy(d)))
                 .unwrap_or_default();
             body.push(String::new());
-            body.push(format!(
-                "It was {what} of {}{to}.",
-                Self::describe(&it.sources)
-            ));
+            body.push(tr!("jobs.it_was_of", "It was {what} of {v}{to}.", what = what, v = Self::describe(&it.sources), to = to));
             if it.kind == "delete" {
-                body.push("Continue it? What is left goes to the trash.".into());
+                body.push(tr!("jobs.continue_it_what_is_left_goes", "Continue it? What is left goes to the trash.").into());
             } else {
-                body.push("Continue it? What was done is skipped; a file cut short starts".into());
-                body.push("again; you are asked about any other file already there.".into());
+                body.push(tr!("jobs.continue_it_what_was_done_is", "Continue it? What was done is skipped; a file cut short starts").into());
+                body.push(tr!("jobs.again_you_are_asked_about_any", "again; you are asked about any other file already there.").into());
             }
             // B2 (owner, 2026-11-15): after a power cut a copied file can be short or
             // hold no data under its real name. Trusting is the default (Enter).
             if it.kind != "delete" {
                 // The owner, 2026-11-17: what C is for, not one cause of it.
-                body.push("C reads every copied file again against its source (slow): for".into());
-                body.push("when a copy may be damaged, as after a power cut or a drive pulled out.".into());
+                body.push(tr!("jobs.c_reads_every_copied_file_again", "C reads every copied file again against its source (slow): for").into());
+                body.push(tr!("jobs.when_a_copy_may_be_damaged", "when a copy may be damaged, as after a power cut or a drive pulled out.").into());
                 check = Some((
                     'c',
-                    "check (slow)".to_string(),
+                    tr!("jobs.check_slow", "check (slow)").into_owned(),
                     Cmd::ResumeChecked(Box::new(it.clone())),
                 ));
             }
             let n = it.partial.len();
             if n > 0 {
                 let kept: u64 = it.partial.iter().map(|p| p.bytes).sum();
-                body.push(format!(
-                    "{n} big file{} kept part way ({}): continued from there, unless the source changed.",
-                    plural(n),
-                    xdevcmd_core::format::human_size(kept),
-                ));
+                body.push(tr!("jobs.big_file_kept_part_way_continued", "{n} big file{v} kept part way ({v2}): continued from there, unless the source changed.", n = n, v = plural(n), v2 = xdevcmd_core::format::human_size(kept)));
             }
             // The owner, 2026-11-17: a way to say "never mind", not only "later". The
             // journal goes (and any part kept); what the run copied or moved stays where
             // it is, and Ctrl+Z, which does not outlive a run, cannot undo it.
             body.push(match (it.kind.as_str(), n) {
-                ("delete", _) => "F forgets it: nothing more is done. What it moved to the trash".into(),
-                (_, 0) => "F forgets it: nothing more is done. What it did stays where it is,".into(),
-                _ => "F forgets it: nothing more is done, the parts kept are removed. What it".into(),
+                ("delete", _) => tr!("jobs.f_forgets_it_nothing_more_is", "F forgets it: nothing more is done. What it moved to the trash").into(),
+                (_, 0) => tr!("jobs.f_forgets_it_nothing_more_is_2", "F forgets it: nothing more is done. What it did stays where it is,").into(),
+                _ => tr!("jobs.f_forgets_it_nothing_more_is_3", "F forgets it: nothing more is done, the parts kept are removed. What it").into(),
             });
             body.push(match (it.kind.as_str(), n) {
-                ("delete", _) => "stays there, and Ctrl+Z cannot undo that.".into(),
-                (_, 0) => "and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
-                _ => "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).".into(),
+                ("delete", _) => tr!("jobs.stays_there_and_ctrl_z_cannot", "stays there, and Ctrl+Z cannot undo that.").into(),
+                (_, 0) => tr!("jobs.and_ctrl_z_cannot_undo_that", "and Ctrl+Z cannot undo that (a replaced file is in the trash).").into(),
+                _ => tr!("jobs.did_stays_and_ctrl_z_cannot", "did stays, and Ctrl+Z cannot undo that (a replaced file is in the trash).").into(),
             });
             discard = Some((
                 'f',
-                "forget it".to_string(),
+                tr!("jobs.forget_it", "forget it").into_owned(),
                 Cmd::Discard(Box::new(it.clone())),
             ));
             ("continue".to_string(), Cmd::Resume(Box::new(it)))
@@ -366,20 +374,30 @@ impl App {
                 .as_ref()
                 .is_some_and(|(_, c)| matches!(c, Cmd::Resume(it) if !it.partial.is_empty()));
             body.push(if kept {
-                "Esc: asked again at the next start, the kept parts left as they are.".into()
+                tr!(
+                    "jobs.esc_asked_again_at_the_next",
+                    "Esc: asked again at the next start, the kept parts left as they are."
+                )
+                .into()
             } else {
-                "Esc: asked again at the next start.".into()
+                tr!(
+                    "jobs.esc_asked_again_at_the_next_2",
+                    "Esc: asked again at the next start."
+                )
+                .into()
             });
             if waiting > 0 {
-                body.push(format!(
-                    "{waiting} older interrupted job{} wait{}: each is asked at a later start.",
-                    plural(waiting),
-                    if waiting == 1 { "s" } else { "" }
+                body.push(tr!(
+                    "jobs.older_interrupted_job_wait_each_is",
+                    "{waiting} older interrupted job{v} wait{s}: each is asked at a later start.",
+                    waiting = waiting,
+                    v = plural(waiting),
+                    s = if waiting == 1 { "s" } else { "" }
                 ));
             }
         }
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Interrupted".into(),
+            title: tr!("jobs.interrupted", "Interrupted").into(),
             body,
             danger: false,
             yes,
@@ -408,11 +426,8 @@ impl App {
         if still.is_empty() {
             let f = xdevcmd_core::journal::discard(&it);
             self.status = match f.left.len() {
-                0 => "nothing left to do: every source has gone".into(),
-                l => format!(
-                    "nothing left to do: every source has gone; {l} kept part{} could not be removed, offered again at the next start",
-                    if l == 1 { "" } else { "s" },
-                ),
+                0 => tr!("jobs.nothing_left_to_do_every_source", "nothing left to do: every source has gone").into(),
+                l => tr!("jobs.nothing_left_to_do_every_source_2", "nothing left to do: every source has gone; {l} kept part{s} could not be removed, offered again at the next start", l = l, s = if l == 1 { "" } else { "s" }),
             };
             return;
         }
@@ -523,11 +538,18 @@ impl App {
         }
         self.last_undo = Some(if s.stopped {
             // What it made before it stopped is not listed (red-team on H-10).
-            Undo::Cannot("a copy that stopped on an internal error".into())
+            Undo::Cannot(
+                tr!(
+                    "jobs.a_copy_that_stopped_on_an",
+                    "a copy that stopped on an internal error"
+                )
+                .into(),
+            )
         } else if s.made_over {
-            Undo::Cannot(format!(
-                "a copy of more than {} items",
-                xdevcmd_core::ops::MADE_CAP
+            Undo::Cannot(tr!(
+                "jobs.a_copy_of_more_than_items",
+                "a copy of more than {MADE_CAP} items",
+                MADE_CAP = xdevcmd_core::ops::MADE_CAP
             ))
         } else {
             Undo::Copy {
@@ -564,31 +586,48 @@ impl App {
                     )
                 })
                 .collect::<Vec<_>>(),
-            Plan::Move { back, into } => vec![format!(
-                "move {} back to {}",
-                Self::describe(back),
-                tidy(into)
+            Plan::Move { back, into } => vec![tr!(
+                "jobs.move_back_to",
+                "move {v} back to {v2}",
+                v = Self::describe(back),
+                v2 = tidy(into)
             )],
-            Plan::Remove(p) => vec![format!("remove {}, still empty", tidy(p))],
+            Plan::Remove(p) => vec![tr!(
+                "jobs.remove_still_empty",
+                "remove {v}, still empty",
+                v = tidy(p)
+            )],
             Plan::Unmake { made, kept } => {
                 let n = made.len() - kept;
                 let back = made.iter().filter(|m| m.old.is_some()).count();
-                let mut lines = vec![format!(
-                    "remove the {n} item{} it made, as it made {}",
-                    if n == 1 { "" } else { "s" },
-                    if n == 1 { "it" } else { "them" }
+                let mut lines = vec![tr!(
+                    "jobs.remove_the_item_it_made_as",
+                    "remove the {n} item{s} it made, as it made {v}",
+                    n = n,
+                    s = if n == 1 { "" } else { "s" },
+                    v = if n == 1 { "it" } else { "them" }
                 )];
                 if back > 0 {
-                    lines.push(format!("put back from the trash the {back} it replaced"));
+                    lines.push(tr!(
+                        "jobs.put_back_from_the_trash_the",
+                        "put back from the trash the {back} it replaced",
+                        back = back
+                    ));
                 }
                 if *kept > 0 {
-                    lines.push(format!("keep {kept} changed since the copy"));
+                    lines.push(tr!(
+                        "jobs.keep_changed_since_the_copy",
+                        "keep {kept} changed since the copy",
+                        kept = kept
+                    ));
                 }
                 if let Undo::Copy { for_good, .. } = u {
                     if *for_good > 0 {
-                        lines.push(format!(
-                            "{for_good} file{} it replaced had no trash: those stay as copied",
-                            if *for_good == 1 { "" } else { "s" }
+                        lines.push(tr!(
+                            "jobs.file_it_replaced_had_no_trash",
+                            "{for_good} file{s} it replaced had no trash: those stay as copied",
+                            for_good = for_good,
+                            s = if *for_good == 1 { "" } else { "s" }
                         ));
                     }
                 }
@@ -598,18 +637,29 @@ impl App {
                 let mut lines: Vec<String> = items
                     .iter()
                     .take(8)
-                    .map(|i| format!("put back {}", tidy(&i.original)))
+                    .map(|i| tr!("jobs.put_back", "put back {v}", v = tidy(&i.original)))
                     .collect();
                 if items.len() > 8 {
-                    lines.push(format!("\u{2026} and {} more", items.len() - 8));
+                    lines.push(tr!(
+                        "jobs.u_and_more",
+                        "\u{2026} and {v} more",
+                        v = items.len() - 8
+                    ));
                 }
                 lines
             }
         };
-        let mut body = vec![format!("Undo the {}?", u.describe()), String::new()];
+        let mut body = vec![
+            tr!(
+                "jobs.undo_the",
+                "Undo the {describe}?",
+                describe = u.describe()
+            ),
+            String::new(),
+        ];
         body.extend(what);
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Undo".into(),
+            title: tr!("jobs.undo", "Undo").into(),
             body,
             danger: false,
             yes: Some(("undo".into(), Cmd::Undo)),
@@ -647,18 +697,34 @@ impl App {
         )
         .into();
         self.modal = Some(Modal::Ask(modal::Ask {
-            title: "Rename many".into(),
+            title: tr!("jobs.rename_many", "Rename many").into(),
             body: vec![
-                "Nothing was renamed: safe operations cannot write their journal".into(),
+                tr!(
+                    "jobs.nothing_was_renamed_safe_operations_cannot",
+                    "Nothing was renamed: safe operations cannot write their journal"
+                )
+                .into(),
                 format!("({why})."),
                 String::new(),
-                "Rename many first moves every file to a temporary name. Without the".into(),
-                "journal, a kill or a power cut between its two steps leaves them under".into(),
-                "those names, and the next start cannot put them back.".into(),
+                tr!(
+                    "jobs.rename_many_first_moves_every_file",
+                    "Rename many first moves every file to a temporary name. Without the"
+                )
+                .into(),
+                tr!(
+                    "jobs.journal_a_kill_or_a_power",
+                    "journal, a kill or a power cut between its two steps leaves them under"
+                )
+                .into(),
+                tr!(
+                    "jobs.those_names_and_the_next_start",
+                    "those names, and the next start cannot put them back."
+                )
+                .into(),
             ],
             danger: true,
             yes: Some((
-                "rename anyway".into(),
+                tr!("jobs.rename_anyway", "rename anyway").into(),
                 Cmd::BatchRenameAnyway { moves, undoing },
             )),
             buttons: Vec::new(),
@@ -721,7 +787,13 @@ impl App {
         self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves));
         self.status = match (out.renamed, out.errors.first()) {
             (n, None) => format!("renamed {n}"),
-            (n, Some(e)) => format!("renamed {n}, {} failed \u{2014} {e}", out.errors.len()),
+            (n, Some(e)) => tr!(
+                "jobs.renamed_failed_u",
+                "renamed {n}, {errors_len} failed \u{2014} {e}",
+                n = n,
+                errors_len = out.errors.len(),
+                e = e
+            ),
         };
     }
 
@@ -738,10 +810,12 @@ impl App {
         self.follow_renames(&moves);
         self.status = match out.errors.first() {
             None => format!("undone: {what}"),
-            Some(e) => format!(
-                "undo: {} renamed back, {} failed \u{2014} {e}",
-                out.renamed,
-                out.errors.len()
+            Some(e) => tr!(
+                "jobs.undo_renamed_back_failed_u",
+                "undo: {renamed} renamed back, {errors_len} failed \u{2014} {e}",
+                renamed = out.renamed,
+                errors_len = out.errors.len(),
+                e = e
             ),
         };
         self.last_undo = None;
@@ -771,8 +845,11 @@ impl App {
             _ => false,
         };
         if outside {
-            self.status =
-                "nothing undone: that place is outside the root xdevcmd is confined to".into();
+            self.status = tr!(
+                "jobs.nothing_undone_that_place_is_outside",
+                "nothing undone: that place is outside the root xdevcmd is confined to"
+            )
+            .into();
             return;
         }
         match plan {
@@ -794,7 +871,7 @@ impl App {
             }
             Plan::Unmake { made, .. } => {
                 let mut job = Job::new(ops::Kind::Delete, xdevcmd_core::undo::unmake(made));
-                job.title = Some("Undo the copy".into());
+                job.title = Some(tr!("jobs.undo_the_copy", "Undo the copy").into());
                 self.modal = Some(Modal::Job(job));
                 self.status = tr!(
                     "jobs.undoing_the",
@@ -805,7 +882,7 @@ impl App {
             Plan::Remove(p) => {
                 self.status = match xdevcmd_core::undo::remove(&p) {
                     Ok(()) => format!("undone: {}", u.describe()),
-                    Err(e) => format!("cannot undo: {e}"),
+                    Err(e) => tr!("jobs.cannot_undo", "cannot undo: {e}", e = e),
                 };
             }
             Plan::Restore(items) => {
@@ -817,10 +894,12 @@ impl App {
                 }
                 self.status = match failed.first() {
                     None => format!("undone: {}", u.describe()),
-                    Some(e) => format!(
-                        "undo: {} put back, {} not \u{2014} {e}",
-                        items.len() - failed.len(),
-                        failed.len()
+                    Some(e) => tr!(
+                        "jobs.undo_put_back_not_u",
+                        "undo: {failed_len} put back, {failed_len2} not \u{2014} {e}",
+                        failed_len = items.len() - failed.len(),
+                        failed_len2 = failed.len(),
+                        e = e
                     ),
                 };
             }
@@ -838,15 +917,9 @@ impl App {
         let f = xdevcmd_core::journal::discard(it);
         let s = |n: usize| if n == 1 { "" } else { "s" };
         self.status = match (f.removed, f.left.len()) {
-            (_, l) if l > 0 => format!(
-                "not forgotten: {l} kept part{} could not be removed; offered again at the next start",
-                s(l),
-            ),
-            (0, _) => "the interrupted job forgotten: nothing more is done".into(),
-            (n, _) => format!(
-                "the interrupted job forgotten: nothing more is done, {n} kept part{} removed",
-                s(n),
-            ),
+            (_, l) if l > 0 => tr!("jobs.not_forgotten_kept_part_could_not", "not forgotten: {l} kept part{v} could not be removed; offered again at the next start", l = l, v = s(l)),
+            (0, _) => tr!("jobs.the_interrupted_job_forgotten_nothing_more", "the interrupted job forgotten: nothing more is done").into(),
+            (n, _) => tr!("jobs.the_interrupted_job_forgotten_nothing_more_2", "the interrupted job forgotten: nothing more is done, {n} kept part{v} removed", n = n, v = s(n)),
         };
     }
 
@@ -854,10 +927,11 @@ impl App {
     pub(super) fn start_sync(&mut self, pairs: Vec<(PathBuf, PathBuf, ops::Expect)>) {
         let pairs_len = pairs.len();
         let req = Request::sync(pairs);
-        self.expect_copy_undo(format!(
-            "synchronisation of {} item{}",
-            pairs_len,
-            if pairs_len == 1 { "" } else { "s" }
+        self.expect_copy_undo(tr!(
+            "jobs.synchronisation_of_item",
+            "synchronisation of {pairs_len} item{s}",
+            pairs_len = pairs_len,
+            s = if pairs_len == 1 { "" } else { "s" }
         ));
         self.modal = Some(Modal::Job(Job::new(ops::Kind::Copy, ops::start(req))));
     }
@@ -870,8 +944,11 @@ impl App {
                 .as_ref()
                 .is_some_and(|t| t.plan.target.writable == Some(false))
             {
-                self.status =
-                    "you cannot write there: Tab for the other pane, Esc to cancel".into();
+                self.status = tr!(
+                    "jobs.you_cannot_write_there_tab_for",
+                    "you cannot write there: Tab for the other pane, Esc to cancel"
+                )
+                .into();
                 return;
             }
         }

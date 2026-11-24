@@ -306,8 +306,18 @@ impl App {
             // Both sides, because one number is ambiguous: dragging the terminal's top
             // edge, "45%" read as the terminal's share when it was the panes'.
             self.status = match d.axis {
-                Axis::Cols => format!("left {pct}% \u{b7} right {}%", 100 - pct),
-                Axis::Rows => format!("top {pct}% \u{b7} bottom {}%", 100 - pct),
+                Axis::Cols => tr!(
+                    "mouse.left_u_right",
+                    "left {pct}% \u{b7} right {pct2}%",
+                    pct = pct,
+                    pct2 = 100 - pct
+                ),
+                Axis::Rows => tr!(
+                    "mouse.top_u_bottom",
+                    "top {pct}% \u{b7} bottom {pct2}%",
+                    pct = pct,
+                    pct2 = 100 - pct
+                ),
             };
             return;
         }
@@ -433,8 +443,11 @@ impl App {
             .is_some_and(|f| f.archive.is_some() || f.results.is_some());
         if from_archive || into_virtual {
             let k = self.footer_key(Action::Copy).unwrap_or_default();
-            self.status =
-                format!("archives and results do not take drops \u{2014} {k} extracts or copies");
+            self.status = tr!(
+                "mouse.archives_and_results_do_not_take",
+                "archives and results do not take drops \u{2014} {k} extracts or copies",
+                k = k
+            );
             return;
         }
         let src_dir = self
@@ -459,7 +472,7 @@ impl App {
         // even pass through. The answer is the confirmation; overwrites still ask.
         let items = vec![
             Item::cmd(
-                format!("Copy {what} here"),
+                tr!("mouse.copy_here", "Copy {what} here", what = what),
                 "",
                 Cmd::Transfer {
                     kind: ops::Kind::Copy,
@@ -469,7 +482,7 @@ impl App {
                 true,
             ),
             Item::cmd(
-                format!("Move {what} here"),
+                tr!("mouse.move_here", "Move {what} here", what = what),
                 "",
                 Cmd::Transfer {
                     kind: ops::Kind::Move,
@@ -483,7 +496,7 @@ impl App {
         ];
         self.status = tr!("mouse.drop_into", "drop into {name}?", name = name);
         self.modal = Some(Modal::Menu(Menu::new(
-            Some(format!("Drop into {name}")),
+            Some(tr!("mouse.drop_into_2", "Drop into {name}", name = name)),
             items,
             (x, y),
         )));
@@ -606,13 +619,21 @@ impl App {
             items.push(Item::sep());
         }
         items.push(Item::act(
-            format!("Copy{many} to other pane"),
+            tr!(
+                "mouse.copy_to_other_pane",
+                "Copy{many} to other pane",
+                many = many
+            ),
             k(Action::Copy),
             Action::Copy,
             has_sel && other,
         ));
         items.push(Item::act(
-            format!("Move{many} to other pane"),
+            tr!(
+                "mouse.move_to_other_pane",
+                "Move{many} to other pane",
+                many = many
+            ),
             k(Action::Move),
             Action::Move,
             has_sel && other,

@@ -72,8 +72,11 @@ impl App {
         }
         let max = self.settings.config.files.max_panes;
         if self.file_panes().len() >= max {
-            self.status =
-                format!("at most {max} file panes \u{2014} [files] max_panes in config.toml");
+            self.status = tr!(
+                "panes.at_most_file_panes_u_files",
+                "at most {max} file panes \u{2014} [files] max_panes in config.toml",
+                max = max
+            );
             return;
         }
         let cwd = self.focused_cwd();

@@ -845,7 +845,11 @@ fn complete_path(i: &mut Input) {
         }
     };
     let Ok(it) = std::fs::read_dir(&base) else {
-        i.error = Some(format!("cannot read {}", base.display()));
+        i.error = Some(tr!(
+            "app.cannot_read",
+            "cannot read {base}",
+            base = base.display()
+        ));
         return;
     };
     let mut names: Vec<String> = it
@@ -856,7 +860,13 @@ fn complete_path(i: &mut Input) {
         .collect();
     names.sort();
     let Some(first) = names.first() else {
-        i.error = Some("no directory starts with that".into());
+        i.error = Some(
+            tr!(
+                "app.no_directory_starts_with_that",
+                "no directory starts with that"
+            )
+            .into(),
+        );
         return;
     };
     let common: String = if names.len() == 1 {
@@ -929,11 +939,13 @@ fn name_words(shell: &str, paths: &[PathBuf], dir: Option<&Path>) -> Result<Stri
             p.as_path()
         };
         // A lossy name would be another file, or none.
-        names.push(
-            shown
-                .to_str()
-                .ok_or_else(|| "a name is not UTF-8 \u{2014} not typed".to_string())?,
-        );
+        names.push(shown.to_str().ok_or_else(|| {
+            tr!(
+                "app.a_name_is_not_utf_8",
+                "a name is not UTF-8 \u{2014} not typed"
+            )
+            .into_owned()
+        })?);
     }
     crate::safety::words(shell, &names)
 }

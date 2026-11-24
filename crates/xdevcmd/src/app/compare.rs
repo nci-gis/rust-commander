@@ -84,7 +84,11 @@ impl App {
         let clash = count(&[State::Conflict]);
         let same = count(&[State::Same]);
         let clash = if clash > 0 {
-            format!(" \u{b7} {clash} differ at the same time \u{2014} left alone")
+            tr!(
+                "compare.u_differ_at_the_same_time",
+                " \u{b7} {clash} differ at the same time \u{2014} left alone",
+                clash = clash
+            )
         } else {
             String::new()
         };
@@ -96,10 +100,16 @@ impl App {
             .collect();
         let unknown = match unknown.len() {
             0 => String::new(),
-            1 => format!(" \u{b7} \u{26a0} {} not read in full", unknown[0]),
-            n => format!(
-                " \u{b7} \u{26a0} {n} not read in full ({}, \u{2026})",
-                unknown[0]
+            1 => tr!(
+                "compare.u_u_not_read_in_full",
+                " \u{b7} \u{26a0} {v} not read in full",
+                v = unknown[0]
+            ),
+            n => tr!(
+                "compare.u_u_not_read_in_full_2",
+                " \u{b7} \u{26a0} {n} not read in full ({v}, \u{2026})",
+                n = n,
+                v = unknown[0]
             ),
         };
         self.status = tr!("compare.marked_here_there_newer_or_missing", "marked: {mine} here, {theirs} there, newer or missing on the other side{clash}{unknown} \u{b7} {same} the same", mine = mine, theirs = theirs, clash = clash, unknown = unknown, same = same);
@@ -181,8 +191,11 @@ impl App {
                 let n = c.seen.load(std::sync::atomic::Ordering::Relaxed);
                 if n != c.shown {
                     c.shown = n;
-                    self.status =
-                        format!("comparing the two trees\u{2026} {n} looked at \u{b7} Esc stops");
+                    self.status = tr!(
+                        "compare.comparing_the_two_trees_u_looked",
+                        "comparing the two trees\u{2026} {n} looked at \u{b7} Esc stops",
+                        n = n
+                    );
                     return true;
                 }
                 false
@@ -199,8 +212,16 @@ impl App {
         use xdevcmd_core::compare::{plan, Side, State};
         let pairs = plan(left, right, diffs);
         let mut body = vec![
-            format!("\u{2192} this pane  {}", tidy(left)),
-            format!("\u{2190} the other  {}", tidy(right)),
+            tr!(
+                "compare.u_this_pane",
+                "\u{2192} this pane  {v}",
+                v = tidy(left)
+            ),
+            tr!(
+                "compare.u_the_other",
+                "\u{2190} the other  {v}",
+                v = tidy(right)
+            ),
             String::new(),
         ];
         let mut overwrites = 0;
@@ -218,52 +239,46 @@ impl App {
                 State::RightOnly => format!("\u{2190} {rel}{slash}"),
                 State::LeftNewer => {
                     overwrites += 1;
-                    format!("\u{2192} {rel}  replaces an older copy")
+                    tr!("compare.u_replaces_an_older_copy", "\u{2192} {rel}  replaces an older copy", rel = rel)
                 }
                 State::RightNewer => {
                     overwrites += 1;
-                    format!("\u{2190} {rel}  replaces an older copy")
+                    tr!("compare.u_replaces_an_older_copy_2", "\u{2190} {rel}  replaces an older copy", rel = rel)
                 }
                 State::Conflict => {
-                    format!("\u{2260} {rel}  same time, different size \u{2014} left alone")
+                    tr!("compare.u_same_time_different_size_u", "\u{2260} {rel}  same time, different size \u{2014} left alone", rel = rel)
                 }
-                State::CaseClash => format!(
-                    "\u{2260} {rel}{slash}  same name, different case on the other side \u{2014} left alone"
-                ),
+                State::CaseClash => tr!("compare.u_same_name_different_case_on", "\u{2260} {rel}{slash}  same name, different case on the other side \u{2014} left alone", rel = rel, slash = slash),
                 State::Same => continue,
                 State::Unreadable(s) => {
                     unknown += 1;
-                    format!(
-                        "\u{26a0} {rel}/  cannot be read in {} ({why}) \u{2014} nothing under it is copied",
-                        which(s)
-                    )
+                    tr!("compare.u_cannot_be_read_in_u", "\u{26a0} {rel}/  cannot be read in {v} ({why}) \u{2014} nothing under it is copied", rel = rel, v = which(s), why = why)
                 }
                 State::Missing(s) => {
                     unknown += 1;
-                    format!(
-                        "\u{26a0} {rel}/  went away in {} while compared \u{2014} left alone",
-                        which(s)
-                    )
+                    tr!("compare.u_went_away_in_while_compared", "\u{26a0} {rel}/  went away in {v} while compared \u{2014} left alone", rel = rel, v = which(s))
                 }
                 State::Incomplete(s) if d.error.is_some() => {
                     unknown += 1;
-                    format!(
-                        "\u{26a0} {rel}/  not all of it could be read in {} ({why})",
-                        which(s)
-                    )
+                    tr!("compare.u_not_all_of_it_could", "\u{26a0} {rel}/  not all of it could be read in {v} ({why})", rel = rel, v = which(s), why = why)
                 }
-                State::Incomplete(s) => format!(
-                    "? {rel}{slash}  not copied: {} could not be read in full here",
-                    which(s)
-                ),
+                State::Incomplete(s) => tr!("compare.not_copied_could_not_be_read", "? {rel}{slash}  not copied: {v} could not be read in full here", rel = rel, slash = slash, v = which(s)),
             };
             body.push(line);
         }
         if pairs.is_empty() {
             self.status = if body.len() > 3 {
-                "nothing to copy \u{2014} only differences that need a person".into()
+                tr!(
+                    "compare.nothing_to_copy_u_only_differences",
+                    "nothing to copy \u{2014} only differences that need a person"
+                )
+                .into()
             } else {
-                "the two trees already agree".into()
+                tr!(
+                    "compare.the_two_trees_already_agree",
+                    "the two trees already agree"
+                )
+                .into()
             };
             if body.len() <= 3 {
                 return;
@@ -271,11 +286,24 @@ impl App {
         }
         let n = pairs.len();
         let mut title = match overwrites {
-            0 => format!("Synchronise \u{b7} {n} to copy"),
-            o => format!("Synchronise \u{b7} {n} to copy, {o} replacing older files"),
+            0 => tr!(
+                "compare.synchronise_u_to_copy",
+                "Synchronise \u{b7} {n} to copy",
+                n = n
+            ),
+            o => tr!(
+                "compare.synchronise_u_to_copy_replacing_older",
+                "Synchronise \u{b7} {n} to copy, {o} replacing older files",
+                n = n,
+                o = o
+            ),
         };
         if unknown > 0 {
-            title.push_str(&format!(" \u{b7} \u{26a0} {unknown} not read"));
+            title.push_str(&tr!(
+                "compare.u_u_not_read",
+                " \u{b7} \u{26a0} {unknown} not read",
+                unknown = unknown
+            ));
         }
         self.modal = Some(Modal::Ask(modal::Ask {
             title,

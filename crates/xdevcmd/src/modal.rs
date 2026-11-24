@@ -187,17 +187,29 @@ impl Table {
             }
         }
         let t = &self.plan.totals;
-        let mut out = format!(
-            "create {} \u{b7} replace {replace} \u{b7} skip {skip}",
-            t.new
+        let mut out = tr!(
+            "modal.create_u_replace_u_skip",
+            "create {new} \u{b7} replace {replace} \u{b7} skip {skip}",
+            new = t.new,
+            replace = replace,
+            skip = skip
         );
         if ask > 0 {
-            out.push_str(&format!(" \u{b7} ask {ask}"));
+            out.push_str(&tr!("modal.u_ask", " \u{b7} ask {ask}", ask = ask));
         }
         let needed = bytes(self.plan.needed());
         match self.plan.target.free {
-            Some(free) => out.push_str(&format!(" \u{b7} needs {needed}, {} free", bytes(free))),
-            None => out.push_str(&format!(" \u{b7} needs {needed}")),
+            Some(free) => out.push_str(&tr!(
+                "modal.u_needs_free",
+                " \u{b7} needs {needed}, {v} free",
+                needed = needed,
+                v = bytes(free)
+            )),
+            None => out.push_str(&tr!(
+                "modal.u_needs",
+                " \u{b7} needs {needed}",
+                needed = needed
+            )),
         }
         out
     }
@@ -206,16 +218,18 @@ impl Table {
     pub fn lines(&self) -> (Vec<String>, Vec<String>) {
         let mut head = vec![self.summary()];
         if self.plan.target.writable == Some(false) {
-            head.push(format!(
-                "\u{26d4} you cannot write to {}",
-                self.plan.dest.display()
+            head.push(tr!(
+                "modal.u_you_cannot_write_to",
+                "\u{26d4} you cannot write to {dest}",
+                dest = self.plan.dest.display()
             ));
         }
         if let Some((needed, free)) = self.plan.short_of_space() {
-            head.push(format!(
-                "\u{26d4} it needs {}, and only {} is free there",
-                bytes(needed),
-                bytes(free)
+            head.push(tr!(
+                "modal.u_it_needs_and_only_is",
+                "\u{26d4} it needs {v}, and only {v2} is free there",
+                v = bytes(needed),
+                v2 = bytes(free)
             ));
         }
         if self.plan.target.trash == Some(true)
@@ -225,10 +239,16 @@ impl Table {
                 .any(|(g, ..)| matches!(g, Group::Newer | Group::Older | Group::Differs))
         {
             head.push(match self.plan.kind {
-                ops::Kind::Copy => {
-                    "\u{2139} a file replaced goes to the trash: Ctrl+Z brings it back".into()
-                }
-                _ => "\u{2139} a file replaced goes to the trash".into(),
+                ops::Kind::Copy => tr!(
+                    "modal.u_a_file_replaced_goes_to",
+                    "\u{2139} a file replaced goes to the trash: Ctrl+Z brings it back"
+                )
+                .into(),
+                _ => tr!(
+                    "modal.u_a_file_replaced_goes_to_2",
+                    "\u{2139} a file replaced goes to the trash"
+                )
+                .into(),
             });
         }
         let groups = self
@@ -251,7 +271,7 @@ impl Table {
                             .find_map(|r| r.blocked.as_ref())
                             .map(|b| b.describe())
                             .unwrap_or_default();
-                        format!(", left out: {why}")
+                        tr!("modal.left_out", ", left out: {why}", why = why)
                     } else {
                         String::new()
                     };
@@ -309,8 +329,13 @@ impl Confirm {
         }
         if self.source_dir.as_ref() == Some(&dest) {
             self.body.push(String::new());
-            self.body
-                .push("Same directory as the source \u{2014} nothing would change.".into());
+            self.body.push(
+                tr!(
+                    "modal.same_directory_as_the_source_u",
+                    "Same directory as the source \u{2014} nothing would change."
+                )
+                .into(),
+            );
         }
         if self.existing_line.is_some() {
             self.body.push(String::new());
@@ -383,15 +408,25 @@ impl Confirm {
         self.body.extend(head);
         // Said before Enter, as the plain dialog says it (set_destination).
         if self.source_dir.is_some() && self.source_dir == self.request.dest {
-            self.body
-                .push("Same directory as the source \u{2014} nothing would change.".into());
+            self.body.push(
+                tr!(
+                    "modal.same_directory_as_the_source_u",
+                    "Same directory as the source \u{2014} nothing would change."
+                )
+                .into(),
+            );
         }
         self.body.push(String::new());
         t.first_line = self.body.len();
         self.body.extend(groups);
         self.body.push(String::new());
-        self.body
-            .push("\u{2191}\u{2193} a group \u{b7} Space changes what is done".into());
+        self.body.push(
+            tr!(
+                "modal.u_u_a_group_u_space",
+                "\u{2191}\u{2193} a group \u{b7} Space changes what is done"
+            )
+            .into(),
+        );
         self.existing_line = None;
         self.table = Some(t);
     }
@@ -533,7 +568,7 @@ impl Job {
                             failed: 1,
                             stopped: true,
                             errors: vec![
-                                "stopped: an internal error (crash log written); the next start tidies up".into(),
+                                tr!("modal.stopped_an_internal_error_crash_log", "stopped: an internal error (crash log written); the next start tidies up").into(),
                             ],
                             ..Summary::default()
                         });
@@ -592,9 +627,17 @@ impl Job {
             let said = match a {
                 Answer::Skip | Answer::SkipAll => {
                     self.skipped_failed += 1;
-                    Some(format!("skipped {name}: going on with the next file"))
+                    Some(tr!(
+                        "modal.skipped_going_on_with_the_next",
+                        "skipped {name}: going on with the next file",
+                        name = name
+                    ))
                 }
-                Answer::Retry => Some(format!("trying {name} again")),
+                Answer::Retry => Some(tr!(
+                    "modal.trying_again",
+                    "trying {name} again",
+                    name = name
+                )),
                 _ => None,
             };
             self.said = said.map(|t| (t, std::time::Instant::now()));
@@ -642,12 +685,21 @@ impl Job {
         let (error, attempt, of, at) = self.retrying.as_ref()?;
         let secs = at.saturating_duration_since(now).as_secs_f64().ceil() as u64;
         let when = if secs == 0 {
-            "trying again now".to_string()
+            tr!("modal.trying_again_now", "trying again now").into_owned()
         } else {
-            format!("trying again in {secs} s")
+            tr!(
+                "modal.trying_again_in_s",
+                "trying again in {secs} s",
+                secs = secs
+            )
         };
-        Some(format!(
-            "network error \u{2014} {when} ({attempt} of {of}): {error}"
+        Some(tr!(
+            "modal.network_error_u_of",
+            "network error \u{2014} {when} ({attempt} of {of}): {error}",
+            when = when,
+            attempt = attempt,
+            of = of,
+            error = error
         ))
     }
 
@@ -718,7 +770,11 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
             let mut body = vec![
                 path.display().to_string(),
                 String::new(),
-                format!("on disk   {}", human_size(*existing_bytes)),
+                tr!(
+                    "modal.on_disk",
+                    "on disk   {v}",
+                    v = human_size(*existing_bytes)
+                ),
                 format!("incoming  {}", human_size(*incoming_bytes)),
             ];
             if *changed {
@@ -736,22 +792,34 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
             (title.to_string(), body)
         }
         Question::CrossDevice { path } => (
-            "Different filesystem".to_string(),
+            tr!("modal.different_filesystem", "Different filesystem").into_owned(),
             vec![
                 path.display().to_string(),
                 String::new(),
-                "A move across filesystems is a copy followed by a delete.".to_string(),
-                "It can fail halfway, leaving both copies.".to_string(),
+                tr!(
+                    "modal.a_move_across_filesystems_is_a",
+                    "A move across filesystems is a copy followed by a delete."
+                )
+                .into_owned(),
+                tr!(
+                    "modal.it_can_fail_halfway_leaving_both",
+                    "It can fail halfway, leaving both copies."
+                )
+                .into_owned(),
             ],
         ),
         Question::TrashUnavailable { path, reason } => (
-            "Cannot move to trash".to_string(),
+            tr!("modal.cannot_move_to_trash", "Cannot move to trash").into_owned(),
             vec![
                 path.display().to_string(),
                 String::new(),
                 reason.clone(),
                 String::new(),
-                "Deleting permanently cannot be undone.".to_string(),
+                tr!(
+                    "modal.deleting_permanently_cannot_be_undone",
+                    "Deleting permanently cannot be undone."
+                )
+                .into_owned(),
             ],
         ),
         Question::Failed { path, error } => {
@@ -762,7 +830,11 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
                 String::new(),
                 "R tries this file again (five more tries). S leaves it and goes on with the next"
                     .to_string(),
-                "file; it is not copied. Esc stops the job.".to_string(),
+                tr!(
+                    "modal.file_it_is_not_copied_esc",
+                    "file; it is not copied. Esc stops the job."
+                )
+                .into_owned(),
             ];
             // The engine's words for a network error it tried again and again.
             if error.contains("a network error") {
@@ -771,16 +843,32 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
                         .to_string(),
                 );
             }
-            ("Failed".to_string(), body)
+            (tr!("modal.failed", "Failed").into_owned(), body)
         }
         Question::NoJournal { error } => (
-            "Safe operations: no journal".to_string(),
+            tr!(
+                "modal.safe_operations_no_journal",
+                "Safe operations: no journal"
+            )
+            .into_owned(),
             vec![
-                "Safe operations cannot write their journal (disk full?):".to_string(),
+                tr!(
+                    "modal.safe_operations_cannot_write_their_journal",
+                    "Safe operations cannot write their journal (disk full?):"
+                )
+                .into_owned(),
                 error.clone(),
                 String::new(),
-                "Without it, a kill or a power cut from now on cannot be tidied up".to_string(),
-                "or resumed at the next start. Stop leaves everything as it is now.".to_string(),
+                tr!(
+                    "modal.without_it_a_kill_or_a",
+                    "Without it, a kill or a power cut from now on cannot be tidied up"
+                )
+                .into_owned(),
+                tr!(
+                    "modal.or_resumed_at_the_next_start",
+                    "or resumed at the next start. Stop leaves everything as it is now."
+                )
+                .into_owned(),
             ],
         ),
     }
@@ -1008,7 +1096,11 @@ fn render_ask(frame: &mut Frame, area: Rect, a: &mut Ask) {
     for (i, line) in body.iter().take(shown).enumerate() {
         let last = i + 1 == shown && shown < body.len();
         let text = if last {
-            format!("\u{2026} and {} more", body.len() - shown + 1)
+            tr!(
+                "modal.u_and_more",
+                "\u{2026} and {v} more",
+                v = body.len() - shown + 1
+            )
         } else {
             line.clone()
         };
@@ -1202,7 +1294,12 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                     frame,
                     inner,
                     1,
-                    &format!("{} files · {}", j.total_files, human_size(s.bytes)),
+                    &tr!(
+                        "modal.files",
+                        "{total_files} files · {v}",
+                        total_files = j.total_files,
+                        v = human_size(s.bytes)
+                    ),
                     Style::new().fg(th.fg_dim),
                 );
             }
@@ -1221,21 +1318,26 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
                 &{
                     // How many files, as well as how many bytes (the owner, 2026-11-23:
                     // 50,000 small files moved the bar by bytes only).
-                    let mut s = format!(
-                        "{} of {} files · {} of {}",
-                        j.files_done,
-                        j.total_files,
-                        human_size(j.bytes_done),
-                        human_size(j.total_bytes)
+                    let mut s = tr!(
+                        "modal.of_files_of",
+                        "{files_done} of {total_files} files · {v} of {v2}",
+                        files_done = j.files_done,
+                        total_files = j.total_files,
+                        v = human_size(j.bytes_done),
+                        v2 = human_size(j.total_bytes)
                     );
                     if j.skipped_failed > 0 {
-                        s.push_str(&format!(" · {} skipped", j.skipped_failed));
+                        s.push_str(&tr!(
+                            "modal.skipped",
+                            " · {skipped_failed} skipped",
+                            skipped_failed = j.skipped_failed
+                        ));
                     }
                     if let Some(left) = j
                         .rate
                         .left(std::time::Instant::now(), (j.total_bytes, j.total_files))
                     {
-                        s.push_str(&format!(" · {} left", crate::eta::say(left)));
+                        s.push_str(&tr!("modal.left", " · {v} left", v = crate::eta::say(left)));
                     }
                     s
                 },

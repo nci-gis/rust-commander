@@ -93,12 +93,17 @@ impl Rate {
 pub fn say(d: Duration) -> String {
     let s = d.as_secs();
     if s < 60 {
-        format!("about {} s", (s.div_ceil(5) * 5).max(5))
+        tr!("eta.about_s", "about {v} s", v = (s.div_ceil(5) * 5).max(5))
     } else if s < 3600 {
-        format!("about {} min", (s + 30) / 60)
+        tr!("eta.about_min", "about {v} min", v = (s + 30) / 60)
     } else {
         let m = (s + 30) / 60;
-        format!("about {} h {} min", m / 60, m % 60)
+        tr!(
+            "eta.about_h_min",
+            "about {v} h {v2} min",
+            v = m / 60,
+            v2 = m % 60
+        )
     }
 }
 

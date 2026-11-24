@@ -716,10 +716,10 @@ delete = "Xóa"
 edit = "Sửa"
 help = "Giúp"
 menu = "Menu"
-mkdir = "TạoTM"
-move = "Dời"
+mkdir = "Tạo TM"
+move = "Chuyển"
 quit = "Thoát"
-rename = "Đổi"
+rename = "Đổi tên"
 view = "Xem"
 
 [links]

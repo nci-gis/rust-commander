@@ -4,6 +4,51 @@ use super::*;
 use crate::lang::Text;
 use xdevcmd_core::format::Cells;
 
+/// The key bar's labels, cut to fit `width` columns: the longest gives a column at a
+/// time, down to 3 (two and `…`), when that keeps every key (a longer language at 80
+/// columns); otherwise whole, and the caller leaves the last keys off. Each key takes
+/// its digits, its label and 3 columns of spacing.
+fn fit_labels(items: &[(Action, String, String)], width: usize) -> Vec<String> {
+    const MIN: usize = 3;
+    let mut budget: Vec<usize> = items.iter().map(|(_, _, l)| l.cells()).collect();
+    let total = |b: &[usize]| -> usize {
+        items
+            .iter()
+            .zip(b)
+            .map(|((_, k, _), w)| k.cells() + w + 3)
+            .sum()
+    };
+    // Cut only when that keeps every key; else whole labels, the last keys left off
+    // (a narrow screen reads better with fewer whole words than ten stubs).
+    let least: Vec<usize> = budget.iter().map(|w| (*w).min(MIN)).collect();
+    if total(&least) > width {
+        return items.iter().map(|(_, _, l)| l.clone()).collect();
+    }
+    while total(&budget) > width {
+        let Some((i, _)) = budget
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| **w > MIN)
+            .max_by_key(|(i, w)| (**w, std::cmp::Reverse(*i)))
+        else {
+            break;
+        };
+        budget[i] -= 1;
+    }
+    items
+        .iter()
+        .zip(budget)
+        .map(|((_, _, l), w)| {
+            // "Tạo …" reads as a word left out: the space goes before the `…`.
+            let cut = xdevcmd_core::format::cut_end(l, w);
+            match cut.strip_suffix('\u{2026}') {
+                Some(head) if head.ends_with(' ') => format!("{}\u{2026}", head.trim_end()),
+                _ => cut,
+            }
+        })
+        .collect()
+}
+
 /// The sort's word on the status line, by `SortKey::label`.
 const SORT_WORDS: &[Text] = &[
     Text::new("sort.name", "name"),
@@ -699,8 +744,10 @@ impl App {
         }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still
         // says "5 Copy" is lying, and this is the line people look at most.
-        // In F-key order, as in every orthodox manager. On a narrow screen the ones that
-        // do not fit are left off whole, from the end, rather than cut mid-word.
+        // In F-key order, as in every orthodox manager. Too long for the screen: when
+        // cutting the longest labels (to 3 columns with `…`) keeps every key, they are
+        // cut (a longer language); else the ones that do not fit are left off whole,
+        // from the end (a narrow screen).
         const KEYS: &[(Action, Text)] = &[
             (Action::Help, Text::new("keybar.help", "Help")),
             (Action::Rename, Text::new("keybar.rename", "Ren")),
@@ -713,21 +760,26 @@ impl App {
             (Action::MenuBar, Text::new("keybar.menu", "Menu")),
             (Action::Quit, Text::new("keybar.quit", "Quit")),
         ];
+        // (action, key as shown, label): the keys this mode and keymap have.
+        let items: Vec<(Action, String, String)> = KEYS
+            .iter()
+            .filter(|(action, _)| self.refused(*action).is_none())
+            .filter_map(|(action, label)| {
+                let key = self.footer_key(*action)?;
+                let k = key
+                    .strip_prefix('F')
+                    .filter(|d| d.parse::<u8>().is_ok())
+                    .unwrap_or(&key)
+                    .to_string();
+                Some((*action, k, label.get().into_owned()))
+            })
+            .collect();
+        let labels = fit_labels(&items, area.width as usize);
         let mut spans = Vec::new();
         let mut hits = Vec::new();
         let mut cx = area.x;
-        for (action, label) in KEYS {
-            let label = label.get();
-            if self.refused(*action).is_some() {
-                continue;
-            }
-            let Some(key) = self.footer_key(*action) else {
-                continue;
-            };
-            let k = key
-                .strip_prefix('F')
-                .filter(|d| d.parse::<u8>().is_ok())
-                .unwrap_or(&key);
+        for ((action, k, _), label) in items.iter().zip(&labels) {
+            let k = k.as_str();
             let w = (k.cells() + label.cells() + 3) as u16;
             if cx + w > area.x + area.width {
                 break;

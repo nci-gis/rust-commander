@@ -5847,6 +5847,34 @@ fn a_language_file_names_the_key_bar_and_the_menus() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// Beta.4: a language whose key bar is too long for the screen keeps all ten keys, the
+/// longest labels cut with `…` (the owner, 2026-11-25: "handle khi tràn").
+#[test]
+fn a_long_key_bar_is_cut_not_left_off() {
+    let (a, b) = fixture();
+    let cfg_home = a.parent().unwrap().join("cfg-home");
+    let own = cfg_home.join("xdevcmd").join("lang");
+    fs::create_dir_all(&own).unwrap();
+    let labels = [
+        "help", "rename", "view", "edit", "copy", "move", "mkdir", "delete", "menu", "quit",
+    ]
+    .iter()
+    .map(|k| format!("{k} = \"Longword{k}\"\n"))
+    .collect::<String>();
+    fs::write(own.join("ll.toml"), format!("[keybar]\n{labels}")).unwrap();
+    let home = cfg_home.to_string_lossy().into_owned();
+    let env = [
+        ("XDG_CONFIG_HOME", home.as_str()),
+        ("APPDATA", home.as_str()),
+    ];
+    let s = shot_cfg_env("[general]\nlanguage = \"ll\"\n", &env, "", &a, &b);
+    let bar = s.lines().last().unwrap_or_default();
+    assert!(bar.contains("10 Lo"), "the last key is there\n{s}");
+    assert!(bar.contains('\u{2026}'), "labels were cut\n{s}");
+    assert!(bar.chars().count() <= 110, "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// Beta.4: Settings → Languages lists auto, English and each language file that reads,
 /// "<name> - <code> - <file>"; a file that does not read is not listed; Space chooses.
 #[test]

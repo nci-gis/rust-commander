@@ -160,9 +160,15 @@ impl App {
                         as_secs = STOP_WAIT.as_secs()
                     ),
                     if safe {
-                        "Quitting now leaves its temporary file; the next start removes it."
+                        tr!(
+                            "app_run.quitting_now_leaves_its_temporary_file",
+                            "Quitting now leaves its temporary file; the next start removes it."
+                        )
                     } else {
-                        "Quitting now may leave a file half written."
+                        tr!(
+                            "app_run.quitting_now_may_leave_a_file",
+                            "Quitting now may leave a file half written."
+                        )
                     }
                     .into(),
                 ],

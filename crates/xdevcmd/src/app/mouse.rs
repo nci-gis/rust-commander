@@ -574,38 +574,38 @@ impl App {
                     true,
                 ));
                 items.push(Item::act(
-                    "Open with system app",
+                    tr!("menu.open_with_system_app", "Open with system app"),
                     k(Action::OpenWith),
                     Action::OpenWith,
                     true,
                 ));
                 items.push(Item::act(
-                    "Open with\u{2026}",
+                    tr!("menu.open_with", "Open with\u{2026}"),
                     k(Action::OpenWithMenu),
                     Action::OpenWithMenu,
                     true,
                 ));
                 items.push(Item::act(
-                    "Checksum (SHA-256)",
+                    tr!("menu.checksum_sha_256", "Checksum (SHA-256)"),
                     k(Action::Checksum),
                     Action::Checksum,
                     true,
                 ));
             }
             items.push(Item::act(
-                "Copy as\u{2026}",
+                tr!("menu.copy_as", "Copy as\u{2026}"),
                 k(Action::CopyAs),
                 Action::CopyAs,
                 true,
             ));
             items.push(Item::act(
-                "Link in other pane",
+                tr!("menu.link_in_other_pane", "Link in other pane"),
                 k(Action::Symlink),
                 Action::Symlink,
                 other,
             ));
             items.push(Item::act(
-                "Permissions\u{2026}",
+                tr!("menu.permissions", "Permissions\u{2026}"),
                 k(Action::Permissions),
                 Action::Permissions,
                 true,
@@ -645,7 +645,7 @@ impl App {
             has_sel,
         ));
         items.push(Item::act(
-            "Delete permanently",
+            tr!("menu.delete_permanently", "Delete permanently"),
             k(Action::DeletePermanent),
             Action::DeletePermanent,
             has_sel,
@@ -656,59 +656,64 @@ impl App {
             items.push(Item::act(label, k(Action::Mark), Action::Mark, true));
         }
         items.push(Item::act(
-            "Mark all",
+            tr!("menu.mark_all", "Mark all"),
             k(Action::MarkAll),
             Action::MarkAll,
             true,
         ));
         items.push(Item::act(
-            "Clear marks",
+            tr!("menu.clear_marks", "Clear marks"),
             k(Action::UnmarkAll),
             Action::UnmarkAll,
             any_marks,
         ));
         items.push(Item::sep());
         items.push(Item::act(
-            "New directory",
+            tr!("mouse.new_directory", "New directory"),
             k(Action::MkDir),
             Action::MkDir,
             true,
         ));
         items.push(Item::act(
-            "New tab",
+            tr!("menu.new_tab", "New tab"),
             k(Action::NewTab),
             Action::NewTab,
             true,
         ));
-        items.push(Item::cmd("Copy path", "", Cmd::CopyPath, true));
         items.push(Item::cmd(
-            "Copy relative path",
+            tr!("menu.copy_path", "Copy path"),
+            "",
+            Cmd::CopyPath,
+            true,
+        ));
+        items.push(Item::cmd(
+            tr!("app_mouse.copy_relative_path", "Copy relative path"),
             "",
             Cmd::CopyRelativePath,
             true,
         ));
         items.push(Item::act(
-            "Terminal here",
+            tr!("menu.terminal_here", "Terminal here"),
             k(Action::CdTerminalHere),
             Action::CdTerminalHere,
             self.shell_pane.term_id.is_some(),
         ));
         items.push(Item::act(
-            "Type into the shell",
+            tr!("menu.type_into_the_shell", "Type into the shell"),
             k(Action::TypeNames),
             Action::TypeNames,
             self.shell_pane.term_id.is_some() && has_sel,
         ));
         items.push(Item::act(
-            "Refresh",
+            tr!("menu.refresh", "Refresh"),
             k(Action::Refresh),
             Action::Refresh,
             true,
         ));
         let hide = if hidden {
-            "Hide hidden files"
+            tr!("app_mouse.hide_hidden_files", "Hide hidden files")
         } else {
-            "Show hidden files"
+            tr!("app_mouse.show_hidden_files", "Show hidden files")
         };
         items.push(Item::act(
             hide,

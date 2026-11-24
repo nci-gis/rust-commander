@@ -423,9 +423,9 @@ impl TermPanel {
         };
         shell.set_log(Log::start(path.to_path_buf(), mode, Box::new(file), about));
         let verb = if existed {
-            "appending to"
+            tr!("terms.appending_to", "appending to")
         } else {
-            "logging to"
+            tr!("terms.logging_to", "logging to")
         };
         let mut said = format!("{verb} {} ({})", path.display(), mode.word());
         if shared {

@@ -38,7 +38,9 @@ pub fn load() -> Vec<PathBuf> {
 }
 
 pub fn save(list: &[PathBuf]) -> std::io::Result<()> {
-    let p = path().ok_or_else(|| std::io::Error::other("no state directory"))?;
+    let p = path().ok_or_else(|| {
+        std::io::Error::other(tr!("bookmarks.no_state_directory", "no state directory"))
+    })?;
     let f = File {
         // TOML holds text; a path that is not UTF-8 cannot be bookmarked.
         paths: list

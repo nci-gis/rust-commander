@@ -63,7 +63,11 @@ pub fn said(texts: &[String], base: &Base) -> String {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string())
         ),
-        Base::Folder(_) => "relative to this folder (not in a repository)".into(),
+        Base::Folder(_) => tr!(
+            "relpath.relative_to_this_folder_not_in",
+            "relative to this folder (not in a repository)"
+        )
+        .into(),
     };
     format!("copied {what}, {to}")
 }

@@ -187,7 +187,7 @@ impl App {
             return;
         }
         self.modal = Some(Modal::Confirm(Confirm {
-            title: kind.verb().to_string(),
+            title: crate::modal::verb_text(kind),
             body: vec![
                 Self::describe(&sources),
                 String::new(),
@@ -308,7 +308,7 @@ impl App {
         let dir = self.focused_cwd();
         self.modal = Some(Modal::Input(Input {
             title: tr!("file_ops.create_directory", "Create directory").into(),
-            label: format!("in {}", dir.display()),
+            label: tr!("where.in", "in {dir}", dir = dir.display()),
             edit: LineEdit::new(""),
             kind: InputKind::MkDir,
             dir,
@@ -325,7 +325,10 @@ impl App {
             self.status = tr!("file_ops.nothing_to_rename_here", "nothing to rename here").into();
             return;
         };
-        let (label, dir) = (format!("in {}", f.cwd.display()), f.cwd.clone());
+        let (label, dir) = (
+            tr!("where.in", "in {dir}", dir = f.cwd.display()),
+            f.cwd.clone(),
+        );
         if self.guard_refused(std::slice::from_ref(&e.path)) {
             return;
         }

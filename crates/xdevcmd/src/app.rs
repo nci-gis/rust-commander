@@ -261,7 +261,10 @@ fn input_gone() -> anyhow::Error {
             "the thread reading the keyboard failed \u{2014} details in {}",
             log.display()
         ),
-        None => anyhow::anyhow!("the thread reading the keyboard failed"),
+        None => anyhow::anyhow!(tr!(
+            "app.the_thread_reading_the_keyboard_failed",
+            "the thread reading the keyboard failed"
+        )),
     }
 }
 
@@ -272,7 +275,10 @@ fn input_gone() -> anyhow::Error {
 #[cfg(unix)]
 fn terminal_alive(watch: bool) -> Result<()> {
     if watch && tty_gone(std::io::stdin()) {
-        anyhow::bail!("the terminal is gone (hung up)");
+        anyhow::bail!(tr!(
+            "app.the_terminal_is_gone_hung_up",
+            "the terminal is gone (hung up)"
+        ));
     }
     Ok(())
 }

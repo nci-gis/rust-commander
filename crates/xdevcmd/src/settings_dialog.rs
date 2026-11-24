@@ -20,7 +20,14 @@ use crate::lang::Text;
 use crate::modal::{buttons, centered, frame_box, put};
 use crate::theme;
 
-pub const TABS: &[&str] = &["General", "Files", "Theme", "Terminal", "Languages", "Keys"];
+pub const TABS: &[Text] = &[
+    Text::new("settings.tab.general", "General"),
+    Text::new("settings.tab.files", "Files"),
+    Text::new("settings.tab.theme", "Theme"),
+    Text::new("settings.tab.terminal", "Terminal"),
+    Text::new("settings.tab.languages", "Languages"),
+    Text::new("settings.tab.keys", "Keys"),
+];
 /// The tab that lists the languages one per row, rather than settings.
 const LANGUAGES_TAB: usize = 4;
 
@@ -803,6 +810,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
     d.row_hits.clear();
     let mut x = inner.x;
     for (i, t) in TABS.iter().enumerate() {
+        let t = t.get();
         let w = t.cells() as u16 + 2;
         d.tab_hits
             .push(Rect::new(x, inner.y, w, 1).intersection(inner));
@@ -823,16 +831,28 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
         .set_line(inner.x, inner.y, &Line::from(spans), inner.width);
 
     let body_top = 2u16;
-    if TABS[d.tab] == "Keys" {
+    if TABS[d.tab].en == "Keys" {
         let lines = [
-            "Every key is on F1, with the name to rebind it by.",
-            "",
-            "To change one, write it under [keys] in config.toml:",
-            "    copy = [\"F5\", \"Ctrl+c\"]",
-            "Two keys in a row are written with a space:",
-            "    resize_left = [\"Alt+Shift+Left\", \"Alt+r Left\"]",
-            "",
-            "xdevcmd --print-keys lists them all; xdevcmd --show-keys shows what a key sends.",
+            tr!(
+                "settings.keys.f1",
+                "Every key is on F1, with the name to rebind it by."
+            ),
+            "".into(),
+            tr!(
+                "settings.keys.how",
+                "To change one, write it under [keys] in config.toml:"
+            ),
+            "    copy = [\"F5\", \"Ctrl+c\"]".into(),
+            tr!(
+                "settings.keys.chord",
+                "Two keys in a row are written with a space:"
+            ),
+            "    resize_left = [\"Alt+Shift+Left\", \"Alt+r Left\"]".into(),
+            "".into(),
+            tr!(
+                "settings.keys.cli",
+                "xdevcmd --print-keys lists them all; xdevcmd --show-keys shows what a key sends."
+            ),
         ];
         for (i, l) in lines.iter().enumerate() {
             put(frame, inner, body_top + i as u16, l, Style::new().fg(th.fg));

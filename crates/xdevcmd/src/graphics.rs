@@ -192,17 +192,29 @@ pub fn terminal_name(var: impl Fn(&str) -> Option<String>, probe: &Probe) -> Str
     .or_else(|| probe.version.clone())
     .or_else(|| match probe.da2 {
         Some((41, v)) => Some(format!("xterm {v}")),
-        Some((65, _)) => Some("a VTE terminal (GNOME Terminal and others)".to_string()),
+        Some((65, _)) => Some(
+            tr!(
+                "graphics.a_vte_terminal_gnome_terminal_and",
+                "a VTE terminal (GNOME Terminal and others)"
+            )
+            .to_string(),
+        ),
         Some((77, _)) => Some("mintty".to_string()),
         Some((83, _)) => Some("screen".to_string()),
         Some((84, _)) => Some("tmux".to_string()),
         _ => None,
     })
     .or_else(|| {
-        get("VTE_VERSION").map(|_| "a VTE terminal (GNOME Terminal and others)".to_string())
+        get("VTE_VERSION").map(|_| {
+            tr!(
+                "graphics.a_vte_terminal_gnome_terminal_and",
+                "a VTE terminal (GNOME Terminal and others)"
+            )
+            .to_string()
+        })
     });
     let name = named.unwrap_or_else(|| match term.as_str() {
-        "" => "an unknown terminal".to_string(),
+        "" => tr!("graphics.an_unknown_terminal", "an unknown terminal").to_string(),
         t => format!("an unknown terminal (TERM={t})"),
     });
     if get("SSH_CONNECTION").is_some() || get("SSH_TTY").is_some() {

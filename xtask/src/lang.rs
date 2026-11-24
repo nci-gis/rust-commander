@@ -2,6 +2,8 @@
 //!
 //! - `xtask lang template` prints every key with its English, as a language file to
 //!   copy to `lang/<name>.toml` and translate (any name: `vi`, `ja`, a pseudo-language).
+//! - `xtask lang pseudo` prints the same with every text in ⟦…⟧ (its `{params}` kept): a
+//!   language file to find what still shows in English, and what a longer text cuts.
 //! - `xtask lang check FILE` says which keys of FILE the code no longer has, and which
 //!   texts name a `{param}` their English does not give (xdevcmd would show the English).
 //!
@@ -20,6 +22,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("template") => {
             print!("{}", template(&keys));
+            Ok(())
+        }
+        Some("pseudo") => {
+            let bracketed = keys
+                .iter()
+                .map(|(k, en)| (k.clone(), format!("\u{27e6}{en}\u{27e7}")))
+                .collect();
+            print!("\"$__name\" = \"Pseudo\"\n{}", template(&bracketed));
             Ok(())
         }
         Some("check") => {
@@ -43,7 +53,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 ))
             }
         }
-        _ => Err("usage: xtask lang template | xtask lang check FILE".into()),
+        _ => Err("usage: xtask lang template | pseudo | check FILE".into()),
     }
 }
 

@@ -50,7 +50,12 @@ impl App {
                 })
                 .collect();
             items.push(Item::sep());
-            items.push(Item::cmd("New list", "n", Cmd::AddToList(None), true));
+            items.push(Item::cmd(
+                tr!("menu.new_list", "New list"),
+                "n",
+                Cmd::AddToList(None),
+                true,
+            ));
             // The history stays behind the menu, and comes back if it is cancelled.
             if let Some(Modal::View(v)) = self.modal.take() {
                 self.return_to = Some(v);

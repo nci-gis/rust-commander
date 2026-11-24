@@ -826,7 +826,9 @@ pub fn remember(recent: &mut Vec<String>, id: &str) {
 }
 
 pub fn save_recent(recent: &[String]) -> std::io::Result<()> {
-    let p = recent_path().ok_or_else(|| std::io::Error::other("no state directory"))?;
+    let p = recent_path().ok_or_else(|| {
+        std::io::Error::other(tr!("commands.no_state_directory", "no state directory"))
+    })?;
     let text = toml::to_string_pretty(&RecentFile {
         recent: recent.to_vec(),
     })
@@ -1239,7 +1241,7 @@ impl Commands {
         }
         if chars.is_empty() {
             spans.push(Span::styled(
-                " type to find a command, or a key (f5)",
+                tr!("palette.prompt", " type to find a command, or a key (f5)"),
                 Style::new().fg(th.fg_dim),
             ));
         }
@@ -1307,7 +1309,10 @@ impl Commands {
             frame.buffer_mut().set_line(
                 list.x,
                 list.y,
-                &Line::styled("  no command matches", Style::new().fg(th.fg_dim)),
+                &Line::styled(
+                    tr!("commands.no_command_matches", "  no command matches"),
+                    Style::new().fg(th.fg_dim),
+                ),
                 list.width,
             );
         }
@@ -1472,9 +1477,9 @@ impl Commands {
     /// the left leaves out (F1 larger, or the `[keys]` name to rebind it by).
     fn last_line(&self, w: u16, desc_x: usize, name_w: usize) -> (String, String) {
         let grow = if self.size == Size::Small && self.can_grow() {
-            "F1 larger"
+            tr!("palette.larger", "F1 larger")
         } else {
-            ""
+            "".into()
         };
         if let Some(m) = &self.message {
             return (m.clone(), String::new());
@@ -1502,11 +1507,14 @@ impl Commands {
         if let Some(d) = full.filter(|d| !d.is_empty() && (w < THREE_COLUMNS || cut_on_row)) {
             return (d, grow.to_string());
         }
-        let mut keys = vec!["Enter run", "\u{2191}\u{2193} move"];
+        let mut keys = vec![
+            tr!("palette.run", "Enter run"),
+            tr!("palette.move", "\u{2191}\u{2193} move"),
+        ];
         if !grow.is_empty() {
-            keys.push(grow);
+            keys.push(grow.clone());
         }
-        keys.push("Esc close");
+        keys.push(tr!("palette.close", "Esc close"));
         let hint = keys.join(" \u{b7} ");
         // Where to rebind it: the name `[keys]` knows it by.
         let name = sel

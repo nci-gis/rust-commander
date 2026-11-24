@@ -227,8 +227,8 @@ impl App {
         let mut overwrites = 0;
         let mut unknown = 0;
         let which = |s: Side| match s {
-            Side::Left => "this pane",
-            Side::Right => "the other",
+            Side::Left => tr!("app_compare.this_pane", "this pane"),
+            Side::Right => tr!("app_compare.the_other", "the other"),
         };
         for d in diffs {
             let slash = if d.is_dir { "/" } else { "" };

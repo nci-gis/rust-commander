@@ -357,9 +357,11 @@ impl Viewer {
                 .map(|(r, typed)| (r, typed, String::new())),
         };
         let Some((lines, typed, mut what)) = picked else {
-            self.message =
+            self.message = tr!(
+                "viewer.drag_over_the_lines_to_take",
                 "drag over the lines to take paths from (no prompt marks here: docs/shell.md)"
-                    .into();
+            )
+            .into();
             return Action::Stay;
         };
         if let Some(t) = typed {
@@ -802,7 +804,12 @@ impl Viewer {
             KeyCode::Char('w') => {
                 self.wrap = !self.wrap;
                 self.col = 0;
-                self.message = if self.wrap { "wrap on" } else { "wrap off" }.into();
+                self.message = if self.wrap {
+                    tr!("viewer.wrap_on", "wrap on")
+                } else {
+                    tr!("viewer.wrap_off", "wrap off")
+                }
+                .into();
             }
             KeyCode::Left => self.col = self.col.saturating_sub(8),
             KeyCode::Right if !self.wrap => self.col += 8,
@@ -1142,10 +1149,13 @@ impl Viewer {
 
         if let Some((prompt, buf)) = &self.typing {
             let (lead, hint) = match (prompt, self.mode) {
-                (Prompt::Search, _) => (" /", ""),
-                (Prompt::Line, Mode::Text) => (" go to line: ", "   40 \u{b7} 50% \u{b7} Esc"),
+                (Prompt::Search, _) => (" /".into(), ""),
+                (Prompt::Line, Mode::Text) => (
+                    tr!("viewer.go_to_line", " go to line: "),
+                    "   40 \u{b7} 50% \u{b7} Esc",
+                ),
                 (Prompt::Line, Mode::Hex) => (
-                    " go to offset: ",
+                    tr!("viewer.go_to_offset", " go to offset: "),
                     "   0x1f00 \u{b7} 8000 \u{b7} 50% \u{b7} Esc",
                 ),
             };
@@ -1181,7 +1191,11 @@ impl Viewer {
             (":", "line"),
             ("F2", "save"),
         ];
-        let keys: Vec<(&str, &str)> = keys_lead.iter().chain(rest).copied().collect();
+        let keys: Vec<(&str, std::borrow::Cow<str>)> = keys_lead
+            .iter()
+            .chain(rest)
+            .map(|&(k, l)| (k, crate::modal::button_word(l)))
+            .collect();
         // A message is what just happened (a refusal, "past the end"): it must be read,
         // so keys are dropped from the end, down to Esc, until it fits beside them.
         let width = |n: usize| -> usize {

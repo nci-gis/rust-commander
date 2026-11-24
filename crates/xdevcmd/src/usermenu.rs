@@ -48,7 +48,11 @@ pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
             continue;
         }
         let Some(code) = it.next() else {
-            return Err("the command ends in a lone %".into());
+            return Err(tr!(
+                "usermenu.the_command_ends_in_a_lone",
+                "the command ends in a lone %"
+            )
+            .into());
         };
         let words: Vec<String> = match code {
             '%' => {
@@ -73,7 +77,11 @@ pub fn expand(template: &str, cx: &Context) -> Result<String, String> {
             'd' => vec![text(&cx.dir)?],
             'D' => match &cx.other {
                 Some(d) => vec![text(d)?],
-                None => return Err("%D needs a second pane".into()),
+                None => {
+                    return Err(
+                        tr!("usermenu.d_needs_a_second_pane", "%D needs a second pane").into(),
+                    )
+                }
             },
             other => {
                 return Err(format!(

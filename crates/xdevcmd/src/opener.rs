@@ -162,10 +162,22 @@ pub fn document(path: &Path) -> bool {
 pub fn no_screen() -> Option<String> {
     let set = |v: &str| std::env::var_os(v).is_some_and(|s| !s.is_empty());
     if set("SSH_CONNECTION") || set("SSH_TTY") {
-        return Some("over SSH there is no screen here to open it on".into());
+        return Some(
+            tr!(
+                "opener.over_ssh_there_is_no_screen",
+                "over SSH there is no screen here to open it on"
+            )
+            .into(),
+        );
     }
     if cfg!(all(unix, not(target_os = "macos"))) && !set("DISPLAY") && !set("WAYLAND_DISPLAY") {
-        return Some("no desktop session to open it in (no DISPLAY)".into());
+        return Some(
+            tr!(
+                "opener.no_desktop_session_to_open_it",
+                "no desktop session to open it in (no DISPLAY)"
+            )
+            .into(),
+        );
     }
     None
 }

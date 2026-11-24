@@ -286,15 +286,22 @@ impl Table {
 }
 
 /// What the confirmation says for each choice of what to do with existing files.
-pub fn existing_label(e: ops::Existing) -> &'static str {
+pub fn existing_label(e: ops::Existing) -> String {
     match e {
-        ops::Existing::Ask => "if a file is there: ask  (U changes)",
-        ops::Existing::Update => "if a file is there: replace it only if older; skip the same  (U)",
-        ops::Existing::Skip => "if a file is there: leave it  (U)",
-        ops::Existing::Replace => "if a file is there: replace it  (U)",
+        ops::Existing::Ask => tr!("existing.ask", "if a file is there: ask  (U changes)"),
+        ops::Existing::Update => tr!(
+            "existing.update",
+            "if a file is there: replace it only if older; skip the same  (U)"
+        ),
+        ops::Existing::Skip => tr!("existing.skip", "if a file is there: leave it  (U)"),
+        ops::Existing::Replace => tr!("existing.replace", "if a file is there: replace it  (U)"),
         // Only an interrupted job continued; never offered by U.
-        ops::Existing::Resume => "if a file is there: skip it if identical, else ask  (U)",
+        ops::Existing::Resume => tr!(
+            "existing.resume",
+            "if a file is there: skip it if identical, else ask  (U)"
+        ),
     }
+    .into_owned()
 }
 
 impl Confirm {
@@ -311,7 +318,7 @@ impl Confirm {
             Replace | Resume => Ask,
         };
         if let Some(l) = self.body.get_mut(line) {
-            *l = existing_label(self.request.existing).to_string();
+            *l = existing_label(self.request.existing);
         }
     }
 
@@ -339,8 +346,7 @@ impl Confirm {
         }
         if self.existing_line.is_some() {
             self.body.push(String::new());
-            self.body
-                .push(existing_label(self.request.existing).to_string());
+            self.body.push(existing_label(self.request.existing));
             self.existing_line = Some(self.body.len() - 1);
         }
     }
@@ -780,14 +786,20 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
             if *changed {
                 body.push(String::new());
                 body.push(
-                    "It changed since you answered or since the plan was made: asked again."
-                        .to_string(),
+                    tr!(
+                        "modal.it_changed_since_you_answered_or",
+                        "It changed since you answered or since the plan was made: asked again."
+                    )
+                    .to_string(),
                 );
             }
             let title = if *changed {
-                "Already exists, and changed"
+                tr!(
+                    "modal.already_exists_and_changed",
+                    "Already exists, and changed"
+                )
             } else {
-                "Already exists"
+                tr!("modal.already_exists", "Already exists")
             };
             (title.to_string(), body)
         }
@@ -828,7 +840,7 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
                 String::new(),
                 error.clone(),
                 String::new(),
-                "R tries this file again (five more tries). S leaves it and goes on with the next"
+                tr!("modal.r_tries_this_file_again_five", "R tries this file again (five more tries). S leaves it and goes on with the next")
                     .to_string(),
                 tr!(
                     "modal.file_it_is_not_copied_esc",
@@ -839,7 +851,7 @@ fn question_text(q: &Question) -> (String, Vec<String>) {
             // The engine's words for a network error it tried again and again.
             if error.contains("a network error") {
                 body.push(
-                    "The share looks down: S will most likely meet the same error on the next file."
+                    tr!("modal.the_share_looks_down_s_will", "The share looks down: S will most likely meet the same error on the next file.")
                         .to_string(),
                 );
             }
@@ -986,6 +998,72 @@ pub(crate) fn paint_picture(
 ///
 /// Recording the rectangles while drawing, rather than recomputing them in the click
 /// handler, means the click target is always exactly what is on screen.
+/// The words buttons and answers say, in the run's language: [`buttons`] looks each
+/// label up here by its English, so every place that draws one is covered at once.
+const BUTTON_WORDS: &[crate::lang::Text] = &[
+    crate::lang::Text::new("button.abort", "abort"),
+    crate::lang::Text::new("button.background", "background"),
+    crate::lang::Text::new("button.cancel", "cancel"),
+    crate::lang::Text::new("button.close", "close"),
+    crate::lang::Text::new(
+        "button.continue_without_the_journal",
+        "continue without the journal",
+    ),
+    crate::lang::Text::new("button.copy_then_delete", "copy then delete"),
+    crate::lang::Text::new("button.delete_all_permanently", "delete all permanently"),
+    crate::lang::Text::new("button.delete_permanently", "delete permanently"),
+    crate::lang::Text::new("button.do_that_for_all", "do that for all"),
+    crate::lang::Text::new("button.edit_in_editor", "edit in editor"),
+    crate::lang::Text::new("button.find", "find"),
+    crate::lang::Text::new("button.go", "go"),
+    crate::lang::Text::new("button.paths", "paths"),
+    crate::lang::Text::new("button.list", "list"),
+    crate::lang::Text::new("button.hex", "hex"),
+    crate::lang::Text::new("button.wrap", "wrap"),
+    crate::lang::Text::new("button.search", "search"),
+    crate::lang::Text::new("button.next", "next"),
+    crate::lang::Text::new("button.ends", "ends"),
+    crate::lang::Text::new("button.line", "line"),
+    crate::lang::Text::new("button.create", "create"),
+    crate::lang::Text::new("button.mark", "mark"),
+    crate::lang::Text::new("button.unmark", "unmark"),
+    crate::lang::Text::new("button.copy", "copy"),
+    crate::lang::Text::new("button.apply", "apply"),
+    crate::lang::Text::new("button.pack", "pack"),
+    crate::lang::Text::new("button.log", "log"),
+    crate::lang::Text::new("button.next_field", "next field"),
+    crate::lang::Text::new("button.other_pane", "other pane"),
+    crate::lang::Text::new("button.overwrite", "overwrite"),
+    crate::lang::Text::new("button.overwrite_all", "overwrite all"),
+    crate::lang::Text::new("button.rename", "rename"),
+    crate::lang::Text::new("button.retry", "retry"),
+    crate::lang::Text::new("button.save", "save"),
+    crate::lang::Text::new("button.skip", "skip"),
+    crate::lang::Text::new("button.skip_all", "skip all"),
+    crate::lang::Text::new("button.stop", "stop"),
+    crate::lang::Text::new("button.update_all", "update all"),
+];
+
+/// A job's verb as a title ("Copy"), in the run's language.
+pub fn verb_text(kind: ops::Kind) -> String {
+    match kind {
+        ops::Kind::Copy => tr!("job.copy", "Copy"),
+        ops::Kind::Move => tr!("job.move", "Move"),
+        ops::Kind::Delete => tr!("job.delete", "Delete"),
+        ops::Kind::Extract => tr!("job.extract", "Extract"),
+        ops::Kind::Pack => tr!("job.pack", "Pack"),
+    }
+    .into_owned()
+}
+
+/// A button's label as shown: its translation, else as given.
+pub fn button_word(label: &str) -> std::borrow::Cow<'_, str> {
+    BUTTON_WORDS
+        .iter()
+        .find(|t| t.en == label)
+        .map_or(std::borrow::Cow::Borrowed(label), |t| t.get())
+}
+
 pub(crate) fn buttons(
     frame: &mut Frame,
     x: u16,
@@ -998,7 +1076,7 @@ pub(crate) fn buttons(
     let mut cx = x;
     for (key, label, colour) in items {
         let k = format!("[{key}]");
-        let l = format!(" {label}");
+        let l = format!(" {}", button_word(label));
         let w = (k.cells() + l.cells()) as u16;
         rects.push(Rect::new(cx, y, w.min((x + width).saturating_sub(cx)), 1));
         cx += w + 2;
@@ -1272,7 +1350,7 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
     let inner = frame_box(
         frame,
         r,
-        j.title.as_deref().unwrap_or(j.kind.verb()),
+        &j.title.clone().unwrap_or_else(|| verb_text(j.kind)),
         th.accent,
     );
 

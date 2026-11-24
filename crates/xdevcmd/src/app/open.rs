@@ -306,7 +306,7 @@ impl App {
                 true,
             ),
             Item::act(
-                "View it",
+                tr!("menu.view_it", "View it"),
                 self.footer_key(Action::View).unwrap_or_default(),
                 Action::View,
                 true,
@@ -431,19 +431,19 @@ impl App {
             }
         }
         items.push(Item::act(
-            "System default",
+            tr!("menu.system_default", "System default"),
             self.footer_key(Action::OpenWith).unwrap_or_default(),
             Action::OpenWith,
             self.refused(Action::OpenWith).is_none() && screen.is_none(),
         ));
         items.push(Item::act(
-            "View",
+            tr!("menu.view", "View"),
             self.footer_key(Action::View).unwrap_or_default(),
             Action::View,
             true,
         ));
         items.push(Item::act(
-            "Edit",
+            tr!("menu.edit", "Edit"),
             self.footer_key(Action::Edit).unwrap_or_default(),
             Action::Edit,
             self.refused(Action::Edit).is_none(),
@@ -451,7 +451,7 @@ impl App {
         if opener::console_program(&path) {
             let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
             items.push(Item::cmd(
-                "Run in a terminal tab",
+                tr!("app_open.run_in_a_terminal_tab", "Run in a terminal tab"),
                 "",
                 Cmd::RunInTerminal {
                     argv: vec![path.clone().into_os_string()],

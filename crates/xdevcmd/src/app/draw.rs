@@ -1,6 +1,7 @@
 //! Drawing: the menu bar, the frame, the status line and the key footer.
 
 use super::*;
+use crate::lang::Text;
 use xdevcmd_core::format::Cells;
 
 impl App {
@@ -8,72 +9,140 @@ impl App {
     /// effect, so its hints are the keys you have and what is off is greyed out.
     pub(super) fn bar_items(&self, i: usize) -> Vec<Item> {
         use Action as A;
-        let file: &[Option<(&str, A)>] = &[
-            Some(("View", A::View)),
-            Some(("Edit", A::Edit)),
-            Some(("Open with system app", A::OpenWith)),
-            Some(("Open with\u{2026}", A::OpenWithMenu)),
+        let file: &[Option<(Text, A)>] = &[
+            Some((Text::new("menu.view", "View"), A::View)),
+            Some((Text::new("menu.edit", "Edit"), A::Edit)),
+            Some((
+                Text::new("menu.open_with_system_app", "Open with system app"),
+                A::OpenWith,
+            )),
+            Some((
+                Text::new("menu.open_with", "Open with\u{2026}"),
+                A::OpenWithMenu,
+            )),
             None,
-            Some(("Copy", A::Copy)),
-            Some(("Move", A::Move)),
-            Some(("Copy as\u{2026}", A::CopyAs)),
-            Some(("Rename", A::Rename)),
-            Some(("Rename many\u{2026}", A::BulkRename)),
-            Some(("Link in other pane", A::Symlink)),
-            Some(("Permissions\u{2026}", A::Permissions)),
-            Some(("Checksum", A::Checksum)),
+            Some((Text::new("menu.copy", "Copy"), A::Copy)),
+            Some((Text::new("menu.move", "Move"), A::Move)),
+            Some((Text::new("menu.copy_as", "Copy as\u{2026}"), A::CopyAs)),
+            Some((Text::new("menu.rename", "Rename"), A::Rename)),
+            Some((
+                Text::new("menu.rename_many", "Rename many\u{2026}"),
+                A::BulkRename,
+            )),
+            Some((
+                Text::new("menu.link_in_other_pane", "Link in other pane"),
+                A::Symlink,
+            )),
+            Some((
+                Text::new("menu.permissions", "Permissions\u{2026}"),
+                A::Permissions,
+            )),
+            Some((Text::new("menu.checksum", "Checksum"), A::Checksum)),
             None,
-            Some(("New file\u{2026}", A::NewFile)),
-            Some(("New directory\u{2026}", A::MkDir)),
-            Some(("Pack\u{2026}", A::Pack)),
-            Some(("Unpack", A::Unpack)),
+            Some((Text::new("menu.new_file", "New file\u{2026}"), A::NewFile)),
+            Some((
+                Text::new("menu.new_directory", "New directory\u{2026}"),
+                A::MkDir,
+            )),
+            Some((Text::new("menu.pack", "Pack\u{2026}"), A::Pack)),
+            Some((Text::new("menu.unpack", "Unpack"), A::Unpack)),
             None,
-            Some(("Delete", A::Delete)),
-            Some(("Delete permanently", A::DeletePermanent)),
+            Some((Text::new("menu.delete", "Delete"), A::Delete)),
+            Some((
+                Text::new("menu.delete_permanently", "Delete permanently"),
+                A::DeletePermanent,
+            )),
             None,
-            Some(("Find files\u{2026}", A::FindFiles)),
-            Some(("Your commands\u{2026}", A::UserMenu)),
+            Some((
+                Text::new("menu.find_files", "Find files\u{2026}"),
+                A::FindFiles,
+            )),
+            Some((
+                Text::new("menu.your_commands", "Your commands\u{2026}"),
+                A::UserMenu,
+            )),
             None,
-            Some(("Quit", A::Quit)),
+            Some((Text::new("menu.quit", "Quit"), A::Quit)),
         ];
         // Settings… is put in just above Quit, below.
-        let view: &[Option<(&str, A)>] = &[
-            Some(("Quick search", A::QuickSearch)),
-            Some(("Filter\u{2026}", A::Filter)),
-            Some(("Go to path\u{2026}", A::GoToPath)),
-            Some(("Back", A::Back)),
-            Some(("Forward", A::Forward)),
-            Some(("History and lists\u{2026}", A::History)),
-            Some(("Last list", A::ShowList)),
-            Some(("Hotlist", A::Hotlist)),
+        let view: &[Option<(Text, A)>] = &[
+            Some((
+                Text::new("menu.quick_search", "Quick search"),
+                A::QuickSearch,
+            )),
+            Some((Text::new("menu.filter", "Filter\u{2026}"), A::Filter)),
+            Some((
+                Text::new("menu.go_to_path", "Go to path\u{2026}"),
+                A::GoToPath,
+            )),
+            Some((Text::new("menu.back", "Back"), A::Back)),
+            Some((Text::new("menu.forward", "Forward"), A::Forward)),
+            Some((
+                Text::new("menu.history_and_lists", "History and lists\u{2026}"),
+                A::History,
+            )),
+            Some((Text::new("menu.last_list", "Last list"), A::ShowList)),
+            Some((Text::new("menu.hotlist", "Hotlist"), A::Hotlist)),
             None,
-            Some(("Hidden files", A::ToggleHidden)),
-            Some(("Sort by name", A::SortName)),
-            Some(("Sort by extension", A::SortExt)),
-            Some(("Sort by size", A::SortSize)),
-            Some(("Sort by date", A::SortModified)),
-            Some(("Directory sizes", A::CalcSizes)),
-            Some(("Refresh", A::Refresh)),
+            Some((
+                Text::new("menu.hidden_files", "Hidden files"),
+                A::ToggleHidden,
+            )),
+            Some((Text::new("menu.sort_by_name", "Sort by name"), A::SortName)),
+            Some((
+                Text::new("menu.sort_by_extension", "Sort by extension"),
+                A::SortExt,
+            )),
+            Some((Text::new("menu.sort_by_size", "Sort by size"), A::SortSize)),
+            Some((
+                Text::new("menu.sort_by_date", "Sort by date"),
+                A::SortModified,
+            )),
+            Some((
+                Text::new("menu.directory_sizes", "Directory sizes"),
+                A::CalcSizes,
+            )),
+            Some((Text::new("menu.refresh", "Refresh"), A::Refresh)),
             None,
-            Some(("Quick view", A::QuickView)),
-            Some(("Zoom", A::Zoom)),
-            Some(("Split right", A::SplitRight)),
-            Some(("Split down", A::SplitDown)),
-            Some(("Close pane", A::ClosePane)),
-            Some(("Swap panes", A::SwapPanes)),
-            Some(("Same directory there", A::MirrorPane)),
-            Some(("Compare with other pane", A::CompareDirs)),
-            Some(("Synchronise\u{2026}", A::SyncDirs)),
+            Some((Text::new("menu.quick_view", "Quick view"), A::QuickView)),
+            Some((Text::new("menu.zoom", "Zoom"), A::Zoom)),
+            Some((Text::new("menu.split_right", "Split right"), A::SplitRight)),
+            Some((Text::new("menu.split_down", "Split down"), A::SplitDown)),
+            Some((Text::new("menu.close_pane", "Close pane"), A::ClosePane)),
+            Some((Text::new("menu.swap_panes", "Swap panes"), A::SwapPanes)),
+            Some((
+                Text::new("menu.same_directory_there", "Same directory there"),
+                A::MirrorPane,
+            )),
+            Some((
+                Text::new("menu.compare_with_other_pane", "Compare with other pane"),
+                A::CompareDirs,
+            )),
+            Some((
+                Text::new("menu.synchronise", "Synchronise\u{2026}"),
+                A::SyncDirs,
+            )),
             None,
-            Some(("Terminal", A::FocusTerminal)),
-            Some(("Terminal history", A::TerminalHistory)),
-            Some(("New terminal", A::NewTerminal)),
-            Some(("Show or hide terminal", A::ToggleTerminal)),
+            Some((Text::new("menu.terminal", "Terminal"), A::FocusTerminal)),
+            Some((
+                Text::new("menu.terminal_history", "Terminal history"),
+                A::TerminalHistory,
+            )),
+            Some((
+                Text::new("menu.new_terminal", "New terminal"),
+                A::NewTerminal,
+            )),
+            Some((
+                Text::new("menu.show_or_hide_terminal", "Show or hide terminal"),
+                A::ToggleTerminal,
+            )),
         ];
         // Commands… and Config in use are put in at the top, Documentation and About
         // at the end, below.
-        let help: &[Option<(&str, A)>] =
-            &[Some(("Usage", A::Usage)), Some(("Messages", A::Messages))];
+        let help: &[Option<(Text, A)>] = &[
+            Some((Text::new("menu.usage", "Usage"), A::Usage)),
+            Some((Text::new("menu.messages", "Messages"), A::Messages)),
+        ];
         let list = match i {
             0 => file,
             1 => view,
@@ -84,7 +153,7 @@ impl App {
             .map(|e| match e {
                 None => Item::sep(),
                 Some((label, a)) => Item::act(
-                    *label,
+                    label.get(),
                     self.footer_key(*a).unwrap_or_default(),
                     *a,
                     self.refused(*a).is_none(),
@@ -94,19 +163,58 @@ impl App {
         if i == 0 {
             // Above Quit, which is last.
             let at = items.len().saturating_sub(1);
-            items.insert(at, Item::cmd("Settings\u{2026}", "", Cmd::Settings, true));
+            items.insert(
+                at,
+                Item::cmd(
+                    tr!("menu.settings", "Settings\u{2026}"),
+                    "",
+                    Cmd::Settings,
+                    true,
+                ),
+            );
         }
         if i == 1 {
             items.push(Item::sep());
-            items.push(Item::cmd("Theme\u{2026}", "", Cmd::ThemeMenu, true));
+            items.push(Item::cmd(
+                tr!("menu.theme", "Theme\u{2026}"),
+                "",
+                Cmd::ThemeMenu,
+                true,
+            ));
         }
         if i == 2 {
             let f1 = self.footer_key(A::Help).unwrap_or_default();
-            items.insert(0, Item::cmd("Commands\u{2026}", f1, Cmd::Commands, true));
-            items.insert(1, Item::cmd("Config in use", "", Cmd::ConfigInUse, true));
-            items.push(Item::cmd("Documentation", "", Cmd::Documentation, true));
+            items.insert(
+                0,
+                Item::cmd(
+                    tr!("menu.commands", "Commands\u{2026}"),
+                    f1,
+                    Cmd::Commands,
+                    true,
+                ),
+            );
+            items.insert(
+                1,
+                Item::cmd(
+                    tr!("menu.config_in_use", "Config in use"),
+                    "",
+                    Cmd::ConfigInUse,
+                    true,
+                ),
+            );
+            items.push(Item::cmd(
+                tr!("menu.documentation", "Documentation"),
+                "",
+                Cmd::Documentation,
+                true,
+            ));
             items.push(Item::sep());
-            items.push(Item::cmd("About xdevcmd", "", Cmd::About, true));
+            items.push(Item::cmd(
+                tr!("menu.about_xdevcmd", "About xdevcmd"),
+                "",
+                Cmd::About,
+                true,
+            ));
         }
         items
     }
@@ -585,7 +693,6 @@ impl App {
         // says "5 Copy" is lying, and this is the line people look at most.
         // In F-key order, as in every orthodox manager. On a narrow screen the ones that
         // do not fit are left off whole, from the end, rather than cut mid-word.
-        use crate::lang::Text;
         const KEYS: &[(Action, Text)] = &[
             (Action::Help, Text::new("keybar.help", "Help")),
             (Action::Rename, Text::new("keybar.rename", "Ren")),

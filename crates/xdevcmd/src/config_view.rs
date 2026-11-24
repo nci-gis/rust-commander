@@ -147,7 +147,10 @@ impl ConfigView {
         spans.push(Span::styled(" ", Style::new().fg(th.bg).bg(th.fg)));
         if text.is_empty() {
             spans.push(Span::styled(
-                " type to filter: a setting, a value, a [section]",
+                tr!(
+                    "config_view.type_to_filter_a_setting_a",
+                    " type to filter: a setting, a value, a [section]"
+                ),
                 Style::new().fg(th.fg_dim),
             ));
         }
@@ -172,7 +175,10 @@ impl ConfigView {
             frame.buffer_mut().set_line(
                 body.x,
                 body.y,
-                &Line::styled("  nothing matches", Style::new().fg(th.fg_dim)),
+                &Line::styled(
+                    tr!("config_view.nothing_matches", "  nothing matches"),
+                    Style::new().fg(th.fg_dim),
+                ),
                 body.width,
             );
         }
@@ -283,7 +289,7 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
     push(
         &mut out,
         Line::from(Span::styled(
-            "    xdevcmd --print-config   writes every setting;   xdevcmd --check-config   validates the file",
+            tr!("config_view.xdevcmd_print_config_writes_every_setting", "    xdevcmd --print-config   writes every setting;   xdevcmd --check-config   validates the file"),
             Style::new().fg(th.fg_dim),
         )),
         false,

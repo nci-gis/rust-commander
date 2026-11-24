@@ -269,9 +269,12 @@ pub fn describe(l: &Link) -> Said {
     };
     // Keys before the base: on a narrow screen the end is what is cut.
     let keys = if l.dir {
-        "Enter goes there"
+        tr!("links.enter_goes_there", "Enter goes there")
     } else {
-        "Enter goes there, F3 views, F4 edits"
+        tr!(
+            "links.enter_goes_there_f3_views_f4",
+            "Enter goes there, F3 views, F4 edits"
+        )
     };
     let from = match l.base {
         Some(Base::Command) => " \u{b7} from its command's directory",

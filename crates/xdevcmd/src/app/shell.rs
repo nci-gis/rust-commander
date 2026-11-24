@@ -359,7 +359,12 @@ impl App {
             return;
         };
         let items = vec![
-            Item::cmd("View history", history, Cmd::TabHistory(id), true),
+            Item::cmd(
+                tr!("menu.view_history", "View history"),
+                history,
+                Cmd::TabHistory(id),
+                true,
+            ),
             Item::cmd(
                 "Save history as\u{2026}",
                 save,
@@ -367,8 +372,18 @@ impl App {
                 writes,
             ),
             match self.panel().and_then(|p| p.tab_log(i)) {
-                Some(_) => Item::cmd("Stop logging", "\u{25cf}", Cmd::TabStopLog(id), true),
-                None => Item::cmd("Log to file\u{2026}", "", Cmd::TabLog(id), writes),
+                Some(_) => Item::cmd(
+                    tr!("menu.stop_logging", "Stop logging"),
+                    "\u{25cf}",
+                    Cmd::TabStopLog(id),
+                    true,
+                ),
+                None => Item::cmd(
+                    tr!("menu.log_to_file", "Log to file\u{2026}"),
+                    "",
+                    Cmd::TabLog(id),
+                    writes,
+                ),
             },
             Item::cmd(
                 "List from the last command\u{2026}",
@@ -377,7 +392,12 @@ impl App {
                 true,
             ),
             Item::sep(),
-            Item::cmd("Close tab", "\u{00d7}", Cmd::TabClose(id), true),
+            Item::cmd(
+                tr!("menu.close_tab", "Close tab"),
+                "\u{00d7}",
+                Cmd::TabClose(id),
+                true,
+            ),
         ];
         self.modal = Some(Modal::Menu(Menu::new(
             Some(tr!("shell.terminal", "Terminal {v}", v = i + 1)),
@@ -545,9 +565,12 @@ impl App {
             self.focused_cwd()
         };
         let what = if v.doc.in_memory {
-            "the history, readable by you only"
+            tr!(
+                "app_shell.the_history_readable_by_you_only",
+                "the history, readable by you only"
+            )
         } else {
-            "a copy of this file"
+            tr!("app_shell.a_copy_of_this_file", "a copy of this file")
         };
         self.save_from = Some(v);
         self.modal = Some(Modal::Input(Input {
@@ -834,28 +857,28 @@ impl App {
         );
         let (title, mut body) = match &state {
             ShellState::Busy(p) => (
-                "A program is running",
+                tr!("app_shell.a_program_is_running", "A program is running"),
                 vec![tr!("shell.is_running_in_this_terminal_u", "{p} is running in this terminal \u{2014} xdevcmd does not type into a program.", p = p)],
             ),
             ShellState::Remote(p) => (
-                "The shell is on another machine",
+                tr!("app_shell.the_shell_is_on_another_machine", "The shell is on another machine"),
                 vec![tr!("shell.is_running_in_this_terminal_u_2", "{p} is running in this terminal \u{2014} the shell there is on another machine.", p = p)],
             ),
             ShellState::Unknown => (
-                "Type into the shell?",
+                tr!("app_shell.type_into_the_shell", "Type into the shell?"),
                 vec![
                     tr!("shell.xdevcmd_cannot_tell_whether_a_program", "xdevcmd cannot tell whether a program is running in this shell.").into(),
                     tr!("shell.docs_shell_md_shows_the_prompt", "docs/shell.md shows the prompt snippet that lets it tell.").into(),
                 ],
             ),
             ShellState::Idle if !long => (
-                "Type into the shell?",
+                tr!("app_shell.type_into_the_shell", "Type into the shell?"),
                 vec![
                     tr!("shell.the_shell_is_at_its_prompt", "The shell is at its prompt.").into(),
                     tr!("shell.settings_u_terminal_can_send_without", "Settings \u{2192} Terminal can send without asking.").into(),
                 ],
             ),
-            ShellState::Idle => ("Type into the shell?", vec![tr!("shell.the_shell_is_at_its_prompt", "The shell is at its prompt.").into()]),
+            ShellState::Idle => (tr!("app_shell.type_into_the_shell", "Type into the shell?"), vec![tr!("shell.the_shell_is_at_its_prompt", "The shell is at its prompt.").into()]),
         };
         if long {
             body.push(tr!(

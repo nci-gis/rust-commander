@@ -133,13 +133,19 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut FindDialog) {
         frame,
         inner,
         0,
-        &format!("in {}", d.root.display()),
+        &tr!("where.in", "in {dir}", dir = d.root.display()),
         Style::new().fg(th.fg_dim),
     );
     let w = inner.width as usize;
     let rows = [
-        ("names  (*.rs *.toml, empty: all)", &d.names),
-        ("containing  (empty: any file)", &d.text),
+        (
+            tr!("find.names", "names  (*.rs *.toml, empty: all)"),
+            &d.names,
+        ),
+        (
+            tr!("find.containing", "containing  (empty: any file)"),
+            &d.text,
+        ),
     ];
     for (i, (label, edit)) in rows.iter().enumerate() {
         let y = 1 + i as u16 * 2;

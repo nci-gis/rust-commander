@@ -4,6 +4,7 @@
 //! same `xdevcmd_core::batch_rename::plan` the editor route uses. F4 hands the names, as
 //! the pattern has them so far, to the editor instead.
 
+use crate::lang::Text;
 use std::path::PathBuf;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -138,7 +139,13 @@ impl RenameDialog {
     }
 }
 
-const LABELS: [&str; FIELDS] = ["Name", "Extension", "Find", "Replace with", "Case"];
+const LABELS: [Text; FIELDS] = [
+    Text::new("rename.name", "Name"),
+    Text::new("rename.extension", "Extension"),
+    Text::new("rename.find", "Find"),
+    Text::new("rename.replace_with", "Replace with"),
+    Text::new("rename.case", "Case"),
+];
 const LABEL_W: u16 = 14;
 
 pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
@@ -174,7 +181,7 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
         } else {
             Style::new().fg(th.fg_dim)
         };
-        put(frame, inner, y, label, style);
+        put(frame, inner, y, &label.get(), style);
         let line = if i == CASE {
             let s = if on {
                 Style::new().fg(th.bg).bg(th.accent)
@@ -206,9 +213,12 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut RenameDialog) {
             .set_line(inner.x + LABEL_W, inner.y + y, &line, field_w as u16);
     }
     let mut y = FIELDS as u16;
-    let help = "[N] name  [N2-5] letters 2-5  [E] extension  [P] folder  [C] counter  [C10+5:3]";
+    let help = tr!(
+        "rename.tokens",
+        "[N] name  [N2-5] letters 2-5  [E] extension  [P] folder  [C] counter  [C10+5:3]"
+    );
     if y + 2 < inner.height {
-        put(frame, inner, y, help, Style::new().fg(th.fg_dim));
+        put(frame, inner, y, &help, Style::new().fg(th.fg_dim));
         y += 1;
     }
     // What is wrong, if anything, and what Enter would do.

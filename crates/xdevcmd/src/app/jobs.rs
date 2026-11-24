@@ -152,8 +152,11 @@ impl App {
                 v = if n == 1 { " is" } else { "s are" }
             ));
             body.push(
-                "Quitting cancels them; a file being written is removed, not left half done."
-                    .into(),
+                tr!(
+                    "app_jobs.quitting_cancels_them_a_file_being",
+                    "Quitting cancels them; a file being written is removed, not left half done."
+                )
+                .into(),
             );
         }
         if !programs.is_empty() {
@@ -177,9 +180,9 @@ impl App {
             ));
         }
         let yes = if n > 0 {
-            "cancel them and quit"
+            tr!("app_jobs.cancel_them_and_quit", "cancel them and quit")
         } else {
-            "quit anyway"
+            tr!("app_jobs.quit_anyway", "quit anyway")
         };
         self.modal = Some(Modal::Ask(modal::Ask {
             title: tr!("jobs.quit", "Quit?").into(),

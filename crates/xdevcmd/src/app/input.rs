@@ -226,19 +226,19 @@ impl App {
                 p.select_tab(i);
                 return;
             }
-            (c, "the terminal")
+            (c, tr!("app_input.the_terminal", "the terminal"))
         } else {
             let c = self.focused_tabs().map_or(0, |t| t.len());
             if let Some(t) = self.focused_tabs().filter(|_| i < c) {
                 t.select(i);
                 return;
             }
-            (c, "this file pane")
+            (c, tr!("app_input.this_file_pane", "this file pane"))
         };
         let has = if count == 1 {
             tr!("input.one_tab", "one tab").into_owned()
         } else {
-            format!("{count} tabs")
+            tr!("input.n_tabs", "{count} tabs", count = count)
         };
         let prefix = self
             .settings
@@ -246,7 +246,7 @@ impl App {
             .shell_prefix()
             .map(|c| format!("{} ", crate::keys::key_name(c.0, c.1)))
             .unwrap_or_default();
-        self.status = if whose == "this file pane" && self.shell_pane.term_shown {
+        self.status = if !self.focus_is_term() && self.shell_pane.term_shown {
             tr!("input.no_tab_has_u_f12_to", "no tab {n}: {whose} has {has} \u{2014} F12 to the terminal, then {prefix}Alt+{n} picks its tabs", n = n, whose = whose, has = has, prefix = prefix)
         } else {
             tr!(

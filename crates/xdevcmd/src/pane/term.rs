@@ -403,7 +403,7 @@ impl TermPane {
         scrollback: usize,
     ) -> Result<Self> {
         let Some((program, args)) = argv.split_first() else {
-            anyhow::bail!("nothing to run");
+            anyhow::bail!(tr!("term.nothing_to_run", "nothing to run"));
         };
         if let Some(why) = batch_refusal(
             argv,

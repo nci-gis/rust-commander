@@ -1,6 +1,6 @@
 # Round 036: end-to-end tests for data safety, fewer cases by hand
 
-**Status**: Review (Check written 2026-11-24). Was: In Progress (the owner, 2026-11-24: "proceed", after Round 035's freeze at
+**Status**: Complete (the owner, 2026-11-24). Was: In Progress (the owner, 2026-11-24: "proceed", after Round 035's freeze at
 `f6e6202`; opened the same day: "tạo 1 round riêng cho phần E2E, riêng 2, 6, và 7 vẫn
 giữ manual")
 **Part of**: **0.4.0-beta.3** (the owner, 2026-11-24: "r36 làm cho beta.3 nhé, sau r35
@@ -8,7 +8,7 @@ khi đã freeze code"): after Round 035's code freeze and before the cut, so bet
 with 9 hand cells at most instead of 21. Test code and tooling only: the product's code
 is frozen, and nothing here changes what xdevcmd does.
 **Date started**: 2026-11-24
-**Date completed**: YYYY-MM-DD
+**Date completed**: 2026-11-24
 
 ## Goal
 

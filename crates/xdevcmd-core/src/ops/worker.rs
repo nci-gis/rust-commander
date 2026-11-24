@@ -225,7 +225,7 @@ pub(super) struct Worker {
     pub(super) backoff: Vec<std::time::Duration>,
     /// The user answered Retry to the last failed file.
     pub(super) retry: bool,
-    /// Per directory: whether it is reached over a network ([`crate::plan::is_network`]).
+    /// Per directory: whether it is reached over a network ([`crate::os::is_network`]).
     pub(super) network: std::collections::HashMap<PathBuf, bool>,
     /// Per destination directory: whether a file replaced there goes to the trash.
     pub(super) keeps: std::collections::HashMap<PathBuf, bool>,
@@ -662,7 +662,7 @@ impl Worker {
         *self
             .network
             .entry(dir)
-            .or_insert_with_key(|d| crate::plan::is_network(d))
+            .or_insert_with_key(|d| crate::os::is_network(d))
     }
 
     /// Wait `d`, in short steps, ending at once on Esc: false when stopped.
@@ -759,11 +759,11 @@ impl Worker {
             .flag("fast", req.fast)
             .num("group_threads", self.group.threads as u64);
         if let Some(src) = req.sources.first().and_then(|p| p.parent()) {
-            e = e.word("src_fs", &crate::plan::fs_word(src));
+            e = e.word("src_fs", &crate::os::fs_word(src));
         }
         if let Some(d) = req.dest.as_deref() {
             e = e
-                .word("dst_fs", &crate::plan::fs_word(d))
+                .word("dst_fs", &crate::os::fs_word(d))
                 .flag("dst_network", self.on_network(d));
         }
         e.write();

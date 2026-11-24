@@ -89,9 +89,8 @@ pub fn runs_something(path: &Path) -> bool {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         let exec = std::fs::metadata(path)
-            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+            .is_ok_and(|m| m.is_file() && xdevcmd_core::os::has_exec_bit(&m));
         // Launchers and what a desktop hands to an interpreter it may have: a .desktop
         // file's command, `java -jar`, Wine for Windows programs, an AppImage; on macOS
         // a .terminal file's command, a .command script, an Automator workflow.
@@ -185,13 +184,12 @@ pub fn console_program(path: &Path) -> bool {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         let desktop = path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("desktop"));
         !desktop
             && std::fs::metadata(path)
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                .is_ok_and(|m| m.is_file() && xdevcmd_core::os::has_exec_bit(&m))
     }
     #[cfg(not(any(unix, windows)))]
     {

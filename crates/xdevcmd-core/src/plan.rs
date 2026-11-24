@@ -21,6 +21,9 @@ use std::sync::Arc;
 
 use crate::faults::{self, Point};
 use crate::ops::{Ident, Kind};
+#[cfg(target_os = "macos")]
+use crate::os::mac_fs_name;
+use crate::os::{free_space, fs_kind, same_device, writable, Fs};
 
 /// Past this many rows, a plan keeps only rows with a decision in them (and every
 /// blocked row); the plain new files are counted, not kept (owner, 2026-11-13).
@@ -379,21 +382,6 @@ impl Plan {
 /// The largest file a FAT drive holds.
 const FAT_MAX: u64 = u32::MAX as u64;
 
-/// What kind of file system a destination is, as far as names and sizes go.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Fs {
-    /// FAT12/16/32: files under 4 GiB, Windows' names, case ignored.
-    Fat,
-    Exfat,
-    Ntfs,
-    /// Reached over a network (NFS, SMB, sshfs, rclone, a UNC path): errors that pass
-    /// are retried, and new files synced before their rename (Round 031).
-    Network,
-    Other,
-    /// It could not be told (Windows, for beta.1: owner, 2026-11-13).
-    Unknown,
-}
-
 /// What a destination is and allows. Each `None` is "unknown", never "fine".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Target {
@@ -487,215 +475,6 @@ fn on_system_drive(dir: &Path, system: &str) -> Option<bool> {
         return Some(false);
     }
     Some(s.len() >= 2 && system.len() == 2 && s[..2].eq_ignore_ascii_case(system))
-}
-
-#[cfg(target_os = "linux")]
-fn fs_kind(dest: &Path) -> Fs {
-    let Ok(st) = rustix::fs::statfs(dest) else {
-        return Fs::Unknown;
-    };
-    #[allow(clippy::unnecessary_cast)]
-    match st.f_type as i64 {
-        0x4d44 => Fs::Fat,
-        0x2011_bab0 => Fs::Exfat,
-        0x5346_544e | 0x7366_746e => Fs::Ntfs,
-        // NFS, SMB2/3, CIFS, SMB1, Ceph, AFS.
-        0x6969 | 0xfe53_4d42 | 0xff53_4d42 | 0x517b | 0x00c3_6400 | 0x5346_414f => Fs::Network,
-        // Every FUSE mount has this one number, sshfs and a local ntfs-3g alike: its
-        // type in the mount table tells them apart.
-        0x6573_5546 => match linux_mount_type(dest).as_deref().map(network_fuse) {
-            Some(true) => Fs::Network,
-            // ntfs-3g and exfat-fuse are both "fuseblk": not told apart.
-            _ => Fs::Unknown,
-        },
-        _ => Fs::Other,
-    }
-}
-
-/// A FUSE type from the mount table that reaches over a network.
-#[cfg(any(target_os = "linux", test))]
-fn network_fuse(t: &str) -> bool {
-    let name = t.strip_prefix("fuse.").unwrap_or(t);
-    matches!(
-        name,
-        "sshfs"
-            | "rclone"
-            | "s3fs"
-            | "gcsfuse"
-            | "goofys"
-            | "davfs"
-            | "davfs2"
-            | "curlftpfs"
-            | "smbnetfs"
-            | "glusterfs"
-            | "cephfs"
-            | "ceph-fuse"
-            | "afpfs"
-            | "mountpoint-s3"
-    )
-}
-
-/// The type of the mount holding `dest` ("fuse.sshfs"), from `/proc/self/mountinfo`:
-/// the mount point that is the longest prefix of `dest`, the last such in the table.
-#[cfg(target_os = "linux")]
-fn linux_mount_type(dest: &Path) -> Option<String> {
-    let dest = std::fs::canonicalize(dest).ok()?;
-    mount_type_in(
-        &std::fs::read_to_string("/proc/self/mountinfo").ok()?,
-        &dest,
-    )
-}
-
-#[cfg(any(target_os = "linux", test))]
-fn mount_type_in(table: &str, dest: &Path) -> Option<String> {
-    // Spaces and the like are written as octal escapes (`\040`).
-    let unescape = |s: &str| {
-        let b = s.as_bytes();
-        let mut out = Vec::with_capacity(b.len());
-        let mut i = 0;
-        while i < b.len() {
-            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(u8::is_ascii_digit) {
-                let n = (b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0');
-                out.push(n);
-                i += 4;
-            } else {
-                out.push(b[i]);
-                i += 1;
-            }
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    };
-    let mut best: Option<(usize, String)> = None;
-    for line in table.lines() {
-        let (left, right) = line.split_once(" - ")?;
-        let point = unescape(left.split(' ').nth(4)?);
-        let kind = right.split(' ').next()?.to_string();
-        if dest.starts_with(&point) && best.as_ref().is_none_or(|(n, _)| point.len() >= *n) {
-            best = Some((point.len(), kind));
-        }
-    }
-    best.map(|(_, k)| k)
-}
-
-/// The file system's name macOS gives: "apfs", "msdos", "smbfs" …
-#[cfg(target_os = "macos")]
-fn mac_fs_name(dest: &Path) -> Option<Vec<u8>> {
-    let st = rustix::fs::statfs(dest).ok()?;
-    Some(
-        st.f_fstypename
-            .iter()
-            .take_while(|&&c| c != 0)
-            .map(|&c| c as u8)
-            .collect(),
-    )
-}
-
-#[cfg(target_os = "macos")]
-fn fs_kind(dest: &Path) -> Fs {
-    let Some(name) = mac_fs_name(dest) else {
-        return Fs::Unknown;
-    };
-    match name.as_slice() {
-        b"msdos" => Fs::Fat,
-        b"exfat" => Fs::Exfat,
-        b"ntfs" | b"ufsd_NTFS" => Fs::Ntfs,
-        b"smbfs" | b"nfs" | b"afpfs" | b"webdav" | b"cifs" | b"ftp" => Fs::Network,
-        n if n.starts_with(b"macfuse") || n.starts_with(b"osxfuse") => Fs::Unknown,
-        _ => Fs::Other,
-    }
-}
-
-/// Windows: a UNC path is a network share; a mapped drive letter cannot be told
-/// without the console API, and stays unknown.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn fs_kind(dest: &Path) -> Fs {
-    if unc(dest) {
-        Fs::Network
-    } else {
-        Fs::Unknown
-    }
-}
-
-/// `\\server\share` or `\\?\UNC\server\share`.
-#[cfg(any(windows, test))]
-fn unc(p: &Path) -> bool {
-    let s = p.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) => rest.len() >= 4 && rest[..4].eq_ignore_ascii_case("UNC\\"),
-        None => s.starts_with(r"\\") || s.starts_with("//"),
-    }
-}
-
-/// Whether the directory `dir` is reached over a network ([`Fs::Network`]).
-pub fn is_network(dir: &Path) -> bool {
-    fs_kind(dir) == Fs::Network
-}
-
-/// The file system at `dir`, as a word for the debug log ([`crate::debuglog`]): the
-/// system's own name where it gives one ("apfs", "ext4"), else the kind.
-pub fn fs_word(dir: &Path) -> String {
-    #[cfg(target_os = "linux")]
-    if let Ok(st) = rustix::fs::statfs(dir) {
-        #[allow(clippy::unnecessary_cast)]
-        let name = match st.f_type as i64 {
-            0xef53 => Some("ext4"),
-            0x9123_683e => Some("btrfs"),
-            0x5846_5342 => Some("xfs"),
-            0x0102_1994 => Some("tmpfs"),
-            0x2fc1_2fc1 => Some("zfs"),
-            0xcafe_4a11 => Some("bcachefs"),
-            0x794c_7630 => Some("overlay"),
-            0xf2f5_2010 => Some("f2fs"),
-            _ => None,
-        };
-        if let Some(n) = name {
-            return n.to_string();
-        }
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(n) = mac_fs_name(dir) {
-        return String::from_utf8_lossy(&n).into_owned();
-    }
-    match fs_kind(dir) {
-        Fs::Fat => "fat",
-        Fs::Exfat => "exfat",
-        Fs::Ntfs => "ntfs",
-        Fs::Network => "network",
-        Fs::Other => "other",
-        Fs::Unknown => "unknown",
-    }
-    .to_string()
-}
-
-/// Bytes free at `dest` for this user; `None` where it cannot be asked (Windows).
-pub fn free_space(dest: &Path) -> Option<u64> {
-    #[cfg(unix)]
-    {
-        let st = rustix::fs::statvfs(dest).ok()?;
-        Some(st.f_bavail.saturating_mul(st.f_frsize))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dest;
-        None
-    }
-}
-
-fn writable(dest: &Path) -> Option<bool> {
-    #[cfg(unix)]
-    {
-        use rustix::io::Errno;
-        match rustix::fs::access(dest, rustix::fs::Access::WRITE_OK) {
-            Ok(()) => Some(true),
-            Err(e) if e == Errno::ACCESS || e == Errno::ROFS || e == Errno::PERM => Some(false),
-            Err(_) => None,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dest;
-        None
-    }
 }
 
 /// Whether `dest` ignores case: Windows and FAT/exFAT do; elsewhere `dest` is looked up
@@ -1311,29 +1090,6 @@ fn subtree(p: &Path, stop: &AtomicBool) -> (u64, u64) {
     (items, bytes)
 }
 
-/// Whether `src` and the directory `dest` are on one device. `None`: one of them
-/// cannot be looked at, or (Windows) a path without a drive or share to compare.
-pub fn same_device(src: &Path, dest: &Path) -> Option<bool> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let a = fs::symlink_metadata(src).ok()?.dev();
-        let b = fs::metadata(dest).ok()?.dev();
-        Some(a == b)
-    }
-    #[cfg(not(unix))]
-    {
-        let volume = |p: &Path| -> Option<std::ffi::OsString> {
-            let p = crate::paths::canonical(p).ok()?;
-            match p.components().next()? {
-                std::path::Component::Prefix(x) => Some(x.as_os_str().to_ascii_uppercase()),
-                _ => None,
-            }
-        };
-        Some(volume(src)? == volume(dest)?)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1688,27 +1444,6 @@ mod tests {
         ignores_case: Some(true),
         trash: None,
     };
-
-    /// Round 031: a network target from the mount table (the longest mount point
-    /// holding the path, spaces escaped), FUSE's network types, and UNC paths.
-    #[test]
-    fn network_targets_are_told_from_the_mount_table_and_unc_paths() {
-        let table = "\
-22 1 8:1 / / rw - ext4 /dev/sda1 rw
-40 22 0:50 / /mnt/box rw - fuse.sshfs me@box: rw
-41 40 0:51 / /mnt/box/my\\040disk rw - fuse.ntfs-3g /dev/sdb1 rw
-";
-        let t = |p: &str| mount_type_in(table, Path::new(p));
-        assert_eq!(t("/home/me").as_deref(), Some("ext4"));
-        assert_eq!(t("/mnt/box/x").as_deref(), Some("fuse.sshfs"));
-        assert_eq!(t("/mnt/box/my disk/x").as_deref(), Some("fuse.ntfs-3g"));
-        assert!(network_fuse("fuse.sshfs") && network_fuse("fuse.rclone"));
-        assert!(!network_fuse("fuse.ntfs-3g") && !network_fuse("fuseblk"));
-        assert!(unc(Path::new(r"\\server\share\x")));
-        assert!(unc(Path::new(r"\\?\UNC\server\share")));
-        assert!(!unc(Path::new(r"\\?\C:\x")));
-        assert!(!unc(Path::new(r"C:\x")));
-    }
 
     /// Round 031, the owner's decision 1: on Windows only the system drive's Recycle
     /// Bin is trusted to keep a replaced file; a UNC path never.

@@ -31,6 +31,7 @@ pub mod listing;
 pub mod name_mask;
 pub mod noreplace;
 pub mod ops;
+pub mod os;
 pub mod paths;
 pub mod plan;
 pub mod policy;

@@ -590,7 +590,7 @@ fn check_room(
             total / packed
         )));
     }
-    if let Some(free) = crate::plan::free_space(dest) {
+    if let Some(free) = crate::os::free_space(dest) {
         if total > free {
             return Err(io::Error::other(format!(
                 "it needs {}, and only {} is free there",

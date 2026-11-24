@@ -58,7 +58,8 @@ File → Settings… saves into the file `load` chose (`config::path_in_use()`, 
   exactly what the dialog shows, or nothing is written and the status line says to edit
   the file by hand. A file in a style the line editor does not follow (dotted keys,
   inline tables) fails safe this way; no test uses such a file yet.
-- Written atomically and owner-only (`session::write_private`). Refused in read-only and
+- Written atomically and owner-only (`xdevcmd_core::document::save_state`, Round 035 W6;
+  `session::write_private` before). Refused in read-only and
   restricted modes, and while the file has an error.
 - After saving, the new settings apply at once, keeping start-up's mode, root and colour
   depth. Settings read on every use take effect now; those read at start-up (hidden

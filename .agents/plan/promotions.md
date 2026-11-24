@@ -301,3 +301,11 @@ test perf"): Round 036 is part of beta.3, after Round 035's freeze; kills at mar
 small files; the 0.4.x row moved into beta.3's.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
 
+
+## 2026-11-24: reference/config.md names the function that saves Settings now
+
+**Source**: the beta.3 red-team (data path): `.agents/reference/config.md:61` named
+`session::write_private`, removed by Round 035 W6. The owner, 2026-11-24: "ok sửa".
+**What**: `reference/config.md`: the line names `xdevcmd_core::document::save_state` (W6),
+with the old name for history. A read-only path, changed on the owner's word.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

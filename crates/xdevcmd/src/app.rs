@@ -1215,6 +1215,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Round 035, W8: a worker that ends without its result (a panic) left the checksum
+    /// waiting forever, "working out the SHA-256…" on the status line, as H-10's job
+    /// did. Its end is seen and said.
+    #[test]
+    fn a_checksum_whose_worker_died_is_not_waited_for_forever() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-died-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);
+        app.start_hashing_with(root.join("f"), |_| panic!("the worker died"));
+        for _ in 0..200 {
+            app.background();
+            if !app.status.contains("working out") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            app.status.contains("stopped") && !app.status.contains("working out"),
+            "{}",
+            app.status
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn quitting_with_jobs_running_asks_first() {
         let root = std::env::temp_dir().join(format!("xdevcmd-bgq-{}", std::process::id()));

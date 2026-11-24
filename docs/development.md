@@ -355,6 +355,13 @@ start-up and the screen, each system and terminal). Each case has an ID, its pla
 steps, the expected result from the user docs, and what counts as a fail; results go
 in the round's `Check`, one line per case. Testers follow [How to test](how-to-test.md).
 
+Data safety is split by what a machine can do (Round 036). Kills and continues (M-DS-01,
+03, 04, 05) run in CI on Linux, macOS and Windows (`crates/xdevcmd/tests/kill.rs`), each
+killed at a marker the fault seam sets, not after a time. A real stick pulled out, a
+share taken away and a hard NFS mount (M-DS-02, 06, 07) stay by hand, and `cargo xtask
+qa ledger` asks for one again only when a file that case vouches for has changed
+(`CASE_PATHS` in `xtask/src/qa.rs`).
+
 ## How the code is organised
 
 Start with `.agents/context/project.md` in the repository: the rules, the layout and

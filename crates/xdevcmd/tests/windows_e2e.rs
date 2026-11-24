@@ -3,9 +3,9 @@
 //! and much more on Unix; this is the start of the same on Windows.
 #![cfg(windows)]
 
-mod winpty;
+mod harness;
 
-use winpty::{Run, F10, F12};
+use harness::{Run, F10, F12};
 
 const CMD: &str = "[terminal]\nshell = \"cmd.exe\"\n";
 

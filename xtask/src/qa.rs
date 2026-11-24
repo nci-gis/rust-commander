@@ -47,11 +47,85 @@ pub const DATA_PATH: &[&str] = &[
     // (their UI changes do not make hand tests stale).
     "crates/xdevcmd/src/app/jobs.rs",
     "crates/xdevcmd/src/app/file_ops.rs",
+    // A running job's box: the retry countdown, the Failed question, Esc to stop
+    // (M-DS-06, 07). Only those cases list them (CASE_PATHS), so a change to the box
+    // does not make the other cases stale.
+    "crates/xdevcmd/src/modal.rs",
+    "crates/xdevcmd/src/app/modals.rs",
     "crates/xdevcmd/src/app/archives.rs",
     "crates/xdevcmd/src/tempfiles.rs",
     // A new trash or tempfile crate changes what a delete or a save does.
     "Cargo.lock",
 ];
+
+/// What each hand case vouches for (Round 036, E4; the owner: test again only when a
+/// change touches it): its cells go stale when one of these changes, not when any file
+/// of `DATA_PATH` does. A case not listed vouches for the whole `DATA_PATH`. Every path
+/// here is also in `DATA_PATH` (a test).
+pub const CASE_PATHS: &[(&str, &[&str])] = &[
+    // A USB stick pulled mid-copy: the copy, its part files and syncs, the error it
+    // reports, FAT's names and sizes, what is skipped.
+    (
+        "M-DS-02",
+        &[
+            "crates/xdevcmd-core/src/ops.rs",
+            "crates/xdevcmd-core/src/ops",
+            "crates/xdevcmd-core/src/os.rs",
+            "crates/xdevcmd-core/src/plan.rs",
+            "crates/xdevcmd-core/src/fastcopy.rs",
+            "crates/xdevcmd-core/src/noreplace.rs",
+            "crates/xdevcmd-core/src/faults.rs",
+            "crates/xdevcmd-core/src/journal.rs",
+            "crates/xdevcmd-core/src/entry.rs",
+            "crates/xdevcmd/src/app/jobs.rs",
+            "crates/xdevcmd/src/app/file_ops.rs",
+            "Cargo.lock",
+        ],
+    ),
+    // A network share taken away: the retries, the network check, the Failed question.
+    (
+        "M-DS-06",
+        &[
+            "crates/xdevcmd-core/src/ops.rs",
+            "crates/xdevcmd-core/src/ops",
+            "crates/xdevcmd-core/src/os.rs",
+            "crates/xdevcmd-core/src/plan.rs",
+            "crates/xdevcmd-core/src/fastcopy.rs",
+            "crates/xdevcmd-core/src/noreplace.rs",
+            "crates/xdevcmd-core/src/faults.rs",
+            "crates/xdevcmd-core/src/journal.rs",
+            "crates/xdevcmd/src/app/jobs.rs",
+            "crates/xdevcmd/src/app/file_ops.rs",
+            "crates/xdevcmd/src/modal.rs",
+            "crates/xdevcmd/src/app/modals.rs",
+            "Cargo.lock",
+        ],
+    ),
+    // A hard NFS mount whose server is gone: cancelling a job held in a system call.
+    (
+        "M-DS-07",
+        &[
+            "crates/xdevcmd-core/src/ops.rs",
+            "crates/xdevcmd-core/src/ops",
+            "crates/xdevcmd-core/src/os.rs",
+            "crates/xdevcmd-core/src/fastcopy.rs",
+            "crates/xdevcmd-core/src/faults.rs",
+            "crates/xdevcmd/src/app/jobs.rs",
+            "crates/xdevcmd/src/app/file_ops.rs",
+            "crates/xdevcmd/src/modal.rs",
+            "crates/xdevcmd/src/app/modals.rs",
+            "Cargo.lock",
+        ],
+    ),
+];
+
+/// The files `case`'s evidence vouches for.
+fn paths_of(case: &str) -> &'static [&'static str] {
+    CASE_PATHS
+        .iter()
+        .find(|(c, _)| *c == case)
+        .map_or(DATA_PATH, |(_, p)| p)
+}
 
 /// The systems every data-safety case needs evidence from, or a waiver.
 pub const SYSTEMS: &[&str] = &["linux", "macos", "windows"];
@@ -302,7 +376,7 @@ fn decide(root: &Path, rev: &str, case: &str, rows: &[&BTreeMap<&'static str, St
     let mut fresh = Vec::new();
     let mut why_not = None;
     for r in rows {
-        match fresh_build(root, rev, &r["built_from"]) {
+        match fresh_build(root, rev, &r["built_from"], paths_of(case)) {
             Ok(()) => fresh.push(*r),
             Err(e) => why_not = Some(Verdict::Stale(e)),
         }
@@ -351,9 +425,10 @@ pub(crate) fn one(case: &str, r: &BTreeMap<&'static str, String>) -> Verdict {
 }
 
 /// `built_from` names a commit (a SHA, or `git describe`'s `…-g<sha>`), from committed
-/// code, whose data path is exactly the one at `rev`: not a name that moves (HEAD, a
-/// branch), not a side branch with other code (red-team of #51).
-fn fresh_build(root: &Path, rev: &str, built: &str) -> Result<(), String> {
+/// code, whose `paths` (the case's part of the data path) are exactly those at `rev`:
+/// not a name that moves (HEAD, a branch), not a side branch with other code (red-team
+/// of #51).
+fn fresh_build(root: &Path, rev: &str, built: &str, paths: &[&str]) -> Result<(), String> {
     if built.ends_with("-dirty") {
         return Err(format!("{built} was built from uncommitted code"));
     }
@@ -375,7 +450,7 @@ fn fresh_build(root: &Path, rev: &str, built: &str) -> Result<(), String> {
     )
     .map_err(|_| format!("{hex} is not a commit of this repository"))?;
     let mut args = vec!["diff", "--quiet", sha.as_str(), rev, "--"];
-    args.extend(DATA_PATH);
+    args.extend(paths);
     let same = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -652,6 +727,64 @@ mod tests {
         }
     }
 
+    /// Each case's paths are on the data path and exist: a list naming a file the data
+    /// path does not would be stale where nothing tells.
+    #[test]
+    fn each_cases_paths_are_on_the_data_path() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        for (case, paths) in CASE_PATHS {
+            for p in *paths {
+                assert!(DATA_PATH.contains(p), "{case}: {p} is not in DATA_PATH");
+                assert!(root.join(p).exists(), "{case}: {p} is gone");
+            }
+        }
+    }
+
+    /// Round 036, E4: a change to a file a case vouches for makes its cells stale; one
+    /// outside them does not, while a case with no list of its own goes stale on any.
+    #[test]
+    fn a_hand_cell_goes_stale_only_when_its_own_files_change() {
+        let d = std::env::temp_dir().join(format!("xtask-qa-percase-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        sh(&d, &["init", "-q"]);
+        write(&d, CASES, "### M-DS-01 Whole\n\n### M-DS-07 Its own\n");
+        let mine = "crates/xdevcmd-core/src/fastcopy.rs";
+        let other = "crates/xdevcmd-core/src/trashed.rs";
+        assert!(paths_of("M-DS-07").contains(&mine) && !paths_of("M-DS-07").contains(&other));
+        write(&d, mine, "v1\n");
+        write(&d, other, "v1\n");
+        sh(&d, &["add", "-A"]);
+        sh(&d, &["commit", "-qm", "one"]);
+        let built = sh(&d, &["rev-parse", "HEAD"]);
+        let mut tsv = COLUMNS.join("\t") + "\n";
+        for os in SYSTEMS {
+            tsv += &row(&built, os, "M-DS-01", "PASS", "PASS", "check.txt", "");
+            tsv += &row(&built, os, "M-DS-07", "PASS", "-", "-", "");
+        }
+        write(&d, RUNS, &tsv);
+        sh(&d, &["add", "-A"]);
+        sh(&d, &["commit", "-qm", "runs"]);
+        let fresh = |case: &str| {
+            let l = ledger(&d, "HEAD").unwrap();
+            l.rows
+                .iter()
+                .filter(|(c, _, _)| c == case)
+                .all(|(_, _, v)| *v == Verdict::Pass)
+        };
+        assert!(fresh("M-DS-01") && fresh("M-DS-07"));
+        // Outside M-DS-07's files: it stays; M-DS-01, with no list, goes stale.
+        write(&d, other, "v2\n");
+        sh(&d, &["commit", "-qam", "trash code"]);
+        assert!(fresh("M-DS-07"), "{}", ledger(&d, "HEAD").unwrap().text());
+        assert!(!fresh("M-DS-01"));
+        // One of its own: stale.
+        write(&d, mine, "v2\n");
+        sh(&d, &["commit", "-qam", "copy code"]);
+        assert!(!fresh("M-DS-07"), "{}", ledger(&d, "HEAD").unwrap().text());
+        let _ = fs::remove_dir_all(&d);
+    }
+
     /// The ledger fires: evidence made before a data-path commit is STALE, a PASS that
     /// --check contradicts or that names no evidence is UNPROVEN, a missing system is
     /// MISSING; fresh evidence and waivers with a reason pass (lessons L7, L15).
@@ -865,7 +998,8 @@ mod tests {
     fn the_real_cases_and_runs_files_parse() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let ids = case_ids(&fs::read_to_string(root.join(CASES)).unwrap()).unwrap();
-        assert_eq!(ids.len(), 7, "{ids:?}");
+        // Round 036: 01, 03, 04, 05 are run by CI (tests/kill.rs); these need a device.
+        assert_eq!(ids, ["M-DS-02", "M-DS-06", "M-DS-07"], "{ids:?}");
         let runs = fs::read_to_string(root.join(RUNS)).unwrap();
         assert_eq!(runs.lines().next().unwrap(), COLUMNS.join("\t"));
     }

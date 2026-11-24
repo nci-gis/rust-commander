@@ -7,9 +7,9 @@
 //! it, so xdevcmd asks; Enter is no.
 #![cfg(windows)]
 
-mod winpty;
+mod harness;
 
-use winpty::Run;
+use harness::Run;
 
 const QUESTION: &str = "Start another xdevcmd here?";
 

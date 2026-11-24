@@ -3,16 +3,21 @@
 Promise: however a job ends, no file is cut short under its real name, and no source is
 removed before its copy is complete ([security.md](../../../../../docs/security.md#safe-operations)).
 
-### M-DS-01 Kill a copy that replaces files
-**Platform**: all, on a real disk · **Automated**: pty kill tests · **With xtask**: `try` check A
-**Setup**: two folders with the same file names, the destination's files older.
-**Steps**: 1. F5, choose **replace** for the older ones. 2. While it runs, `kill -9`
-xdevcmd (Windows: Task Manager → End task). 3. Start it again.
-**Expected**: it says it "ended in the middle of a job"; if it was between
-the trash and the rename, "replacement finished … the old one is in the trash".
-Continue finishes without asking again what you chose.
-**Fail if**: a file empty, short or missing under its own name; an old file gone and
-not in the trash.
+The cases a machine can run are run by CI on Linux, macOS and Windows, killed at a
+chosen step and started again (`crates/xdevcmd/tests/kill.rs`, Round 036). Their green
+run at the cut commit is their evidence; nothing is logged for them here.
+
+| Case | Run by CI as |
+|---|---|
+| M-DS-01 Kill a copy that replaces files | `a_planned_copy_killed_then_continued_keeps_every_decision`; through the trash, `a_replace_killed_after_the_trash_is_finished_at_the_next_start` |
+| M-DS-03 A big copy, killed past a checkpoint | `a_big_copy_killed_after_a_checkpoint_goes_on_from_there` |
+| M-DS-04 A checked continue (C) | `a_checked_resume_repairs_a_file_the_journal_called_done` |
+| M-DS-05 Move across drives, killed | `a_move_killed_before_removing_its_source_says_both_are_there` |
+
+`xtask try` (checks A to C) still shows the same by hand, for whoever wants to look.
+
+The three below need a real device or network, and stay by hand. Each goes stale only
+when a file it vouches for changes (`CASE_PATHS` in `xtask/src/qa.rs`).
 
 ### M-DS-02 Pull a USB stick mid-copy
 **Platform**: all; FAT32, then exFAT · **Automated**: none (a removed drive)
@@ -21,34 +26,6 @@ not in the trash.
 **Expected**: the job reports an error, not success. Complete files are whole; the one
 being written is not there under its real name.
 **Fail if**: the job says done; a file under its real name with the wrong size.
-
-### M-DS-03 A big copy, killed past a checkpoint
-**Platform**: all · **Automated**: checkpoint unit tests, a pty kill past a checkpoint (Linux only) · **With xtask**: `try` check B
-**Setup**: a file of 1 GB or more. Copy to another drive, or set
-`[general] fast_copy = false` (on the same APFS, Btrfs or XFS volume a copy is a clone:
-instant, no checkpoint).
-**Steps**: 1. F5. 2. Past 30 %, `kill -9` xdevcmd (Windows: Task Manager → End task).
-3. Start again, Continue.
-Not the terminal's close button: on Linux and macOS it cancels the job tidily, and
-nothing is offered at the next start ([security.md](../../../../../docs/security.md#whatever-the-setting)).
-**Expected**: the dialog says "kept part way"; the bar starts near where it stopped; the
-copy equals the source (`cmp`; Windows `fc.exe /b`).
-**Fail if**: the bar starts at 0 %, or the copy differs.
-
-### M-DS-04 A checked continue (C)
-**Platform**: all · **Automated**: pty resume tests (Linux, macOS) · **With xtask**: `try` check C
-**Steps**: 1. As M-DS-03 with a folder of small files: kill mid-way. 2. Overwrite one
-finished copy with zeros of the same size and the source's date
-(`truncate -s0 f && truncate -s <size> f && touch -r src f`). 3. Start again, press **C**.
-**Expected**: "1 found different … copied again"; the file equals its source.
-**Fail if**: the zeroed file is kept, or Enter (not C) reads every file.
-
-### M-DS-05 Move across drives, killed
-**Platform**: all, disk → USB stick · **Automated**: engine tests on one machine's mounts
-**Steps**: 1. F6 a folder to the stick. 2. Kill xdevcmd mid-way. 3. Start again.
-**Expected**: every file on one side or the other, or on both ("copied completely …
-both are kept").
-**Fail if**: a file on neither side.
 
 ### M-DS-06 A network share pulled mid-copy
 **Platform**: SMB or NFS (unplug or stop the server); sshfs (kill the ssh connection) ·

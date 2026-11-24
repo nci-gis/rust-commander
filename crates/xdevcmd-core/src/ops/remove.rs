@@ -110,10 +110,14 @@ pub(super) fn remove_file_anyway(p: &Path) -> io::Result<()> {
 
 /// Move one entry to wherever this platform keeps deleted files, and say where it went.
 pub fn send_to_trash(path: &Path, root: Option<&Path>) -> io::Result<crate::trashed::Trashed> {
-    if let Some(base) = root {
-        // Tests pass a temp directory here, so a test run never puts anything in the
-        // real trash of whoever happens to be running it.
-        return trash_into(base, path, None);
+    // Tests pass a temp directory here, or a test build is given one
+    // (`XDEVCMD_TEST_TRASH`), so a test run never puts anything in the real trash of
+    // whoever happens to be running it.
+    if let Some(base) = root
+        .map(Path::to_path_buf)
+        .or_else(crate::faults::test_trash)
+    {
+        return trash_into(&base, path, None);
     }
     #[cfg(target_os = "linux")]
     {

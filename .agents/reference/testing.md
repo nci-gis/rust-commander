@@ -41,12 +41,22 @@ console events, and whether SGR mouse input survives that is unverified. `render
 covers the same behaviour on all three platforms.
 
 **Windows has its own, smaller layer under a real ConPTY** (Rounds 018–019):
-`tests/winpty/mod.rs` runs `xdevcmd.exe` under portable-pty, answers ConPTY's `ESC[6n`,
+`tests/harness/mod.rs` (was `tests/winpty/`) runs `xdevcmd.exe` under portable-pty, answers ConPTY's `ESC[6n`,
 and reads the output both as text (for what is printed before the screen) and through
 vt100 as a screen. `windows_panel.rs` covers the question asked when started from a
 panel; `windows_e2e.rs` covers the panes, a command run in `cmd.exe` in the panel, and
 F10. They compile on every system (clippy for `x86_64-pc-windows-gnu` checks them) and
 run only on Windows. Keys only: no mouse yet.
+
+**The data-safety kills run on all three systems** (Round 036): `tests/kill.rs` uses the
+same harness, which serves Linux and macOS too: a `Scratch` a killed run leaves for the
+next start, `Run::kill_hard` (`kill -9`; TerminateProcess on Windows), the journal's
+path encoding per system, `other_device` (fails instead of skipping when CI sets
+`XDEVCMD_REQUIRE_OTHER_DEV`). Each kill waits for a `halt` marker or the journal's `ckpt`
+line, never a time. A test build's trash is `XDEVCMD_TEST_TRASH` when set
+(`faults::test_trash`), on every system, so a replace through the trash is killed on
+macOS and Windows too without touching the real one. Hand-test cases M-DS-01, 03, 04, 05
+are these tests; only M-DS-02, 06, 07 are run by hand.
 
 **Faults: a data-safety fix is shown failing through the fault seam** (Round 029). A
 sync moved after its rename passes every content check, and a full disk or a swapped

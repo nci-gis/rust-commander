@@ -319,3 +319,14 @@ before the freeze (C1–C9 for rc.1, L1–L3 for beta.4, M1–M3); `plan/ROADMAP
 row points to it.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
 
+## 2026-11-24: Round 036's flow in the read-only docs, and a test trash in the code
+
+**Source**: the owner, 2026-11-24: "bro sửa code luôn nhé, phạm vi nhỏ; mình approve để
+sửa các file docs để đúng với implement mới luôn".
+**What**: `reference/testing.md` (the shared harness, `tests/kill.rs`, the test trash)
+and `skills/qa/SKILL.md` (the ledger asks for M-DS-02, 06, 07, stale per case). In the
+code, past Round 035's freeze on the owner's word: `faults::test_trash`
+(`XDEVCMD_TEST_TRASH`, test builds only), read by `plan::trash_keeps` and
+`ops::send_to_trash`, so M-DS-01's replace through the trash is killed on every system.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+

@@ -121,6 +121,8 @@ impl Session {
         cmd.env("TERM", "xterm-256color");
         cmd.env("XDEVCMD_CONFIG", s.0.join("no-such-config.toml"));
         cmd.env("XDG_DATA_HOME", s.0.join("data"));
+        // Language files of the test's own (none): English, whatever LANG says.
+        cmd.env("XDG_CONFIG_HOME", s.0.join("config"));
         // q saves the session: into the scratch directory, never over the real one.
         cmd.env("XDEVCMD_STATE", s.0.join("session.toml"));
         cmd.env("SHELL", "/bin/sh");

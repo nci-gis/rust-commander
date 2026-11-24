@@ -144,6 +144,10 @@ pub struct General {
     /// Seconds the walker stands before a new message before it walks on: 5 to 15.
     /// The config file only, not Settings.
     pub animation_hold_secs: u64,
+    /// The language of the words on screen: `auto` (the system's: `LC_ALL`,
+    /// `LC_MESSAGES`, `LANG`), `en`, or the name of a file in a `lang/` folder (`vi` for
+    /// `vi.toml`). English wherever a file has no text. See `crate::lang`.
+    pub language: String,
 }
 
 impl Default for General {
@@ -158,6 +162,7 @@ impl Default for General {
             fast_copy: true,
             animation: false,
             animation_hold_secs: crate::walker::HOLD_SECS,
+            language: "auto".into(),
         }
     }
 }
@@ -429,6 +434,8 @@ pub struct Settings {
     pub theme_name: String,
     /// `[theme] name` named a theme that is not there; the default is in use.
     pub theme_note: Option<String>,
+    /// What went wrong reading the language's files; English is in use where it did.
+    pub lang_note: Option<String>,
 }
 
 impl Default for Settings {
@@ -665,6 +672,7 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
             theme_name
         },
         theme_note,
+        lang_note: None,
     })
 }
 

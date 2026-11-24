@@ -131,6 +131,9 @@ impl Run {
         cmd.cwd(dir);
         cmd.env("XDEVCMD_CONFIG", dir.join("config.toml"));
         cmd.env("XDG_DATA_HOME", dir.join("data"));
+        // Language files of the test's own (none): English, whatever LANG says.
+        cmd.env("XDG_CONFIG_HOME", dir.join("config"));
+        cmd.env("APPDATA", dir.join("config"));
         cmd.env("XDEVCMD_STATE", dir.join("session.toml"));
         // The plain look the tests read.
         cmd.env("XDEVCMD_THEME", "dark");

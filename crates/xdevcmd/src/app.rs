@@ -393,7 +393,11 @@ impl xdevcmd_core::archive::Hooks for ViewHooks {
 type PendingView = (Task<std::io::Result<()>>, PathBuf, String);
 
 /// The menu bar, left to right.
-pub const BAR: &[&str] = &["File", "View", "Help"];
+pub const BAR: &[crate::lang::Text] = &[
+    crate::lang::Text::new("menu.file", "File"),
+    crate::lang::Text::new("menu.view", "View"),
+    crate::lang::Text::new("menu.help", "Help"),
+];
 
 /// What quick view has open: the file, and a viewer on it.
 type Preview = (PathBuf, Box<Viewer>);
@@ -640,7 +644,10 @@ impl Drop for App {
 
 impl App {
     pub fn new(left: &Path, right: &Path, settings: Settings, outcome: Outcome) -> Self {
-        let notice = outcome.message().or_else(|| settings.theme_note.clone());
+        let notice = outcome
+            .message()
+            .or_else(|| settings.theme_note.clone())
+            .or_else(|| settings.lang_note.clone());
         let settings_height = settings.config.terminal.height_percent;
         let theme_name = settings.theme_name.clone();
         let recent_commands = if settings.config.general.restore_session {

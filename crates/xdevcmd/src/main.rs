@@ -20,6 +20,8 @@ mod git;
 mod graphics;
 mod keyfix;
 mod keys;
+#[macro_use]
+mod lang;
 mod layout;
 mod line_edit;
 mod links;
@@ -267,6 +269,11 @@ fn main() -> Result<()> {
 
     let (mut settings, outcome) = config::load(cli.config.as_deref());
     clock.mark("config");
+    // The words on screen: English unless a language file says otherwise (beta.4).
+    let lang_problems = lang::init(&settings.config.general.language);
+    if !lang_problems.is_empty() {
+        settings.lang_note = Some(lang_problems.join(" · "));
+    }
     if cli.check_config {
         match &outcome {
             // The app starts with the default theme in its place, but a check says so.

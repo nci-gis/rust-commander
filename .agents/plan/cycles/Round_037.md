@@ -1,6 +1,7 @@
 # Round 037: 0.4.0-beta.4: languages (EN, VI, JA preview)
 
-**Status**: Planning (the owner, 2026-11-24: "tạo nhánh feat/v0.4.0-beta.4 để làm i18n")
+**Status**: In Progress (the owner, 2026-11-24: "tạo nhánh feat/v0.4.0-beta.4 để làm i18n";
+the mechanism chosen the same evening, below)
 **Part of**: v0.4.0, `ROADMAP.md`, the row for **0.4.0-beta.4** (the owner, 2026-11-15,
 restated 2026-11-23): the i18n mechanism and a pseudo-locale; English, Vietnamese, and
 Japanese as a preview
@@ -36,7 +37,21 @@ words; widths already measure CJK and Vietnamese right (beta.3).
   `memory/2026-11-24-beta3-review-carryover.md`): `Mode::turned_off(what, next)`,
   `"{} mode"` in `app/open.rs`, `DIED` glued onto other text.
 
-## Options for the mechanism (the owner decides; recommendation last)
+## Decided (the owner, 2026-11-24, 20:09–20:27)
+
+**A, and small**: a bonus the user controls, not a translation project.
+- A folder of TOML files, one per language, shipped beside the program (`lang/`); a user
+  adds or changes one by hand in the config folder's `lang/`, which wins.
+- The code asks by key with its English beside it; no file or no key: the English.
+- `{params}` are filled in; a text naming one the call does not give falls back to the
+  English for that key (answered: yes, hand-written code handles params and their
+  mistakes).
+- Only the UI; docs, code, comments, config keys stay English. An engine ready for more.
+- A language's name and code are its file's name, unless the file says `"$__name"` /
+  `"$__code"` (32 characters at most, cut); a common ISO 639-1 code has a display name.
+- A pseudo-language is just a file of one's own.
+
+## Options for the mechanism (as proposed; A chosen)
 
 | | How | For | Against |
 |---|---|---|---|
@@ -91,6 +106,26 @@ planned for 0.5.
   platform code untouched, and the first CI run after beta.3 is read before more work.
 
 ## Do
+
+- **The engine** (2026-11-24): `crates/xdevcmd/src/lang.rs` (the app only; no new
+  dependency: `toml` was there). `tr!("key", "English")`, `tr!("key", "English {n}", n =
+  x)`, `Text::new("key", "English")` for tables. Keys whole, dotted or in sections.
+  `[general] language = "auto"` (`LC_ALL`, `LC_MESSAGES`, `LANG`) or a code; `lang/`
+  beside the program, then in the config folder; `$__code`, `$__name`, an ISO table of 24
+  names. A problem reading a file is a note on the status line at start; Help → Config
+  in use names the language in use and those found. Tests: lookup and fallback, params
+  (missing, unknown, unclosed, braces), the choice from the environment, folder order,
+  a broken file, `$__` keys and the cut, a screenshot in Vietnamese and one with no file.
+- **`xtask lang`**: `template` (every key and its English, in sections) and `check FILE`
+  (texts that would show in English, keys the code lacks); tests read the source's keys
+  (one English each) and check the shipped files.
+- **First texts with keys**: the key bar and the menu bar; `lang/vi.toml` and
+  `lang/ja.toml` (preview) ship them; the release packs `lang/`.
+- **Tests stay English** whatever the developer's locale: render, pty and the kill
+  harness give xdevcmd a config folder of their own.
+- `docs/config.md`: Languages; the docs-example test loads a `# lang/<file>` example as a
+  language file.
+- All local (the owner's rule for this branch): workspace tests, clippy, fmt.
 
 ## Check
 

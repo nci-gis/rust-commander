@@ -1,0 +1,22 @@
+# Tiếng Việt cho xdevcmd. Đặt [general] language = "vi" trong config.toml (hoặc để
+# "auto" với LANG=vi_VN...). Khóa nào thiếu ở đây thì hiện tiếng Anh. Sửa bản của
+# riêng mình: chép file này vào thư mục lang/ trong thư mục config của xdevcmd.
+
+"$__name" = "Tiếng Việt"
+
+[keybar]
+copy = "Chép"
+delete = "Xóa"
+edit = "Sửa"
+help = "Giúp"
+menu = "Menu"
+mkdir = "Tạo TM"
+move = "Chuyển"
+quit = "Thoát"
+rename = "Đổi tên"
+view = "Xem"
+
+[menu]
+file = "Tệp"
+help = "Trợ giúp"
+view = "Xem"

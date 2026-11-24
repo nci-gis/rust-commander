@@ -304,6 +304,33 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
         ]),
         false,
     );
+    // The words on screen (beta.4): the language in use and the others there are.
+    let found = crate::lang::languages(&crate::lang::folders());
+    let in_use = crate::lang::chosen().map_or_else(
+        || "English".to_string(),
+        |l| format!("{} ({})", l.name, l.code),
+    );
+    let others = found
+        .iter()
+        .map(|l| format!("{} ({})", l.name, l.code))
+        .collect::<Vec<_>>()
+        .join(", ");
+    push(
+        &mut out,
+        Line::from(vec![
+            Span::styled("    language  ", Style::new().fg(th.fg_dim)),
+            Span::styled(in_use, Style::new().fg(th.fg)),
+            Span::styled(
+                if others.is_empty() {
+                    "   no lang/*.toml found".to_string()
+                } else {
+                    format!("   found: {others}")
+                },
+                Style::new().fg(th.fg_dim),
+            ),
+        ]),
+        false,
+    );
     push(&mut out, Line::raw(""), false);
 
     // The values as loaded, in the file's own syntax, `[keys]` included: the keys you

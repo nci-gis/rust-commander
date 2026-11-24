@@ -43,6 +43,10 @@ fn isolated() -> Command {
     let sandbox = scratch("isolation");
     c.env("XDEVCMD_CONFIG", sandbox.join("no-such-config.toml"));
     c.env("XDG_DATA_HOME", sandbox.join("data"));
+    // And from their language files (beta.4): a config folder of the test's own, so a
+    // `lang/vi.toml` of theirs and LANG=vi_VN do not turn the screens Vietnamese.
+    c.env("XDG_CONFIG_HOME", sandbox.join("config"));
+    c.env("APPDATA", sandbox.join("config"));
     // And from their session: a test must neither reopen their panes nor overwrite them.
     // One state directory per run of xdevcmd: what one test leaves there (F1's recent
     // commands) must not change what another sees.
@@ -4978,6 +4982,38 @@ fn every_toml_example_in_the_docs_is_a_valid_config() {
             // A theme file's example says so on its first line, "# themes/x.toml": put
             // it there, and check a config that names it.
             let first = body.lines().next().unwrap_or_default();
+            // A language file's example says so too, "# lang/vi.toml": put it in a config
+            // folder's lang/, start in that language, and no note may say it failed.
+            if let Some(file) = first
+                .strip_prefix("# lang/")
+                .and_then(|r| r.split_whitespace().next())
+            {
+                let home = dir.join("cfg-home");
+                fs::create_dir_all(home.join("xdevcmd").join("lang")).unwrap();
+                fs::write(home.join("xdevcmd").join("lang").join(file), &body[..end]).unwrap();
+                let code = file.trim_end_matches(".toml");
+                let cfg = write_config(&dir, &format!("[general]\nlanguage = \"{code}\"\n"));
+                let h = home.to_string_lossy().into_owned();
+                let out = isolated()
+                    .env("XDG_CONFIG_HOME", &h)
+                    .env("APPDATA", &h)
+                    .arg("--config")
+                    .arg(&cfg)
+                    .arg("--screenshot=110x24")
+                    .arg(&dir)
+                    .arg(&dir)
+                    .output()
+                    .unwrap();
+                let screen = String::from_utf8_lossy(&out.stdout);
+                assert!(
+                    out.status.success() && !screen.contains(file),
+                    "{file}: the language example does not load:\n{}\n{screen}",
+                    &body[..end]
+                );
+                checked += 1;
+                rest = &body[end..];
+                continue;
+            }
             let cfg = if let Some(file) = first
                 .strip_prefix("# themes/")
                 .and_then(|r| r.split_whitespace().next())
@@ -5775,5 +5811,33 @@ fn key_table_a_click_on_the_key_bar_does_what_the_key_does() {
         &b,
     );
     assert!(!a.join("victim.txt").exists(), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Beta.4: `[general] language` picks a language file from `lang/` in the config folder;
+/// the shipped Vietnamese names the key bar and the menus, and what it leaves out, and
+/// a language with no file, stay English.
+#[test]
+fn a_language_file_names_the_key_bar_and_the_menus() {
+    let (a, b) = fixture();
+    let cfg_home = a.parent().unwrap().join("cfg-home");
+    let own = cfg_home.join("xdevcmd").join("lang");
+    fs::create_dir_all(&own).unwrap();
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/vi.toml");
+    fs::copy(shipped, own.join("vi.toml")).unwrap();
+    let home = cfg_home.to_string_lossy().into_owned();
+    let env = [
+        ("XDG_CONFIG_HOME", home.as_str()),
+        ("APPDATA", home.as_str()),
+    ];
+    let vi = shot_cfg_env("[general]\nlanguage = \"vi\"\n", &env, "", &a, &b);
+    for word in ["Tệp", "Trợ giúp", "Chép", "Thoát"] {
+        assert!(vi.contains(word), "{word}\n{vi}");
+    }
+    assert!(!vi.contains(" Copy "), "{vi}");
+    // No file for it: English, and a note on the status line.
+    let none = shot_cfg_env("[general]\nlanguage = \"qq\"\n", &env, "", &a, &b);
+    assert!(none.contains("File") && none.contains("Copy"), "{none}");
+    assert!(none.contains("qq.toml"), "the note names the file\n{none}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

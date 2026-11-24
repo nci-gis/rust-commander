@@ -138,7 +138,7 @@ impl App {
         buf.set_style(area, Style::new().bg(th.bg_bar));
         let mut x = area.x + 1;
         for (i, title) in BAR.iter().enumerate() {
-            let text = format!(" {title} ");
+            let text = format!(" {} ", title.get());
             let w = text.cells() as u16;
             if x + w > area.x + area.width {
                 break;
@@ -594,22 +594,24 @@ impl App {
         // says "5 Copy" is lying, and this is the line people look at most.
         // In F-key order, as in every orthodox manager. On a narrow screen the ones that
         // do not fit are left off whole, from the end, rather than cut mid-word.
-        const KEYS: &[(Action, &str)] = &[
-            (Action::Help, "Help"),
-            (Action::Rename, "Ren"),
-            (Action::View, "View"),
-            (Action::Edit, "Edit"),
-            (Action::Copy, "Copy"),
-            (Action::Move, "Move"),
-            (Action::MkDir, "MkDir"),
-            (Action::Delete, "Del"),
-            (Action::MenuBar, "Menu"),
-            (Action::Quit, "Quit"),
+        use crate::lang::Text;
+        const KEYS: &[(Action, Text)] = &[
+            (Action::Help, Text::new("keybar.help", "Help")),
+            (Action::Rename, Text::new("keybar.rename", "Ren")),
+            (Action::View, Text::new("keybar.view", "View")),
+            (Action::Edit, Text::new("keybar.edit", "Edit")),
+            (Action::Copy, Text::new("keybar.copy", "Copy")),
+            (Action::Move, Text::new("keybar.move", "Move")),
+            (Action::MkDir, Text::new("keybar.mkdir", "MkDir")),
+            (Action::Delete, Text::new("keybar.delete", "Del")),
+            (Action::MenuBar, Text::new("keybar.menu", "Menu")),
+            (Action::Quit, Text::new("keybar.quit", "Quit")),
         ];
         let mut spans = Vec::new();
         let mut hits = Vec::new();
         let mut cx = area.x;
         for (action, label) in KEYS {
+            let label = label.get();
             if self.refused(*action).is_some() {
                 continue;
             }

@@ -1,0 +1,21 @@
+# xdevcmd の日本語 (プレビュー)。config.toml で [general] language = "ja"
+# (または "auto" と LANG=ja_JP...)。ここにないキーは英語で表示されます。
+
+"$__name" = "日本語 (プレビュー)"
+
+[keybar]
+copy = "コピー"
+delete = "削除"
+edit = "編集"
+help = "ヘルプ"
+menu = "メニュー"
+mkdir = "作成"
+move = "移動"
+quit = "終了"
+rename = "改名"
+view = "表示"
+
+[menu]
+file = "ファイル"
+help = "ヘルプ"
+view = "表示"

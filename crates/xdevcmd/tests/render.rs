@@ -5866,7 +5866,13 @@ fn settings_lists_the_languages_there_are() {
         ("LC_ALL", ""),
         ("LC_MESSAGES", ""),
     ];
-    let s = shot_cfg_env("", &env, "F9,Up,Up,Enter,Tab,Tab,Tab,Tab,Down,Down,Space", &a, &b);
+    let s = shot_cfg_env(
+        "",
+        &env,
+        "F9,Up,Up,Enter,Tab,Tab,Tab,Tab,Down,Down,Space",
+        &a,
+        &b,
+    );
     for line in [
         "auto - detect by locale - (vi)",
         "English - en - built in",
@@ -5877,7 +5883,10 @@ fn settings_lists_the_languages_there_are() {
     }
     assert!(!s.contains("broken"), "{s}");
     // Space on the third row chose Tiếng Việt.
-    let chosen = s.lines().find(|l| l.contains("(\u{2022})")).unwrap_or_default();
+    let chosen = s
+        .lines()
+        .find(|l| l.contains("(\u{2022})"))
+        .unwrap_or_default();
     assert!(chosen.contains("Tiếng Việt"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

@@ -1284,7 +1284,7 @@ impl Worker {
                 self.sum.done += 1;
                 self.advance(size);
             }
-            Err(e) if is_cross_device(&e) => {
+            Err(e) if crate::os::is_cross_device(&e) => {
                 // Not a rename at all: a copy followed by a delete, which can half-fail.
                 // The user is told before it starts.
                 let go = if self.cross_all {
@@ -1413,21 +1413,5 @@ fn identical(src: Option<&Path>, dst: &Path) -> Same {
         Same::Yes
     } else {
         Same::No
-    }
-}
-
-fn is_cross_device(e: &io::Error) -> bool {
-    #[cfg(unix)]
-    {
-        e.raw_os_error() == Some(18) // EXDEV
-    }
-    #[cfg(windows)]
-    {
-        e.raw_os_error() == Some(17) // ERROR_NOT_SAME_DEVICE
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = e;
-        false
     }
 }

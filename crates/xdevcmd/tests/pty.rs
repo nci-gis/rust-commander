@@ -1235,10 +1235,7 @@ fn a_background_panic_is_logged_and_xdevcmd_goes_on() {
 /// The journal's first line, as a run on this machine writes it.
 #[cfg(unix)]
 fn host_line() -> String {
-    format!(
-        "host {}\n",
-        hex(Path::new(&xdevcmd_core::journal::hostname()))
-    )
+    format!("host {}\n", hex(Path::new(&xdevcmd_core::os::hostname())))
 }
 
 /// A path as the journal writes it: hex of its bytes.

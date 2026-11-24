@@ -19,13 +19,17 @@ use crate::config_edit::Value;
 use crate::modal::{buttons, centered, frame_box, put};
 use crate::theme;
 
-pub const TABS: &[&str] = &["General", "Files", "Theme", "Terminal", "Keys"];
+pub const TABS: &[&str] = &["General", "Files", "Theme", "Terminal", "Languages", "Keys"];
+/// The tab that lists the languages one per row, rather than settings.
+const LANGUAGES_TAB: usize = 4;
 
 #[derive(Clone, Copy)]
 enum Kind {
     Bool,
     Pick(&'static [&'static str]),
     Themes,
+    /// `auto`, `en` and the language files found: the Languages tab lists them.
+    Languages,
 }
 
 #[derive(Clone, Copy)]
@@ -331,6 +335,15 @@ const FIELDS: &[Field] = &[
         Kind::Bool,
         true,
     ),
+    f(
+        LANGUAGES_TAB,
+        "general",
+        "language",
+        "Language",
+        "The words on screen; lang/<name>.toml beside xdevcmd or in its config folder",
+        Kind::Languages,
+        false,
+    ),
 ];
 
 /// What a full history costs a shell at most, for the Settings row: lines × columns ×
@@ -354,6 +367,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("general", "autosave_secs") => c.general.autosave_secs.to_string(),
         ("general", "menu_bar") => c.general.menu_bar.to_string(),
         ("general", "animation") => c.general.animation.to_string(),
+        ("general", "language") => c.general.language.clone(),
         ("general", "safe_operations") => c.general.safe_operations.to_string(),
         ("files", "enter") => c.files.enter.clone(),
         ("files", "filter") => c.files.filter.clone(),
@@ -394,6 +408,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         }
         ("general", "menu_bar") => c.general.menu_bar = b,
         ("general", "animation") => c.general.animation = b,
+        ("general", "language") => c.general.language = v.to_string(),
         ("general", "safe_operations") => c.general.safe_operations = b,
         ("files", "enter") => c.files.enter = v.to_string(),
         ("files", "filter") => c.files.filter = v.to_string(),
@@ -470,6 +485,8 @@ pub struct SettingsDialog {
     pub before: Config,
     pub now: Config,
     themes: Vec<String>,
+    /// The Languages tab's rows: (code, line), from `lang::settings_rows`.
+    langs: Vec<(String, String)>,
     /// Why saving is not possible here (read-only modes), if it is not.
     pub cannot_save: Option<String>,
     pub buttons: Vec<Rect>,
@@ -481,6 +498,7 @@ pub struct SettingsDialog {
 
 /// One row as drawn: the whole line, and its `‹` and `›` (for a check box, both are
 /// the box).
+#[derive(Clone, Copy)]
 struct RowHit {
     line: Rect,
     back: Rect,
@@ -498,8 +516,14 @@ pub enum Outcome {
 }
 
 impl SettingsDialog {
-    pub fn new(config: &Config, themes: Vec<String>, cannot_save: Option<String>) -> Self {
+    pub fn new(
+        config: &Config,
+        themes: Vec<String>,
+        langs: Vec<(String, String)>,
+        cannot_save: Option<String>,
+    ) -> Self {
         Self {
+            langs,
             tab: 0,
             row: 0,
             before: config.clone(),
@@ -514,6 +538,25 @@ impl SettingsDialog {
 
     fn rows(&self) -> Vec<&'static Field> {
         FIELDS.iter().filter(|f| f.tab == self.tab).collect()
+    }
+
+    /// How many rows the tab has: a setting each, or on Languages a language each.
+    fn row_count(&self) -> usize {
+        if self.tab == LANGUAGES_TAB {
+            self.langs.len()
+        } else {
+            self.rows().len()
+        }
+    }
+
+    /// The language chosen now: `auto` when the file says nothing.
+    fn language(&self) -> String {
+        let l = self.now.general.language.trim();
+        if l.is_empty() {
+            "auto".into()
+        } else {
+            l.to_string()
+        }
     }
 
     /// The fields whose values differ from when the dialog opened.
@@ -535,6 +578,13 @@ impl SettingsDialog {
     }
 
     fn step(&mut self, delta: isize) -> Outcome {
+        // Languages: the row under the cursor is the choice.
+        if self.tab == LANGUAGES_TAB {
+            if let Some((code, _)) = self.langs.get(self.row) {
+                self.now.general.language = code.clone();
+            }
+            return Outcome::Stay;
+        }
         let rows = self.rows();
         let Some(f) = rows.get(self.row).copied() else {
             return Outcome::Stay;
@@ -544,6 +594,7 @@ impl SettingsDialog {
             Kind::Bool => vec!["false".into(), "true".into()],
             Kind::Pick(c) => with_own(c, &get(&self.before, f)),
             Kind::Themes => self.themes.clone(),
+            Kind::Languages => self.langs.iter().map(|(c, _)| c.clone()).collect(),
         };
         if choices.is_empty() {
             return Outcome::Stay;
@@ -569,7 +620,7 @@ impl SettingsDialog {
         match m.kind {
             MouseEventKind::ScrollUp => self.row = self.row.saturating_sub(1),
             MouseEventKind::ScrollDown => {
-                let rows = self.rows().len();
+                let rows = self.row_count();
                 if rows > 0 {
                     self.row = (self.row + 1).min(rows - 1);
                 }
@@ -584,13 +635,15 @@ impl SettingsDialog {
                 }
                 if let Some(t) = self.tab_hits.iter().position(hit) {
                     if t != self.tab {
-                        self.tab = t;
-                        self.row = 0;
+                        self.go_to_tab(t);
                     }
                     return Outcome::Stay;
                 }
                 if let Some(i) = self.row_hits.iter().position(|r| hit(&r.line)) {
                     self.row = i;
+                    if self.tab == LANGUAGES_TAB {
+                        return self.step(1);
+                    }
                     let r = &self.row_hits[i];
                     if hit(&r.back) {
                         return self.step(-1);
@@ -605,19 +658,24 @@ impl SettingsDialog {
         Outcome::Stay
     }
 
+    /// Tab `t`, on its first row, or on Languages the row of the language chosen.
+    fn go_to_tab(&mut self, t: usize) {
+        self.tab = t;
+        self.row = if t == LANGUAGES_TAB {
+            let now = self.language();
+            self.langs.iter().position(|(c, _)| *c == now).unwrap_or(0)
+        } else {
+            0
+        };
+    }
+
     pub fn on_key(&mut self, k: KeyEvent) -> Outcome {
-        let rows = self.rows().len();
+        let rows = self.row_count();
         match k.code {
             KeyCode::Esc => return Outcome::Cancel,
             KeyCode::Enter if self.cannot_save.is_none() => return Outcome::Save,
-            KeyCode::Tab => {
-                self.tab = (self.tab + 1) % TABS.len();
-                self.row = 0;
-            }
-            KeyCode::BackTab => {
-                self.tab = (self.tab + TABS.len() - 1) % TABS.len();
-                self.row = 0;
-            }
+            KeyCode::Tab => self.go_to_tab((self.tab + 1) % TABS.len()),
+            KeyCode::BackTab => self.go_to_tab((self.tab + TABS.len() - 1) % TABS.len()),
             KeyCode::Up => self.row = self.row.saturating_sub(1),
             KeyCode::Down if rows > 0 => self.row = (self.row + 1).min(rows - 1),
             KeyCode::Left => return self.step(-1),
@@ -672,6 +730,60 @@ pub fn render(frame: &mut Frame, area: Rect, d: &mut SettingsDialog) {
         for (i, l) in lines.iter().enumerate() {
             put(frame, inner, body_top + i as u16, l, Style::new().fg(th.fg));
         }
+    } else if d.tab == LANGUAGES_TAB {
+        // One language a row; the one chosen marked. Space, ←/→ or a click chooses.
+        let chosen = d.language();
+        let before = {
+            let l = d.before.general.language.trim();
+            if l.is_empty() {
+                "auto".to_string()
+            } else {
+                l.to_string()
+            }
+        };
+        let room = inner.height.saturating_sub(body_top + 4) as usize;
+        let skip = d.row.saturating_sub(room.saturating_sub(1));
+        for (i, (code, text)) in d.langs.iter().enumerate().skip(skip).take(room) {
+            let y = body_top + (i - skip) as u16;
+            let mark = if *code == chosen { "(\u{2022})" } else { "( )" };
+            let changed = *code == chosen && chosen != before;
+            let line = format!("{}{mark} {text}", if changed { "\u{2022} " } else { "  " });
+            let style = if i == d.row {
+                Style::new().fg(th.fg).bg(th.row_cursor_active)
+            } else {
+                Style::new().fg(th.fg)
+            };
+            let row = Rect::new(inner.x, inner.y + y, inner.width, 1);
+            if i == d.row {
+                frame.buffer_mut().set_style(row, style);
+            }
+            put(frame, inner, y, &line, style);
+            d.row_hits.push(RowHit {
+                line: row,
+                back: Rect::default(),
+                value: row,
+            });
+        }
+        // The rows a click can reach start at the first shown.
+        if skip > 0 {
+            let mut hits = vec![
+                RowHit {
+                    line: Rect::default(),
+                    back: Rect::default(),
+                    value: Rect::default(),
+                };
+                skip
+            ];
+            hits.append(&mut d.row_hits);
+            d.row_hits = hits;
+        }
+        put(
+            frame,
+            inner,
+            inner.height.saturating_sub(3),
+            "The words on screen, from the next start. lang/<name>.toml files: see docs/config.md",
+            Style::new().fg(th.fg_dim),
+        );
     } else {
         let rows = d.rows();
         let label_w = 32usize;
@@ -819,6 +931,7 @@ mod tests {
                 Kind::Bool => if v == "true" { "false" } else { "true" }.to_string(),
                 Kind::Pick(c) => c.iter().find(|x| **x != v).unwrap().to_string(),
                 Kind::Themes => if v == "light" { "dark" } else { "light" }.to_string(),
+                Kind::Languages => if v == "vi" { "en" } else { "vi" }.to_string(),
             };
             let mut c = base.clone();
             set(&mut c, f, &other);
@@ -842,6 +955,7 @@ mod tests {
                     .iter()
                     .map(|s| s.to_string())
                     .collect(),
+                Kind::Languages => vec!["auto".into(), "en".into(), "vi".into()],
             };
             for v in choices {
                 let mut c = Config::default();

@@ -14,7 +14,7 @@
 //! ```
 //!
 //! A language is named by its file: `vi.toml` is the language `vi`. Two keys may say
-//! otherwise (the owner, 2026-11-24), at most 32 characters each, cut if longer:
+//! otherwise (the owner, 2026-11-24), at most 32 characters each (longer ends in `...`):
 //! `"$__code"`, the name `[general] language` picks it by (`vietnamese.toml` with
 //! `"$__code" = "vi"` is `vi`), and `"$__name"`, the name a user reads ("Tiếng Việt").
 //! Without `$__name`, a common ISO 639-1 code has its name ([`iso_name`]), else the code.
@@ -36,8 +36,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// The longest `$__code` or `$__name`, in characters; longer is cut.
+/// The longest `$__code` or `$__name`, in characters; longer ends in `...` within it.
 pub const MAX_ID: usize = 32;
+
+/// `s` in at most [`MAX_ID`] characters: whole, or its start and `...` (the owner,
+/// 2026-11-24).
+pub fn fit(s: &str) -> String {
+    if s.chars().count() <= MAX_ID {
+        return s.to_string();
+    }
+    s.chars().take(MAX_ID - 3).collect::<String>() + "..."
+}
 
 /// The names of common ISO 639-1 languages, in their own language, for a file with no
 /// `$__name`.
@@ -75,10 +84,10 @@ pub fn iso_name(code: &str) -> Option<&'static str> {
         .map(|(_, n)| *n)
 }
 
-/// `s` trimmed and cut to [`MAX_ID`] characters; `None` if nothing is left.
+/// `s` trimmed and [`fit`]; `None` if nothing is left.
 fn id(s: &str) -> Option<String> {
-    let s: String = s.trim().chars().take(MAX_ID).collect();
-    (!s.is_empty()).then_some(s)
+    let s = s.trim();
+    (!s.is_empty()).then(|| fit(s))
 }
 
 /// A language found in the `lang/` folders.
@@ -92,8 +101,9 @@ pub struct Language {
     pub files: Vec<PathBuf>,
 }
 
-/// Every language in `folders`, by code: each `*.toml`, its `$__code` and `$__name` read.
-/// A file that does not parse counts under its file name, so loading it can say why.
+/// Every language in `folders`, by code: each `*.toml` that reads as TOML, its `$__code`
+/// and `$__name` read. A file that does not read is not a language (Settings lists only
+/// what works, the owner, 2026-11-24); [`broken`] names it.
 pub fn languages(folders: &[PathBuf]) -> Vec<Language> {
     let mut out: Vec<Language> = Vec::new();
     for dir in folders {
@@ -110,16 +120,13 @@ pub fn languages(folders: &[PathBuf]) -> Vec<Language> {
             let Some(stem) = file.file_stem().and_then(|s| s.to_str()).and_then(id) else {
                 continue;
             };
-            let table = std::fs::read_to_string(&file)
+            let Some(table) = std::fs::read_to_string(&file)
                 .ok()
-                .and_then(|t| t.parse::<toml::Table>().ok());
-            let meta = |k: &str| {
-                table
-                    .as_ref()
-                    .and_then(|t| t.get(k))
-                    .and_then(|v| v.as_str())
-                    .and_then(id)
+                .and_then(|t| t.parse::<toml::Table>().ok())
+            else {
+                continue;
             };
+            let meta = |k: &str| table.get(k).and_then(|v| v.as_str()).and_then(id);
             let code = meta("$__code").unwrap_or(stem);
             let own_name = meta("$__name");
             match out.iter_mut().find(|l| l.code == code) {
@@ -277,9 +284,36 @@ pub fn folders() -> Vec<PathBuf> {
     beside.into_iter().chain(own).collect()
 }
 
+/// The `*.toml` files in `folders` that do not read, and why: (file name, reason).
+pub fn broken(folders: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    for dir in folders {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        let mut files: Vec<PathBuf> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "toml"))
+            .collect();
+        files.sort();
+        for f in files {
+            match std::fs::read_to_string(&f) {
+                Ok(t) => {
+                    if let Err(e) = t.parse::<toml::Table>() {
+                        out.push((f, first_line(&e.to_string()).to_string()));
+                    }
+                }
+                Err(e) => out.push((f, e.to_string())),
+            }
+        }
+    }
+    out
+}
+
 /// The catalogue for `code` from `folders`: each file of that code ([`languages`]), the
-/// later over the earlier. A file that does not parse is skipped and named in the error,
-/// the others still load.
+/// later over the earlier. A file named for `code` that does not read is named in the
+/// problems; the others still load.
 pub fn load(code: &str, folders: &[PathBuf]) -> (Catalog, Vec<String>) {
     let mut cat = Catalog::default();
     let mut problems = Vec::new();
@@ -292,9 +326,13 @@ pub fn load(code: &str, folders: &[PathBuf]) -> (Catalog, Vec<String>) {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
-        match Catalog::parse(&text) {
-            Ok(c) => cat.merge(c),
-            Err(e) => problems.push(format!("{}: {}", file.display(), first_line(&e))),
+        if let Ok(c) = Catalog::parse(&text) {
+            cat.merge(c);
+        }
+    }
+    for (file, why) in broken(folders) {
+        if file.file_stem().and_then(|s| s.to_str()) == Some(code) {
+            problems.push(format!("{}: {why}", file.display()));
         }
     }
     (cat, problems)
@@ -302,6 +340,34 @@ pub fn load(code: &str, folders: &[PathBuf]) -> (Catalog, Vec<String>) {
 
 fn first_line(s: &str) -> &str {
     s.lines().find(|l| !l.trim().is_empty()).unwrap_or(s).trim()
+}
+
+/// Settings → Languages: (code, line) for each choice, `auto` first, then English, then
+/// every language a `lang/` folder has that reads: "<name> - <code> - <files>", each part
+/// at most 32 characters (the owner, 2026-11-24).
+pub fn settings_rows() -> Vec<(String, String)> {
+    let get = |k: &str| std::env::var(k).ok();
+    let detected = wanted("auto", &get).unwrap_or_else(|| "en".into());
+    let mut rows = vec![
+        (
+            "auto".to_string(),
+            format!("auto - detect by locale - ({})", fit(&detected)),
+        ),
+        ("en".to_string(), "English - en - built in".to_string()),
+    ];
+    for l in languages(&folders()) {
+        let files = l
+            .files
+            .iter()
+            .filter_map(|f| f.file_name().and_then(|n| n.to_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        rows.push((
+            l.code.clone(),
+            format!("{} - {} - {}", l.name, l.code, fit(&files)),
+        ));
+    }
+    rows
 }
 
 static CURRENT: OnceLock<Catalog> = OnceLock::new();
@@ -426,12 +492,20 @@ mod tests {
         )
         .unwrap();
         std::fs::write(own.join("xx.toml"), "\"a\" = \"[ońe]\"\n").unwrap();
+        // One that does not read is not a language, and is named as broken.
+        std::fs::write(own.join("bad.toml"), "\"a\" = \n").unwrap();
+        let bad = broken(&[shipped.clone(), own.clone()]);
+        assert_eq!(bad.len(), 1, "{bad:?}");
+        assert!(bad[0].0.ends_with("bad.toml"));
         let langs = languages(&[shipped.clone(), own.clone()]);
         let got: Vec<(&str, &str, usize)> = langs
             .iter()
             .map(|l| (l.code.as_str(), l.name.as_str(), l.files.len()))
             .collect();
-        let cut: String = long.chars().take(MAX_ID).collect();
+        let cut = fit(long);
+        assert_eq!(cut.chars().count(), MAX_ID);
+        assert!(cut.ends_with("..."), "{cut}");
+        assert_eq!(fit("Tiếng Việt"), "Tiếng Việt");
         assert_eq!(
             got,
             [

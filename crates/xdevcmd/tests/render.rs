@@ -5841,3 +5841,43 @@ fn a_language_file_names_the_key_bar_and_the_menus() {
     assert!(none.contains("qq.toml"), "the note names the file\n{none}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
+
+/// Beta.4: Settings → Languages lists auto, English and each language file that reads,
+/// "<name> - <code> - <file>"; a file that does not read is not listed; Space chooses.
+#[test]
+fn settings_lists_the_languages_there_are() {
+    let (a, b) = fixture();
+    let cfg_home = a.parent().unwrap().join("cfg-home");
+    let own = cfg_home.join("xdevcmd").join("lang");
+    fs::create_dir_all(&own).unwrap();
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/vi.toml");
+    fs::copy(shipped, own.join("vi.toml")).unwrap();
+    fs::write(
+        own.join("mine.toml"),
+        "\"$__name\" = \"A pseudo-language with a name far too long\"\n\"$__code\" = \"xx\"\n",
+    )
+    .unwrap();
+    fs::write(own.join("broken.toml"), "\"a\" = \n").unwrap();
+    let home = cfg_home.to_string_lossy().into_owned();
+    let env = [
+        ("XDG_CONFIG_HOME", home.as_str()),
+        ("APPDATA", home.as_str()),
+        ("LANG", "vi_VN.UTF-8"),
+        ("LC_ALL", ""),
+        ("LC_MESSAGES", ""),
+    ];
+    let s = shot_cfg_env("", &env, "F9,Up,Up,Enter,Tab,Tab,Tab,Tab,Down,Down,Space", &a, &b);
+    for line in [
+        "auto - detect by locale - (vi)",
+        "English - en - built in",
+        "Tiếng Việt - vi - vi.toml",
+        "A pseudo-language with a name... - xx - mine.toml",
+    ] {
+        assert!(s.contains(line), "{line}\n{s}");
+    }
+    assert!(!s.contains("broken"), "{s}");
+    // Space on the third row chose Tiếng Việt.
+    let chosen = s.lines().find(|l| l.contains("(\u{2022})")).unwrap_or_default();
+    assert!(chosen.contains("Tiếng Việt"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}

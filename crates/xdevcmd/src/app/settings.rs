@@ -18,6 +18,7 @@ impl App {
         self.modal = Some(Modal::Settings(Box::new(SettingsDialog::new(
             &self.settings.config,
             crate::config::available_themes(),
+            crate::lang::settings_rows(),
             cannot_save,
         ))));
     }

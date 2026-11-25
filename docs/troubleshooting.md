@@ -123,8 +123,8 @@ not. `xdevcmd --print-config | Out-File -Encoding utf8 config.toml` writes UTF-8
 **`o` says "no desktop session to open it in (no DISPLAY)".** There is no desktop to
 open the file in: set `[commands] opener` (a terminal viewer, say), or use F3.
 
-**The Linux console (`TERM=linux`)** shows 16 colours; xdevcmd switches to a 16-colour
-theme by itself.
+**The Linux console (`TERM=linux`)** shows 16 colours, and xdevcmd uses 16 by itself: the
+default theme gives way to a 16-colour one; a theme you chose is fitted to the 16.
 
 ## Reporting a problem
 
@@ -149,8 +149,9 @@ At start the status line says `debug log on (jobs, errors): <path>` (Messages, A
 keeps it).
 
 - **Where**: `debug-<time>-<process>.jsonl` in the state directory
-  (`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows), or
-  in `XDEVCMD_DEBUG_DIR`. Each stops at 16 MiB; the five newest are kept.
+  (`~/.local/state/xdevcmd/` on Linux and macOS, `%LOCALAPPDATA%\xdevcmd\` on Windows;
+  beside the `XDEVCMD_STATE` file when that is set), or in `XDEVCMD_DEBUG_DIR`. Each stops
+  at 16 MiB; the five newest are kept.
 - **What it holds**: per job, its kind and size, the kind of drive at each end (`ntfs`,
   `apfs`, `network` …), how long each part took (checking, opening, creating, writing,
   syncing, finishing), how the bytes were copied, the batches small files were synced
@@ -166,7 +167,7 @@ Written on your machine only; nothing is sent anywhere. (It came in 0.4.0-beta.2
 
 ### xdevcmd crashed
 
-It writes a `crash-….log` in the state directory (above) and says where once the
-terminal is back; the five newest are kept. Attach it to an issue, after reading it: it
+It writes a `crash-….log` in the state directory (above) and says where once the terminal
+is back; the five newest are kept. Attach it to an issue, after reading it: it
 may hold file names. With the debug log on, it ends with the debug log's last lines.
 Nothing is ever sent by xdevcmd itself.

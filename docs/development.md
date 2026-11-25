@@ -13,7 +13,7 @@ Needs Rust 1.90 or newer (`rustup`). Nothing needs root.
 ## Check before you push
 
 ```bash
-cargo test                                         # about 400 tests, ~30 s
+cargo test                                         # over 1,000 tests; the terminal ones take minutes
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 cargo fmt --check
@@ -52,7 +52,7 @@ cargo xtask bench --host my-laptop --save-baseline
 ```
 
 It builds the release binary and runs each case five times (`--runs N`) after a warm-up,
-printing the median, p95, best and peak memory, and the change from this host's
+printing the median, p95, best and peak memory (Linux only), and the change from this host's
 baseline, marked past ±15 %:
 
 - the package: the binary's size, the crates in `Cargo.lock`;
@@ -68,9 +68,10 @@ directory, never your files. Results go to `bench/` (its README says which file 
 which); `--host` names the machine in them, and nothing is read from the system to name
 it. Two machines' numbers are not comparable, nor a busy machine's (the load is printed
 first). CI does not compare times, which vary too much on shared runners: it keeps hard
-budgets only (`tests/budgets.rs`), and a tripwire for start-up in `tests/pty.rs`
+budgets only (`crates/xdevcmd/tests/budgets.rs`), and a tripwire for start-up in
+`crates/xdevcmd/tests/pty.rs`
 (everything but the terminal check under 1 s, a debug build: an order of magnitude over
-the 150 ms budget, which is for `cargo xtask bench` on a release build).
+the 150 ms goal, checked by hand with `cargo xtask bench` on a release build).
 
 **On another machine or drive.** `--only CASE` runs just the cases whose name holds
 `CASE`, with no build and no start-up cases. Where to get `xtask`:
@@ -174,8 +175,8 @@ the log started) and `ev`:
 
 `file` is a number for a path, the same within one run (a keyed hash; the key is never
 written). `kind` is Rust's `io::ErrorKind`, `os` the system's code (`errno`, or Windows'
-`GetLastError`). Nothing in a line is a name: words are kept to letters, digits and
-`_ . -`.
+`GetLastError`). `job` is the job's number in the run. Nothing in a line is a name:
+words are kept to letters, digits and `_ . - +`, at most 40 characters.
 
 Where a job's time went: the phases add up to the time spent on files; `ms` minus them
 is the walk, directories, the journal and waiting for answers. `small_ms` against
@@ -246,9 +247,10 @@ without the icon, unless `XDEVCMD_REQUIRE_ICON=1`, which CI and releases set.
 - **`dev`** is where finished work collects. Every push to it runs CI, except one that
   touches only `.agents/` or `CHANGELOG.md`, which no test reads.
 - **`feat/<topic>`** holds anything bigger than a commit or two, such as a round of the
-  plan. Every push to it runs CI too (except `.agents/` or `CHANGELOG.md` only), so a
-  broken build shows before the pull request. When it is ready, open a pull request
-  into `dev`: CI runs on it, then merge.
+  plan. A push to it runs no CI: run it by hand once a piece is done (below). When it
+  is ready, open a pull request into `dev`: CI runs on it, then merge.
+- **`feat/v<version>`** (such as `feat/v0.4.0-beta.4`) collects a release's work. Every
+  push to it runs CI, as for `dev`.
 
 A build to try on another system, from any branch: **Actions → ci → Run workflow**
 and pick the branch, or
@@ -299,7 +301,7 @@ Both crates go to crates.io (`xdevcmd-core` first, then `xdevcmd`, which pins it
    runner's CPU can, its version the tag's), attests their build provenance, and opens
    a **draft** release with
    the archives (each holding `LICENSE`, `README.md`, `THIRD-PARTY.md`, the example
-   `themes/` and this version's `docs/`), `SHA256SUMS`, and that CHANGELOG section as its
+   `themes/`, the languages in `lang/` and this version's `docs/`), `SHA256SUMS`, and that CHANGELOG section as its
    notes. Read it, then Publish.
 5. **crates.io**, by the owner, from `main` at the tag (needs `cargo login` once, with a
    crates.io token kept on the owner's machine, never in a workflow). Check first that
@@ -329,8 +331,8 @@ no beta channel worth keeping). It is cut from `dev`, without a pull request int
    the tag to be (or `gh workflow run release --ref dev -f tag=v0.4.0-beta.1`). Before
    step 2 it fails on the version and the CHANGELOG, as it should; the branch rule is
    what this tries. Locally, with `dev` checked out and pulled:
-   `scripts/release-check.sh v0.4.0-beta.1 HEAD` (another commit than the one checked
-   out is refused).
+   `scripts/release-check.sh v0.4.0-beta.1 HEAD` (a commit whose `Cargo.toml` or
+   `CHANGELOG.md` differs from the files checked out is refused).
 2. **On `dev`**, the version and the dated notes, never published:
 
    ```bash
@@ -365,7 +367,7 @@ A bad pre-release tag is deleted like any other (`git push origin :v0.4.0-beta.1
 A published pre-release is not deleted: the next one supersedes it.
 
 CI runs on pushes to `dev`, `main` and the integration branches (`feat/v*`, such as
-`feat/v0.4.0-beta.3`), and on pull requests into `dev` and `main`; a working branch
+`feat/v0.4.0-beta.3`), and on pull requests into those; a working branch
 runs it by hand once a piece is done (`gh workflow run ci --ref <branch>`), not on each
 push. It also builds once on the `rust-version` in Cargo.toml (the `msrv` job); the `release`
 workflow runs only for a `v*` tag (a release on `main`, a pre-release on `dev` or

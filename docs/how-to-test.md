@@ -86,8 +86,8 @@ again with the same `--launch` line and press **C**: "1 found different … copi
 **9. Check every file**: `xtask try --check`. The last line must be
 **PASS: every copy whole, no file lost or wrong**; it is saved as `check-<os>-<time>.txt`
 beside `xdevcmd-try`. Nothing to record: CI runs these checks on Linux, macOS and
-Windows for every release (the maintainer's `tests/kill.rs`); they are here to look for
-yourself. If one fails for you, send it (step 11). Then `xtask try --clean`.
+Windows on each push to a release branch (`crates/xdevcmd/tests/kill.rs`); they are here
+to look for yourself. If one fails for you, send it (step 11). Then `xtask try --clean`.
 
 **10. Use it for a week** for your normal file work, where you would use Explorer,
 Finder, mc or Total Commander: copies and moves onto folders that share some names, F8
@@ -132,8 +132,9 @@ attached:     the debug logs (and bench/results/*.json if you ran the benchmark)
   kill lands mid-way; an NVMe disk copies 1 GiB in well under a second).
 - **`--small`** (0.6 GiB, about 1.1 GiB with the copies; 2.5 and 3.8 GiB without it) is
   for a slow disk or little space.
-- **`--clean`** removes the whole sandbox, the copies in it included, and refuses only
-  when its top holds something `--make` did not make. Keep nothing of your own inside
+- **`--clean`** removes the whole sandbox, the copies in it included. It refuses when its
+  top holds something `--make` did not make, or while the xdevcmd started by `--launch`
+  still runs. Keep nothing of your own inside
   it. What the checks sent to the trash stays there.
 - **The speed** on your own drives, unattended, any day: [Benchmarks](benchmark.md).
 - **With Rust 1.90+**: the automated tests at this version's tag,

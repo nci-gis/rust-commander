@@ -34,6 +34,15 @@ that heading and starts a new, empty one here. -->
 - **The key bar keeps every key in a longer language**: its longest labels are cut
   with `…` when that fits all ten; on a narrow screen the last keys are left off, as
   before.
+- **An `[[open]]` rule never runs a program from the folder you browse**: outside a
+  terminal tab too, a program named without a path is looked up only in `PATH`'s full
+  directories (Linux, macOS), as [security.md](docs/security.md) says. Before, a `.` or
+  empty entry in `PATH` could reach a same-named program there.
+- **A theme's `[style]` keeps the base's look for the lines it leaves out**, as the
+  docs say; before, each line left out was plain (`base = "xdevtheme"` with only
+  `borders` lost its notch titles and glow).
+- **The docs were checked against the code**, page by page (`cargo xtask docs`), and
+  corrected where they were wrong.
 
 ## [0.4.0-beta.3] - 2026-11-24
 

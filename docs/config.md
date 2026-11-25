@@ -49,17 +49,18 @@ set, and reads only that file:
 
 `~` is the first of `HOME` and `USERPROFILE` that is a full path. A relative folder in
 any of these is skipped (the XDG spec says so): it would point into whatever folder
-xdevcmd was started from. The state directory below follows the same rules.
+xdevcmd was started from. `XDEVCMD_CONFIG` is taken as written. The state directory below
+follows the same rules.
 
 If the file it chose is missing, xdevcmd uses the defaults; it does not look further
 down the list. A missing file named with `--config` is an error.
 
-**If the file has a mistake**, xdevcmd ignores all of it and asks at start
-(**Config not loaded**, with the error):
+**If the file has a mistake**, or on Unix anyone may write it (world-writable), xdevcmd
+ignores all of it and asks at start (**Config not loaded**, with the error):
 
 - **Enter**: go on with the defaults.
 - **E**: open the file in your editor; it is checked again when you close it, and a
-  mended file is used from the next start.
+  mended file is used from the next start. Not offered in read-only or restricted mode.
 - **Q**: quit.
 
 Nothing is ever saved over the file.
@@ -85,7 +86,7 @@ sort = "name"             # name | ext | size | modified
 reverse = false           # the other way round
 dirs_first = true         # directories before files
 max_panes = 3             # how many file panes you can split into (2-16)
-auto_refresh_ms = 1000    # how often panes look for changes where the system cannot tell
+auto_refresh_ms = 1000    # how often panes look for changes where the system cannot tell; 0 (off) or 100-60000
                           # (network drives; 10 times less often where it can); 0 = never
 filter = "fuzzy"          # Ctrl+F: fuzzy (letters in order, best first) or plain
 ls_colors = false         # use your $LS_COLORS
@@ -213,8 +214,8 @@ accent = "#ff8800"
 cursor_active = "#5a3000"
 ```
 
-It may also say how it draws, in a `[style]` table. Every line is optional; leaving it
-out keeps the base's look:
+It may also say how it draws, in a `[style]` table. Every line is optional; a line left
+out keeps the base's:
 
 ```toml
 # themes/glow.toml — then [theme] name = "glow"
@@ -360,9 +361,9 @@ command = "robocopy %d %D %s /COPYALL /SL"
 | `%%` | a `%` sign |
 
 xdevcmd quotes every file name for your shell, so spaces and quotes in names are safe.
-When a command hands its text to another shell (`sh -c`, `bash -c`, `eval`, `ssh`), put
-`%f` and the others inside single quotes there (`sh -c 'wc -l %f'`), never double quotes:
-the second shell reads the name again.
+When a command hands its text to another shell (`sh -c`, `bash -c`, `eval`, `ssh`), the
+second shell reads the name again, and a `'` or `"` in it breaks either kind of quote. Pass
+names as arguments instead: `sh -c 'wc -l "$1"' sh %f`.
 
 ## Security
 
@@ -388,13 +389,15 @@ file named with `--cwd-file`, on quit.
 | `crash-….log` | beside `session.toml` | Written only if xdevcmd crashes: what happened, for a report. The five newest are kept. |
 | `debug-….jsonl` | beside `session.toml`, or `XDEVCMD_DEBUG_DIR` | Only with `XDEVCMD_DEBUG` set: what jobs did and how long each part took, with no names ([Troubleshooting](troubleshooting.md#sending-a-log-with-a-report)). The five newest are kept. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside xdevcmd (Ctrl+D). Bookmarks in this config are not copied there. |
+| `commands.toml` | beside `session.toml` | F1's recently run commands. Not written with `restore_session = false`. |
 | `xdevcmd-run-<pid>/` | the system's temporary directory | One directory per run, readable by you only, for a file from inside an archive extracted for F3, and the list of names when renaming many files in your editor. Each is removed when you are done with it, the directory when xdevcmd ends; one left by a crash is removed at the next start, an hour on. |
 
 - `$XDG_STATE_HOME/xdevcmd/` replaces the state directory, and `XDEVCMD_STATE` names the
   session file itself, by its full path, such as `/tmp/x/session.toml`: the journal,
-  crash logs and bookmarks go beside it. A folder or a relative path is refused at the
+  crash logs, bookmarks and recent commands go beside it. A folder or a relative path is refused at the
   start.
 - `restore_session = false` stops the session being saved.
-- `--read-only` and `--restricted` save no session, no bookmarks and no settings. They
+- `--read-only` and `--restricted` save no session, no bookmarks, no recent commands and
+  no settings. They
   still write the file named with `--cwd-file`, and the temporary copy of a file viewed
   from inside an archive, removed as above.

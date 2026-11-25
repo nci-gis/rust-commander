@@ -121,7 +121,7 @@ To check a version yourself: [How to test](https://github.com/nci-gis/rust-comma
 |---|---|---|---|
 | Builds (x86_64; ARM64 too on Linux and macOS) | ✓ | ✓ | ✓ (x86_64) |
 | Whole test suite in CI | ✓ (x86_64, ARM64) | ✓ | ✓ |
-| Tests in a real pseudo-terminal | ✓ | ✓ | ConPTY: start-up only |
+| Tests in a real pseudo-terminal | ✓ | ✓ | ConPTY: start, draw, an F12 command, quit |
 | Used by hand by the maintainer | ✓ | not yet | ✓ (Windows 11) |
 | Shell reports (directory, prompt marks) | bash tested; zsh, fish not run | zsh not run | PowerShell, cmd not run; whether ConPTY passes them on is not checked |
 
@@ -156,7 +156,7 @@ Keep only the lines you change. The steps for Windows, and how the file is chose
 xdevcmd is developed with AI coding agents (Claude Code, Copilot); most of the code is
 agent-written. A human maintainer sets the scope and the design, reviews the changes,
 and tests each release by hand. Safety rests on checks you can run yourself rather
-than on trust: about 950 tests, fault injection for copy, move and their journal,
+than on trust: over 1,000 tests, fault injection for copy, move and their journal,
 fuzzed parsers, `cargo-deny`, no `unsafe` code in the engine, no network access, and
 build provenance on every release. Found a problem? See
 [SECURITY.md](https://github.com/nci-gis/rust-commander/blob/main/SECURITY.md).

@@ -20,9 +20,9 @@ kind you use: not the session you started xdevcmd from.
 A program cannot change its parent shell's directory, but xdevcmd can write where you
 were, and a small function can `cd` there. Add one of these to your shell's startup
 file, then run `xc` instead of `xdevcmd` (the name is yours; `rc` would hide the Plan 9
-shell). Quit with **F10** to go to that directory, or **Q** to stay where you started.
+shell). Quit with **F10** to go to that directory, or **Alt+X q** to stay where you started.
 
-**bash / zsh** (`~/.bashrc` or `~/.zshrc`). Tested:
+**bash / zsh** (`~/.bashrc` or `~/.zshrc`). Tried by hand (no test runs it):
 
 ```bash
 xc() { local f; f=$(mktemp) || return; xdevcmd --cwd-file="$f" "$@"; local d; d=$(cat -- "$f"); rm -f -- "$f"; [ -n "$d" ] && [ "$d" != "$PWD" ] && cd -- "$d"; }
@@ -46,14 +46,16 @@ function xc { $f = New-TemporaryFile; xdevcmd --cwd-file="$f" @args; $d = Get-Co
   `%COMSPEC%`).
 - **Keys inside it**: xdevcmd takes only F12, Shift+F12 and Alt+X. **Alt+X, then a
   terminal key** acts on the shell (Alt+S split, Alt+W close, Alt+N new tab, Alt+1…9
-  tab N). Anything else after Alt+X, Enter too, goes to the program with it; Esc
-  cancels. **Alt+X F1** opens Commands, since F1 alone is the program's (mc, htop and
+  tab N), **q** quits. Anything else after Alt+X, Enter too, goes to the program with
+  it; Esc cancels. **Alt+X F1** opens Commands, since F1 alone is the program's (mc, htop and
   emacs use it).
 - **The mouse** is the program's when it asked for it (vim with `mouse=a`, htop, Claude
-  Code). Otherwise a click gives the shell focus and the wheel scrolls back through the
-  history.
-- **Shift+F12** shows the history in the viewer, to read, search and copy. It is never
-  written to disk unless you [log the tab](#logging-a-tab-to-a-file).
+  Code). Otherwise a click gives the shell focus, and the wheel:
+  - in a full-screen program (less, man): sends ↑/↓, three a notch;
+  - at the prompt: scrolls back through the history.
+- **Shift+F12** shows the history in the viewer, to read, search and copy. It is written
+  to disk only when you ask: F2 there, **Save history as…** in the tab's right-click menu,
+  or [a log](#logging-a-tab-to-a-file).
 
 ### Between the panes and the shell
 
@@ -61,7 +63,7 @@ Pressed in the file panes (in the shell, Alt+C and Alt+G are the program's):
 
 | Key | Does |
 |---|---|
-| **Alt+C** | Types `cd <this directory>` into the shell, quoted for your shell |
+| **Alt+C** | Types the shell's own `cd` with this directory, quoted, and Enter: `cd` (sh, bash, zsh, fish), `cd /d` (cmd), `Set-Location -LiteralPath` (PowerShell) |
 | **Alt+Enter** or **Ctrl+Enter** | Types the marked names (else the one under the cursor), each quoted, with a space after the last and **no Enter**: you finish the command. Bare names when the shell is in their directory, full paths otherwise. Also **Type into the shell** in the files' right-click menu, since many terminals send Ctrl+Enter as Enter and Windows Terminal keeps Alt+Enter for full screen |
 | **Alt+G** | Takes the pane to the shell's directory; types nothing. Refused while a program runs in the shell, when it is `ssh` (the directory is on another machine), and when the directory is unknown, gone, or outside xdevcmd's root |
 
@@ -93,8 +95,8 @@ xdevcmd never types into a running program. Alt+C, Alt+Enter and your own comman
   Ctrl+C there first. Nor is a program built into the shell that reads a line, such as bash's
   `read -s`: the shell looks idle and Alt+C is typed as its answer; the prompt marks
   ([below](#telling-xdevcmd-where-the-shell-is)) show it as busy.
-- **With every shell tab in use**, nothing is typed and the status line says to press
-  Ctrl+C there.
+- **With every shell tab in use**, nothing is typed and the status line says what to do:
+  Ctrl+C in that shell (Linux, macOS), or close a shell tab (Windows).
 - **Refused before any question**: a name with a control character, or one your shell
   cannot be given safely: a backtick for sh, bash and zsh; `%`, `"`, `!` or `^` for cmd;
   `$(` or `"` for fish; `$(` or a double quote (plain or typographic) for PowerShell.
@@ -154,7 +156,8 @@ rows were left out.
 
 **Lists are kept** for the session, the last 10, in memory only:
 
-- **Back** (Alt+, or Backspace) after Enter on a row returns to the list, on that row.
+- **Back** (Alt+,) after Enter on a row returns to the list, on that row. Backspace
+  is Parent, as anywhere.
   Alt+F7's results are kept the same way.
 - **Alt+L** shows the list used last, from anywhere (from the shell: Alt+X, then Alt+L).
 - **Alt+Down** (or **Alt+J**) lists them above the directories visited; also View →
@@ -240,7 +243,7 @@ then type into that program. cmd cannot send `C`: give it only OSC 9;9.
 Put one of these in your shell's startup file. Only bash's has been run (bash 5.2, on
 Linux); the others are written from each shell's manual and **have not been run**.
 
-**bash** (`~/.bashrc`; `PS0` needs bash 4.4 or later). Tested:
+**bash** (`~/.bashrc`; `PS0` needs bash 4.4 or later). Tried by hand (no test runs it):
 
 ```bash
 __xdevcmd_osc7() {

@@ -80,17 +80,22 @@ where the screen cuts.
 
 - `$__code` and `$__name`: at most 32 characters (longer ends in `...`).
 - `{n}`, `{name}` …: filled in by xdevcmd. Any order; leaving one out is fine; one the
-  English does not have makes that text English. `{{` `}}` is a brace.
+  English does not have makes that text English. `{{` `}}` is a brace. In a text whose
+  English has no `{…}`, nothing is filled in: braces show as written.
 - **Escapes**: TOML's (`\n`, `\u001b` …) work, but a text holding a control character
   (ESC, BEL …) or a direction override (U+202E …) that its English does not hold is
   not used: it shows in English. A language file is text from anyone, and what it says
   is drawn on your terminal. The same characters are left out of `$__name`.
-- Longer than the English: the key bar cuts its longest labels with `…` to keep all
-  ten keys; a dialog line too long for its box is shortened in the middle.
-- A file that is not valid TOML is skipped and named on the status line at start.
+- Longer than the English: the key bar cuts its longest labels with `…` (to 3 cells at
+  least) when that keeps every key, else drops keys from the end; a dialog line too long
+  for its box is shortened in the middle.
+- A file that is not valid TOML is skipped. If it is the language chosen, the status
+  line names it at start.
 - A language chosen by name and not found: English, and the status line says where it
   looked.
-- From the source tree: `cargo xtask lang check my.toml` lists all of the above;
+- From the source tree: `cargo xtask lang check my.toml` lists what would show in
+  English: unknown keys, a `{name}` the English lacks, an open brace, refused characters,
+  a long `$__name`;
   `cargo xtask lang template` and `pseudo` (`--style leet|wide|upside`) print for the
   code you have
   ([Development](development.md)).

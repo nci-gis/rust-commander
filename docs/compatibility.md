@@ -21,7 +21,7 @@ says so under **Changed**, with what to do.
 | **Command-line flags** | `[LEFT] [RIGHT]`, `--no-restore`, `--read-only`, `--restricted`, `--root`, `--cwd-file`, `--config`, `--check-config` (and its exit code), `--print-config`, `--print-theme`, `--print-keys`, `--print-completions`, `--print-man`, `--version`, `--help` | `xdevcmd --help`, the man page |
 | **Action names in `[keys]`** | The names you bind keys to (`quit`, `help`, `copy`, …), and the old names kept as aliases (`grow_pane`, …). A key's **default** binding is not covered (0.4.0-beta.2 took `q` off Quit). | `xdevcmd --print-config`, section `[keys]` |
 | **Theme files** | The format of a theme file (`[theme]` colours and `[style]`), and the names of the built-in themes. | `xdevcmd --print-theme NAME`, [config.md](config.md) |
-| **Journals** | A newer 0.4.x tidies up after, and offers to continue, a job that an older 0.4.x was killed in (journal `v 3`). A journal it cannot read is left alone, never acted on. | [security.md](security.md), "Safe operations" |
+| **Journals** | A newer 0.4.x tidies up after, and offers to continue, a job that an older 0.4.x was killed in (journal `v 3`). In a journal, a line it does not know is skipped; the lines it knows are acted on. | [security.md](security.md), "Safe operations" |
 | **Environment variables** | `XDEVCMD_CONFIG`, `XDEVCMD_STATE`, `XDEVCMD_DEBUG`, `XDEVCMD_DEBUG_DIR`: their names and what they point at. | `xdevcmd --help`, the man page, [config.md](config.md) |
 
 ## Not promised

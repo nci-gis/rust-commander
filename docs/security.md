@@ -35,13 +35,13 @@ your permissions. This page says what it guards against, and where the limits ar
 | **A folder copied or moved into itself** | Refused before anything is written, however the destination is reached: through a link into the folder, `..`, or a folder there not made yet. A copy onto itself is skipped. Pack leaves out the archive it replaces. |
 | **A file that appears while xdevcmd writes** | Renaming (F2, rename many, moving into the Linux trash) is refused by the system if the new name is taken, even a moment earlier. Copy and move write to a free name only if it is still free; otherwise you get the usual overwrite question. Nothing is replaced without asking. |
 | **Typing into the wrong program** | Alt+C, Alt+Enter and your own commands type only into a shell at its prompt, never into an editor, a password prompt, `ssh` or another program; when unsure, xdevcmd asks. It never adds to a line you typed and did not run. Known gaps: a prompt built into the shell, such as bash's `read -s`, looks like the shell's own prompt; on Windows, a program that prints a prompt mark can look idle ([shell.md](shell.md#before-anything-is-typed-into-the-shell)). |
-| **The wrong folder** | The drive's root, your home, every folder a pane shows or a shell is in, and the folders above them, are never deleted, moved or renamed, however the path is written (`src/..`, `link/`); the engine checks again. Writes wait while a pane is still opening a folder. |
+| **The wrong folder** | The drive's root, your home, every folder a pane shows or a shell is in, and the folders above them, are never deleted, moved or renamed, however the path is written (`src/..`, `link/`). The copy engine refuses the root, your home and `.`/`..` again on its own. Writes wait while a pane is still opening a folder. |
 | **A file over a folder, or the reverse** | Never, even with "replace all": skipped, and the job says so. |
-| **A config file others can write** | Refused on Unix, because it names the programs xdevcmd runs. |
+| **A config file anyone can write** | Refused on Unix when it is world-writable, because it names the programs xdevcmd runs. Group-writable is allowed. |
 
-Dependencies are checked for known vulnerabilities and licences (`cargo deny`) on every
-change and weekly. xdevcmd was tested against attacks on names, files and the shell
-before release.
+Dependencies are checked for known vulnerabilities and licences (`cargo deny`) on each
+pull request into `main`, `dev` or a release branch, and weekly. xdevcmd was tested
+against attacks on names, files and the shell before release.
 
 ## Safe operations
 
@@ -360,8 +360,8 @@ Without it, compare the archive's SHA-256 with its line in `SHA256SUMS` (`sha256
 
 The binaries are **not code-signed** yet: Windows SmartScreen and macOS Gatekeeper warn
 the first time ([troubleshooting](troubleshooting.md#macos) says what to do). Before each
-release, the release workflow unpacks every archive and checks its files and its size
-(at most 7 MiB), then runs its version and its `--print` commands
+release, the release workflow unpacks every archive and checks its files and the
+binary's size (at most 7 MiB), then runs its version and its `--print` commands
 (`scripts/smoke.sh`). The Intel macOS archive is built and checked on an Apple Silicon
 machine, so it is not run there.
 

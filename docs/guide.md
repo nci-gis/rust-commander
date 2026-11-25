@@ -58,7 +58,8 @@ Every key: [keys.md](keys.md).
   (config, panes, terminal check, shell). `--timings` (or `XDEVCMD_TIMINGS=1`) also
   shows it on the status line and prints one JSON line on stderr at the end. A slow
   "terminal check" is the terminal not answering what it can draw: it waits up to
-  1.5 s (slow SSH, a terminal that never answers); `[viewer] images = "none"` skips it.
+  1.5 s (slow SSH, a terminal that never answers); `[viewer] images = "blocks"` skips it,
+  and so does running inside tmux or screen.
 
 ## Moving around
 
@@ -99,7 +100,7 @@ Your own commands (Shift+F9, `[[menu]]` in the config) can hold the mount comman
   as jobs with Cancel.
 - **A network error that may pass** (timeout, dropped connection, stale handle): the
   file is tried again after 1, 2, 4, 8 and 15 seconds ("network error — trying again in
-  4 s (3 of 5)"), then you get Retry, Skip or Stop. Esc during a wait stops at once.
+  4 s (3 of 5)"), then you get Retry, Skip or Abort (Esc). Esc during a wait stops at once.
 - **Each new file is synced before it gets its name** on a network mount (NFS, SMB,
   sshfs, rclone, `\\server\share`), since such servers often report a failed write only
   then.
@@ -164,7 +165,8 @@ xdevcmd always asks before it deletes or overwrites anything.
   `NO_COLOR`.
 - **Quick view's pictures** (Alt+Q) are sharp where the terminal draws them (kitty,
   Ghostty, iTerm2, WezTerm, Windows Terminal, foot), half blocks elsewhere (macOS
-  Terminal.app, VS Code, inside tmux). `[viewer] images` chooses or turns it off.
+  Terminal.app, VS Code, inside tmux). `[viewer] images` chooses: `auto`, `kitty`, `iterm2`, `sixel`, or `blocks` (half
+  blocks always).
 
 ### Opening a file
 
@@ -343,9 +345,9 @@ directory when you quit: [shell.md](shell.md).
 |---|---|
 | **F12** | Into the shell and back. Inside, xdevcmd takes only **F12**, **Shift+F12** and **Alt+X**; every other key is the program's (readline's Alt+D, emacs' F keys, mc's F10) |
 | **Alt+N** | New terminal tab |
-| **Alt+X**, then a key | In the shell: **Alt+S** / **Alt+D** split, **Alt+W** close, **Alt+1** tab 1. Anything else after Alt+X, Enter too, goes to the program; Esc cancels |
+| **Alt+X**, then a key | In the shell: **Alt+S** / **Alt+D** split, **Alt+W** close, **Alt+1** tab 1, **q** quit. Anything else after Alt+X, Enter too, goes to the program; Esc cancels |
 | **Shift+F12** (or **Alt+X F12**) | The shell's history in the viewer, at its end: search with `/`, drag and `y` to copy, **Esc** back. While a full-screen program is up, its screen only |
-| **Alt+C** | `cd` the shell to this directory (a new shell if you typed something not yet run) |
+| **Alt+C** | `cd` the shell to this directory (a new shell if you typed something not yet run; with every shell tab in use, the status line says how to clear the line) |
 | **Alt+T** | Hide or show the terminal; `exit` closes one |
 | **Ctrl+O** | Says the shell is F12 (mc's shell key). In the shell the F-key bar gives way to three buttons for the mouse, **[ Help ] [ Menu ] [ Quit ]**: the F-keys there are the program's (from the keyboard: Alt+X F1, Alt+X q) |
 

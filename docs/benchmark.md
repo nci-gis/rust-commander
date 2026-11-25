@@ -8,7 +8,7 @@ yours. About 25 minutes, unattended; no Rust needed.
 
 `xtask bench --only mixed` copies one large file (1000 MiB) followed by 5,000 small
 files (4 KiB each), the way xdevcmd copies by default, five times after one warm-up run,
-and prints how long each copy took and how much memory it used.
+and prints how long each copy took and, on Linux, how much memory it used.
 
 - **Its own files only**: made from a fixed recipe in a folder of its own (in the
   system's temporary folder, or under `--dir`), copied within that folder, removed at
@@ -93,10 +93,10 @@ how steady the numbers are.
 
 ```text
 case                                                     median        p95       best  peak mem   vs base
-mixed: one large file and small files                  84.33 ms   94.61 ms   78.69 ms   4.3 MiB         —
+mixed: one large file and small files                  84.33 ms   94.61 ms   78.69 ms         —         —
 ```
 
-(That one is a clone, on APFS.) **median** is the number; **p95** far above it means
+(That one is a clone, on APFS; macOS gives no memory figure, so `—`.) **median** is the number; **p95** far above it means
 something else ran, so run again. **vs base** is the change from this host's baseline
 (`—` without one; ◀ past ±15 %). With `XDEVCMD_DEBUG=jobs`, the debug logs in
 `bench/results/debug-<host>-<date>/` say where the time went

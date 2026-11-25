@@ -1740,6 +1740,6 @@ mod tests {
         // HELP: "--small: 0.6 and 1.1" (made, and with the copies of big and the tree).
         let gib = |b: u64| b as f64 / (1u64 << 30) as f64;
         assert!((gib(Sizes::SMALL.bytes()) - 0.6).abs() < 0.05);
-        assert!(Sizes::SMALL.big < Sizes::FULL.big);
+        const { assert!(Sizes::SMALL.big < Sizes::FULL.big) };
     }
 }

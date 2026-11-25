@@ -223,7 +223,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 println!("{page:width$}  {state}");
             }
             let todo = rows.iter().filter(|(_, s)| !s.starts_with("ok")).count();
-            println!("\n{todo} of {} to review ({LEDGER})", rows.len());
+            let open = rows
+                .iter()
+                .filter(|(_, s)| s.starts_with("ok, open"))
+                .count();
+            println!(
+                "\n{todo} of {} to review, {open} with something left open ({LEDGER})",
+                rows.len()
+            );
             Ok(())
         }
         Some("check") => {
@@ -247,6 +254,21 @@ pub fn run(args: &[String]) -> Result<(), String> {
 struct Review {
     hash: String,
     commit: String,
+    /// `ok`, `fixed` or `open`; and what is open.
+    result: String,
+    note: String,
+}
+
+impl Review {
+    /// A page whose review still holds: `ok`, and what the review left open, if any.
+    fn ok(&self) -> String {
+        let at = short(&self.commit);
+        if self.result == "open" {
+            format!("ok, open: {} (reviewed at {at})", self.note)
+        } else {
+            format!("ok (reviewed at {at})")
+        }
+    }
 }
 
 fn ledger(root: &Path) -> Result<BTreeMap<String, Review>, String> {
@@ -254,7 +276,7 @@ fn ledger(root: &Path) -> Result<BTreeMap<String, Review>, String> {
     let mut out = BTreeMap::new();
     for line in text.lines().skip(1).filter(|l| !l.trim().is_empty()) {
         let f: Vec<&str> = line.split('\t').collect();
-        let [path, hash, commit, ..] = f[..] else {
+        let [path, hash, commit, ref rest @ ..] = f[..] else {
             return Err(format!(
                 "{LEDGER}: a row needs path, hash, commit: {line:?}"
             ));
@@ -264,6 +286,9 @@ fn ledger(root: &Path) -> Result<BTreeMap<String, Review>, String> {
             Review {
                 hash: hash.into(),
                 commit: commit.into(),
+                // After `date` and `by`.
+                result: rest.get(2).unwrap_or(&"").to_string(),
+                note: rest.get(3).unwrap_or(&"").to_string(),
             },
         );
     }
@@ -300,7 +325,7 @@ fn status(root: &Path) -> Result<Vec<(String, String)>, String> {
                 if now != r.hash {
                     "page changed since its review".to_string()
                 } else if paths.is_empty() {
-                    format!("ok (reviewed at {})", short(&r.commit))
+                    r.ok()
                 } else {
                     let mut args = vec!["rev-list", "--count"];
                     let range = format!("{}..HEAD", r.commit);
@@ -311,7 +336,7 @@ fn status(root: &Path) -> Result<Vec<(String, String)>, String> {
                     if n > 0 {
                         format!("code changed: {n} commits since {}", short(&r.commit))
                     } else {
-                        format!("ok (reviewed at {})", short(&r.commit))
+                        r.ok()
                     }
                 }
             }
@@ -779,5 +804,20 @@ mod tests {
                 "{LEDGER}: {page} is not in scope"
             );
         }
+    }
+
+    #[test]
+    fn a_review_left_open_says_what_is_open() {
+        let r = |result: &str, note: &str| Review {
+            hash: "h".into(),
+            commit: "0123456789abcdef".into(),
+            result: result.into(),
+            note: note.into(),
+        };
+        assert_eq!(r("fixed", "").ok(), "ok (reviewed at 012345678)");
+        assert_eq!(
+            r("open", "unverified: x").ok(),
+            "ok, open: unverified: x (reviewed at 012345678)"
+        );
     }
 }

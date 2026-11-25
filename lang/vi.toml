@@ -1206,6 +1206,7 @@ xdevcmd_cannot_tell_whether_a_program = "xdevcmd không biết được có chư
 [shell_keys]
 f1 = "{k} mở Lệnh (F1) từ shell, nơi F1 thuộc về chương trình."
 prefix = "{p} rồi một phím terminal (chia, đóng, thẻ) tác động lên shell; phím khác sau {p}, kể cả Enter, gửi cho chương trình kèm theo; Esc để hủy."
+quit = "{k} cũng thoát được từ shell."
 taken = "Trong shell, xdevcmd chỉ giữ {listed}; mọi phím khác thuộc về chương trình."
 
 [sizes]

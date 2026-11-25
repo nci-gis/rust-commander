@@ -1589,11 +1589,14 @@ mod tests {
     }
 
     #[test]
-    fn every_action_has_a_place_and_only_help_opens_from_the_shell() {
+    fn every_action_has_a_place_and_only_help_and_quit_open_from_the_shell() {
         for b in keys::BINDINGS {
             // The match is exhaustive; this says the answer is a real one.
             let _ = b.action.place();
-            assert_eq!(b.action.opens_from_shell(), b.action == Action::Help);
+            assert_eq!(
+                b.action.opens_from_shell(),
+                matches!(b.action, Action::Help | Action::QuitNoCd)
+            );
             // F12's family stays the only keys taken inside the shell.
             assert!(!b.action.opens_from_shell() || !b.action.is_global());
         }

@@ -3506,6 +3506,24 @@ fn from_the_shell_f1_is_the_programs_and_alt_x_f1_opens_commands() {
     x.quit();
 }
 
+/// Alt+X q quits from the shell as from a file pane (the owner, 2026-11-25); `q` alone
+/// is the program's there.
+#[test]
+fn from_the_shell_q_is_the_programs_and_alt_x_q_quits() {
+    let s = Scratch::new("q-shell");
+    let mut x = Session::start(&s, None);
+    x.send(F12);
+    x.wait_for("$ ");
+    x.send(b"stty raw -echo; dd bs=1 count=1 of=keys.bin 2>/dev/null; stty sane; echo GOT''_Q\r");
+    std::thread::sleep(Duration::from_millis(300));
+    x.send(b"q");
+    x.wait_for("GOT_Q");
+    assert_eq!(std::fs::read(s.left().join("keys.bin")).unwrap(), b"q");
+    x.wait_for("$ ");
+    x.send(ALT_X);
+    x.quit_by(b"q");
+}
+
 /// From the shell, F1's shell commands act on the shell and a file pane's commands on
 /// the file pane the shell was entered from, which takes the focus (decision 3).
 #[test]

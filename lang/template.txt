@@ -1210,6 +1210,7 @@ xdevcmd_cannot_tell_whether_a_program = "xdevcmd cannot tell whether a program i
 [shell_keys]
 f1 = "{k} opens Commands (F1) from the shell, where F1 is the program's."
 prefix = "{p} then a terminal key (split, close, tabs) acts on the shell; anything else after {p}, Enter too, goes to the program with it; Esc cancels."
+quit = "{k} quits from the shell too."
 taken = "In the shell, xdevcmd takes only {listed}; every other key is the program's."
 
 [sizes]

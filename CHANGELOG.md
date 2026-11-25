@@ -18,6 +18,9 @@ that heading and starts a new, empty one here. -->
   from. A text that could act on the terminal (a control character, a direction
   override) is not used from a language file.
 
+- **Alt+X q quits from the shell**, as it does from a file pane; `q` alone stays the
+  program's there.
+
 ### Fixed
 - **Names Windows does not allow are refused before they are made** by F7, a new file,
   a rename, rename many, copy as, pack and save as, as copy and move refuse them:

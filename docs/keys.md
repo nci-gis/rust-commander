@@ -3,7 +3,7 @@
 These are the defaults. Press **F1** in xdevcmd to see your own, after any changes in
 `[keys]` in the config. This file is generated: `xdevcmd --print-keys > docs/keys.md`.
 
-In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x, Enter too, goes to the program with it; Esc cancels. Alt+x F1 opens Commands (F1) from the shell, where F1 is the program's.
+In the shell, xdevcmd takes only F12, Shift+F12 and Alt+x; every other key is the program's. Alt+x then a terminal key (split, close, tabs) acts on the shell; anything else after Alt+x, Enter too, goes to the program with it; Esc cancels. Alt+x F1 opens Commands (F1) from the shell, where F1 is the program's. Alt+x q quits from the shell too.
 
 ## General
 

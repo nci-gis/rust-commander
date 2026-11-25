@@ -412,7 +412,8 @@ nine rows (digits alone are typed).
   stays small). **Esc** clears what you typed, then closes.
 - Rows that cannot run say why: a mouse gesture, the viewer's own key, or a mode that
   turns the command off.
-- In the shell F1 is the program's: **Alt+X F1** opens Commands there. A pane's command
+- In the shell F1 and F10 are the program's: **Alt+X F1** opens Commands there, and
+  **Alt+X q** quits, as from a pane. A pane's command
   run from the shell acts on the pane you came from; the shell's own (split, new tab)
   act on the shell. Over the viewer, F1 lists the viewer's keys first, and Esc gives the
   viewer back.

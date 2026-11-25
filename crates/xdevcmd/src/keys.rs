@@ -1171,6 +1171,18 @@ pub fn shell_rule(keymap: &Keymap) -> Vec<String> {
                 k = k
             ));
         }
+        // Quit from the shell (Alt+X q), as from a pane.
+        if let Some(k) = keymap
+            .keys_for(Action::QuitNoCd)
+            .into_iter()
+            .find(|k| k.starts_with(&format!("{p} ")))
+        {
+            out.push(tr!(
+                "shell_keys.quit",
+                "{k} quits from the shell too.",
+                k = k
+            ));
+        }
     }
     out
 }
@@ -1354,11 +1366,13 @@ impl Action {
         }
     }
 
-    /// Opens from the shell after the prefix (Alt+X F1), without being one of the keys
+    /// Opens from the shell after the prefix (Alt+X F1, Alt+X q), without being one of the keys
     /// xdevcmd takes inside the shell (`is_global`, F12's family): F1 typed there stays
     /// the program's. Kept apart so keymap A's rule and its tests do not move.
     pub fn opens_from_shell(self) -> bool {
-        matches!(self, Action::Help)
+        // Alt+X q quits from the shell as from a pane (the owner, 2026-11-25); q alone,
+        // and Alt+X then anything else, stay the program's.
+        matches!(self, Action::Help | Action::QuitNoCd)
     }
 }
 

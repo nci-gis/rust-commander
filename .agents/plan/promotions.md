@@ -340,3 +340,11 @@ and "nên lưu ở: .agents/lesgers/docs-review.tsv" (written `ledgers/`).
 `xtask docs check` and `xtask docs status`. `AGENTS.md`'s directory map does not list
 `ledgers/` yet: that edit waits for the owner's word.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
+
+## 2026-11-25: `ledgers/` in AGENTS.md
+
+**Source**: the owner, 2026-11-25: "ok" (to adding `ledgers/` to `AGENTS.md`).
+**What**: `AGENTS.md`'s directory map lists `ledgers/`, and the Authority table lets an
+agent write its rows only through the skill that owns it, with the owner's agreement.
+Two lines joined elsewhere to stay under 100 lines; no rule changed.
+**Promoted by**: the owner's word in session. Written by Claude Code.

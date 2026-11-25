@@ -15,8 +15,7 @@
 3. Files in `reference/` when their stated trigger fires — each one
    opens with a **Read this when** line.
 
-Everything else is **on demand**, including `prompts/`, which are invoked
-deliberately rather than loaded at startup.
+Everything else is **on demand**; `prompts/` are invoked, never loaded at startup.
 
 Context spent here is context taken from the task, so load by relevance, not
 by habit. Loading everything is a cost, not thoroughness.
@@ -35,6 +34,7 @@ by habit. Loading everything is a cost, not thoroughness.
     harness-behaviour.md  # How the harnesses load and enforce (dated)
     memory-placement.md   # Which memory system a finding belongs in
   memory/        # Agent-generated learnings (drafts) — see _TEMPLATE.md
+  ledgers/       # Records a skill writes (docs-review.tsv)
   prompts/       # Scanning & generation prompts — invoked, not auto-loaded
   skills/        # Reusable procedures (Agent Skills spec)
   plan/          # PDCA.md, promotions.md, cycles/
@@ -48,6 +48,7 @@ by habit. Loading everything is a cost, not thoroughness.
 | ----------------------------------------------------------------------------- | --------------------------------- |
 | `AGENTS.md`, `reference/`, `context/`, `prompts/`, `skills/` | ❌ READ ONLY                       |
 | `memory/`                                                                     | ✅ READ + WRITE                   |
+| `ledgers/`                                                                    | ✅ WRITE rows through its skill, with the owner's agreement |
 | `plan/`                                                                       | ⚠️ APPEND to `promotions.md`; edit `Do`/`Check` of an active round |
 
 Closing a round, editing a closed one and compacting `cycles/` are human calls — see [plan/PDCA.md](plan/PDCA.md).
@@ -64,8 +65,7 @@ log it in `plan/promotions.md`. Procedure:
 **If a discovery contradicts `context/`**: do not edit it. Write the finding to
 `memory/` and flag it for human review.
 
-**If `memory/` looks outdated**: do not delete it. Add
-`**Status**: Needs Review` to its header.
+**If `memory/` looks outdated**: do not delete it; add `**Status**: Needs Review`.
 
 ---
 

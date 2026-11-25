@@ -97,6 +97,10 @@ model provider in CI. So: claims with evidence, checked by an agent when asked.
 ## Check
 
 - `docs status` shows `ok` for a row whose result is `open`: the result column is not
-  read. Small follow-up if the owner wants it (say "ok, 1 open item").
+  read. A small follow-up, if the owner wants it: show `ok, open: <note>`.
+- CI on `f912ce6`: ubuntu-latest failed once on `pty.rs`
+  `typed_names_go_in_bracketed_paste_when_the_shell_asks_for_it` (`got []`: nothing
+  typed before the wait ran out; the test sleeps a fixed 500 ms for the shell). Passed
+  on re-run and on the 5 other jobs; code it runs was not changed. A flake to watch.
 
 ## Act

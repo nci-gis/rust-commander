@@ -50,6 +50,9 @@ that heading and starts a new, empty one here. -->
   question.
 - **A very deep folder tree no longer ends xdevcmd**: planning, copying and counting
   sizes ran out of stack at about 1,500 levels, which closed the whole program.
+- **Moving a folder onto a folder of the same name merges them** on one drive too, as
+  the plan says and as a move across drives does. Before, it stopped with "0 moved,
+  1 failed" (the system refuses to rename onto a folder that is not empty).
 
 ## [0.4.0-beta.3] - 2026-11-24
 

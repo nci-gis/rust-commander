@@ -471,6 +471,53 @@ fn a_move_reports_nothing_made() {
     assert_eq!(sum.relocated, [(d.join("f"), d.join("to/f"))]);
 }
 
+/// A folder moved onto a folder of the same name, on one drive: the two merge, as the
+/// plan shows and as a move across drives does. Before (QA 2026-11-17; the pre-rc
+/// review), the rename refused a folder that was not empty: "0 moved, 1 failed".
+#[test]
+fn a_folder_moved_onto_a_folder_merges_into_it() {
+    let d = tmp("move-merge");
+    fs::create_dir_all(d.join("src/A/deep")).unwrap();
+    fs::create_dir_all(d.join("to/A/deep")).unwrap();
+    fs::write(d.join("src/A/x"), "x").unwrap();
+    fs::write(d.join("src/A/deep/z"), "z").unwrap();
+    fs::write(d.join("to/A/y"), "y").unwrap();
+    fs::write(d.join("to/A/deep/w"), "w").unwrap();
+    let (sum, asked) = run_with(
+        Request::mv(vec![d.join("src/A")], d.join("to")),
+        Answer::Yes,
+    );
+    assert_eq!((sum.failed, asked), (0, 0), "{sum:?}");
+    for (f, text) in [("x", "x"), ("y", "y"), ("deep/z", "z"), ("deep/w", "w")] {
+        assert_eq!(
+            fs::read_to_string(d.join("to/A").join(f)).unwrap(),
+            text,
+            "{f}"
+        );
+    }
+    assert!(!d.join("src/A").exists(), "the emptied source folder goes");
+    assert_eq!(sum.done, 2, "{sum:?}");
+}
+
+/// What a merge skips stays, and so does the folder that holds it.
+#[test]
+fn a_merge_keeps_the_source_folder_of_what_it_skipped() {
+    let d = tmp("move-merge-skip");
+    fs::create_dir_all(d.join("src/A")).unwrap();
+    fs::create_dir_all(d.join("to/A")).unwrap();
+    fs::write(d.join("src/A/x"), "new").unwrap();
+    fs::write(d.join("src/A/only"), "o").unwrap();
+    fs::write(d.join("to/A/x"), "old").unwrap();
+    let (sum, _) = run_with(
+        Request::mv(vec![d.join("src/A")], d.join("to")),
+        Answer::Skip,
+    );
+    assert_eq!(fs::read_to_string(d.join("to/A/x")).unwrap(), "old");
+    assert_eq!(fs::read_to_string(d.join("src/A/x")).unwrap(), "new");
+    assert_eq!(fs::read_to_string(d.join("to/A/only")).unwrap(), "o");
+    assert_eq!((sum.done, sum.skipped, sum.failed), (1, 1, 0), "{sum:?}");
+}
+
 #[test]
 fn a_planned_job_does_not_walk_its_sources_again() {
     let d = tmp("planned");

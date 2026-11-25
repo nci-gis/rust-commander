@@ -112,8 +112,8 @@ The [guide](https://github.com/nci-gis/rust-commander/blob/main/docs/guide.md) e
 
 ## Platforms
 
-What has been checked, and how. "CI" is the whole test suite on GitHub's runners at
-every pull request; "by hand" is the maintainer using it with
+What has been checked, and how. "CI" is the whole test suite on GitHub's runners, on
+each pull request into `main` or `dev` and each push to a release branch; "by hand" is the maintainer using it with
 [the hand-test list](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#testing-a-pre-release-by-hand).
 To check a version yourself: [How to test](https://github.com/nci-gis/rust-commander/blob/main/docs/how-to-test.md).
 
@@ -155,10 +155,10 @@ Keep only the lines you change. The steps for Windows, and how the file is chose
 
 xdevcmd is developed with AI coding agents (Claude Code, Copilot); most of the code is
 agent-written. A human maintainer sets the scope and the design, reviews the changes,
-and tests each release by hand. Safety rests on checks you can run yourself rather
+and tests each pre-release by hand on the systems the table above marks. Safety rests on checks you can run yourself rather
 than on trust: over 1,000 tests, fault injection for copy, move and their journal,
 fuzzed parsers, `cargo-deny`, no `unsafe` code in the engine, no network access, and
-build provenance on every release. Found a problem? See
+build provenance on each release since 0.4.0-beta.2. Found a problem? See
 [SECURITY.md](https://github.com/nci-gis/rust-commander/blob/main/SECURITY.md).
 
 ## Licence

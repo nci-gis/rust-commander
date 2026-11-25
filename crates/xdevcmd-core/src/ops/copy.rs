@@ -1243,6 +1243,15 @@ impl Worker {
             self.note_error(src, &e);
             return;
         }
+        // A folder onto a folder is a merge, as the plan shows and as a move across
+        // drives does: each entry moves into the folder there, and the source folder
+        // goes once empty. A rename cannot do it: it refuses a folder that is not
+        // empty (QA 2026-11-17; before, "0 moved, 1 failed").
+        let real_dir = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_dir());
+        if real_dir(src) && real_dir(&dst) {
+            self.merge_into(src, &dst);
+            return;
+        }
         let size = fs::symlink_metadata(src).map(|m| m.len()).unwrap_or(0);
         let moved = loop {
             let free = dst.symlink_metadata().is_err();
@@ -1324,6 +1333,26 @@ impl Worker {
             }
         }
         self.approved = None;
+    }
+
+    /// Move each entry of the folder `src` into the folder `dst`, by name order, then
+    /// remove `src` if that left it empty: what was skipped or failed keeps it.
+    fn merge_into(&mut self, src: &Path, dst: &Path) {
+        let mut entries: Vec<PathBuf> = match fs::read_dir(src) {
+            Ok(rd) => rd.flatten().map(|e| e.path()).collect(),
+            Err(e) => {
+                self.note_error(src, &e);
+                return;
+            }
+        };
+        entries.sort();
+        for child in entries {
+            if self.abort || self.cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            self.move_into(&child, dst, None);
+        }
+        let _ = fs::remove_dir(src);
     }
 
     /// A move by rename over an existing `dst` the user agreed to replace. Where the

@@ -83,7 +83,7 @@ Usage:
   xdevcmd --root DIR           never navigate above DIR
                                These only tighten [security] in the config, never loosen it.
   xdevcmd --cwd-file PATH      on quit, write the directory you were in to PATH, so a
-                               shell function can cd there (Q quits without it)
+                               shell function can cd there (Alt+X q quits without it)
   xdevcmd --config PATH        use this config file instead of the default one
   xdevcmd --print-config       print every setting at its default, ready to save
   xdevcmd --print-theme NAME   print a theme as a file, to start your own

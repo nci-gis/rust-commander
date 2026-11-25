@@ -1,1 +1,16 @@
 path	hash	commit	date	by	result	note
+README.md	23619676a9cbb6bf2bf4dfe1697ac7c6fa6d455e	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+SECURITY.md	6d9e831b7d132427c27e95bbf145dac39f9b9a70	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	ok	
+crates/xdevcmd-core/README.md	bf774821898b42c7943f59fcc9de804706a44abb	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	ok	
+docs/README.md	e314c4973dfb9ac478528a19f6509aa21a325bf2	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	ok	
+docs/benchmark.md	c50e8ca53cc493f246f436d67be511f0781c26f4	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+docs/compatibility.md	25e0fc471afbe6eab4e10c329194afb634ac75b3	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+docs/config.md	f6e43c8226ac021e14eaa93c83b9b2f503ffa632	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	open	unverified: 256-colour gradient coarser; shell programs keep their colours; delete always asks
+docs/development.md	f9d9b370b1a98508d739f89f2a75061a9dbfe8fd	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+docs/guide.md	9a1fd278d8cc101dc2e026e53dd42c46572ed18c	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+docs/how-to-test.md	5ede46e67868f3a85bbd756f0c32c3fe1389e614	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+docs/known-issues.md	8a33ec1954a0fba09eaa60054c10138d736ded05	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	open	unverified: temp-file tidy limited to this machine and account
+docs/language.md	9ed3670c35f45c232e5f53901ad906951af32a0b	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	
+docs/security.md	963d71ec3322161153ab1d6272eb0c656ea53f06	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	open-rule PATH lookup fixed in code (83b0740)
+docs/shell.md	c8f663421a4f5db4f403c6d0747f307f1e81eb6a	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	fixed	xc and prompt snippets: tried by hand, no test
+docs/troubleshooting.md	c77b7750744234d90d535f821f54dacf41b22cfe	f912ce658c6bc0c05c9aeb0338097839bc0d53f8	2026-11-25	claude (docs-review pass 1)	open	unverified: terminal panel background; nothing sent (by absence)

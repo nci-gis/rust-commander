@@ -84,7 +84,19 @@ model provider in CI. So: claims with evidence, checked by an agent when asked.
   spread over its modules, a made-up `docs/b.md` in a test), now fixed; 1 real: shell.md
   named `[terminal] log`, a setting that does not exist yet (reworded). All 76 anchors
   resolve. `docs status`: 15 of 15 never reviewed (D5 next).
+- 2026-11-25: D5, the first review (`/docs-review`, 7 read-only subagents, code at
+  `26d055b`; report in `memory/2026-11-25-docs-review-first-pass.md`). About 470
+  claims: 41 false, ~20 unverified. The owner agreed to all (2026-11-25). Four were the
+  code's fault and were fixed with tests (`83b0740`): an `[[open]]` rule's program
+  looked up in PATH's absolute directories only; a theme's `[style]` starting from its
+  base; `lang check` leaving braces alone where the English has none; `try --small` at
+  its 0.6 GiB. The 41 doc fixes, in language.md's style, and `DOC_PATHS` widened to the
+  code each page describes (`f912ce6`). Ledger: 15 rows, 12 `ok`/`fixed`, 3 `open`
+  (unverified claims in config, known-issues, troubleshooting).
 
 ## Check
+
+- `docs status` shows `ok` for a row whose result is `open`: the result column is not
+  read. Small follow-up if the owner wants it (say "ok, 1 open item").
 
 ## Act

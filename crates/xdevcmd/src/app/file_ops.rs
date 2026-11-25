@@ -36,6 +36,25 @@ impl App {
         dirs
     }
 
+    /// The pane a copy or move to `dir` lands in, as [`transfer_targets`] ranks them:
+    /// the other file pane focused last that shows `dir`. Drawn lit while the dialog
+    /// is open, so with three panes or more the destination is seen, not guessed.
+    pub(super) fn transfer_pane(&self, dir: &Path) -> Option<PaneId> {
+        let rank = |id: &PaneId| self.mru.iter().position(|m| m == id).unwrap_or(usize::MAX);
+        let mut panes: Vec<PaneId> = self
+            .file_panes()
+            .into_iter()
+            .filter(|id| *id != self.focus)
+            .collect();
+        panes.sort_by_key(rank);
+        panes.into_iter().find(|id| {
+            self.panes
+                .get(id)
+                .and_then(Pane::as_files)
+                .is_some_and(|f| f.archive.is_none() && f.results.is_none() && f.cwd == dir)
+        })
+    }
+
     pub(super) fn other_pane_cwd(&self) -> Option<PathBuf> {
         self.transfer_targets().into_iter().next()
     }

@@ -5870,6 +5870,46 @@ fn a_language_file_names_the_key_bar_and_the_menus() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// With three panes or more, the copy dialog shows where it goes: the destination pane
+/// is lit as a drop target is, Tab moves the light, and its button says which of how
+/// many ("other pane 1/2") (the owner, 2026-11-25).
+#[test]
+fn the_copy_dialog_lights_the_pane_it_goes_to() {
+    let (a, b) = files(&["f.txt"]);
+    let env = [("XDEVCMD_SCREENSHOT_COLOR", "1")];
+    let top = |keys: &str| {
+        let s = shot_cfg_env("", &env, keys, &a, &b);
+        (s.lines().nth(1).unwrap_or_default().to_string(), s)
+    };
+    // Bold on a pane's corner: lit. The panes' own borders are not bold.
+    let lit = |line: &str| {
+        line.match_indices(";1m\u{250c}")
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>()
+    };
+    let (before, _) = top("Alt+d,Down");
+    assert!(
+        lit(&before).is_empty(),
+        "nothing lit without the dialog: {before:?}"
+    );
+    // From the new pane (bottom left, on a): the other pane (top right, on b) first.
+    let (first, s) = top("Alt+d,Down,F5");
+    assert!(s.contains("other pane 1/2"), "{s}");
+    let at = lit(&first);
+    assert_eq!(at.len(), 1, "one pane lit: {first:?}");
+    assert!(
+        at[0] > 0,
+        "the right-hand pane, not the first on the line: {first:?}"
+    );
+    // Tab: the top-left pane (on a, the source's own folder, so last) instead.
+    let (second, s) = top("Alt+d,Down,F5,Tab");
+    assert!(s.contains("other pane 2/2"), "{s}");
+    let at2 = lit(&second);
+    assert_eq!(at2.len(), 1, "one pane lit: {second:?}");
+    assert!(at2[0] < at[0], "the light moved left: {second:?}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 /// W8 (Round 037): F7 and a new file refuse what Windows does not allow, where its
 /// rules hold, as copy and move do; elsewhere such a name is made. (On a FAT, exFAT or
 /// NTFS drive the rules hold anywhere: `rename::check` is tested with them.)

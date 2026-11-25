@@ -194,8 +194,10 @@ whether you can write there.
   one, another size, a case clash…), ℹ only said (identical files). Each ⚠ group is
   **skip** by default; **↑↓** picks a group, **Space** turns it to **replace** or **ask
   each**. The first line sums up: create · replace · skip · space needed and free.
-- **Enter** before the check ends starts the job as before, asking as it goes. **Tab**
-  checks again for the other pane.
+- **Where it goes**: the other file pane you used last (a tab is part of its pane; a
+  pane on the source's own folder comes last), lit while the dialog is open. With more
+  than one place to go, **Tab** steps to the next (`other pane 2/3`) and checks again.
+- **Enter** before the check ends starts the job as before, asking as it goes.
 - A file is replaced only while it is still the one the check saw; changed since, you
   are asked. At an overwrite question, **U** applies "only if newer" to the rest.
 

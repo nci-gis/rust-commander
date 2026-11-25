@@ -20,6 +20,8 @@ that heading and starts a new, empty one here. -->
 
 - **Alt+X q quits from the shell**, as it does from a file pane; `q` alone stays the
   program's there.
+- **The copy and move dialog shows where it goes**: the destination pane is lit while
+  it is open, and Tab's button says which of how many (`other pane 2/3`).
 - **In the shell, the key bar is three buttons**: [ Help ] [ Menu ] [ Quit ], for the
   mouse, with no key on them (the F-keys there are the program's).
 

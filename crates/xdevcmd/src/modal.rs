@@ -1238,11 +1238,32 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
     let th = theme::t();
     let accent = if c.danger { th.err } else { th.accent };
     let h = (c.body.len() as u16) + 4;
+    let first = if c.permanent {
+        ("Y", "delete permanently", accent)
+    } else {
+        ("Enter", "go", accent)
+    };
+    // With more than one place to go, which of them this is: "other pane 2/3".
+    let other = format!(
+        "{} {}/{}",
+        button_word("other pane"),
+        c.choice + 1,
+        c.choices.len()
+    );
+    let mut items = vec![first, ("Esc", "cancel", th.accent)];
+    if c.choices.len() > 1 {
+        items.push(("Tab", other.as_str(), th.accent));
+    }
+    // The buttons' row fits too: "[Tab] other pane 2/3" is not cut off its number.
+    let row: usize = items
+        .iter()
+        .map(|(k, l, _)| k.cells() + button_word(l).cells() + 4)
+        .sum();
     let w = c
         .body
         .iter()
         .map(|l| l.cells())
-        .chain(std::iter::once(c.title.cells() + 8))
+        .chain([c.title.cells() + 8, row])
         .max()
         .unwrap_or(40)
         .clamp(40, 100) as u16
@@ -1269,15 +1290,6 @@ fn render_confirm(frame: &mut Frame, area: Rect, c: &mut Confirm) {
         put(frame, inner, i as u16, line, style);
     }
     let y = inner.y + inner.height.saturating_sub(1);
-    let first = if c.permanent {
-        ("Y", "delete permanently", accent)
-    } else {
-        ("Enter", "go", accent)
-    };
-    let mut items = vec![first, ("Esc", "cancel", th.accent)];
-    if c.choices.len() > 1 {
-        items.push(("Tab", "other pane", th.accent));
-    }
     c.buttons = buttons(frame, inner.x, y, inner.width, &items);
 }
 

@@ -455,6 +455,14 @@ impl App {
             })
             .map(|(_, r)| r.y)
             .collect();
+        // While a copy or move asks where to, the pane it goes to is lit as a drop target
+        // is: Tab moves the light with the destination (the owner, 2026-11-25).
+        let landing = match &self.modal {
+            Some(Modal::Confirm(c)) if !c.choices.is_empty() => {
+                c.choices.get(c.choice).and_then(|d| self.transfer_pane(d))
+            }
+            _ => None,
+        };
         for (id, r) in rects {
             let active = id == self.focus;
             if previewing == Some(id) {
@@ -467,7 +475,8 @@ impl App {
                         .hits
                         .drag
                         .as_ref()
-                        .is_some_and(|d| d.mode == DragMode::Files && d.hover == Some(id));
+                        .is_some_and(|d| d.mode == DragMode::Files && d.hover == Some(id))
+                        || landing == Some(id);
                     f.render(frame, r, active, target, barred.contains(&r.y))
                 }
                 Some(Pane::Term(p)) => p.render(frame, r, active),

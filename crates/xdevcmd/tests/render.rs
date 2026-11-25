@@ -5860,7 +5860,7 @@ fn f7_and_a_new_file_refuse_names_windows_does_not_allow() {
     ];
     if cfg!(windows) {
         // New file opens the editor once made: only where it is refused.
-        cases.push(("Alt+q,n,u,l,.,t,x,t,Enter", "nul.txt"));
+        cases.push(("Shift+F4,n,u,l,.,t,x,t,Enter", "nul.txt"));
     }
     for (keys, name) in cases {
         let s = shot_keys("110x24", keys, &a, &b);

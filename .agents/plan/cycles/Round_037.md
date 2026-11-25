@@ -164,8 +164,12 @@ planned for 0.5.
   built in (`lang/` moved to `crates/xdevcmd/lang/` so the crate package has it; test
   harnesses pin `LC_MESSAGES=C`; +145 KB); `5f75aad` a folder moved onto a folder merges
   on one drive, `--help` says Alt+X q, README's CI/hand-test/provenance wording.
-  Open: B3 (sync new files before a job ends) placement, beta.4 or beta.5: the owner's
-  call, with a bench before and after.
+  B3: the owner put it in beta.4 (2026-11-26). `c37a1b1`: new files synced in batches
+  (128 files / 64 MiB / 1 s) and before any done mark, checkpoint and the job's end
+  (Event::Syncing, "writing N new files to the disk…"); a folder waits on the group
+  batch, the fresh batch or both (`Waiting`). Bench, Linux ext4 median of 5: copy small
+  files +23 %, mixed +5 %, one 256 MiB file +0.3 s. ROADMAP's rc.1 row still names B3:
+  the owner's edit (read-only for agents).
 
 ## Check
 

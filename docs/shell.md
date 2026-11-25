@@ -208,7 +208,7 @@ offers **Stop logging**.
   log stops, the status line says why, a text log ends with a line saying so, and ●
   becomes a red **!** until you stop it.
 
-Logging every shell (`[terminal] log`) is planned for 0.5.
+Logging every shell, by a setting, is planned for 0.5.
 
 ## Telling xdevcmd where the shell is
 

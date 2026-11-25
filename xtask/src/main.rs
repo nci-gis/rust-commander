@@ -59,6 +59,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+mod docs;
 mod lang;
 mod manual;
 mod qa;
@@ -105,6 +106,13 @@ fn main() {
         Some("manual") => manual::run(&args[1..], built_from().unwrap_or("unknown")),
         // The maintainer's checks around a cut; not in --help (needs the repository).
         Some("qa") => qa::run(&args[1..]),
+        Some("docs") => match docs::run(&args[1..]) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        },
         Some("lang") => match lang::run(&args[1..]) {
             Ok(()) => 0,
             Err(e) => {

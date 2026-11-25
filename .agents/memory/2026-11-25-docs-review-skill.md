@@ -3,7 +3,7 @@
 **Date**: 2026-11-25
 **Agent**: Claude Code
 **Confidence**: Medium
-**Status**: New
+**Status**: Promoted (skills/docs-review/SKILL.md, 2026-11-25)
 **Source**: Round 038 (the owner, 2026-11-25: a skill the user calls when wanted, a
 ledger of the last review per page with its hash)
 **Review-by**: 2026-12-31

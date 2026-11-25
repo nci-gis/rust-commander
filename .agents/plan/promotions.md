@@ -330,3 +330,13 @@ code, past Round 035's freeze on the owner's word: `faults::test_trash`
 `ops::send_to_trash`, so M-DS-01's replace through the trash is killed on every system.
 **Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.
 
+
+## 2026-11-25: the docs-review skill, and a ledgers folder
+
+**Source**: the owner, 2026-11-25: "3) mình approve nhé" (promote the docs-review skill),
+and "nên lưu ở: .agents/lesgers/docs-review.tsv" (written `ledgers/`).
+**What**: `skills/docs-review/SKILL.md`, from `memory/2026-11-25-docs-review-skill.md`
+(now Promoted), with the ledger at `.agents/ledgers/docs-review.tsv` and the steps of
+`xtask docs check` and `xtask docs status`. `AGENTS.md`'s directory map does not list
+`ledgers/` yet: that edit waits for the owner's word.
+**Promoted by**: XDevTeam (approval = merging this PR). Written by Claude Code.

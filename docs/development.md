@@ -189,6 +189,17 @@ is the walk, directories, the journal and waiting for answers. `small_ms` agains
 - `lang/template.txt`: `cargo xtask lang template > lang/template.txt`, after adding or
   changing a `tr!` or `Text::new`. A test fails if it is out of date.
 
+## Docs that say what the code does
+
+```sh
+cargo xtask docs check    # links and #anchors, xdevcmd --flags, XDEVCMD_*, [section] keys
+cargo xtask docs status   # each page: never reviewed, page changed, code changed, ok
+```
+
+The sentences are reviewed on demand by an agent with the `docs-review` skill
+(`.agents/skills/docs-review/`), which writes the last review of each page to
+`.agents/ledgers/docs-review.tsv`. A test checks every link and anchor on each run.
+
 ## Languages
 
 A text on screen is written `tr!("key", "English")` (`tr!("key", "{n} files", n = x)`

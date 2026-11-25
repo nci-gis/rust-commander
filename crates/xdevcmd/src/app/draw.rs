@@ -733,13 +733,36 @@ impl App {
             return;
         }
         // In the shell the F-keys are the shell's: a bar saying "8 Del" there lies, and
-        // a click on it acted on the files behind (plan A10, UX). The status line above
-        // says how back (F12).
+        // a click on it acted on the files behind (plan A10, UX). So the bar is three
+        // buttons, with no key on them, for the mouse (the owner, 2026-11-25: way B);
+        // their keys from the shell (Alt+X F1, Alt+X q) are in the docs. Quit there is
+        // quit_no_cd, as Alt+X q.
         if self.focus_is_term() {
-            frame
-                .buffer_mut()
-                .set_style(area, Style::new().bg(theme::t().bg_bar));
-            self.hits.footer_hits.clear();
+            const BUTTONS: &[(Action, Text)] = &[
+                (Action::Help, Text::new("keybar.help", "Help")),
+                (Action::MenuBar, Text::new("keybar.menu", "Menu")),
+                (Action::QuitNoCd, Text::new("keybar.quit", "Quit")),
+            ];
+            let th = theme::t();
+            let style = Style::new().fg(th.fg_dim);
+            let mut spans = Vec::new();
+            let mut hits = Vec::new();
+            let mut cx = area.x;
+            for (action, label) in BUTTONS {
+                let text = format!(" [ {} ] ", label.get());
+                let w = text.cells() as u16;
+                if cx + w > area.x + area.width {
+                    break;
+                }
+                // The click lands on the brackets and the word, not the spaces around.
+                hits.push((*action, Rect::new(cx + 1, area.y, w - 2, 1)));
+                cx += w;
+                spans.push(Span::styled(text, style));
+            }
+            let buf = frame.buffer_mut();
+            buf.set_style(area, Style::new().bg(th.bg_bar));
+            buf.set_line(area.x, area.y, &Line::from(spans), area.width);
+            self.hits.footer_hits = hits;
             return;
         }
         // Read from the keymap, not written down: after `copy = ["F2"]` a bar that still

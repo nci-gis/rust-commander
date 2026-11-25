@@ -345,7 +345,7 @@ directory when you quit: [shell.md](shell.md).
 | **Shift+F12** (or **Alt+X F12**) | The shell's history in the viewer, at its end: search with `/`, drag and `y` to copy, **Esc** back. While a full-screen program is up, its screen only |
 | **Alt+C** | `cd` the shell to this directory (a new shell if you typed something not yet run) |
 | **Alt+T** | Hide or show the terminal; `exit` closes one |
-| **Ctrl+O** | Says the shell is F12 (mc's shell key). In the shell the F-key bar is hidden |
+| **Ctrl+O** | Says the shell is F12 (mc's shell key). In the shell the F-key bar gives way to three buttons for the mouse, **[ Help ] [ Menu ] [ Quit ]**: the F-keys there are the program's (from the keyboard: Alt+X F1, Alt+X q) |
 
 - **A right-click on a terminal tab**: View history, Save history as…, Log to file… (or
   Stop logging), List from the last command…, Close tab. Inside the shell a right-click

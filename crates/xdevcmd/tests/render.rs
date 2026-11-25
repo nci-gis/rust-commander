@@ -2102,7 +2102,8 @@ fn closing_shells_then_the_last_one_removes_the_panel() {
 }
 
 /// Plan A10, UX: Ctrl+O, mc's shell key, says where the shell is; in the shell the F-key
-/// bar is gone (its keys are the shell's), and back in the files it is there again.
+/// bar is gone (its keys are the shell's): three buttons with no key take its place (the
+/// owner, 2026-11-25), and back in the files it is there again.
 #[test]
 fn ctrl_o_names_the_shell_and_the_key_bar_hides_in_it() {
     let (a, b) = files(&["alpha.txt"]);
@@ -2114,6 +2115,28 @@ fn ctrl_o_names_the_shell_and_the_key_bar_hides_in_it() {
     assert!(
         !shell.contains("8 Del"),
         "the bar shows in the shell\n{shell}"
+    );
+    let bar = shell.lines().last().unwrap_or_default();
+    assert!(
+        bar.contains("[ Help ]") && bar.contains("[ Menu ]") && bar.contains("[ Quit ]"),
+        "{shell}"
+    );
+    assert!(
+        !bar.contains("F1") && !bar.contains("Alt+X"),
+        "no key on them\n{bar}"
+    );
+    // A click on [ Menu ] opens the menu bar, from the shell.
+    let x = bar.find("[ Menu ]").unwrap() as u16 + 2;
+    let rows = SIZE.split('x').nth(1).unwrap();
+    let menu = shot_keys(
+        SIZE,
+        &format!("F12,click:{x}:{}", rows.parse::<u16>().unwrap() - 1),
+        &a,
+        &b,
+    );
+    assert!(
+        menu.contains("Copy as") && menu.contains("\u{2502} View"),
+        "{menu}"
     );
     let back = shot_keys(SIZE, "F12,F12", &a, &b);
     assert!(back.contains("8 Del"), "{back}");

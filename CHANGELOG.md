@@ -20,6 +20,8 @@ that heading and starts a new, empty one here. -->
 
 - **Alt+X q quits from the shell**, as it does from a file pane; `q` alone stays the
   program's there.
+- **In the shell, the key bar is three buttons**: [ Help ] [ Menu ] [ Quit ], for the
+  mouse, with no key on them (the F-keys there are the program's).
 
 ### Fixed
 - **Names Windows does not allow are refused before they are made** by F7, a new file,

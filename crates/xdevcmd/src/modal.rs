@@ -511,6 +511,8 @@ pub struct Job {
     pub total_bytes: u64,
     pub bytes_done: u64,
     pub current: Option<PathBuf>,
+    /// The job's last new files are going to the disk (B3): how many.
+    pub syncing: Option<u64>,
     pub question: Option<Question>,
     pub done: Option<Summary>,
     /// Its box's title when not the kind's verb: "Undo the copy".
@@ -540,6 +542,7 @@ impl Job {
             total_bytes: 0,
             bytes_done: 0,
             current: None,
+            syncing: None,
             question: None,
             done: None,
             title: None,
@@ -590,7 +593,9 @@ impl Job {
                 ops::Event::Begin { path } => {
                     self.current = Some(path);
                     self.retrying = None;
+                    self.syncing = None;
                 }
+                ops::Event::Syncing { files } => self.syncing = Some(files),
                 ops::Event::Progress {
                     bytes_done,
                     files_done,
@@ -598,6 +603,7 @@ impl Job {
                     self.bytes_done = bytes_done;
                     self.files_done = files_done;
                     self.retrying = None;
+                    self.syncing = None;
                     self.rate.observe(
                         std::time::Instant::now(),
                         bytes_done,
@@ -1392,11 +1398,11 @@ fn render_job(frame: &mut Frame, area: Rect, j: &mut Job) {
             }
         }
         None => {
-            let what = j
-                .current
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "scanning…".to_string());
+            let what = match (j.syncing, &j.current) {
+                (Some(n), _) => tr!("modal.syncing", "writing {n} new files to the disk…", n = n),
+                (None, Some(p)) => p.display().to_string(),
+                (None, None) => "scanning…".to_string(),
+            };
             put(frame, inner, 0, &what, Style::new().fg(th.fg));
             put(
                 frame,

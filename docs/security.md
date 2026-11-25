@@ -52,7 +52,7 @@ against attacks on names, files and the shell before release.
 | What ends the run | With safe operations on |
 |---|---|
 | **A kill** (`kill -9`, a crash; on Windows, the terminal's close button too) | No file is ever cut short under its real name: it holds the old file or the complete new one. The next start tidies up, and offers to continue a copy, a move or a delete to the trash (a sync, an extract, a pack and rename many are tidied up only). |
-| **A power cut** | A file replaced is the old one or the complete new one; a source moved across drives is never gone before its copy is on disk. But a **new** file copied just before the cut can be short or empty under its real name: continue with **C** (below). |
+| **A power cut** | A file replaced is the old one or the complete new one; a source moved across drives is never gone before its copy is on disk; a finished job's files are all on disk. A **new** file copied within about a second of the cut can be short or empty under its real name; the job's journal is still there: continue with **C** (below). |
 
 **Covered**: F5 copy, F6 move, Shift+F5 copy as, Alt+Y sync, extracting (F5 inside an
 archive, Alt+F9), Alt+F5 pack, and Shift+F2 rename many. **Not covered**, because
@@ -149,10 +149,14 @@ rename on disk before the data. So, with safe operations on or off:
   machine). A copy that cannot be synced is removed and its source kept.
 - **The journal** is synced, with its folder, when a job starts and before each step
   that cannot be undone.
-- **Not synced, on purpose**: a new file copied onto the same drive, and the end of a
-  job. Syncing every new file would make copying many small files several times slower,
-  for a protection only a power cut needs. A later version will sync new files before a
-  job ends.
+- **New files**, with safe operations on: synced together after they take their real
+  names, 128 files (or 64 MiB, or a second's worth) at a time on the same threads, then
+  their folders; and always before a folder or a source is marked done in the journal,
+  before a big file's checkpoint, and before the job ends ("writing N new files to the
+  disk…"). Until its batch is synced a new file can be short after a power cut, and the
+  journal is kept to cover it. Measured on Linux (median of 5): small files 23 % slower,
+  a mixed tree 5 %, one 256 MiB file 0.3 s more, the time its data takes to reach the
+  disk. With safe operations off, new files are not synced.
 
 ### Replacing a file
 

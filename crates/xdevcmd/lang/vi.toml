@@ -843,6 +843,7 @@ same_directory_as_the_source_u = "Cùng thư mục với nguồn — không có 
 skipped = " · bỏ qua {skipped_failed}"
 skipped_going_on_with_the_next = "đã bỏ qua {name}: làm tiếp tệp kế"
 stopped_an_internal_error_crash_log = "đã dừng: lỗi nội bộ (đã ghi crash log); lần chạy sau sẽ dọn dẹp"
+syncing = "đang ghi {n} tệp mới xuống đĩa…"
 the_share_looks_down_s_will = "Ổ mạng có vẻ đã mất: S nhiều khả năng sẽ gặp lại lỗi này ở tệp kế."
 trying_again = "đang thử lại {name}"
 trying_again_in_s = "thử lại sau {secs} giây"

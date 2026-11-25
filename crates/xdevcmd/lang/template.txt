@@ -845,6 +845,7 @@ same_directory_as_the_source_u = "Same directory as the source — nothing would
 skipped = " · {skipped_failed} skipped"
 skipped_going_on_with_the_next = "skipped {name}: going on with the next file"
 stopped_an_internal_error_crash_log = "stopped: an internal error (crash log written); the next start tidies up"
+syncing = "writing {n} new files to the disk…"
 the_share_looks_down_s_will = "The share looks down: S will most likely meet the same error on the next file."
 trying_again = "trying {name} again"
 trying_again_in_s = "trying again in {secs} s"

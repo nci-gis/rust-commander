@@ -302,6 +302,9 @@ impl Worker {
             }
             if made {
                 self.made(dst, None);
+                if self.safe && !self.moving {
+                    self.fresh.dirs.push(dst.to_path_buf());
+                }
             }
             // Moving: a directory made here keeps its name in a power cut before any
             // source under it is removed (its files sync their own names).
@@ -800,7 +803,13 @@ impl Worker {
                         .map(|()| true);
                     self.lap(Phase::Finish, &mut t);
                     if r.is_ok() {
-                        keep(self, w);
+                        if self.moving || self.on_network(dst) {
+                            // A move's copies sync with their batch; a network file
+                            // was synced before its rename.
+                            keep(self, w);
+                        } else {
+                            self.fresh_file(dst, w, meta.len());
+                        }
                     }
                     r
                 } else if self.group_takes(dst, meta.len()) {
@@ -945,7 +954,7 @@ impl Worker {
                 drop(p.file);
                 let _ = fs::remove_file(&p.tmp);
             }
-            self.finished.clear();
+            self.finished.retain(|w| !w.group);
             self.group.flushing = false;
             return;
         }
@@ -1058,12 +1067,101 @@ impl Worker {
         self.group.flushing = false;
         // The folders whose last files were in this batch: finished, if it went through
         // without a failure. Otherwise a resume walks them again, which is only slower.
-        let waiting = std::mem::take(&mut self.finished);
-        if self.sum.failed == failed_before && !self.stopped() {
-            for d in waiting {
-                self.tell_finished(&d);
+        let ok = self.sum.failed == failed_before && !self.stopped();
+        self.settle(ok, |w| &mut w.group);
+    }
+
+    /// What a folder waits on (`which` of [`Waiting`]) is through, `ok` if without a
+    /// failure: the folders waiting on it are dropped if not, else freed of it, and
+    /// those waiting on nothing more are told to the journal.
+    fn settle(&mut self, ok: bool, which: fn(&mut Waiting) -> &mut bool) {
+        let mut tell = Vec::new();
+        self.finished.retain_mut(|w| {
+            if !*which(w) {
+                return true;
+            }
+            if !ok {
+                return false;
+            }
+            *which(w) = false;
+            if w.group || w.fresh {
+                return true;
+            }
+            tell.push(std::mem::take(&mut w.dir));
+            false
+        });
+        for d in tell {
+            self.tell_finished(&d);
+        }
+    }
+
+    /// A new file that took its real name, `w` its handle (B3): kept for its batch's
+    /// sync, which runs once the batch is full or its first file has waited long
+    /// enough. Without safe operations a new file is not synced, as before.
+    pub(super) fn fresh_file(&mut self, dst: &Path, w: File, size: u64) {
+        if !self.safe {
+            return;
+        }
+        let f = &mut self.fresh;
+        f.files.push((dst.to_path_buf(), w));
+        f.bytes += size;
+        let since = *f.since.get_or_insert_with(std::time::Instant::now);
+        if f.files.len() >= FRESH_BATCH_FILES
+            || f.bytes >= FRESH_BATCH_BYTES
+            || since.elapsed() >= GROUP_BATCH_AGE
+        {
+            self.sync_fresh();
+        }
+    }
+
+    /// B3: the new files and folders so far to the disk, data and names, then the
+    /// sources and folders waiting on them told to the journal as done, if nothing in
+    /// the batch failed. A file whose sync failed is reported (its data may be lost:
+    /// fsyncgate) and nothing waiting is told, so a resume goes over it again.
+    pub(super) fn sync_fresh(&mut self) {
+        if self.fresh.is_empty() {
+            return;
+        }
+        let fresh = std::mem::take(&mut self.fresh);
+        let failed_before = self.sum.failed;
+        let mut t = self.clock();
+        // Run in the middle of another file's copy too: its step is put back after.
+        let phase = std::mem::replace(&mut self.phase, "sync");
+        let threads = self.group.threads_now();
+        let errors = sync_each(&fresh.files, threads, |(path, file)| {
+            crate::faults::sync_data(file, path)
+        });
+        for ((path, _), e) in fresh.files.iter().zip(errors) {
+            if let Some(e) = e {
+                self.note_error(path, &e);
             }
         }
+        // The names: each folder a new file or folder went into.
+        let folders: std::collections::BTreeSet<&Path> = fresh
+            .files
+            .iter()
+            .map(|(p, _)| p.as_path())
+            .chain(fresh.dirs.iter().map(PathBuf::as_path))
+            .filter_map(Path::parent)
+            .collect();
+        for d in folders {
+            if let Err(e) = crate::faults::sync_dir(d) {
+                self.note_error(d, &e);
+            }
+        }
+        drop(fresh);
+        self.lap(Phase::Sync, &mut t);
+        self.phase = phase;
+        let ok = self.sum.failed == failed_before && !self.stopped();
+        let sources = std::mem::take(&mut self.sources_waiting);
+        if ok {
+            for src in sources {
+                if let Some(j) = self.journal.as_mut() {
+                    let _ = j.done(&src);
+                }
+            }
+        }
+        self.settle(ok, |w| &mut w.fresh);
     }
 
     /// A folder of a copy finished without a failure: a resume need not walk it again.
@@ -1073,10 +1171,15 @@ impl Worker {
         if !self.copying || self.moving || self.journal.is_none() {
             return;
         }
-        if self.group.pending.is_empty() {
-            self.tell_finished(src);
+        let (group, fresh) = (!self.group.pending.is_empty(), !self.fresh.is_empty());
+        if group || fresh {
+            self.finished.push(Waiting {
+                dir: src.to_path_buf(),
+                group,
+                fresh,
+            });
         } else {
-            self.finished.push(src.to_path_buf());
+            self.tell_finished(src);
         }
     }
 
@@ -1130,6 +1233,14 @@ impl Worker {
     /// which goes round as any write error; a failed line only breaks the journal,
     /// which is asked about before the next step that needs it.
     pub(super) fn tick(&mut self, w: &File, n: u64) -> io::Result<()> {
+        // B3: new files before it wait no longer than a batch may, a big file or not.
+        if self
+            .fresh
+            .since
+            .is_some_and(|s| s.elapsed() >= GROUP_BATCH_AGE)
+        {
+            self.sync_fresh();
+        }
         let Some(c) = self.ckpt.as_mut() else {
             return Ok(());
         };
@@ -1137,6 +1248,14 @@ impl Worker {
         if c.part.bytes < c.next {
             return Ok(());
         }
+        // A checkpoint is a point a resume goes on from: what was copied before it is
+        // on the disk first (B3).
+        if !self.fresh.is_empty() {
+            self.sync_fresh();
+        }
+        let Some(c) = self.ckpt.as_mut() else {
+            return Ok(());
+        };
         let t = std::time::Instant::now();
         crate::faults::sync_data(w, &c.part.part)?;
         c.next = c.part.bytes + self.checkpoint;

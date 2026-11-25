@@ -1454,6 +1454,100 @@ fn a_journal_that_cannot_be_begun_is_asked_about_before_anything_is_done() {
 }
 
 /// The points a trace saw, in order, as their names.
+/// B3: with safe operations, every new file is on the disk, data and name, before the
+/// job ends: each is synced under its real name, and so is each folder one went into.
+/// Without them, as before, a new file is not synced.
+#[test]
+fn new_files_are_synced_before_the_job_ends() {
+    for safe in [true, false] {
+        let root = tmp(if safe { "b3-safe" } else { "b3-fast" });
+        let (src, dst) = (root.join("src"), root.join("dst"));
+        fs::create_dir_all(src.join("in")).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        for f in ["a", "b", "in/c"] {
+            fs::write(src.join(f), f).unwrap();
+        }
+        let traced: Vec<(crate::faults::Point, PathBuf)> = {
+            let frag = dst.to_string_lossy().into_owned();
+            crate::faults::trace(&frag);
+            let mut req = Request::copy(vec![src.clone()], dst.clone());
+            req.safe = safe;
+            let s = run(req);
+            assert_eq!(s.failed, 0, "{s:?}");
+            crate::faults::traced(&frag)
+        };
+        let synced =
+            |point: &str, p: &Path| traced.iter().any(|(x, q)| x.name() == point && q == p);
+        for f in ["a", "b", "in/c"] {
+            let at = dst.join("src").join(f);
+            assert_eq!(
+                synced("sync-data", &at),
+                safe,
+                "{f}, safe {safe}: {traced:?}"
+            );
+        }
+        if safe && cfg!(unix) {
+            for d in [dst.join("src"), dst.join("src/in"), dst.clone()] {
+                assert!(synced("sync-dir", &d), "{d:?}: {traced:?}");
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+/// B3: before its last sync, the job says so (the bar can stand full a while), and
+/// says how many new files are going to the disk; then it is done.
+#[test]
+fn the_last_sync_is_said_before_the_job_is_done() {
+    let root = tmp("b3-said");
+    fs::create_dir_all(root.join("dst")).unwrap();
+    fs::write(root.join("f"), "x").unwrap();
+    let mut req = Request::copy(vec![root.join("f")], root.join("dst"));
+    req.safe = true;
+    let h = start(req);
+    let mut said = None;
+    loop {
+        match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+            Event::Syncing { files } => said = Some(files),
+            Event::Done(s) => {
+                assert_eq!(s.failed, 0, "{s:?}");
+                break;
+            }
+            Event::Ask(_) => h.answer(Answer::Yes),
+            _ => {}
+        }
+    }
+    assert_eq!(said, Some(1));
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// B3: a new file whose sync fails is reported, and its folder is not told to the
+/// journal as finished, so a continue goes over it again.
+#[test]
+fn a_new_file_whose_sync_fails_is_reported_and_its_folder_not_told() {
+    journals();
+    let root = tmp("b3-fail");
+    let (src, dst) = (root.join("src"), root.join("dst"));
+    fs::create_dir_all(src.join("sub")).unwrap();
+    fs::create_dir_all(&dst).unwrap();
+    fs::write(src.join("sub/b3-bad.txt"), "x").unwrap();
+    fs::write(src.join("sub/b3-ok.txt"), "y").unwrap();
+    let _f = crate::faults::fail(
+        crate::faults::Point::SyncData,
+        "b3-bad.txt",
+        1,
+        crate::faults::Fault::Os(5),
+    );
+    let mut req = Request::copy(vec![src.clone()], dst.clone());
+    req.safe = true;
+    let s = run(req);
+    assert_eq!(s.failed, 1, "{s:?}");
+    assert!(s.errors.iter().any(|e| e.contains("b3-bad.txt")), "{s:?}");
+    let told = TOLD.lock().unwrap().clone();
+    assert!(!told.contains(&src.join("sub")), "{told:?}");
+    let _ = fs::remove_dir_all(&root);
+}
+
 fn points(fragment: &str) -> Vec<&'static str> {
     crate::faults::traced(fragment)
         .into_iter()

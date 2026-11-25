@@ -50,6 +50,12 @@ that heading and starts a new, empty one here. -->
   question.
 - **A very deep folder tree no longer ends xdevcmd**: planning, copying and counting
   sizes ran out of stack at about 1,500 levels, which closed the whole program.
+- **New files are on the disk when a job ends** (with safe operations on): they are
+  synced in batches, 128 files or 64 MiB or a second at a time, and before a folder is
+  marked done in the journal, so a power cut loses at most the last batch, which the
+  journal still covers (continue with C). The last batch says "writing N new files to
+  the disk…". Copying many small files is about 23 % slower, a 256 MiB file 0.3 s
+  (Linux); see [security.md](docs/security.md#what-is-synced-and-when).
 - **Moving a folder onto a folder of the same name merges them** on one drive too, as
   the plan says and as a move across drives does. Before, it stopped with "0 moved,
   1 failed" (the system refuses to rename onto a folder that is not empty).

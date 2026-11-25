@@ -842,6 +842,7 @@ same_directory_as_the_source_u = "元と同じディレクトリです — 何�
 skipped = " · スキップ {skipped_failed}"
 skipped_going_on_with_the_next = "{name} をスキップ: 次のファイルへ"
 stopped_an_internal_error_crash_log = "停止: 内部エラー (クラッシュログを書き出しました)。次回の起動で片付けます"
+syncing = "新しいファイル {n} 個をディスクに書き込み中…"
 the_share_looks_down_s_will = "共有が落ちているようです: S でも次のファイルで同じエラーになる可能性が高いです。"
 trying_again = "{name} を再試行中"
 trying_again_in_s = "{secs} 秒後に再試行"

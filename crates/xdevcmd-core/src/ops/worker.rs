@@ -23,6 +23,11 @@ pub enum Event {
         of: u32,
         wait: std::time::Duration,
     },
+    /// The job's last new files going to the disk (B3): with a slow drive the bar
+    /// can stand full a while. Cleared by the next `Begin`, `Progress` or `Done`.
+    Syncing {
+        files: u64,
+    },
     Ask(Question),
     Done(Summary),
 }
@@ -132,6 +137,8 @@ pub fn start(req: Request) -> Handle {
             },
             verify: req.verify && req.existing == Existing::Resume,
             finished: Vec::new(),
+            fresh: Fresh::default(),
+            sources_waiting: Vec::new(),
             dbg: crate::debuglog::on(crate::debuglog::Topic::Jobs).then(|| {
                 Box::new(Dbg {
                     job: crate::debuglog::next_job(),
@@ -253,9 +260,14 @@ pub(super) struct Worker {
     pub(super) done_dirs: std::collections::HashSet<PathBuf>,
     /// [`Request::verify`]: an identical-looking destination is compared byte by byte.
     pub(super) verify: bool,
-    /// Folders copied without a failure whose last files wait in the group batch: told
-    /// to the journal once that batch is through without one.
-    pub(super) finished: Vec<PathBuf>,
+    /// Folders copied without a failure whose last files wait for a sync: told to the
+    /// journal once what they wait on is through without one.
+    pub(super) finished: Vec<Waiting>,
+    /// B3: new files under their real names, and new folders, not yet synced.
+    pub(super) fresh: Fresh,
+    /// Sources finished whose new files wait in [`Worker::fresh`]: told to the journal
+    /// as done once that batch is synced without a failure.
+    pub(super) sources_waiting: Vec<PathBuf>,
     /// The debug log's record of this job ([`crate::debuglog`]), when it logs jobs.
     pub(super) dbg: Option<Box<Dbg>>,
     /// The step under way, for the debug log's error lines.
@@ -313,6 +325,33 @@ pub(super) struct Ckpt {
     pub(super) part: crate::journal::Partial,
     /// Where the next checkpoint is due.
     pub(super) next: u64,
+}
+
+/// A finished folder and what it waits on before the journal is told: the group batch
+/// (its replacements), the fresh batch (its new files, B3), or both. A failure in one
+/// drops only the folders that wait on it.
+pub(super) struct Waiting {
+    pub(super) dir: PathBuf,
+    pub(super) group: bool,
+    pub(super) fresh: bool,
+}
+
+/// B3: new files that took their real names, handles open, and the folders made, not
+/// yet synced. Synced a batch at a time ([`Worker::sync_fresh`]), and always before a
+/// source or folder is told to the journal as done and before the job ends: a power
+/// cut then leaves a journal whose continue covers every file not on the disk whole.
+#[derive(Default)]
+pub(super) struct Fresh {
+    pub(super) files: Vec<(PathBuf, File)>,
+    pub(super) dirs: Vec<PathBuf>,
+    pub(super) bytes: u64,
+    pub(super) since: Option<std::time::Instant>,
+}
+
+impl Fresh {
+    pub(super) fn is_empty(&self) -> bool {
+        self.files.is_empty() && self.dirs.is_empty()
+    }
 }
 
 /// A replacement written under its temporary name, its handle open, waiting for the
@@ -437,17 +476,28 @@ pub(super) fn group_default_threads() -> usize {
 /// Sync every pending file's data on `threads` threads, each taking the next file: per
 /// file, the error if its sync failed.
 pub(super) fn sync_all(batch: &[Pending], threads: usize) -> Vec<Option<io::Error>> {
+    sync_each(batch, threads, |p| {
+        crate::faults::sync_data(&p.file, &p.tmp)
+    })
+}
+
+/// `sync` on each of `items`, on up to `threads` threads; each item's error, in order.
+pub(super) fn sync_each<T: Sync>(
+    items: &[T],
+    threads: usize,
+    sync: impl Fn(&T) -> io::Result<()> + Sync,
+) -> Vec<Option<io::Error>> {
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut out: Vec<Option<io::Error>> = (0..batch.len()).map(|_| None).collect();
+    let mut out: Vec<Option<io::Error>> = (0..items.len()).map(|_| None).collect();
     let failed: Vec<(usize, io::Error)> = std::thread::scope(|s| {
-        let workers: Vec<_> = (0..threads.clamp(1, batch.len().max(1)))
+        let workers: Vec<_> = (0..threads.clamp(1, items.len().max(1)))
             .map(|_| {
                 s.spawn(|| {
                     let mut bad = Vec::new();
                     loop {
                         let i = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(p) = batch.get(i) else { break };
-                        if let Err(e) = crate::faults::sync_data(&p.file, &p.tmp) {
+                        let Some(item) = items.get(i) else { break };
+                        if let Err(e) = sync(item) {
                             bad.push((i, e));
                         }
                     }
@@ -640,11 +690,16 @@ impl Worker {
                 Kind::Extract | Kind::Pack => {}
             }
             // Finished with this source (not stopped part way): a resume leaves it.
-            // Its batch first: a resume leaves a source marked done.
+            // Its batches first: a resume leaves a source marked done. Its new files may
+            // wait for their batch (B3): told then, so many small sources share a sync.
             self.flush_group();
             if !self.stopped() && matches!(req.kind, Kind::Copy | Kind::Move) {
-                if let Some(j) = self.journal.as_mut() {
-                    let _ = j.done(src);
+                if self.fresh.is_empty() {
+                    if let Some(j) = self.journal.as_mut() {
+                        let _ = j.done(src);
+                    }
+                } else {
+                    self.sources_waiting.push(src.clone());
                 }
             }
         }
@@ -726,6 +781,12 @@ impl Worker {
         // first): they would never be finished.
         self.drop_partials();
         self.flush_group();
+        // B3: every new file on the disk before the job says it is done.
+        if !self.fresh.files.is_empty() {
+            let files = self.fresh.files.len() as u64;
+            let _ = self.tx.send(Event::Syncing { files });
+        }
+        self.sync_fresh();
         self.sum.cancelled = self.cancel.load(Ordering::Relaxed) || self.abort;
         self.sum.bytes = self.bytes_done;
         if let Some(why) = self.journal.as_ref().and_then(|j| j.broken()) {

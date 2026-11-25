@@ -33,6 +33,11 @@ const GROUP_BATCH_AGE: std::time::Duration = std::time::Duration::from_secs(1);
 const GROUP_PROBE_AFTER: u64 = 1000;
 /// The thread counts the probe tries (the owner: 2 rather than 1, at most 32).
 const GROUP_PROBE: [usize; 4] = [2, 8, 16, 32];
+/// B3: new files under their real names wait for one parallel sync of their batch,
+/// this many files (each holds its handle open until then)...
+const FRESH_BATCH_FILES: usize = 128;
+/// ...or this many bytes, or once the first has waited [`GROUP_BATCH_AGE`].
+const FRESH_BATCH_BYTES: u64 = 64 << 20;
 /// A big file copied under a temporary name is synced every this many bytes and the
 /// journal told how far it got, so a run that dies goes on from there (Round 033): at
 /// most this much is copied again. A file no bigger has no checkpoint.

@@ -156,6 +156,16 @@ planned for 0.5.
 - `docs/config.md`: Languages; the docs-example test loads a `# lang/<file>` example as a
   language file.
 - All local (the owner's rule for this branch): workspace tests, clippy, fmt.
+- 2026-11-26, after the pre-rc independent review
+  (`memory/2026-11-25-pre-rc-independent-review.md`), the owner chose option A (fix the
+  P0s in beta.4; rc fixes only). Done, each with a test that failed first:
+  `6871143` the plan no longer folds case where the case rule is unknown, and tree
+  walks run on a 256 MiB stack (1,900 levels planned and copied); `019018c` vi and ja
+  built in (`lang/` moved to `crates/xdevcmd/lang/` so the crate package has it; test
+  harnesses pin `LC_MESSAGES=C`; +145 KB); `5f75aad` a folder moved onto a folder merges
+  on one drive, `--help` says Alt+X q, README's CI/hand-test/provenance wording.
+  Open: B3 (sync new files before a job ends) placement, beta.4 or beta.5: the owner's
+  call, with a bench before and after.
 
 ## Check
 

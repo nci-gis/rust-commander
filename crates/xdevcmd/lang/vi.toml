@@ -1086,6 +1086,7 @@ is_written_in_a_way_settings = "{path} được viết theo cách mà Cài đặ
 "keys.f1" = "Mọi phím đều có trong F1, kèm tên để gán lại."
 "keys.how" = "Để đổi một phím, viết nó dưới [keys] trong config.toml:"
 "languages.auto" = "auto - theo locale - ({code})"
+"languages.built_in" = "có sẵn"
 "languages.english" = "English - en - có sẵn"
 "languages.note" = "Chữ trên màn hình, từ lần chạy sau. Ngôn ngữ của riêng bạn: xem docs/language.md"
 nowhere_to_save_no_config_location = "không có chỗ lưu: không có thư mục cấu hình (HOME chưa đặt)"

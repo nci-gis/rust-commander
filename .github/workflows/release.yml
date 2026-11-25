@@ -111,8 +111,9 @@ jobs:
           cp LICENSE README.md THIRD-PARTY.md "$name/"
           # Example themes: read from themes/ beside the binary, so they work unpacked.
           cp -r themes "$name/"
-          # Language files: read from lang/ beside the binary (beta.4).
-          cp -r lang "$name/"
+          # Language files: built in, and also in lang/ beside the binary, where a user
+          # can read and change them; template.txt is the start of a new one.
+          cp -r crates/xdevcmd/lang "$name/"
           # This version's documentation, for a machine without a browser or a network:
           # Help → Documentation names docs/ beside the binary first.
           mkdir "$name/docs"

@@ -1085,6 +1085,7 @@ is_written_in_a_way_settings = "{path} は設定画面で安全に変更でき�
 "keys.f1" = "すべてのキーは F1 にあり、割り当て直すための名前も載っています。"
 "keys.how" = "変更するには config.toml の [keys] に書きます:"
 "languages.auto" = "auto - ロケールで判定 - ({code})"
+"languages.built_in" = "組み込み"
 "languages.english" = "English - en - 組み込み"
 "languages.note" = "画面の言葉。次回の起動から。独自の言語: docs/language.md を参照"
 nowhere_to_save_no_config_location = "保存先がありません: 設定の場所がありません (HOME 未設定)"

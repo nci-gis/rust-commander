@@ -5,8 +5,9 @@
 //! `tr!("job.copied", "copied {n} files", n = count)`. That English is what shows unless a
 //! language file gives the key another text. A language file is TOML, one key per line,
 //! named for its language: `lang/vi.toml`, `lang/ja.toml`, `lang/xx.toml` (any name: a
-//! pseudo-language of one's own is fine). xdevcmd looks in two folders, the user's last
-//! so it wins: `lang/` beside the program (what a release ships), then `lang/` in the
+//! pseudo-language of one's own is fine). The languages a release ships are built in
+//! ([`BUILT_IN`]); over them, xdevcmd reads two folders, the user's last so it wins:
+//! `lang/` beside the program (what a release archive ships), then `lang/` in the
 //! config folder (what the user adds or changes).
 //!
 //! ```toml
@@ -99,15 +100,46 @@ pub struct Language {
     pub code: String,
     /// What a user reads: `$__name`, else the ISO name of the code, else the code.
     pub name: String,
+    /// Built into the program ([`BUILT_IN`]): it loads first, under its files.
+    pub built_in: Option<&'static str>,
     /// Its files, in the order they load (the config folder's last).
     pub files: Vec<PathBuf>,
+}
+
+/// The languages a release ships, built into the program too, so that every way of
+/// installing it has them (`cargo install` and `cargo binstall` bring the program alone).
+/// A file of the same code in a `lang/` folder loads over it, key by key.
+pub const BUILT_IN: &[(&str, &str)] = &[
+    ("ja", include_str!("../lang/ja.toml")),
+    ("vi", include_str!("../lang/vi.toml")),
+];
+
+/// What a built-in language's text says of itself: its `$__name`, if any.
+fn own_name(text: &str) -> Option<String> {
+    let table = text.parse::<toml::Table>().ok()?;
+    table.get("$__name").and_then(|v| v.as_str()).and_then(id)
 }
 
 /// Every language in `folders`, by code: each `*.toml` that reads as TOML, its `$__code`
 /// and `$__name` read. A file that does not read is not a language (Settings lists only
 /// what works, the owner, 2026-11-24); [`broken`] names it.
 pub fn languages(folders: &[PathBuf]) -> Vec<Language> {
-    let mut out: Vec<Language> = Vec::new();
+    languages_with(BUILT_IN, folders)
+}
+
+/// [`languages`], with `built_in` for [`BUILT_IN`].
+fn languages_with(built_in: &[(&str, &'static str)], folders: &[PathBuf]) -> Vec<Language> {
+    let mut out: Vec<Language> = built_in
+        .iter()
+        .map(|&(code, text)| Language {
+            name: own_name(text)
+                .or_else(|| iso_name(code).map(str::to_string))
+                .unwrap_or_else(|| code.to_string()),
+            code: code.to_string(),
+            built_in: Some(text),
+            files: Vec::new(),
+        })
+        .collect();
     for dir in folders {
         let Ok(rd) = std::fs::read_dir(dir) else {
             continue;
@@ -143,6 +175,7 @@ pub fn languages(folders: &[PathBuf]) -> Vec<Language> {
                         .or_else(|| iso_name(&code).map(str::to_string))
                         .unwrap_or_else(|| code.clone()),
                     code,
+                    built_in: None,
                     files: vec![file],
                 }),
             }
@@ -354,14 +387,27 @@ pub fn broken(folders: &[PathBuf]) -> Vec<(PathBuf, String)> {
 /// later over the earlier. A file named for `code` that does not read is named in the
 /// problems; the others still load.
 pub fn load(code: &str, folders: &[PathBuf]) -> (Catalog, Vec<String>) {
+    load_with(BUILT_IN, code, folders)
+}
+
+/// [`load`], with `built_in` for [`BUILT_IN`].
+fn load_with(
+    built_in: &[(&str, &'static str)],
+    code: &str,
+    folders: &[PathBuf],
+) -> (Catalog, Vec<String>) {
     let mut cat = Catalog::default();
     let mut problems = Vec::new();
-    let files = languages(folders)
+    let Some(lang) = languages_with(built_in, folders)
         .into_iter()
         .find(|l| l.code == code)
-        .map(|l| l.files)
-        .unwrap_or_default();
-    for file in files {
+    else {
+        return (cat, problems);
+    };
+    if let Some(Ok(c)) = lang.built_in.map(Catalog::parse) {
+        cat.merge(c);
+    }
+    for file in lang.files {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
@@ -390,6 +436,8 @@ const AUTO_ROW: Text = Text::new(
     "auto - detect by locale - ({code})",
 );
 const ENGLISH_ROW: Text = Text::new("settings.languages.english", "English - en - built in");
+/// Where a language comes from, when it is built into the program.
+const BUILT_IN_WORD: Text = Text::new("settings.languages.built_in", "built in");
 
 pub fn settings_rows() -> Vec<(String, String)> {
     let get = |k: &str| std::env::var(k).ok();
@@ -402,10 +450,16 @@ pub fn settings_rows() -> Vec<(String, String)> {
         ("en".to_string(), ENGLISH_ROW.get().into_owned()),
     ];
     for l in languages(&folders()) {
+        let word = BUILT_IN_WORD.get();
         let files = l
-            .files
-            .iter()
-            .filter_map(|f| f.file_name().and_then(|n| n.to_str()))
+            .built_in
+            .map(|_| word.as_ref())
+            .into_iter()
+            .chain(
+                l.files
+                    .iter()
+                    .filter_map(|f| f.file_name().and_then(|n| n.to_str())),
+            )
             .collect::<Vec<_>>()
             .join(", ");
         rows.push((
@@ -554,7 +608,7 @@ mod tests {
         let bad = broken(&[shipped.clone(), own.clone()]);
         assert_eq!(bad.len(), 1, "{bad:?}");
         assert!(bad[0].0.ends_with("bad.toml"));
-        let langs = languages(&[shipped.clone(), own.clone()]);
+        let langs = languages_with(&[], &[shipped.clone(), own.clone()]);
         let got: Vec<(&str, &str, usize)> = langs
             .iter()
             .map(|l| (l.code.as_str(), l.name.as_str(), l.files.len()))
@@ -571,7 +625,7 @@ mod tests {
                 ("xx", "xx", 1)
             ]
         );
-        let (c, problems) = load("vi", &[shipped, own]);
+        let (c, problems) = load_with(&[], "vi", &[shipped, own]);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!((c.text("a", "one"), c.text("b", "two")), ("một", "hai"));
         assert_eq!(c.text("$__name", "-"), "-", "not a text");
@@ -673,6 +727,7 @@ mod tests {
         let lang = |code: &str| Language {
             code: code.into(),
             name: code.into(),
+            built_in: None,
             files: Vec::new(),
         };
         let found = [lang("my-pseudo"), lang("pt_BR"), lang("vi")];
@@ -706,22 +761,54 @@ mod tests {
         )
         .unwrap();
         std::fs::write(own.join("vi.toml"), "\"b\" = \"HAI\"\n").unwrap();
-        let (c, problems) = load("vi", &[shipped.clone(), own.clone()]);
+        let (c, problems) = load_with(&[], "vi", &[shipped.clone(), own.clone()]);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!((c.text("a", "one"), c.text("b", "two")), ("một", "HAI"));
 
         std::fs::write(own.join("vi.toml"), "\"b\" = \n").unwrap();
-        let (c, problems) = load("vi", &[shipped.clone(), own.clone()]);
+        let (c, problems) = load_with(&[], "vi", &[shipped.clone(), own.clone()]);
         assert_eq!(c.text("a", "one"), "một", "the other file still loads");
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(problems[0].contains("vi.toml"), "{problems:?}");
 
         // No file: English, nothing to say.
-        let (c, problems) = load("ja", &[shipped, own]);
+        let (c, problems) = load_with(&[], "ja", &[shipped, own]);
         assert!(c.is_empty() && problems.is_empty());
         // A code names a language found, never a path.
-        let (c, problems) = load("../vi", std::slice::from_ref(&d));
+        let (c, problems) = load_with(&[], "../vi", std::slice::from_ref(&d));
         assert!(c.is_empty() && problems.is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_shipped_languages_are_built_in_and_a_file_goes_over_them() {
+        // No folder at all, as after `cargo install`: vi and ja are there.
+        let langs = languages(&[]);
+        for code in ["ja", "vi"] {
+            let l = langs.iter().find(|l| l.code == code).expect(code);
+            assert!(l.built_in.is_some() && l.files.is_empty(), "{l:?}");
+        }
+        let (vi, problems) = load("vi", &[]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let built = vi.text("keybar.copy", "Copy").to_string();
+        assert_ne!(built, "Copy", "vi has its own word for Copy");
+        // A file of the same code loads over it, key by key.
+        let d = std::env::temp_dir().join(format!("xdevcmd-lang-built-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("vi.toml"), "[keybar]\ncopy = \"Chép!\"\n").unwrap();
+        let (vi, _) = load("vi", std::slice::from_ref(&d));
+        assert_eq!(vi.text("keybar.copy", "Copy"), "Chép!");
+        assert_ne!(
+            vi.text("keybar.move", "Move"),
+            "Move",
+            "the rest still built in"
+        );
+        let l = languages(std::slice::from_ref(&d))
+            .into_iter()
+            .find(|l| l.code == "vi")
+            .unwrap();
+        assert!(l.built_in.is_some() && l.files.len() == 1, "{l:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

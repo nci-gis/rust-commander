@@ -1,8 +1,8 @@
 # Languages
 
 The words on screen (menus, key bar, dialogs, status line, F1) can be in another
-language. A release has Vietnamese and Japanese; you can add your own. A
-language is one text file.
+language. Vietnamese and Japanese are built in, however xdevcmd was installed; you can
+add your own. A language is one text file.
 
 Stays English: these docs, `--help`, config keys and their errors, and some messages of
 the copy engine. A text with no translation shows in English.
@@ -14,7 +14,7 @@ the copy engine. A text with no translation shows in English.
    - `auto - detect by locale - (vi)`: the system's (`LC_ALL`, `LC_MESSAGES`, `LANG`).
      Windows rarely sets these, so pick by name there.
    - `English - en - built in`.
-   - `<name> - <code> - <file>` for each language file found.
+   - `<name> - <code> - <where>` for each language: `built in`, its files, or both.
 3. Start xdevcmd again.
 
 Or in `config.toml`:
@@ -28,18 +28,21 @@ Help → Config in use shows the language in use and those found.
 
 ## Where the files are
 
-Read in this order, the later winning:
+Read in this order, the later winning, key by key:
 
-1. `lang/` beside the program: what a release ships (`vi.toml`, `ja.toml`,
-   `template.txt`). Replaced by each update.
-2. `lang/` in your config folder: yours, never touched.
+1. Built in: Vietnamese and Japanese.
+2. `lang/` beside the program: what a release archive ships (`vi.toml`, `ja.toml`,
+   `template.txt`). Replaced by each update. `cargo install` and `cargo binstall`
+   bring the program alone: take `template.txt` from a release archive or the
+   [source](../crates/xdevcmd/lang/template.txt).
+3. `lang/` in your config folder: yours, never touched.
    - Linux, macOS: `~/.config/xdevcmd/lang/`
    - Windows: `%APPDATA%\xdevcmd\lang\`
    - Any system, `XDG_CONFIG_HOME` set: `$XDG_CONFIG_HOME/xdevcmd/lang/`
 
 ## Make your own
 
-1. Copy `lang/template.txt` (beside the program) to your `lang/` folder as
+1. Copy `template.txt` (above) to your `lang/` folder as
    `<code>.toml`: `de.toml`, `vi-hue.toml`, `pirate.toml`, any name.
 2. Translate the texts in quotes. Keep the keys and every `{name}` in braces. Delete
    lines you skip: they show in English.

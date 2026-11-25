@@ -47,6 +47,9 @@ fn isolated() -> Command {
     // `lang/vi.toml` of theirs and LANG=vi_VN do not turn the screens Vietnamese.
     c.env("XDG_CONFIG_HOME", sandbox.join("config"));
     c.env("APPDATA", sandbox.join("config"));
+    // vi and ja are built in: English, whatever LANG says (LC_MESSAGES comes first; a
+    // test of another language sets it empty again).
+    c.env("LC_MESSAGES", "C");
     // And from their session: a test must neither reopen their panes nor overwrite them.
     // One state directory per run of xdevcmd: what one test leaves there (F1's recent
     // commands) must not change what another sees.
@@ -5851,7 +5854,7 @@ fn a_language_file_names_the_key_bar_and_the_menus() {
     let cfg_home = a.parent().unwrap().join("cfg-home");
     let own = cfg_home.join("xdevcmd").join("lang");
     fs::create_dir_all(&own).unwrap();
-    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/vi.toml");
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lang/vi.toml");
     fs::copy(shipped, own.join("vi.toml")).unwrap();
     let home = cfg_home.to_string_lossy().into_owned();
     let env = [
@@ -5976,7 +5979,7 @@ fn settings_lists_the_languages_there_are() {
     let cfg_home = a.parent().unwrap().join("cfg-home");
     let own = cfg_home.join("xdevcmd").join("lang");
     fs::create_dir_all(&own).unwrap();
-    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/vi.toml");
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lang/vi.toml");
     fs::copy(shipped, own.join("vi.toml")).unwrap();
     fs::write(
         own.join("mine.toml"),
@@ -5995,22 +5998,25 @@ fn settings_lists_the_languages_there_are() {
     let s = shot_cfg_env(
         "",
         &env,
-        "F9,Up,Up,Enter,Tab,Tab,Tab,Tab,Down,Down,Space",
+        "F9,Up,Up,Enter,Tab,Tab,Tab,Tab,Down,Down,Down,Space",
         &a,
         &b,
     );
     // The UI is in Vietnamese here (LANG): the first two rows by their parts, not words.
+    // ja and vi are built in ("có sẵn"); vi's file of the config folder goes over it.
     for line in [
         "( ) auto - ",
         " - (vi)",
         "( ) English - en - ",
-        "Tiếng Việt - vi - vi.toml",
+        // (the capture spaces out wide characters: 日 本 語)
+        " - ja - có sẵn",
+        "Tiếng Việt - vi - có sẵn, vi.toml",
         "A pseudo-language with a name... - xx - mine.toml",
     ] {
         assert!(s.contains(line), "{line}\n{s}");
     }
     assert!(!s.contains("broken"), "{s}");
-    // Space on the third row chose Tiếng Việt.
+    // Space on the fourth row chose Tiếng Việt.
     let chosen = s
         .lines()
         .find(|l| l.contains("(\u{2022})"))

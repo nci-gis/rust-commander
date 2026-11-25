@@ -12,7 +12,8 @@ that heading and starts a new, empty one here. -->
 
 ### Added
 - **Languages**: the words on screen in Vietnamese or Japanese, or a language of your
-  own: one TOML file in `lang/` ([docs/language.md](docs/language.md)). File →
+  own: one TOML file in `lang/` ([docs/language.md](docs/language.md)). Vietnamese and
+  Japanese are built in, so `cargo install` and `cargo binstall` have them too. File →
   Settings… → Languages lists those found; `[general] language` (default `auto`, the
   system's). A release ships `lang/template.txt`, every text in English, to start
   from. A text that could act on the terminal (a control character, a direction
@@ -43,6 +44,12 @@ that heading and starts a new, empty one here. -->
   `borders` lost its notch titles and glow).
 - **The docs were checked against the code**, page by page (`cargo xtask docs`), and
   corrected where they were wrong.
+- **A file that differs is no longer skipped as identical** when a copy goes into a
+  folder whose name has no letters (`2026`, `照片`) on a disk that tells case apart:
+  `A.txt` there could stand for `a.txt`, and an older `a.txt` was left with no
+  question.
+- **A very deep folder tree no longer ends xdevcmd**: planning, copying and counting
+  sizes ran out of stack at about 1,500 levels, which closed the whole program.
 
 ## [0.4.0-beta.3] - 2026-11-24
 

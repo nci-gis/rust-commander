@@ -450,12 +450,12 @@ mod tests {
     #[test]
     fn the_shipped_template_is_up_to_date() {
         let want = template(&keys(&root()).unwrap());
-        let have = std::fs::read_to_string(root().join("lang/template.txt"))
+        let have = std::fs::read_to_string(root().join("crates/xdevcmd/lang/template.txt"))
             .unwrap_or_default()
             .replace("\r\n", "\n");
         assert!(
             have == want,
-            "lang/template.txt is out of date: run `cargo xtask lang template > lang/template.txt`"
+            "crates/xdevcmd/lang/template.txt is out of date: run `cargo xtask lang template > crates/xdevcmd/lang/template.txt`"
         );
         // One key a line, and each reads back as its English.
         let table: toml::Table = want.parse().unwrap();
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn the_shipped_language_files_are_whole() {
         let keys = keys(&root()).unwrap();
-        let dir = root().join("lang");
+        let dir = root().join("crates/xdevcmd/lang");
         let mut seen = 0;
         for e in std::fs::read_dir(&dir).unwrap().flatten() {
             let p = e.path();

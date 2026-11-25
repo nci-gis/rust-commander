@@ -143,7 +143,7 @@ pub const DOC_PATHS: &[(&str, &[&str])] = &[
         &[
             "crates/xdevcmd/src/lang.rs",
             "xtask/src/lang.rs",
-            "lang",
+            "crates/xdevcmd/lang",
             "crates/xdevcmd/src/app/draw.rs",
             "crates/xdevcmd/src/modal.rs",
             "crates/xdevcmd/src/settings_dialog.rs",

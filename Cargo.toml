@@ -25,6 +25,9 @@ edition = "2021"
 rust-version = "1.90"
 
 [profile.release]
-lto = "thin"
+# Fat LTO: about 5 % smaller than thin at the same speed, for the 7 MiB bar in
+# scripts/smoke.sh (the owner, 2026-11-25). Not opt-level "s": 29 % smaller but
+# listing 100,000 entries ran 46 % slower.
+lto = "fat"
 codegen-units = 1
 strip = true

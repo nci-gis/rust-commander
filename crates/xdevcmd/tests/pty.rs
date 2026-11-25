@@ -3822,9 +3822,10 @@ fn alt_x_is_the_prefix_inside_the_shell_and_gives_back_what_it_does_not_use() {
     std::thread::sleep(Duration::from_millis(300));
     xdevcmd.send(ALT_X);
     xdevcmd.wait_for("ALT+X");
-    xdevcmd.send(b"q");
+    // A key the prefix has no use for in the shell (q is quit's, since 2026-11-25).
+    xdevcmd.send(b"z");
     xdevcmd.wait_for("GOT_IT");
-    assert_eq!(std::fs::read(s.left().join("keys.bin")).unwrap(), b"\x1bxq");
+    assert_eq!(std::fs::read(s.left().join("keys.bin")).unwrap(), b"\x1bxz");
     xdevcmd.send(ALT_X);
     xdevcmd.send(ALT_N);
     xdevcmd.wait_for("terminal 2/2");

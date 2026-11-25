@@ -1962,7 +1962,7 @@ fn is_batch(p: &Path) -> bool {
 /// Empty and relative entries are skipped: they mean the current directory, which in
 /// a terminal tab is the directory being browsed.
 #[cfg(unix)]
-fn on_path(
+pub(crate) fn on_path(
     program: &std::ffi::OsStr,
     path: Option<&std::ffi::OsStr>,
 ) -> Option<std::path::PathBuf> {

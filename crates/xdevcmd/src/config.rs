@@ -876,7 +876,7 @@ pub fn theme_from_text(text: &str, shown: &str) -> Result<Theme, String> {
         set(slot, field, v)?;
     }
     if let Some(st) = &f.style {
-        t.decor = crate::decor::Decor::from_file(st, shown)?;
+        t.decor = crate::decor::Decor::from_file(st, shown, t.decor)?;
     }
     Ok(t)
 }
@@ -1560,5 +1560,34 @@ mod tests {
         let missing = std::env::temp_dir().join("xdevcmd-definitely-not-here.toml");
         let (_, outcome) = load(Some(&missing));
         assert!(matches!(outcome, Outcome::Rejected { .. }));
+    }
+
+    #[test]
+    fn a_style_line_left_out_keeps_the_base_themes() {
+        use crate::decor::{Borders, Titles};
+        let base = crate::theme::built_in("xdevtheme").unwrap().decor;
+        let t = theme_from_text(
+            "base = \"xdevtheme\"\n[style]\nborders = \"thick\"\n",
+            "t.toml",
+        )
+        .unwrap();
+        assert_eq!(t.decor.borders, Borders::Thick);
+        assert_eq!(t.decor.titles, Titles::Notch);
+        assert_eq!(
+            crate::decor::Decor {
+                borders: base.borders,
+                ..t.decor
+            },
+            base
+        );
+        // On a plain base, a lone line is that line and nothing else.
+        let t = theme_from_text("[style]\nborders = \"thick\"\n", "t.toml").unwrap();
+        assert_eq!(
+            t.decor,
+            crate::decor::Decor {
+                borders: Borders::Thick,
+                ..Default::default()
+            }
+        );
     }
 }

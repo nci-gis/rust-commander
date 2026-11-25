@@ -265,6 +265,11 @@ pub fn check(
         }) {
             errors.push(format!("{k}: U+{:04X} could act on the terminal; not used", c as u32));
         }
+        // An English with no brace has nothing filled in: its translation is shown as
+        // written, braces and all (lang::Catalog::text).
+        if !en.contains(['{', '}']) {
+            continue;
+        }
         match (params(t), params(en)) {
             (None, _) => errors.push(format!("{k}: a brace is not closed: {t:?}")),
             (Some(mine), Some(theirs)) => {
@@ -573,5 +578,10 @@ mod tests {
             check(&dotted, &t2).unwrap().0.is_empty() && check(&dotted, &t2).unwrap().1.is_empty()
         );
         assert!(check(&keys, &t).unwrap().0.is_empty());
+        // Nothing is filled in a text whose English has no brace: any brace is fine.
+        assert!(check(&dotted, "[keybar]\ncopy = \"{Chép} }\"\n")
+            .unwrap()
+            .0
+            .is_empty());
     }
 }

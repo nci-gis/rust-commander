@@ -378,7 +378,14 @@ impl App {
             );
             return;
         }
-        let mut cmd = std::process::Command::new(&argv[0]);
+        let program = match program_to_run(&argv[0], std::env::var_os("PATH").as_deref()) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = e;
+                return;
+            }
+        };
+        let mut cmd = std::process::Command::new(program);
         cmd.args(&argv[1..]);
         let done = tr!(
             "open.opened_with",
@@ -688,6 +695,30 @@ impl App {
     }
 }
 
+/// The program an `[[open]]` rule runs. On Linux and macOS a bare name is looked up in
+/// the absolute directories of `path` only, as a terminal tab does: an empty or `.`
+/// entry would find a same-named program in the folder being browsed. A name with a
+/// directory in it is run as written; on Windows the system's own search is kept.
+fn program_to_run(
+    program: &std::ffi::OsStr,
+    path: Option<&std::ffi::OsStr>,
+) -> Result<std::ffi::OsString, String> {
+    #[cfg(unix)]
+    if Path::new(program).components().count() == 1 {
+        return crate::pane::term::on_path(program, path)
+            .map(PathBuf::into_os_string)
+            .ok_or_else(|| {
+                tr!(
+                    "open.not_found_in_path",
+                    "{v}: not found in PATH",
+                    v = program.to_string_lossy()
+                )
+            });
+    }
+    let _ = path;
+    Ok(program.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::editor_args;
@@ -721,5 +752,32 @@ mod tests {
         assert_eq!(args("notepad", at), (vec!["/s/a.rs".into()], false));
         // No line asked for: the file alone, nothing to say.
         assert_eq!(args("notepad", None), (vec!["/s/a.rs".into()], true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_open_rule_never_runs_a_program_from_a_relative_path_entry() {
+        use super::program_to_run;
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("xdevcmd-open-path-{}", std::process::id()));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("tool"), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(bin.join("tool"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let name = std::ffi::OsStr::new("tool");
+        // Only `.` and an empty entry: nothing is run, the status says why.
+        let rel = std::env::join_paths([".", ""]).unwrap();
+        let err = program_to_run(name, Some(&rel)).unwrap_err();
+        assert!(err.contains("not found in PATH"), "{err}");
+        // An absolute entry finds it, as a full path.
+        let abs = std::env::join_paths([&bin]).unwrap();
+        assert_eq!(
+            program_to_run(name, Some(&abs)).unwrap(),
+            bin.join("tool").into_os_string()
+        );
+        // A name with a directory in it is run as written.
+        let written = std::ffi::OsStr::new("./tool");
+        assert_eq!(program_to_run(written, Some(&rel)).unwrap(), written);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

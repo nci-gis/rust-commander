@@ -929,6 +929,7 @@ f3_views_a_file_not_a = "F3 はファイルを表示します (ディレクト�
 f4_edits_a_file_not_a = "F4 はファイルを編集します (ディレクトリは不可)"
 is_a_program_u_opening_it = "{name} はプログラムです — 開くと実行されます"
 not_a_type_xdevcmd_knows_as = "{name}: xdevcmd が文書として知らない種類です — 開きますか?"
+not_found_in_path = "{v}: PATH に見つかりません"
 o_opens_a_file_u_enter = "o はファイルを開きます — ディレクトリには Enter で入ります"
 on_this_computer_beside_xdevcmd = "このコンピュータ上、xdevcmd の隣:"
 online_for_xdevcmd = "オンライン、xdevcmd {v} 用:"

@@ -145,12 +145,8 @@ pub fn run(args: &[String], version: &str) -> i32 {
                 println!("{HELP}");
                 return 0;
             }
-            "--small" => {
-                sizes = Sizes {
-                    big: sizes.big,
-                    ..Sizes::SMALL
-                }
-            }
+            // `--big` is kept apart and applied after, so it holds in any order.
+            "--small" => sizes = Sizes::SMALL,
             // A fast disk copies 1 GiB in well under a second: a bigger file leaves the
             // kill time to land past check B's checkpoint (the owner, 2026-11-22).
             "--big" => match it.next().and_then(|n| n.parse::<u64>().ok()) {
@@ -1737,5 +1733,13 @@ mod tests {
         fs::create_dir(root.join("copy-to")).unwrap();
         clean(&root).unwrap();
         let _ = fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn small_is_the_0_6_gib_the_help_says() {
+        // HELP: "--small: 0.6 and 1.1" (made, and with the copies of big and the tree).
+        let gib = |b: u64| b as f64 / (1u64 << 30) as f64;
+        assert!((gib(Sizes::SMALL.bytes()) - 0.6).abs() < 0.05);
+        assert!(Sizes::SMALL.big < Sizes::FULL.big);
     }
 }

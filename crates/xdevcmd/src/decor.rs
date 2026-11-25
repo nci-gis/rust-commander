@@ -130,8 +130,9 @@ pub struct StyleFile {
 }
 
 impl Decor {
-    /// From a theme file's `[style]`; `shown` names the file in errors.
-    pub fn from_file(f: &StyleFile, shown: &str) -> Result<Decor, String> {
+    /// From a theme file's `[style]`, on top of the base theme's own style: a line
+    /// left out keeps `base`'s; `shown` names the file in errors.
+    pub fn from_file(f: &StyleFile, shown: &str, base: Decor) -> Result<Decor, String> {
         fn pick<T: Copy>(
             shown: &str,
             key: &str,
@@ -157,7 +158,7 @@ impl Decor {
                 .map_err(|e| format!("{shown}: [style] gradient = \"{v}\": {e}, or \"none\""))
         };
         let gradient = match &f.gradient {
-            None => None,
+            None => base.gradient,
             Some(Colours::One(v)) if v == "none" => None,
             Some(Colours::One(v)) => Some(Gradient {
                 mid: None,
@@ -191,7 +192,7 @@ impl Decor {
                     ("double", Borders::Double),
                     ("none", Borders::Cards),
                 ],
-                Borders::Plain,
+                base.borders,
             )?,
             titles: pick(
                 shown,
@@ -202,7 +203,7 @@ impl Decor {
                     ("notch", Titles::Notch),
                     ("pill", Titles::Pill),
                 ],
-                Titles::Line,
+                base.titles,
             )?,
             gradient,
             down: pick(
@@ -210,7 +211,7 @@ impl Decor {
                 "gradient_runs",
                 &f.gradient_runs,
                 &[("across", false), ("down", true)],
-                false,
+                base.down,
             )?,
             cursor: pick(
                 shown,
@@ -221,9 +222,9 @@ impl Decor {
                     ("glow", Cursor::Glow),
                     ("pill", Cursor::Pill),
                 ],
-                Cursor::Block,
+                base.cursor,
             )?,
-            marker: f.marker.unwrap_or(false),
+            marker: f.marker.unwrap_or(base.marker),
             keys: pick(
                 shown,
                 "keys",
@@ -233,7 +234,7 @@ impl Decor {
                     ("caps", Keys::Caps),
                     ("slant", Keys::Slant),
                 ],
-                Keys::Plain,
+                base.keys,
             )?,
             shadow: pick(
                 shown,
@@ -244,11 +245,11 @@ impl Decor {
                     ("dim", Shadow::Dim),
                     ("glow", Shadow::Glow),
                 ],
-                Shadow::None,
+                base.shadow,
             )?,
-            glow: f.glow.unwrap_or(false),
-            sky: f.sky.unwrap_or(false),
-            stars: f.stars.unwrap_or(false),
+            glow: f.glow.unwrap_or(base.glow),
+            sky: f.sky.unwrap_or(base.sky),
+            stars: f.stars.unwrap_or(base.stars),
         })
     }
 }
@@ -905,7 +906,7 @@ mod tests {
 
     fn read(text: &str) -> Result<Decor, String> {
         let f: StyleFile = toml::from_str(text).map_err(|e| e.to_string())?;
-        Decor::from_file(&f, "t.toml")
+        Decor::from_file(&f, "t.toml", Decor::default())
     }
 
     #[test]

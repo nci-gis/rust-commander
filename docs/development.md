@@ -198,6 +198,9 @@ How users make a language: [Languages](language.md).
 ```sh
 cargo xtask lang template          # every key and its English (lang/template.txt)
 cargo xtask lang pseudo            # the same, each text in ⟦…⟧: what is still English
+cargo xtask lang pseudo --style leet     # same width; what is unchanged is English
+cargo xtask lang pseudo --style wide     # every character two columns: width at its worst
+cargo xtask lang pseudo --style upside   # backwards: a sentence built from pieces shows
 cargo xtask lang check lang/vi.toml   # unknown keys, {names}, characters refused
 ```
 

@@ -91,5 +91,6 @@ where the screen cuts.
 - A language chosen by name and not found: English, and the status line says where it
   looked.
 - From the source tree: `cargo xtask lang check my.toml` lists all of the above;
-  `cargo xtask lang template` and `pseudo` print for the code you have
+  `cargo xtask lang template` and `pseudo` (`--style leet|wide|upside`) print for the
+  code you have
   ([Development](development.md)).

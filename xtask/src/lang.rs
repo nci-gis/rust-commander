@@ -4,6 +4,9 @@
 //!   copy to `lang/<name>.toml` and translate (any name: `vi`, `ja`, a pseudo-language).
 //! - `xtask lang pseudo` prints the same with every text in ⟦…⟧ (its `{params}` kept): a
 //!   language file to find what still shows in English, and what a longer text cuts.
+//!   `--style leet` (same width: what is unchanged is English), `--style wide` (every
+//!   character two columns: the worst case for width), `--style upside` (upside down and
+//!   backwards: a sentence put together from pieces shows its seams).
 //! - `xtask lang check FILE` says which keys of FILE the code no longer has, and which
 //!   texts name a `{param}` their English does not give (xdevcmd would show the English).
 //!
@@ -25,11 +28,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         Some("pseudo") => {
-            let bracketed = keys
+            let style = match args.get(1..).unwrap_or_default() {
+                [] => Style::Brackets,
+                [flag, s] if flag == "--style" => Style::parse(s)?,
+                _ => return Err(PSEUDO_USAGE.into()),
+            };
+            let texts = keys
                 .iter()
-                .map(|(k, en)| (k.clone(), format!("\u{27e6}{en}\u{27e7}")))
+                .map(|(k, en)| (k.clone(), pseudo(en, style)))
                 .collect();
-            print!("\"$__name\" = \"Pseudo\"\n{}", template(&bracketed));
+            print!("{}{}", style.header(), template(&texts));
             Ok(())
         }
         Some("check") => {
@@ -53,8 +61,121 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 ))
             }
         }
-        _ => Err("usage: xtask lang template | pseudo | check FILE".into()),
+        _ => Err("usage: xtask lang template | pseudo [--style S] | check FILE".into()),
     }
+}
+
+const PSEUDO_USAGE: &str = "usage: xtask lang pseudo [--style brackets|leet|wide|upside]";
+
+/// How `xtask lang pseudo` changes each text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Style {
+    Brackets,
+    Leet,
+    Wide,
+    Upside,
+}
+
+impl Style {
+    fn parse(s: &str) -> Result<Style, String> {
+        Ok(match s {
+            "brackets" => Style::Brackets,
+            "leet" => Style::Leet,
+            "wide" => Style::Wide,
+            "upside" => Style::Upside,
+            _ => return Err(PSEUDO_USAGE.into()),
+        })
+    }
+
+    /// The file's first lines: a name for Settings, and a code apart from its file
+    /// name (the bracketed one takes the file's name, as before).
+    fn header(self) -> &'static str {
+        match self {
+            Style::Brackets => "\"$__name\" = \"Pseudo\"\n",
+            Style::Leet => "\"$__name\" = \"1337 h4x0r\"\n\"$__code\" = \"leet\"\n",
+            Style::Wide => {
+                "\"$__name\" = \"\u{ff37}\u{ff49}\u{ff44}\u{ff45}\"\n\"$__code\" = \"wide\"\n"
+            }
+            Style::Upside => {
+                "\"$__name\" = \"\u{0279}\u{01dd}p\u{1d09}sdn\"\n\"$__code\" = \"upside\"\n"
+            }
+        }
+    }
+}
+
+/// `en` in `style`. What xdevcmd fills in stays as it is: `{name}`, `{{`, `}}`, and
+/// control characters (a `\n`), so the text checks as the English does.
+fn pseudo(en: &str, style: Style) -> String {
+    if style == Style::Brackets {
+        return format!("\u{27e6}{en}\u{27e7}");
+    }
+    // Pieces: (kept as is?, text).
+    let mut pieces: Vec<(bool, String)> = Vec::new();
+    let mut rest = en;
+    while !rest.is_empty() {
+        let kept = if rest.starts_with("{{") || rest.starts_with("}}") {
+            Some(2)
+        } else if rest.starts_with('{') {
+            rest.find('}').map(|i| i + 1)
+        } else {
+            rest.chars()
+                .next()
+                .filter(|c| c.is_control())
+                .map(char::len_utf8)
+        };
+        let (n, keep) = match kept {
+            Some(n) => (n, true),
+            None => (rest.chars().next().map_or(1, char::len_utf8), false),
+        };
+        match pieces.last_mut() {
+            Some((false, run)) if !keep => run.push_str(&rest[..n]),
+            _ => pieces.push((keep, rest[..n].to_string())),
+        }
+        rest = &rest[n..];
+    }
+    let change = |run: &str| -> String {
+        match style {
+            Style::Leet => run
+                .chars()
+                .map(|c| match c.to_ascii_lowercase() {
+                    'a' => '4',
+                    'e' => '3',
+                    'i' => '1',
+                    'o' => '0',
+                    's' => '5',
+                    't' => '7',
+                    _ => c,
+                })
+                .collect(),
+            Style::Wide => run
+                .chars()
+                .map(|c| match c {
+                    ' ' => '\u{3000}',
+                    '!'..='~' => char::from_u32(c as u32 + 0xfee0).unwrap_or(c),
+                    _ => c,
+                })
+                .collect(),
+            Style::Upside => run.chars().rev().map(flip).collect(),
+            Style::Brackets => run.to_string(),
+        }
+    };
+    if style == Style::Upside {
+        pieces.reverse();
+    }
+    pieces
+        .iter()
+        .map(|(keep, t)| if *keep { t.clone() } else { change(t) })
+        .collect()
+}
+
+/// A character upside down, where Unicode has one.
+fn flip(c: char) -> char {
+    const FROM: &str = "abcdefghijklmnopqrstuvwxyzACEFGJLMPTUVWY.,!?'()[]<>&";
+    const TO: &str = "\u{0250}q\u{0254}p\u{01dd}\u{025f}\u{0183}\u{0265}\u{1d09}\u{027e}\u{029e}l\u{026f}uodb\u{0279}s\u{0287}n\u{028c}\u{028d}x\u{028e}z\u{2200}\u{0186}\u{018e}\u{2132}\u{2141}\u{017f}\u{2142}W\u{0500}\u{22a5}\u{2229}\u{039b}M\u{2144}\u{02d9}'\u{00a1}\u{00bf},)(][><\u{214b}";
+    FROM.chars()
+        .position(|f| f == c)
+        .and_then(|i| TO.chars().nth(i))
+        .unwrap_or(c)
 }
 
 /// Every key in the source with its English; an error if one key has two Englishes.
@@ -340,6 +461,33 @@ mod tests {
             assert_eq!(v.as_str(), keys.get(k).map(String::as_str), "{k}");
         }
         assert!(!want.contains("\"\"\""), "a multi-line string");
+    }
+
+    #[test]
+    fn pseudo_styles_keep_what_xdevcmd_fills_in() {
+        let en = "{n} files in {dir}\n{{x}}";
+        assert_eq!(
+            pseudo(en, Style::Brackets),
+            "\u{27e6}{n} files in {dir}\n{{x}}\u{27e7}"
+        );
+        assert_eq!(pseudo(en, Style::Leet), "{n} f1l35 1n {dir}\n{{x}}");
+        assert_eq!(
+            pseudo("Copy {n}", Style::Wide),
+            "\u{ff23}\u{ff4f}\u{ff50}\u{ff59}\u{3000}{n}"
+        );
+        // Backwards: the pieces swap places, the words read upside down.
+        assert_eq!(pseudo("to {dest}", Style::Upside), "{dest} o\u{0287}");
+        // Every style of every text checks as its English does.
+        let keys = keys(&root()).unwrap();
+        for style in [Style::Brackets, Style::Leet, Style::Wide, Style::Upside] {
+            let texts = keys
+                .iter()
+                .map(|(k, en)| (k.clone(), pseudo(en, style)))
+                .collect();
+            let file = format!("{}{}", style.header(), template(&texts));
+            let (errors, _) = check(&keys, &file).unwrap();
+            assert!(errors.is_empty(), "{style:?}: {errors:?}");
+        }
     }
 
     #[test]

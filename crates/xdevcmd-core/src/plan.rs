@@ -629,7 +629,7 @@ pub fn start(
     let (tx, rx) = channel();
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
-    std::thread::spawn(move || {
+    crate::walk_thread(move || {
         let progress = tx.clone();
         let mut report = |items, bytes| {
             let _ = progress.send(Msg::Progress { items, bytes });
@@ -750,7 +750,11 @@ struct There {
 
 impl There {
     fn list(dir: &Path, t: &Target) -> Option<Self> {
-        let folded = t.ignores_case != Some(false);
+        // Fold only where case is known to be ignored. When it is unknown (`None`),
+        // names are kept as they are and the listing is not complete: a name it lacks
+        // is asked of the file system, which answers for its own case rule. Folding
+        // there would let `A.txt` stand for `a.txt` on a case-sensitive disk.
+        let folded = t.ignores_case == Some(true);
         let mut complete = t.ignores_case.is_some();
         let mut entries = HashMap::new();
         for e in fs::read_dir(dir).ok()? {
@@ -1604,6 +1608,50 @@ mod tests {
         assert_ne!(r.class, Class::New, "{r:?}");
         assert!(r.target.is_some(), "{r:?}");
         assert_eq!(r.warn, Some(Warn::CaseClash("Readme".into())));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A destination whose case rule is unknown (its name has no letters: `2026`, `照片`)
+    /// must not be read as ignoring case: on a case-sensitive disk `a.txt` and `A.txt`
+    /// are two files, and the one compared must be the one of that name.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unknown_case_rule_compares_the_file_of_that_name() {
+        let d = tmp("case-unknown");
+        let (s, to) = (d.join("s").join("sub"), d.join("照片").join("sub"));
+        fs::create_dir_all(&s).unwrap();
+        fs::create_dir_all(&to).unwrap();
+        let back = |p: &Path, t| {
+            let f = fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(t).unwrap();
+        };
+        // 40 pairs, so the order a listing gives cannot hide it: `fN.txt` is older
+        // than the source, `FN.TXT` the same as it.
+        for i in 0..40 {
+            let (lower, upper) = (format!("f{i}.txt"), format!("F{i}.TXT"));
+            fs::write(s.join(&lower), "new!").unwrap();
+            fs::write(to.join(&lower), "old").unwrap();
+            fs::write(to.join(&upper), "new!").unwrap();
+            let when = fs::metadata(s.join(&lower)).unwrap().modified().unwrap();
+            back(&to.join(&upper), when);
+            back(
+                &to.join(&lower),
+                when - std::time::Duration::from_secs(3600),
+            );
+        }
+        let t = Target {
+            fs: Fs::Other,
+            ignores_case: None,
+            ..FAT
+        };
+        let p = plan_on(t, Kind::Copy, std::slice::from_ref(&s), &d.join("照片"));
+        let wrong: Vec<_> = p
+            .rows
+            .iter()
+            .filter(|r| r.class == Class::Identical)
+            .map(|r| r.dst.clone())
+            .collect();
+        assert!(wrong.is_empty(), "planned as identical: {wrong:?}");
         let _ = fs::remove_dir_all(&d);
     }
 

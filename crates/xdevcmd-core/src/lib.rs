@@ -51,3 +51,21 @@ pub use entry::{special_kind, split_name, Entry, Kind};
 pub use listing::{entry_at, read_dir, read_dir_counted};
 pub use ops::{Answer, Question, Request, Summary};
 pub use sort::{sort_entries, Sort, SortKey};
+
+/// The stack of a thread that walks a tree, one call per level: planning, copying,
+/// counting. A thread's default (2 MiB) runs out near 1,500 levels, and running out is
+/// an abort that ends the whole program. 256 MiB is address space reserved, not memory
+/// used, and walks deeper than any path a system lets a program name (Windows' 32,767
+/// characters is 16,000 levels of one letter and a separator).
+pub const WALK_STACK: usize = 256 << 20;
+
+/// A thread for work that walks a tree; see [`WALK_STACK`].
+pub fn walk_thread<F>(f: F) -> std::thread::JoinHandle<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::Builder::new()
+        .stack_size(WALK_STACK)
+        .spawn(f)
+        .expect("a thread to walk a tree")
+}

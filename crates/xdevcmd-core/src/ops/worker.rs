@@ -55,7 +55,7 @@ impl Handle {
         let (answers, _) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let c = cancel.clone();
-        std::thread::spawn(move || work(etx, c));
+        crate::walk_thread(move || work(etx, c));
         Self {
             events,
             answers,
@@ -79,7 +79,7 @@ pub fn start(req: Request) -> Handle {
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = cancel.clone();
 
-    std::thread::spawn(move || {
+    crate::walk_thread(move || {
         let mut w = Worker {
             tx: etx,
             answers: arx,
@@ -1143,7 +1143,7 @@ impl Count {
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
-        std::thread::spawn(move || {
+        crate::walk_thread(move || {
             if let Some(n) = work(&flag) {
                 let _ = tx.send(n);
             }

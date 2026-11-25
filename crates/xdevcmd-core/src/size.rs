@@ -109,7 +109,7 @@ impl Sizer {
                 .clamp(1, 4);
             for _ in 0..n {
                 let (queue, stop, tx) = (queue.clone(), self.stop.clone(), self.tx.clone());
-                thread::spawn(move || loop {
+                crate::walk_thread(move || loop {
                     // The lock is held only to take the next request.
                     let next = queue.lock().map(|q| q.recv());
                     let Ok(Ok(dir)) = next else { return };

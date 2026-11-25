@@ -34,7 +34,7 @@ impl<T: Send + 'static> Task<T> {
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
-        std::thread::spawn(move || {
+        crate::walk_thread(move || {
             let _ = tx.send(work(&flag));
         });
         Self { rx, stop }

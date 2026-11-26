@@ -105,6 +105,11 @@ stable release, not code) · **later** (0.4.x / 0.5) · **owner** (a decision) �
 | T19 | `cargo install` from crates.io builds without the workspace's fat LTO and strip | 0.4.0 (note in the install docs) |
 | T20 | docs status: 13 pages changed since the first review | at the cut (review the changed pages) |
 | T21 | release-check: version, dated CHANGELOG section, branch on dev | at the cut (the release flow) |
+| T22 | Check of the amendments: a lone new file whose own batch sync failed was still counted done (the sync ran before the caller counted it) | fixed (the batch syncs after the file is counted; `made` entry dropped; test fails without the fix) |
+| T23 | A background merging move finishing later clears a newer move's undo | rc (tie the undo to its job); only blocks an undo |
+| T24 | A merge killed after `remove_dir(src)` and before the journal line: the resume sees no merge, undo could move the folder back | rc (SUSPECT; record the merge in the journal or refuse undo after a resume) |
+| T25 | Core English around translated texts (`Undo::plan`'s frame, `Summary::describe`, "undone: …", Mark/Unmark menu labels) | rc / known issue "some words stay English" (core text not translated in 0.4) |
+| T26 | ZWNJ/ZWJ refused would block Persian and Indic translations | fixed (allowed again; ZWSP, BOM, U+2028/9 still refused) |
 
 ## Evidence
 

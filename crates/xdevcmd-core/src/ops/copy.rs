@@ -562,6 +562,11 @@ impl Worker {
                     } else if self.recording {
                         self.sum.replaced_for_good += 1;
                     }
+                    // The fresh batch, once this file is counted: a failed sync then
+                    // takes back what was counted (beta.4 red-team check).
+                    if self.fresh_due() {
+                        self.sync_fresh();
+                    }
                     return;
                 }
                 // Taken since it was found free: round again, to the question.
@@ -1112,13 +1117,16 @@ impl Worker {
         let f = &mut self.fresh;
         f.files.push((dst.to_path_buf(), w));
         f.bytes += size;
-        let since = *f.since.get_or_insert_with(std::time::Instant::now);
-        if f.files.len() >= FRESH_BATCH_FILES
+        f.since.get_or_insert_with(std::time::Instant::now);
+    }
+
+    /// The fresh batch is full or its first file has waited long enough. Its sync runs
+    /// at the caller's next safe point, after the file just added is counted.
+    pub(super) fn fresh_due(&self) -> bool {
+        let f = &self.fresh;
+        f.files.len() >= FRESH_BATCH_FILES
             || f.bytes >= FRESH_BATCH_BYTES
-            || since.elapsed() >= GROUP_BATCH_AGE
-        {
-            self.sync_fresh();
-        }
+            || f.since.is_some_and(|s| s.elapsed() >= GROUP_BATCH_AGE)
     }
 
     /// B3: the new files and folders so far to the disk, data and names, then the
@@ -1144,6 +1152,8 @@ impl Worker {
                 // it is not counted done; its folder is not told finished.
                 let _ = remove_file_anyway(path);
                 self.sum.done = self.sum.done.saturating_sub(1);
+                // Undo of the copy must not look for it either.
+                self.sum.made.retain(|m| m.path != *path);
                 self.note_error(path, &e);
             }
         }

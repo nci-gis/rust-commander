@@ -1507,6 +1507,29 @@ fn new_files_are_synced_before_the_job_ends() {
     }
 }
 
+/// B3: a lone new file whose own batch sync fails is not counted done, even when it is
+/// the file that fills the batch (64 MiB): the sync runs once it is counted (beta.4
+/// red-team check: it said "1 copied, 1 failed").
+#[test]
+fn a_lone_new_file_whose_sync_fails_is_not_counted() {
+    let root = tmp("b3-lone");
+    fs::create_dir_all(root.join("dst")).unwrap();
+    fs::write(root.join("b3-lone.bin"), vec![7u8; 65 << 20]).unwrap();
+    let _f = crate::faults::fail(
+        crate::faults::Point::SyncData,
+        "dst/b3-lone.bin",
+        1,
+        crate::faults::Fault::Os(5),
+    );
+    let mut req = Request::copy(vec![root.join("b3-lone.bin")], root.join("dst"));
+    req.safe = true;
+    let s = run(req);
+    assert_eq!((s.done, s.failed), (0, 1), "{s:?}");
+    assert!(s.made.is_empty(), "{s:?}");
+    assert!(!root.join("dst/b3-lone.bin").exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// B3: before its last sync, the job says so (the bar can stand full a while), and
 /// says how many new files are going to the disk; then it is done.
 #[test]

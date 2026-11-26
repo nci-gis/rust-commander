@@ -337,15 +337,16 @@ fn pick_code(
 /// Whether `c` may not come from a language file: a control character (ESC starts a
 /// terminal command: a title, the clipboard), or one that turns text around on screen
 /// (bidirectional overrides and isolates, so "delete" can read as another word).
-/// Also characters that draw nothing or break a line (zero-width spaces and joiners,
-/// the BOM, U+2028/2029): a label of them is an invisible key.
+/// Also characters that draw nothing or break a line (the zero-width space, the BOM,
+/// U+2028/2029): a label of them is an invisible key. The zero-width joiner and
+/// non-joiner stay allowed: Persian and Indic scripts need them.
 pub fn unsafe_char(c: char) -> bool {
     xdevcmd_core::controls::is(c)
         || matches!(
             c,
             '\u{202a}'..='\u{202e}'
                 | '\u{2066}'..='\u{2069}'
-                | '\u{200b}'..='\u{200f}'
+                | '\u{200b}' | '\u{200e}' | '\u{200f}'
                 | '\u{061c}'
                 | '\u{2028}'
                 | '\u{2029}'

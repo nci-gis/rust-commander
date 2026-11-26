@@ -317,6 +317,15 @@ fn ctrl_z_after_a_merging_move_says_it_cannot_and_moves_nothing() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// F2 selects the name: Ctrl+C copies it, as in any text field (it copied nothing).
+#[test]
+fn ctrl_c_in_the_rename_field_copies_the_selected_name() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x24", "Down,F2,Ctrl+c", &a, &b);
+    assert!(s.contains("copied 1 line to the clipboard"), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn f5_can_replace_only_older_files() {
     let (a, b) = fixture();
@@ -6042,4 +6051,27 @@ fn settings_lists_the_languages_there_are() {
         .unwrap_or_default();
     assert!(chosen.contains("Tiếng Việt"), "{s}");
     let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// A zip-based document opens with its program on Enter; a plain zip is still browsed;
+/// Open with… offers to browse inside the document.
+#[test]
+fn enter_opens_a_zip_document_and_open_with_browses_inside() {
+    let (a, b) = fixture();
+    write_zip(&a.join("report.docx"), &[("word-part.xml", b"<w/>")]);
+    write_zip(&a.join("plain.zip"), &[("inner.txt", b"x")]);
+    let s = shot_keys(SIZE, "/,r,e,p,o,r,t,Enter,Enter", &a, &b);
+    assert!(!s.contains("report.docx/"), "Enter does not go inside\n{s}");
+    assert!(s.contains("would open") || s.contains("Open it?"), "{s}");
+    let s = shot_keys(SIZE, "/,p,l,a,i,n,Enter,Enter", &a, &b);
+    assert!(s.contains("plain.zip/"), "a plain zip is browsed\n{s}");
+    let s = shot_keys(SIZE, "/,r,e,p,o,r,t,Enter,Shift+O", &a, &b);
+    assert!(s.contains("Browse inside"), "{s}");
+    let s = shot_keys(
+        SIZE,
+        "/,r,e,p,o,r,t,Enter,Shift+O,Down,Down,Down,Enter",
+        &a,
+        &b,
+    );
+    assert!(s.contains("report.docx/"), "Browse inside goes in\n{s}");
 }

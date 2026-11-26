@@ -52,6 +52,23 @@ impl LineEdit {
         self.cursor
     }
 
+    /// What Ctrl+C copies: the selection, or the whole line when nothing is selected.
+    pub fn selected_or_all(&self) -> String {
+        match self.selection() {
+            Some((s, e)) => self.chars[s..e].iter().collect(),
+            None => self.text(),
+        }
+    }
+
+    /// Ctrl+X: the selection (or the whole line) taken out, and returned to copy.
+    pub fn cut(&mut self) -> String {
+        let (s, e) = self.selection().unwrap_or((0, self.chars.len()));
+        let out: String = self.chars.drain(s..e).collect();
+        self.cursor = s;
+        self.anchor = None;
+        out
+    }
+
     /// The selected range, start before end, or `None` when nothing is selected.
     pub fn selection(&self) -> Option<(usize, usize)> {
         let a = self.anchor?;
@@ -231,5 +248,19 @@ mod tests {
         e.on_key(key(KeyCode::Right));
         assert_eq!(e.text(), "");
         assert_eq!(e.cursor(), 0);
+    }
+
+    #[test]
+    fn copy_takes_the_selection_or_the_whole_line_and_cut_takes_it_out() {
+        let e = LineEdit::for_rename("báo cáo.docx", false);
+        assert_eq!(e.selected_or_all(), "báo cáo", "the name F2 selects");
+        assert_eq!(
+            LineEdit::new("abc").selected_or_all(),
+            "abc",
+            "nothing selected"
+        );
+        let mut e = LineEdit::for_rename("báo cáo.docx", false);
+        assert_eq!(e.cut(), "báo cáo");
+        assert_eq!((e.text(), e.cursor()), (".docx".to_string(), 0));
     }
 }

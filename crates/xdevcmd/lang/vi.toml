@@ -945,6 +945,7 @@ u_item_u_release_to_copy = "⇢ {n} mục — thả ra để chép hoặc chuy�
 view = "Xem"
 
 [open]
+browse_inside = "Duyệt bên trong"
 ran = "đã chạy {label}"
 opened = "đã mở {name}"
 cannot_run = "không chạy được {program}: {e}"

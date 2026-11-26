@@ -62,6 +62,20 @@ pub fn format_of(path: &Path) -> Option<Format> {
     }
 }
 
+/// A document that happens to be a zip (Office, OpenDocument, EPUB): Enter opens it
+/// with the system's program, and Open with… offers to browse inside (the owner,
+/// 2026-11-26). A plain archive, or a .jar, .war or .apk (opening runs code), is
+/// browsed on Enter.
+pub fn is_zip_document(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    [".docx", ".xlsx", ".pptx", ".odt", ".epub"]
+        .iter()
+        .any(|e| name.ends_with(e))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     File,

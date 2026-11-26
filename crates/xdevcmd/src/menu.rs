@@ -19,6 +19,9 @@ use crate::keys::Action;
 use crate::theme;
 
 pub enum Cmd {
+    /// Go into this archive or zip-based document, as into a folder (Enter opens a
+    /// document instead).
+    BrowseInside(PathBuf),
     Act(Action),
     /// Put the selected paths on the clipboard through the terminal (OSC 52).
     CopyPath,

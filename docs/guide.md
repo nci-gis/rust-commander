@@ -140,6 +140,11 @@ Your own commands (Shift+F9, `[[menu]]` in the config) can hold the mount comman
 
 xdevcmd always asks before it deletes or overwrites anything.
 
+**In a text field** (rename, new directory, Go to…): **Ctrl+A** selects all, **Ctrl+C**
+or **Ctrl+Insert** copies what is selected (the whole line if nothing is), **Ctrl+X**
+cuts, **Ctrl+U** deletes back to the start. Copying goes through the terminal (OSC 52):
+see [Troubleshooting](troubleshooting.md#every-system) if nothing arrives.
+
 ### The viewer (F3)
 
 | Key | Does |
@@ -337,6 +342,8 @@ file where the plan saw none, and you are asked.
 
 - **Enter** on a `.zip`, `.tar` or `.tar.gz` opens it like a folder. **F3** reads a file
   inside; **F5** extracts what you marked to the other pane.
+- A document that is a zip inside (`.docx`, `.xlsx`, `.pptx`, `.odt`, `.epub`) opens
+  with its program on **Enter**. To look inside it, **Shift+O** → *Browse inside*.
 - **Alt+F5** packs the selection. **Alt+F9** unpacks everything.
 - An archive is never changed in place.
 - Unpacking refuses an archive that would not fit, or would grow far beyond its size

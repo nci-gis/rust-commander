@@ -79,6 +79,17 @@ impl App {
             Some(Modal::Input(i)) => match k.code {
                 KeyCode::Esc => act = ModalAct::Close,
                 KeyCode::Enter => act = ModalAct::Apply,
+                // Copy what is selected (the whole line if nothing is), as in any text
+                // field; Ctrl+X takes it out too. F2's selected name copied nothing.
+                KeyCode::Char('c') | KeyCode::Insert
+                    if k.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    act = ModalAct::Copy(i.edit.selected_or_all());
+                }
+                KeyCode::Char('x') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    act = ModalAct::Copy(i.edit.cut());
+                    i.error = None;
+                }
                 KeyCode::Tab if i.kind == InputKind::GoTo => complete_path(i),
                 KeyCode::Tab => {
                     if let InputKind::LogTo { raw, .. } = &mut i.kind {
@@ -215,6 +226,11 @@ impl App {
 
     pub(super) fn modal_act_inner(&mut self, act: ModalAct) {
         match act {
+            ModalAct::Copy(t) => {
+                if !t.is_empty() {
+                    self.copy_text(t);
+                }
+            }
             ModalAct::Link(a, l) => self.history_link(a, l),
             ModalAct::Run(c) => {
                 self.modal = None;

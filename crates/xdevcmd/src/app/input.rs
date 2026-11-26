@@ -37,6 +37,7 @@ fn cmd_action(c: &Cmd) -> Option<Action> {
         | Cmd::RemoveBookmark(_) => None,
         // Read, move the view, or close.
         Cmd::GoTo(_)
+        | Cmd::BrowseInside(_)
         | Cmd::ShowList(_)
         | Cmd::AddToList(_)
         | Cmd::TabHistory(_)
@@ -839,6 +840,11 @@ impl App {
                 .into();
             }
             Cmd::OpenFile(p) => self.launch(&p),
+            Cmd::BrowseInside(p) => {
+                if let Some(f) = self.focused_files() {
+                    f.enter_archive(&p);
+                }
+            }
             Cmd::RunInTerminal { argv, .. }
                 if argv
                     .first()

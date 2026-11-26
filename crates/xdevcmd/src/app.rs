@@ -112,6 +112,8 @@ enum ModalAct {
     Palette(usize),
     /// Enter, F3 or F4 on a path in a shell's history.
     Link(viewer::LinkAct, crate::links::Link),
+    /// Ctrl+C, Ctrl+Insert or Ctrl+X in a text field: this text to the clipboard.
+    Copy(String),
 }
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);

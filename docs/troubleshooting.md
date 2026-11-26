@@ -42,6 +42,12 @@ screen to open it on, so xdevcmd views it and says why. An `[[open]]` rule with
 the rest ([config.md](config.md#opening-files)). Read-only mode opens nothing in another
 program.
 
+**Copy puts nothing on the clipboard** (Ctrl+C in a text field, Y in the viewer, Copy
+path in the right-click menu). xdevcmd asks the terminal to do it (OSC 52), and a terminal may ignore
+that. Turn it on where it is a setting: iTerm2's "Applications in terminal may access
+clipboard"; in tmux `set -g set-clipboard on`. Otherwise select with the terminal's own
+mouse selection (Shift+drag in most terminals).
+
 **After xdevcmd was killed, odd characters appear when the mouse moves** (`26M35`,
 `command not found`). A program killed with `kill -9`, or that crashed, cannot put the
 terminal back: it is still sending mouse moves. Type `reset` and Enter, even if you do

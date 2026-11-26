@@ -27,8 +27,15 @@ that heading and starts a new, empty one here. -->
   it is open, and Tab's button says which of how many (`other pane 2/3`).
 - **In the shell, the key bar is three buttons**: [ Help ] [ Menu ] [ Quit ], for the
   mouse, with no key on them (the F-keys there are the program's).
+- **Copy from a text field**: Ctrl+C or Ctrl+Insert copies the selection (or the whole
+  line, if nothing is selected) in F2 rename and every other input box; Ctrl+X cuts it.
 
 ### Fixed
+- **Enter on a `.docx`, `.xlsx`, `.pptx`, `.odt` or `.epub` opens the document** with its
+  program, rather than browsing the zip inside it. Shift+O → *Browse inside* still
+  looks in.
+- **A deep compare stops at the walk's depth limit** with one row that cannot be decided,
+  as copy and move do, rather than ending the program on a small stack.
 - **Names Windows does not allow are refused before they are made** by F7, a new file,
   a rename, rename many, copy as, pack and save as, as copy and move refuse them:
   `CON`, `NUL`, `COM1`…, `< > : " | ? * \`, a dot or space at the end. On Windows, and

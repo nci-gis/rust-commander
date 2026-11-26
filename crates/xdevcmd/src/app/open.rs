@@ -463,6 +463,15 @@ impl App {
             Action::Edit,
             self.refused(Action::Edit).is_none(),
         ));
+        // A zip-based document opens on Enter; what is inside it is one step away here.
+        if xdevcmd_core::archive::format_of(&path).is_some() {
+            items.push(Item::cmd(
+                tr!("open.browse_inside", "Browse inside"),
+                "",
+                Cmd::BrowseInside(path.clone()),
+                true,
+            ));
+        }
         if opener::console_program(&path) {
             let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
             items.push(Item::cmd(

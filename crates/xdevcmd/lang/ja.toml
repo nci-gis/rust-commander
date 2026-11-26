@@ -945,6 +945,7 @@ u_item_u_release_to_copy = "⇢ {n} 項目 — 離すとコピーまたは移動
 view = "表示"
 
 [open]
+browse_inside = "中を見る"
 ran = "{label} を実行しました"
 opened = "{name} を開きました"
 cannot_run = "{program} を実行できません: {e}"

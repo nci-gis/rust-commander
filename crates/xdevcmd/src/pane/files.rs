@@ -1099,8 +1099,13 @@ impl FilePane {
             }
             return None;
         }
-        // Enter on an archive goes into it, as into a directory.
-        if !e.is_dir() && archive::format_of(&e.path).is_some() && self.results.is_none() {
+        // Enter on an archive goes into it, as into a directory; a zip-based document
+        // (Office, EPUB) is a document, and opens (Open with… browses inside).
+        if !e.is_dir()
+            && archive::format_of(&e.path).is_some()
+            && !archive::is_zip_document(&e.path)
+            && self.results.is_none()
+        {
             let file = e.path.clone();
             self.enter_archive(&file);
             return None;

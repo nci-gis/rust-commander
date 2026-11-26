@@ -948,6 +948,7 @@ u_item_u_release_to_copy = "⇢ {n} item{v} — release to copy or move"
 view = "View"
 
 [open]
+browse_inside = "Browse inside"
 cannot_run = "cannot run {program}: {e}"
 cannot_view = "cannot view {path}: {e}"
 commands = "Commands"

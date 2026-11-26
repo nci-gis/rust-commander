@@ -1517,7 +1517,7 @@ fn a_lone_new_file_whose_sync_fails_is_not_counted() {
     fs::write(root.join("b3-lone.bin"), vec![7u8; 65 << 20]).unwrap();
     let _f = crate::faults::fail(
         crate::faults::Point::SyncData,
-        "dst/b3-lone.bin",
+        "b3-lone.bin",
         1,
         crate::faults::Fault::Os(5),
     );

@@ -261,7 +261,26 @@ impl App {
         if self.settings.mode.read_only() {
             return;
         }
-        let found = xdevcmd_core::journal::recover();
+        let (newer, found): (Vec<_>, Vec<_>) = xdevcmd_core::journal::recover()
+            .into_iter()
+            .partition(|i| i.newer.is_some());
+        // Written by a newer xdevcmd in a layout this one does not understand: left
+        // whole (must understand), said once on the status line.
+        if let Some(app) = newer.iter().find_map(|i| i.newer.clone()) {
+            self.status = if app.is_empty() {
+                tr!(
+                    "jobs.left_for_a_newer_version",
+                    "an interrupted job of a newer xdevcmd is left as it is: continue it with that version"
+                )
+                .into_owned()
+            } else {
+                tr!(
+                    "jobs.left_for_version",
+                    "an interrupted job of xdevcmd {version} is left as it is: continue it with that version",
+                    version = app
+                )
+            };
+        }
         if found.is_empty() {
             return;
         }

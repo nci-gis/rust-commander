@@ -650,6 +650,8 @@ move = "移動"
 pack = "圧縮"
 
 [jobs]
+left_for_version = "xdevcmd {version} の中断されたジョブはそのままにしました: そのバージョンで続けてください"
+left_for_a_newer_version = "新しい xdevcmd の中断されたジョブはそのままにしました: そのバージョンで続けてください"
 undo_merged_move = "その移動は既存のフォルダーに統合しました: F6 でファイルを戻してください"
 background_done = "バックグラウンド: {what}"
 to_dir = " ({dir} へ)"

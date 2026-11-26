@@ -651,6 +651,8 @@ move = "Chuyển"
 pack = "Nén"
 
 [jobs]
+left_for_version = "một việc bị gián đoạn của xdevcmd {version} được để nguyên: hãy làm tiếp bằng bản đó"
+left_for_a_newer_version = "một việc bị gián đoạn của xdevcmd bản mới hơn được để nguyên: hãy làm tiếp bằng bản đó"
 undo_merged_move = "lần chuyển đó đã gộp thư mục vào thư mục có sẵn: hãy chuyển các tệp về bằng F6"
 background_done = "nền: {what}"
 to_dir = " vào {dir}"

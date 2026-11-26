@@ -49,6 +49,14 @@
 //! 030), for Resume to carry out exactly what is left. All are unknown tags to 0.3.0's
 //! tidy-up, which skips them, and this version reads older journals as before.
 //!
+//! **Must understand** (beta.4, the owner, 2026-11-26): a journal is acted on only by a
+//! version that understands all of it. `v F R` names its layout F and the oldest
+//! layout R whose reader understands it all (`v F` alone: R = F; no `v` line: 1). This
+//! version reads [`JOURNAL_READS`]; a journal needing more is left whole, never tidied
+//! or offered, and the start says which version wrote it (its `app` line), to
+//! continue it with that one. A later layout that only adds lines an older reader may
+//! skip writes `v 4 3`, and this version still acts on it. 0.3.0 reads neither line.
+//!
 //! Every line's tag, and how many of its words are paths, is in `Tag`: the writer, the
 //! reader and the root check go by it alone. A last line with no newline was cut short
 //! as it was written and is not read.
@@ -278,7 +286,8 @@ impl Journal {
             dirty: false,
         };
         j.put(Tag::Host, &[&enc(Path::new(&hostname()))], about)?;
-        j.put(Tag::V, &["3"], about)?;
+        j.put(Tag::V, &[&JOURNAL_FORMAT.to_string()], about)?;
+        j.put(Tag::App, &[env!("CARGO_PKG_VERSION")], about)?;
         j.put(Tag::Kind, &[kind], about)?;
         for s in sources {
             j.put(Tag::Src, &[&enc(s)], about)?;
@@ -491,13 +500,63 @@ pub struct Interrupted {
     pub done: Vec<PathBuf>,
     /// Big files cut short after a checkpoint, kept for Resume (Round 033).
     pub partial: Vec<Partial>,
+    /// Written by a newer xdevcmd, in a layout this one does not understand: left
+    /// whole, nothing done. Its version, if its `app` line says.
+    pub newer: Option<String>,
     /// The dead run's journal, kept while the job is [offered](Self::offered) or
     /// `partial` is not empty: a later start finds it again if this one neither
     /// resumes nor discards it.
     pub journal: Option<PathBuf>,
 }
 
+/// The journal layout this version writes.
+pub const JOURNAL_FORMAT: u32 = 3;
+/// The layouts this version reads and understands in full (1 had no `v` line, 2 added
+/// `moved`, 3 the plan's decisions and `done`).
+pub const JOURNAL_READS: std::ops::RangeInclusive<u32> = 1..=3;
+
+/// Whether this version understands all of `text` ([`JOURNAL_READS`]); if not, the
+/// version that wrote it, as its `app` line says (empty if it does not).
+pub fn understood(text: &str) -> Result<(), String> {
+    let mut need = 1;
+    let mut app = String::new();
+    for line in whole_lines(text) {
+        let mut w = line.split(' ');
+        match w.next() {
+            Some("v") => {
+                let nums: Vec<u32> = w.map_while(|t| t.parse().ok()).collect();
+                // `v F R`: R readers understand it; `v F`: only F's. Unreadable: not
+                // understood.
+                need = match nums.as_slice() {
+                    [f] => *f,
+                    [_, r, ..] => *r,
+                    [] => u32::MAX,
+                };
+            }
+            Some("app") => app = w.next().unwrap_or("").to_string(),
+            _ => {}
+        }
+    }
+    if JOURNAL_READS.contains(&need) {
+        Ok(())
+    } else {
+        Err(app)
+    }
+}
+
 impl Interrupted {
+    /// A journal left whole for the newer version that wrote it: only its kind and
+    /// that version, nothing tidied, nothing offered.
+    fn newer(text: &str, app: String) -> Self {
+        let mut it = tidy_nothing();
+        it.kind = whole_lines(text)
+            .find_map(|l| l.strip_prefix("kind "))
+            .unwrap_or("")
+            .to_string();
+        it.newer = Some(app);
+        it
+    }
+
     /// Whether the start offers this job again: a copy or a move, or a delete to the
     /// trash, with sources. A permanent delete is not: it would go on with one Enter,
     /// where Shift+F8 itself takes only Y.
@@ -617,6 +676,12 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         let Some(held) = claim(&path, &run, Some((&mut text, &host))) else {
             continue;
         };
+        // Must understand: a journal of a layout this version does not know is left
+        // whole for the version that wrote it (its lock goes with `held`).
+        if let Err(app) = understood(&text) {
+            out.push((written, Interrupted::newer(&text, app)));
+            continue;
+        }
         // A run confined to a root (`--root`) touches nothing outside it: a journal
         // naming a place outside is left whole for a run that may go there.
         if !may_tidy(&text, crate::policy::get()) {
@@ -750,6 +815,27 @@ fn may_tidy(text: &str, policy: &crate::policy::Policy) -> bool {
     })
 }
 
+/// An empty account: nothing found, nothing done.
+fn tidy_nothing() -> Interrupted {
+    Interrupted {
+        kind: String::new(),
+        sources: Vec::new(),
+        dest: None,
+        rename_to: None,
+        to_trash: false,
+        cleaned: 0,
+        restored: 0,
+        stranded: Vec::new(),
+        moved: Vec::new(),
+        decided: Vec::new(),
+        done: Vec::new(),
+        swapped: Vec::new(),
+        partial: Vec::new(),
+        newer: None,
+        journal: None,
+    }
+}
+
 fn tidy(text: &str, run: &str) -> Interrupted {
     let mut it = Interrupted {
         kind: String::new(),
@@ -765,6 +851,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         done: Vec::new(),
         swapped: Vec::new(),
         partial: Vec::new(),
+        newer: None,
         journal: None,
     };
     let mut bad_name = false;
@@ -782,7 +869,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         let path = |i: usize| words.get(i).and_then(|t| dec(t));
         // Every tag, no `_`: a line the writer learns to write is read here too.
         match tag {
-            Tag::Host | Tag::V => {}
+            Tag::Host | Tag::V | Tag::App => {}
             // Not `line[5..]`: a journal cut short after "kind" panicked every start.
             Tag::Kind => it.kind = line.strip_prefix("kind ").unwrap_or("").to_string(),
             Tag::Src => it.sources.extend(path(0)),
@@ -953,12 +1040,15 @@ enum Tag {
     Swap,
     Ckpt,
     Done,
+    /// The version of xdevcmd that wrote it (beta.4): said when it is not understood.
+    App,
 }
 
 impl Tag {
-    const ALL: [Tag; 16] = [
+    const ALL: [Tag; 17] = [
         Tag::Host,
         Tag::V,
+        Tag::App,
         Tag::Kind,
         Tag::Src,
         Tag::Dest,
@@ -980,6 +1070,7 @@ impl Tag {
             // The machine's name, encoded as a path is, but no place.
             Tag::Host => ("host", 0),
             Tag::V => ("v", 0),
+            Tag::App => ("app", 0),
             Tag::Kind => ("kind", 0),
             Tag::Src => ("src", 1),
             Tag::Dest => ("dest", 1),
@@ -1692,6 +1783,65 @@ mod tests {
 
     /// A journal written by 0.3.0 (no `v` line, no `moved`) is tidied up as before; one
     /// of this version, with lines 0.3.0 does not know, is read by the same rules.
+    /// Must understand (beta.4): `v F R` says the oldest layout whose reader understands
+    /// the journal; this version acts only on what it understands in full.
+    #[test]
+    fn a_journal_is_understood_by_its_layout_and_the_oldest_reader_it_names() {
+        let j = |v: &str| format!("host 6f6c64\n{v}app 9.9.9\nkind copy\n");
+        assert_eq!(understood(&j("v 3\n")), Ok(()));
+        assert_eq!(understood(&j("")), Ok(()), "no v line: layout 1 (0.2)");
+        assert_eq!(
+            understood(&j("v 4 3\n")),
+            Ok(()),
+            "4 adds only lines 3 may skip"
+        );
+        assert_eq!(understood(&j("v 4\n")), Err("9.9.9".into()));
+        assert_eq!(understood(&j("v 5 4\n")), Err("9.9.9".into()));
+        assert_eq!(
+            understood(&j("v x\n")),
+            Err("9.9.9".into()),
+            "unreadable: not understood"
+        );
+        assert_eq!(understood("v 4\n"), Err(String::new()), "no app line");
+        // What this version writes, it understands.
+        let me = format!("v {JOURNAL_FORMAT}\napp {}\n", env!("CARGO_PKG_VERSION"));
+        assert_eq!(understood(&me), Ok(()));
+    }
+
+    /// A journal of a layout this version does not understand is left whole: its part
+    /// files stay, nothing is offered, and the start learns which version wrote it.
+    #[test]
+    fn a_newer_journal_is_left_whole_for_the_version_that_wrote_it() {
+        let d = dir("newer");
+        let jdir = d.join("journal");
+        fs::create_dir_all(&jdir).unwrap();
+        let part = d.join(".a.xdevcmd-part-2147483646-0");
+        fs::write(&part, "half").unwrap();
+        let text = format!(
+            "host {}\nv 4\napp 0.5.0\nkind copy\nsrc {}\ndest {}\ndir {}\n",
+            enc(Path::new(&hostname())),
+            enc(&d.join("a")),
+            enc(&d),
+            enc(&d),
+        );
+        orphan(&jdir, &text);
+        let got = recover_in(&jdir);
+        assert_eq!(got.len(), 1);
+        let it = &got[0];
+        assert_eq!(it.newer.as_deref(), Some("0.5.0"));
+        assert_eq!((it.kind.as_str(), it.cleaned), ("copy", 0));
+        assert!(!it.offered() && it.journal.is_none(), "{it:?}");
+        assert!(part.exists(), "nothing tidied");
+        assert!(
+            jdir.join("2147483646-0.journal").exists(),
+            "the journal stays"
+        );
+        // The next start finds it again, as it is.
+        next_start(&jdir);
+        assert_eq!(recover_in(&jdir)[0].newer.as_deref(), Some("0.5.0"));
+        assert!(part.exists());
+    }
+
     #[test]
     fn a_journal_of_0_3_0_is_still_tidied_and_new_tags_are_skipped() {
         let d = dir("v030");

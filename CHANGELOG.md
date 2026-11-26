@@ -59,6 +59,11 @@ that heading and starts a new, empty one here. -->
   journal still covers (continue with C). The last batch says "writing N new files to
   the disk…". Copying many small files is about 23 % slower, a 256 MiB file 0.3 s
   (Linux); see [security.md](docs/security.md#what-is-synced-and-when).
+- **A journal is acted on only by a version that understands all of it**: it names its
+  layout and the oldest reader that understands it (`v 3`, later `v 4 3`), and the
+  version that wrote it (`app …`). One this version does not understand is left as
+  it is, nothing tidied or offered, and the start says which version to continue it
+  with ([compatibility.md](docs/compatibility.md)).
 - **Moving a folder onto a folder of the same name merges them** on one drive too, as
   the plan says and as a move across drives does. Before, it stopped with "0 moved,
   1 failed" (the system refuses to rename onto a folder that is not empty). Ctrl+Z

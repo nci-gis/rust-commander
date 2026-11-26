@@ -1244,6 +1244,7 @@ mod tests {
             swapped: Vec::new(),
             done: vec![a.join("one.txt")],
             partial: Vec::new(),
+            newer: None,
             journal: None,
         };
         let mut app = App::new(&a, &b, Settings::default(), Outcome::NoFile);
@@ -1277,6 +1278,7 @@ mod tests {
             swapped: Vec::new(),
             done: Vec::new(),
             partial: Vec::new(),
+            newer: None,
             journal: None,
         };
         let mut app = App::new(&root, &root, Settings::default(), Outcome::NoFile);

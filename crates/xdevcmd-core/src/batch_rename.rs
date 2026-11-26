@@ -401,14 +401,14 @@ mod tests {
         let _f = crate::faults::fail(
             crate::faults::Point::JournalLine,
             "xdevcmd-batch-journal-file-",
-            6,
+            7,
             crate::faults::Fault::Os(5),
         );
         let jdir = d.join("journals");
         let journal = crate::journal::Journal::begin_in(&jdir, "rename", &paths, None, false);
         assert!(
             journal.is_ok(),
-            "the sixth line is the first after the header's five"
+            "the seventh line is the first after the header's six (host, v, app, kind, two src)"
         );
         let out = apply_with(&moves, Some(journal));
         assert_eq!(out.renamed, 0);

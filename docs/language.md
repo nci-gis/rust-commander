@@ -82,8 +82,8 @@ where the screen cuts.
 
 ## Rules
 
-- `$__code` and `$__name`: at most 32 characters (longer ends in `...`). `$__code`
-  cannot be `auto` or `en`.
+- `$__code` and `$__name`: at most 32 characters (longer ends in `...`). A language
+  cannot have the code `auto` or `en`, by `$__code` or by file name.
 - `$__status`: `prereview` (Settings adds "pre-review" to its row) or `ready`.
   Japanese ships as pre-review until a speaker has read it.
 - `{n}`, `{name}` …: filled in by xdevcmd. Any order; leaving one out is fine; one the

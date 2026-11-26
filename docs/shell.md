@@ -20,7 +20,8 @@ kind you use: not the session you started xdevcmd from.
 A program cannot change its parent shell's directory, but xdevcmd can write where you
 were, and a small function can `cd` there. Add one of these to your shell's startup
 file, then run `xc` instead of `xdevcmd` (the name is yours; `rc` would hide the Plan 9
-shell). Quit with **F10** to go to that directory, or **Alt+X q** to stay where you started.
+shell). Quit with **F10** to go to that directory, or **Alt+X q** to stay where you started
+(as does the **[ Quit ]** button on the key bar while you are in the shell).
 
 **bash / zsh** (`~/.bashrc` or `~/.zshrc`). Tried by hand (no test runs it):
 

@@ -202,10 +202,15 @@ whether you can write there.
 - **Enter** before the check ends starts the job as before, asking as it goes.
 - A file is replaced only while it is still the one the check saw; changed since, you
   are asked. At an overwrite question, **U** applies "only if newer" to the rest.
+- **A folder onto a folder of the same name** is merged, on one drive too: each file
+  goes into the folder there, and the old folder goes once it is empty. Ctrl+Z cannot
+  undo a merge.
 
 **While it runs**: progress, with **Esc** to cancel and **B** to send the job to the
 background. The job box says when it will end ("about 4 min left"), from the last
 seconds' bytes and files; nothing for the first three seconds or while nothing moves.
+At the end of a copy, with Safe operations on, it may say "writing 12 new files to the
+disk…": the bar stands full until they are on the disk. Done then means on the disk.
 
 **Nothing is half-written.** A file being replaced stays as it was until its new copy
 is complete: cancelling leaves the old one. With **Safe operations** (Settings →
@@ -236,7 +241,8 @@ it ends when xdevcmd quits.
 - **Undoing a copy** removes only what is still as the copy made it: a file you changed
   since, or a folder you put something into, is kept, and the job lists it. Files the
   copy replaced come back from the trash.
-- **Not undoable**: a copy of more than 200,000 items, and Shift+F8. Ctrl+Z says so.
+- **Not undoable**: a copy of more than 200,000 items, a move that merged a folder into
+  one already there, and Shift+F8. Ctrl+Z says so; F6 moves the files back.
 - **Kept lists follow your changes**: a row moved (F6), renamed (F2, Shift+F2) or moved
   back by Ctrl+Z stays in the list under its new path.
 
@@ -417,7 +423,8 @@ nine rows (digits alone are typed).
 - Rows that cannot run say why: a mouse gesture, the viewer's own key, or a mode that
   turns the command off.
 - In the shell F1 and F10 are the program's: **Alt+X F1** opens Commands there, and
-  **Alt+X q** quits, as from a pane. A pane's command
+  **Alt+X q** quits, leaving your shell where it started (see
+  [Shell](shell.md#stay-in-the-directory-you-were-in)). A pane's command
   run from the shell acts on the pane you came from; the shell's own (split, new tab)
   act on the shell. Over the viewer, F1 lists the viewer's keys first, and Esc gives the
   viewer back.

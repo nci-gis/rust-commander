@@ -385,7 +385,7 @@ file named with `--cwd-file`, on quit.
 | File | Where | What |
 |---|---|---|
 | `session.toml` | `~/.local/state/xdevcmd/` (Linux, macOS); `%LOCALAPPDATA%\xdevcmd\` (Windows) | The panes, tabs and directories open when you quit, and each terminal tab's directory. Saved on quit, every `autosave_secs`, and when the terminal closes. Readable by you only. |
-| `journal/` | beside `session.toml` | Safe operations: one small file per running job, removed when it ends; what a killed run leaves is cleaned up at the next start. |
+| `journal/` | beside `session.toml` | Safe operations: one small file per running job, removed when it ends; what a killed run leaves is cleaned up at the next start (one a newer xdevcmd wrote is left for that version). |
 | `crash-….log` | beside `session.toml` | Written only if xdevcmd crashes: what happened, for a report. The five newest are kept. |
 | `debug-….jsonl` | beside `session.toml`, or `XDEVCMD_DEBUG_DIR` | Only with `XDEVCMD_DEBUG` set: what jobs did and how long each part took, with no names ([Troubleshooting](troubleshooting.md#sending-a-log-with-a-report)). The five newest are kept. |
 | `bookmarks.toml` | beside `session.toml` | Bookmarks added inside xdevcmd (Ctrl+D). Bookmarks in this config are not copied there. |

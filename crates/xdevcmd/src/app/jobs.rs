@@ -266,18 +266,22 @@ impl App {
             .partition(|i| i.newer.is_some());
         // Written by a newer xdevcmd in a layout this one does not understand: left
         // whole (must understand), said once on the status line.
-        if let Some(app) = newer.iter().find_map(|i| i.newer.clone()) {
-            self.status = if app.is_empty() {
+        if let Some(it) = newer.first() {
+            let app = it.newer.clone().unwrap_or_default();
+            let file = it.left.as_deref().map(tidy).unwrap_or_default();
+            // No version, or this one's: the file is damaged rather than newer.
+            self.status = if app.is_empty() || app == env!("CARGO_PKG_VERSION") {
                 tr!(
-                    "jobs.left_for_a_newer_version",
-                    "an interrupted job of a newer xdevcmd is left as it is: continue it with that version"
+                    "jobs.journal_unreadable",
+                    "an interrupted job's journal cannot be read and is left as it is: {file} (remove it to forget the job)",
+                    file = file
                 )
-                .into_owned()
             } else {
                 tr!(
                     "jobs.left_for_version",
-                    "an interrupted job of xdevcmd {version} is left as it is: continue it with that version",
-                    version = app
+                    "an interrupted job of xdevcmd {version} is left as it is: continue it with that version, or remove {file} to forget it",
+                    version = app,
+                    file = file
                 )
             };
         }

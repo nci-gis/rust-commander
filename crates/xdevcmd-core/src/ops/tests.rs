@@ -1530,6 +1530,44 @@ fn a_lone_new_file_whose_sync_fails_is_not_counted() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// B3: a question can stay open for minutes; the new files before it are synced first
+/// (docs review, 2026-11-26: they waited for the answer).
+#[test]
+fn new_files_are_synced_before_a_question_is_asked() {
+    let root = tmp("b3-ask");
+    let dst = root.join("dst");
+    fs::create_dir_all(&dst).unwrap();
+    fs::write(root.join("a-new"), "n").unwrap();
+    fs::write(root.join("b-there"), "new").unwrap();
+    fs::write(dst.join("b-there"), "old!").unwrap();
+    let frag = dst.to_string_lossy().into_owned();
+    crate::faults::trace(&frag);
+    let mut req = Request::copy(vec![root.join("a-new"), root.join("b-there")], dst.clone());
+    req.safe = true;
+    let h = start(req);
+    let mut seen = None;
+    loop {
+        match h.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+            Event::Ask(_) => {
+                seen.get_or_insert_with(|| crate::faults::traced(&frag));
+                h.answer(Answer::Skip);
+            }
+            Event::Done(s) => {
+                assert_eq!(s.failed, 0, "{s:?}");
+                break;
+            }
+            _ => {}
+        }
+    }
+    let seen = seen.expect("asked about b-there");
+    assert!(
+        seen.iter()
+            .any(|(p, q)| p.name() == "sync-data" && *q == dst.join("a-new")),
+        "a-new synced before the question: {seen:?}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// B3: before its last sync, the job says so (the bar can stand full a while), and
 /// says how many new files are going to the disk; then it is done.
 #[test]

@@ -1,6 +1,6 @@
 # Known issues and limits
 
-What does not work yet, and what will not change, as of 0.4.0-beta.3. One line each;
+What does not work yet, and what will not change, as of 0.4.0-beta.4. One line each;
 the details are where you would meet the thing, behind the link. Not listed here?
 [Report it](troubleshooting.md#reporting-a-problem).
 
@@ -15,7 +15,7 @@ the details are where you would meet the thing, behind the link. Not listed here
 | The fish and PowerShell versions of the shell set-up (staying in the directory you quit in, prompt marks) have not been run | all | Tell us if they work for you | later | [Shell](shell.md#stay-in-the-directory-you-were-in) |
 | The usage view does not measure memory | Windows | — | later | — |
 | The config file's permissions are not checked (elsewhere, a file anyone can write is refused) | Windows | Keep it in its default place, under `%APPDATA%`, which only you can write | later | [Security](security.md#the-config-file-is-trusted) |
-| An older version started after a kill may not understand all of what a newer one was doing (a Copy As name, for one) | 0.3.0 and older | Continue with the same or a newer version. From 0.4.0-beta.4 a journal it does not understand is left as it is, and the start names the version to use | done in 0.4.0-beta.4 | [Compatibility](compatibility.md) |
+| An older version started after a kill may not understand all of what a newer one was doing (a Copy As name, for one) | 0.4.0-beta.3 and older | Continue with the same or a newer version. From 0.4.0-beta.4 a journal it does not understand is left as it is, and the start names the version to use | done in 0.4.0-beta.4 | [Compatibility](compatibility.md) |
 | The Intel macOS build is checked before a release but not run: it is built on Apple Silicon | macOS Intel | Tell us if it does not start | later | [Security](security.md#checking-a-download) |
 | Stopping a job with Esc ends it: it is not offered to continue at the next start, as a killed one is | all | When a share is down, stop with Esc; once it is back, copy again with F5 and answer for the files already there | 0.4.x | [Copy and move](guide.md#copy-and-move-f5-f6) |
 | With a share down, Skip meets the same error on the next file, after its tries (about 30 s a file) | all | Stop with Esc; the question says so when the error is a network one | 0.4.x | [Remote files](guide.md#remote-files-through-a-mount) |

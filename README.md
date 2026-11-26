@@ -113,7 +113,8 @@ The [guide](https://github.com/nci-gis/rust-commander/blob/main/docs/guide.md) e
 ## Platforms
 
 What has been checked, and how. "CI" is the whole test suite on GitHub's runners, on
-each pull request into `main` or `dev` and each push to a release branch; "by hand" is the maintainer using it with
+each pull request into `main`, `dev` or a version branch (`feat/v…`) and each push to
+them (a merge marked `[skip ci]` is not run again); "by hand" is the maintainer using it with
 [the hand-test list](https://github.com/nci-gis/rust-commander/blob/main/docs/development.md#testing-a-pre-release-by-hand).
 To check a version yourself: [How to test](https://github.com/nci-gis/rust-commander/blob/main/docs/how-to-test.md).
 

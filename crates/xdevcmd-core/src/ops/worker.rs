@@ -977,8 +977,10 @@ impl Worker {
 
     pub(super) fn ask(&mut self, q: Question) -> Answer {
         // What is waiting in a batch is finished first: a question can stay open for
-        // minutes, and what was done before it should be done.
+        // minutes, and what was done before it should be done (new files too, B3:
+        // every one in the batch is counted by now).
         self.flush_group();
+        self.sync_fresh();
         let logged = crate::debuglog::on(crate::debuglog::Topic::Errors).then(|| {
             let (q_word, path) = match &q {
                 Question::Conflict { path, changed, .. } if *changed => ("changed", Some(path)),

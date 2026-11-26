@@ -154,8 +154,9 @@ keeps it).
   at 16 MiB; the five newest are kept.
 - **What it holds**: per job, its kind and size, the kind of drive at each end (`ntfs`,
   `apfs`, `network` …), how long each part took (checking, opening, creating, writing,
-  syncing, finishing), how the bytes were copied, the batches small files were synced
-  in, and each error's system code, retry and your answer.
+  syncing, finishing), how the bytes were copied, the batches small replaced files
+  were synced in (new files' syncs count in "syncing"), and each error's system code,
+  retry and your answer.
 - **What it never holds**: file or folder names, user or host names. A file is a number,
   the same within one run. You can attach it as it is.
 - **Topics**: `jobs` (times), `errors` (errors and questions), `all` or `1` (both).

@@ -110,6 +110,9 @@ stable release, not code) · **later** (0.4.x / 0.5) · **owner** (a decision) �
 | T24 | A merge killed after `remove_dir(src)` and before the journal line: the resume sees no merge, undo could move the folder back | rc (SUSPECT; record the merge in the journal or refuse undo after a resume) |
 | T25 | Core English around translated texts (`Undo::plan`'s frame, `Summary::describe`, "undone: …", Mark/Unmark menu labels) | rc / known issue "some words stay English" (core text not translated in 0.4) |
 | T26 | ZWNJ/ZWJ refused would block Persian and Indic translations | fixed (allowed again; ZWSP, BOM, U+2028/9 still refused) |
+| T27 | pty flakes on 2026-11-26: `a_list_from_the_history_is_worked_on_and_come_back_to` (CI ubuntu-latest, run 45734947983) and `alt_c_after_a_continued_line_opens_a_new_shell` (local); both passed on re-run, neither touches the changed code | rc (find the fixed waits behind them; past-misses W03) |
+| T28 | R2 decided by the owner (2026-11-26): must understand = parse and understand; the code names the layouts it reads | fixed `bf149c3` (v F R, app line, JOURNAL_READS; a newer journal left whole) |
+| T29 | ja not yet read by a speaker | fixed `6ea8376` ($__status = prereview, shown in Settings) |
 
 ## Evidence
 

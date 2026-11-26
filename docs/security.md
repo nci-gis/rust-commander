@@ -31,7 +31,7 @@ your permissions. This page says what it guards against, and where the limits ar
 | **Huge images** | A picture claiming billions of pixels is refused before it is decoded. |
 | **Running programs by accident** | Enter or **o** on a program, script, launcher, installer or disk image asks "Run it?", with Cancel the default. Enter opens without asking only known document types (pictures, sound, video, PDF, text, office files that cannot hold macros) or what your `[[open]]` rules name; any other type asks "Open it?", since the system decides what an unknown type does and some types run code. **o** is the explicit "open with the system": it asks only for what runs. |
 | **Names a command line would misread** | Programs get their arguments as a list, never through a shell. On Windows, a batch file (`.bat`, `.cmd`) started in a terminal tab is refused when a file name holds a character `cmd.exe` acts on (`&`, `%`, `^`, `,`, `;`, `=`…), or when its own path has a space (as in `C:\Program Files\nodejs\npm.cmd`). |
-| **A same-named program in the folder you browse** | On Linux and macOS a program named without a path (in `[[open]]`, or run in a terminal tab) is looked up only in the absolute directories of `PATH`; `.` and empty entries are skipped. On Windows the system's own search is used (xdevcmd's folder, the system folders, then `PATH`; not the current folder). |
+| **A same-named program in the folder you browse** | On Linux and macOS a program named without a path (in `[[open]]`, or run in a terminal tab) is looked up only in the absolute directories of `PATH`; `.` and empty entries are skipped. On Windows, `[[open]]` uses the system's search (xdevcmd's folder, the system folders, then `PATH`; not the current folder); a terminal tab searches `PATH` in order, then the folder xdevcmd was started in. |
 | **A folder copied or moved into itself** | Refused before anything is written, however the destination is reached: through a link into the folder, `..`, or a folder there not made yet. A copy onto itself is skipped. Pack leaves out the archive it replaces. |
 | **A file that appears while xdevcmd writes** | Renaming (F2, rename many, moving into the Linux trash) is refused by the system if the new name is taken, even a moment earlier. Copy and move write to a free name only if it is still free; otherwise you get the usual overwrite question. Nothing is replaced without asking. |
 | **Typing into the wrong program** | Alt+C, Alt+Enter and your own commands type only into a shell at its prompt, never into an editor, a password prompt, `ssh` or another program; when unsure, xdevcmd asks. It never adds to a line you typed and did not run. Known gaps: a prompt built into the shell, such as bash's `read -s`, looks like the shell's own prompt; on Windows, a program that prints a prompt mark can look idle ([shell.md](shell.md#before-anything-is-typed-into-the-shell)). |
@@ -150,9 +150,9 @@ rename on disk before the data. So, with safe operations on or off:
 - **The journal** is synced, with its folder, when a job starts and before each step
   that cannot be undone.
 - **New files**, with safe operations on: synced together after they take their real
-  names, 128 files (or 64 MiB, or a second's worth) at a time on the same threads, then
+  names, 32 files (or 64 MiB, or a second's worth) at a time on the same threads, then
   their folders; and always before a folder or a source is marked done in the journal,
-  before a big file's checkpoint, and before the job ends ("writing N new files to the
+  before a big file's checkpoint, before a question is asked, and before the job ends ("writing N new files to the
   disk…"). Until its batch is synced a new file can be short after a power cut, and the
   journal is kept to cover it. Measured on Linux (median of 5): small files 23 % slower,
   a mixed tree 5 %, one 256 MiB file 0.3 s more, the time its data takes to reach the

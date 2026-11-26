@@ -503,6 +503,8 @@ pub struct Interrupted {
     /// Written by a newer xdevcmd, in a layout this one does not understand: left
     /// whole, nothing done. Its version, if its `app` line says.
     pub newer: Option<String>,
+    /// That journal's file, to name it: removing it forgets the job.
+    pub left: Option<PathBuf>,
     /// The dead run's journal, kept while the job is [offered](Self::offered) or
     /// `partial` is not empty: a later start finds it again if this one neither
     /// resumes nor discards it.
@@ -526,14 +528,23 @@ pub fn understood(text: &str) -> Result<(), String> {
             Some("v") => {
                 let nums: Vec<u32> = w.map_while(|t| t.parse().ok()).collect();
                 // `v F R`: R readers understand it; `v F`: only F's. Unreadable: not
-                // understood.
-                need = match nums.as_slice() {
+                // understood. Several (only a damaged or edited file): the most asked.
+                need = need.max(match nums.as_slice() {
                     [f] => *f,
                     [_, r, ..] => *r,
                     [] => u32::MAX,
-                };
+                });
             }
-            Some("app") => app = w.next().unwrap_or("").to_string(),
+            // Shown on the status line: a version's characters only, and short.
+            Some("app") => {
+                app = w
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+                    .take(32)
+                    .collect()
+            }
             _ => {}
         }
     }
@@ -679,7 +690,9 @@ fn recover_in(dir: &Path) -> Vec<Interrupted> {
         // Must understand: a journal of a layout this version does not know is left
         // whole for the version that wrote it (its lock goes with `held`).
         if let Err(app) = understood(&text) {
-            out.push((written, Interrupted::newer(&text, app)));
+            let mut it = Interrupted::newer(&text, app);
+            it.left = Some(path.clone());
+            out.push((written, it));
             continue;
         }
         // A run confined to a root (`--root`) touches nothing outside it: a journal
@@ -832,6 +845,7 @@ fn tidy_nothing() -> Interrupted {
         swapped: Vec::new(),
         partial: Vec::new(),
         newer: None,
+        left: None,
         journal: None,
     }
 }
@@ -852,6 +866,7 @@ fn tidy(text: &str, run: &str) -> Interrupted {
         swapped: Vec::new(),
         partial: Vec::new(),
         newer: None,
+        left: None,
         journal: None,
     };
     let mut bad_name = false;
@@ -1803,6 +1818,14 @@ mod tests {
             "unreadable: not understood"
         );
         assert_eq!(understood("v 4\n"), Err(String::new()), "no app line");
+        // Several v lines (a damaged or edited file): the most asked counts.
+        assert_eq!(understood(&j("v 3\nv 4\n")), Err("9.9.9".into()));
+        assert_eq!(understood(&j("v 4\nv 3\n")), Err("9.9.9".into()));
+        // The app line is shown: a version's characters only.
+        assert_eq!(
+            understood("v 9\napp 1.0\u{1b}]52;x\u{7}\n"),
+            Err("1.052x".into())
+        );
         // What this version writes, it understands.
         let me = format!("v {JOURNAL_FORMAT}\napp {}\n", env!("CARGO_PKG_VERSION"));
         assert_eq!(understood(&me), Ok(()));

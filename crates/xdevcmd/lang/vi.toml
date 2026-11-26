@@ -652,6 +652,7 @@ move = "Chuyển"
 pack = "Nén"
 
 [jobs]
+walk_limit = "thư mục sâu hơn {n} cấp sẽ bị bỏ qua ở đây: hệ thống không cấp đủ bộ nhớ cho mức sâu hơn"
 journal_unreadable = "không đọc được journal của một việc bị gián đoạn, để nguyên: {file} (xóa tệp đó để bỏ việc)"
 left_for_version = "một việc bị gián đoạn của xdevcmd {version} được để nguyên: hãy làm tiếp bằng bản đó, hoặc xóa {file} để bỏ việc"
 undo_merged_move = "lần chuyển đó đã gộp thư mục vào thư mục có sẵn: hãy chuyển các tệp về bằng F6"

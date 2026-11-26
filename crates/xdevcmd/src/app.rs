@@ -458,6 +458,8 @@ pub struct App {
     /// The status line the zoom said, so it is cleared when the zoom ends, whatever
     /// the language (it was matched by its English first word).
     zoom_said: Option<String>,
+    /// Said that walks stop at the fallback depth ([`xdevcmd_core::depth`]): once.
+    said_walk_limit: bool,
     /// The group of two-key bindings open, by its first key: Alt+R, then arrows to
     /// resize, as many as wanted (see `on_key`). Open until a key outside it, Enter,
     /// Esc or the mouse; never by time, so the status line always tells the truth.
@@ -729,6 +731,7 @@ impl App {
             mru: Vec::new(),
             zoom: None,
             zoom_said: None,
+            said_walk_limit: false,
             group: None,
             option_hinted: false,
             recent_commands,

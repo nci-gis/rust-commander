@@ -47,6 +47,7 @@ pub mod trashed;
 pub mod undo;
 
 pub use document::{Document, Mode};
+pub mod depth;
 pub use entry::{special_kind, split_name, Entry, Kind};
 pub use listing::{entry_at, read_dir, read_dir_counted};
 pub use ops::{Answer, Question, Request, Summary};
@@ -74,11 +75,29 @@ where
             job();
         }
     };
+    let measuring = depth::STACK_FOR_MEASURING.load(std::sync::atomic::Ordering::Relaxed);
+    let testing = depth::LIMIT_FOR_TESTING.load(std::sync::atomic::Ordering::Relaxed);
+    let (stack, limit) = if measuring > 0 {
+        (measuring, usize::MAX)
+    } else if testing > 0 {
+        (WALK_STACK, testing)
+    } else {
+        (WALK_STACK, depth::MAX_DEPTH)
+    };
+    let big = run.clone();
     match std::thread::Builder::new()
-        .stack_size(WALK_STACK)
-        .spawn(run.clone())
-    {
+        .stack_size(stack)
+        .spawn(move || {
+            depth::set_limit(limit);
+            big()
+        }) {
         Ok(h) => h,
-        Err(_) => std::thread::spawn(run),
+        Err(_) => {
+            depth::note_fell_back();
+            std::thread::spawn(move || {
+                depth::set_limit(depth::FALLBACK_DEPTH);
+                run()
+            })
+        }
     }
 }

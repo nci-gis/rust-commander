@@ -71,15 +71,22 @@ fn name(p: &Path) -> String {
     )
 }
 
-/// Nothing in `dir` but directories, all the way down; never following links.
+/// Nothing in `dir` but directories, all the way down; never following links. A loop,
+/// not a call per level: it runs on the UI thread, whose stack is 1 MiB on Windows.
 fn only_dirs(dir: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return false;
-    };
-    entries.flatten().all(|e| {
-        e.file_type()
-            .is_ok_and(|t| t.is_dir() && !t.is_symlink() && only_dirs(&e.path()))
-    })
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let Ok(entries) = fs::read_dir(&d) else {
+            return false;
+        };
+        for e in entries.flatten() {
+            if !e.file_type().is_ok_and(|t| t.is_dir() && !t.is_symlink()) {
+                return false;
+            }
+            todo.push(e.path());
+        }
+    }
+    true
 }
 
 impl Undo {
@@ -338,14 +345,25 @@ pub fn remove(p: &Path) -> io::Result<()> {
 /// Remove a tree of directories bottom up, each with `remove_dir`, which refuses one
 /// that is not empty: a file that appears between the check and the removal stops it,
 /// rather than going with the rest.
+/// A loop, not a call per level (the UI thread's stack): every directory is listed
+/// first, then removed deepest first.
 fn remove_empty_tree(dir: &Path) -> io::Result<()> {
-    for e in fs::read_dir(dir)? {
-        let e = e?;
-        if e.file_type()?.is_dir() {
-            remove_empty_tree(&e.path())?;
+    let mut order = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in fs::read_dir(&d)? {
+            let e = e?;
+            if e.file_type()?.is_dir() {
+                todo.push(e.path());
+            }
         }
+        order.push(d);
     }
-    fs::remove_dir(dir)
+    // A parent is listed before its children: the reverse removes children first.
+    for d in order.iter().rev() {
+        fs::remove_dir(d)?;
+    }
+    Ok(())
 }
 
 /// The first directory of `target` that does not exist yet: what F7 is about to make,

@@ -1161,6 +1161,11 @@ pub(super) fn scan_in(
             if !skip.is_empty() && skip.contains(p) {
                 return true;
             }
+            // Counting stops at the walk's limit; the job itself says the folder is too
+            // deep when it comes to it.
+            let Some(_deeper) = crate::depth::deeper() else {
+                return true;
+            };
             if let Ok(it) = fs::read_dir(p) {
                 for e in it.flatten() {
                     if !walk(&e.path(), files, bytes, stop, skip) {

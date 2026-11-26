@@ -81,6 +81,7 @@ impl App {
                 self.note_copied(j.kind, s);
                 self.follow_moves(&s.relocated);
                 self.forget_merged_move(s);
+                self.say_walk_limit();
             }
         }
         // Marks are cleared once an operation has run, the way every orthodox manager
@@ -115,6 +116,7 @@ impl App {
                 self.note_copied(j.kind, &s);
                 self.follow_moves(&s.relocated);
                 self.forget_merged_move(&s);
+                self.say_walk_limit();
                 // A job that ended in errors comes forward so they can be read.
                 if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
                     self.modal = Some(Modal::Job(j));
@@ -206,6 +208,20 @@ impl App {
             pictures: Vec::new(),
         }));
         true
+    }
+
+    /// The system would not give a walk thread its big stack, so walks stop at the
+    /// fallback depth: said once a run (a hard limit, not a setting; the owner).
+    pub(super) fn say_walk_limit(&mut self) {
+        use xdevcmd_core::depth;
+        if depth::fell_back() && !self.said_walk_limit {
+            self.said_walk_limit = true;
+            self.status = tr!(
+                "jobs.walk_limit",
+                "folders deeper than {n} levels are skipped here: the system did not give the memory for deeper ones",
+                n = depth::FALLBACK_DEPTH
+            );
+        }
     }
 
     /// A move that merged a folder into one already there: Ctrl+Z would move the whole

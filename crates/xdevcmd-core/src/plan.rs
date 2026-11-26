@@ -80,6 +80,8 @@ pub enum Blocked {
     TooLong,
     /// A file of 4 GiB or more, onto a FAT drive, which cannot hold one.
     TooBig,
+    /// A folder deeper than a walk goes ([`crate::depth`]): the limit.
+    TooDeep(usize),
 }
 
 impl Blocked {
@@ -93,6 +95,7 @@ impl Blocked {
             Blocked::BadName(why) => format!("a name the destination cannot hold: {why}"),
             Blocked::TooLong => "a name longer than the destination allows".into(),
             Blocked::TooBig => "4 GiB or more, onto a FAT drive".into(),
+            Blocked::TooDeep(n) => format!("deeper than {n} levels"),
         }
     }
 }
@@ -902,6 +905,12 @@ impl Scan<'_> {
             );
             return !self.stop.load(Ordering::Relaxed);
         }
+        // One level down while its entries are planned: at the limit it is not entered
+        // (a stack that ran out would end the program).
+        let Some(_deeper) = crate::depth::deeper() else {
+            self.blocked(src, dst, true, Blocked::TooDeep(crate::depth::limit()));
+            return true;
+        };
         let entries = match faults::at(Point::ReadDir, src).and_then(|()| fs::read_dir(src)) {
             Ok(it) => it,
             Err(e) => {

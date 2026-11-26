@@ -733,6 +733,7 @@ undo_the = "Undo the {describe}?"
 undo_the_copy = "Undo the copy"
 undoing_the = "undoing the {describe}"
 unfinished_temporary_file_removed = "{cleaned} unfinished temporary file{v} removed."
+walk_limit = "folders deeper than {n} levels are skipped here: the system did not give the memory for deeper ones"
 when_a_copy_may_be_damaged = "when a copy may be damaged, as after a power cut or a drive pulled out."
 you_cannot_write_there_tab_for = "you cannot write there: Tab for the other pane, Esc to cancel"
 

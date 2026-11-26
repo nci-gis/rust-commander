@@ -279,6 +279,11 @@ impl Worker {
                 }
                 return;
             }
+            // One level down while it is copied; at the limit not entered, and said.
+            let Some(_deeper) = crate::depth::deeper() else {
+                self.note_error(src, &crate::depth::too_deep());
+                return;
+            };
             let failed_before = self.sum.failed;
             let there = dst.symlink_metadata();
             let made = there.is_err();
@@ -1479,6 +1484,10 @@ impl Worker {
     /// remove `src` if that left it empty: what was skipped or failed keeps it.
     fn merge_into(&mut self, src: &Path, dst: &Path) {
         self.sum.merged = true;
+        let Some(_deeper) = crate::depth::deeper() else {
+            self.note_error(src, &crate::depth::too_deep());
+            return;
+        };
         let mut entries: Vec<PathBuf> = match fs::read_dir(src) {
             Ok(rd) => rd.flatten().map(|e| e.path()).collect(),
             Err(e) => {

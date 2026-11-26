@@ -54,7 +54,10 @@ that heading and starts a new, empty one here. -->
   `A.txt` there could stand for `a.txt`, and an older `a.txt` was left with no
   question.
 - **A very deep folder tree no longer ends xdevcmd**: planning, copying and counting
-  sizes ran out of stack at about 1,500 levels, which closed the whole program.
+  sizes ran out of stack at about 1,500 levels, which closed the whole program. They
+  now have room for any path a system allows, and stop at a hard limit (4,100 levels
+  on Linux, 1,100 on macOS, 16,400 on Windows): a deeper folder is shown as one that
+  cannot be done and reported, and the rest of the job goes on.
 - **New files are on the disk when a job ends** (with safe operations on): they are
   synced in batches, 128 files or 64 MiB or a second at a time, and before a folder is
   marked done in the journal, so a power cut loses at most the last batch, which the

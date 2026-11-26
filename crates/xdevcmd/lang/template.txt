@@ -5,6 +5,8 @@
 # (else the file's name) and the name a user reads (else the ISO name, or the code).
 # "$__code" = "vi"
 # "$__name" = "Tiếng Việt"
+# Until a speaker has read it: Settings marks it pre-review. Then ready.
+# "$__status" = "prereview"
 
 
 [action]
@@ -1122,6 +1124,7 @@ is_written_in_a_way_settings = "{path} is written in a way Settings cannot chang
 "languages.built_in" = "built in"
 "languages.english" = "English - en - built in"
 "languages.note" = "The words on screen, from the next start. Your own language: see docs/language.md"
+"languages.prereview" = "pre-review"
 nowhere_to_save_no_config_location = "nowhere to save: no config location (HOME is not set)"
 settings_nothing_changed = "settings: nothing changed"
 settings_saved_at_the_next_start = "settings saved; at the next start: {to_lowercase}"

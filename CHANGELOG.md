@@ -13,7 +13,9 @@ that heading and starts a new, empty one here. -->
 ### Added
 - **Languages**: the words on screen in Vietnamese or Japanese, or a language of your
   own: one TOML file in `lang/` ([docs/language.md](docs/language.md)). Vietnamese and
-  Japanese are built in, so `cargo install` and `cargo binstall` have them too. File →
+  Japanese are built in, so `cargo install` and `cargo binstall` have them too.
+  Japanese is marked pre-review until a speaker has read it (`"$__status"`, shown
+  in Settings). File →
   Settings… → Languages lists those found; `[general] language` (default `auto`, the
   system's). A release ships `lang/template.txt`, every text in English, to start
   from. A text that could act on the terminal (a control character, a direction

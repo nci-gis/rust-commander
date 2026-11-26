@@ -4,6 +4,7 @@
 # (docs/language.md).
 
 "$__name" = "Tiếng Việt"
+"$__status" = "ready"
 
 [action]
 "back.about" = "Quay về thư mục trước"
@@ -1065,6 +1066,7 @@ unsafe_to_type = "đường dẫn chứa {c} — không gửi, nó có thể ch�
 no_match = " không khớp "
 
 [settings]
+"languages.prereview" = "chưa duyệt"
 cannot_read = "không đọc được {path}: {e}"
 cannot_save = "không lưu được {path}: {e}"
 config_has_error = "config.toml có lỗi (Trợ giúp › Cấu hình đang dùng cho biết lỗi gì): hãy sửa tay trước"

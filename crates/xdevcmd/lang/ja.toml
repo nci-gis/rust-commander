@@ -3,6 +3,8 @@
 # xdevcmd の設定フォルダに lang/ja.toml を作り、そのキーだけを書きます (docs/language.md)。
 
 "$__name" = "日本語"
+# 母語話者のレビュー前 (pre-review): レビューが済んだら ready にします。
+"$__status" = "prereview"
 
 [action]
 "back.about" = "前のディレクトリに戻る"
@@ -1064,6 +1066,7 @@ unsafe_to_type = "パスに {c} が含まれます — コマンドが実行さ�
 no_match = " 一致なし "
 
 [settings]
+"languages.prereview" = "レビュー前"
 cannot_read = "{path} を読めません: {e}"
 cannot_save = "{path} を保存できません: {e}"
 config_has_error = "config.toml に誤りがあります (ヘルプ › 使用中の設定 で確認): 先に手で直してください"

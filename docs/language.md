@@ -52,6 +52,7 @@ Read in this order, the later winning, key by key:
 # lang/vi.toml
 "$__name" = "Tiếng Việt"   # optional: the name Settings shows
 "$__code" = "vi"           # optional: the code to choose it by (else the file name)
+"$__status" = "prereview"  # optional: not yet read by a speaker; "ready" once it is
 
 [keybar]
 copy = "Chép"   # the same key as "keybar.copy" = "Chép"
@@ -81,13 +82,17 @@ where the screen cuts.
 
 ## Rules
 
-- `$__code` and `$__name`: at most 32 characters (longer ends in `...`).
+- `$__code` and `$__name`: at most 32 characters (longer ends in `...`). `$__code`
+  cannot be `auto` or `en`.
+- `$__status`: `prereview` (Settings adds "pre-review" to its row) or `ready`.
+  Japanese ships as pre-review until a speaker has read it.
 - `{n}`, `{name}` …: filled in by xdevcmd. Any order; leaving one out is fine; one the
   English does not have makes that text English. `{{` `}}` is a brace. In a text whose
   English has no `{…}`, nothing is filled in: braces show as written.
 - **Escapes**: TOML's (`\n`, `\u001b` …) work, but a text holding a control character
-  (ESC, BEL …) or a direction override (U+202E …) that its English does not hold is
-  not used: it shows in English. A language file is text from anyone, and what it says
+  (ESC, BEL …), a direction override (U+202E …) or a character that draws nothing (the
+  zero-width space, the BOM, U+2028/2029) that its English does not hold is not used:
+  it shows in English. The zero-width joiner and non-joiner are fine. A language file is text from anyone, and what it says
   is drawn on your terminal. The same characters are left out of `$__name`.
 - Longer than the English: the key bar cuts its longest labels with `…` (to 3 cells at
   least) when that keeps every key, else drops keys from the end; a dialog line too long

@@ -104,6 +104,19 @@ pub struct Language {
     pub built_in: Option<&'static str>,
     /// Its files, in the order they load (the config folder's last).
     pub files: Vec<PathBuf>,
+    /// `"$__status" = "prereview"`: its texts are not yet read by a speaker; Settings
+    /// says so. `ready` or no line: read. The last file that says wins.
+    pub prereview: bool,
+}
+
+/// What a language file's `$__status` says: `Some(true)` pre-review, `Some(false)`
+/// ready, `None` not said (or a word it does not know: `xtask lang check` names it).
+fn status_of(table: &toml::Table) -> Option<bool> {
+    match table.get("$__status").and_then(|v| v.as_str())?.trim() {
+        "prereview" => Some(true),
+        "ready" => Some(false),
+        _ => None,
+    }
 }
 
 /// The languages a release ships, built into the program too, so that every way of
@@ -114,10 +127,14 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("vi", include_str!("../lang/vi.toml")),
 ];
 
-/// What a built-in language's text says of itself: its `$__name`, if any.
-fn own_name(text: &str) -> Option<String> {
-    let table = text.parse::<toml::Table>().ok()?;
-    table.get("$__name").and_then(|v| v.as_str()).and_then(id)
+/// What a built-in language's text says of itself: its `$__name`, if any, and whether
+/// it is pre-review.
+fn own_meta(text: &str) -> (Option<String>, bool) {
+    let Ok(table) = text.parse::<toml::Table>() else {
+        return (None, false);
+    };
+    let name = table.get("$__name").and_then(|v| v.as_str()).and_then(id);
+    (name, status_of(&table).unwrap_or(false))
 }
 
 /// Every language in `folders`, by code: each `*.toml` that reads as TOML, its `$__code`
@@ -131,13 +148,17 @@ pub fn languages(folders: &[PathBuf]) -> Vec<Language> {
 fn languages_with(built_in: &[(&str, &'static str)], folders: &[PathBuf]) -> Vec<Language> {
     let mut out: Vec<Language> = built_in
         .iter()
-        .map(|&(code, text)| Language {
-            name: own_name(text)
-                .or_else(|| iso_name(code).map(str::to_string))
-                .unwrap_or_else(|| code.to_string()),
-            code: code.to_string(),
-            built_in: Some(text),
-            files: Vec::new(),
+        .map(|&(code, text)| {
+            let (name, prereview) = own_meta(text);
+            Language {
+                name: name
+                    .or_else(|| iso_name(code).map(str::to_string))
+                    .unwrap_or_else(|| code.to_string()),
+                code: code.to_string(),
+                built_in: Some(text),
+                files: Vec::new(),
+                prereview,
+            }
         })
         .collect();
     for dir in folders {
@@ -168,11 +189,15 @@ fn languages_with(built_in: &[(&str, &'static str)], folders: &[PathBuf]) -> Vec
                 continue;
             }
             let own_name = meta("$__name");
+            let status = status_of(&table);
             match out.iter_mut().find(|l| l.code == code) {
                 Some(l) => {
                     l.files.push(file);
                     if let Some(n) = own_name {
                         l.name = n;
+                    }
+                    if let Some(p) = status {
+                        l.prereview = p;
                     }
                 }
                 None => out.push(Language {
@@ -182,6 +207,7 @@ fn languages_with(built_in: &[(&str, &'static str)], folders: &[PathBuf]) -> Vec
                     code,
                     built_in: None,
                     files: vec![file],
+                    prereview: status.unwrap_or(false),
                 }),
             }
         }
@@ -256,7 +282,7 @@ fn flatten(prefix: &str, table: toml::Table, out: &mut HashMap<String, String>) 
             format!("{prefix}.{k}")
         };
         match v {
-            // `$__code`, `$__name`: about the file, not texts.
+            // `$__code`, `$__name`, `$__status`: about the file, not texts.
             toml::Value::String(_) if key.starts_with("$__") => {}
             toml::Value::String(s) => {
                 out.insert(key, s);
@@ -455,6 +481,8 @@ const AUTO_ROW: Text = Text::new(
 const ENGLISH_ROW: Text = Text::new("settings.languages.english", "English - en - built in");
 /// Where a language comes from, when it is built into the program.
 const BUILT_IN_WORD: Text = Text::new("settings.languages.built_in", "built in");
+/// After a language whose texts are not yet read by a speaker (`$__status`).
+const PREREVIEW_WORD: Text = Text::new("settings.languages.prereview", "pre-review");
 
 pub fn settings_rows() -> Vec<(String, String)> {
     let get = |k: &str| std::env::var(k).ok();
@@ -479,10 +507,12 @@ pub fn settings_rows() -> Vec<(String, String)> {
             )
             .collect::<Vec<_>>()
             .join(", ");
-        rows.push((
-            l.code.clone(),
-            format!("{} - {} - {}", l.name, l.code, fit(&files)),
-        ));
+        let mut row = format!("{} - {} - {}", l.name, l.code, fit(&files));
+        if l.prereview {
+            row.push_str(" \u{b7} ");
+            row.push_str(&PREREVIEW_WORD.get());
+        }
+        rows.push((l.code.clone(), row));
     }
     rows
 }
@@ -746,6 +776,7 @@ mod tests {
             name: code.into(),
             built_in: None,
             files: Vec::new(),
+            prereview: false,
         };
         let found = [lang("my-pseudo"), lang("pt_BR"), lang("vi")];
         // Its whole name, '-', '_' and '.' included, when a file has it...
@@ -826,6 +857,24 @@ mod tests {
             .find(|l| l.code == "vi")
             .unwrap();
         assert!(l.built_in.is_some() && l.files.len() == 1, "{l:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn japanese_is_pre_review_and_a_file_can_say_otherwise() {
+        let langs = languages_with(BUILT_IN, &[]);
+        let find = |code: &str| langs.iter().find(|l| l.code == code).unwrap().clone();
+        assert!(find("ja").prereview, "a speaker has not read it yet");
+        assert!(!find("vi").prereview);
+        let d = std::env::temp_dir().join(format!("xdevcmd-lang-status-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("ja.toml"), "\"$__status\" = \"ready\"\n").unwrap();
+        std::fs::write(d.join("xx.toml"), "\"$__status\" = \"prereview\"\n").unwrap();
+        let langs = languages_with(BUILT_IN, std::slice::from_ref(&d));
+        let find = |code: &str| langs.iter().find(|l| l.code == code).unwrap().clone();
+        assert!(!find("ja").prereview, "the user's file says ready");
+        assert!(find("xx").prereview);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

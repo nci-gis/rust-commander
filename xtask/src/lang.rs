@@ -206,7 +206,9 @@ pub fn template(keys: &BTreeMap<String, String>) -> String {
          # Optional, at most 32 characters: the code [general] language picks it by\n\
          # (else the file's name) and the name a user reads (else the ISO name, or the code).\n\
          # \"$__code\" = \"vi\"\n\
-         # \"$__name\" = \"Tiếng Việt\"\n\n",
+         # \"$__name\" = \"Tiếng Việt\"\n\
+         # Until a speaker has read it: Settings marks it pre-review. Then ready.\n\
+         # \"$__status\" = \"prereview\"\n\n",
     );
     // One section per first part of the key: `[keybar]`, then `copy = "Copy"`.
     let mut section = None;
@@ -234,6 +236,14 @@ pub fn check(
     flatten("", &table, &mut flat);
     let (mut errors, mut notes) = (Vec::new(), Vec::new());
     for (k, v) in &flat {
+        // About the file: whether a speaker has read it (`prereview` or `ready`).
+        if k == "$__status" {
+            match v.as_str().map(str::trim) {
+                Some("prereview" | "ready") => {}
+                _ => errors.push(format!("{k}: prereview or ready")),
+            }
+            continue;
+        }
         // About the file: what `[general] language` picks it by, and its name.
         if k == "$__code" || k == "$__name" {
             match v.as_str() {

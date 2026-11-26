@@ -323,10 +323,15 @@ fn spawn_timed(
             let took = started.elapsed();
             if !handed && took >= give_up {
                 handed = true;
-                let _ = report.send(format!("handed {what} to {program}"));
+                let _ = report.send(tr!(
+                    "opener.handed",
+                    "handed {what} to {program}",
+                    what = what,
+                    program = program
+                ));
             } else if !said_opening && took >= show_after {
                 said_opening = true;
-                let _ = report.send(format!("opening {what}\u{2026}"));
+                let _ = report.send(tr!("opener.opening", "opening {what}\u{2026}", what = what));
             }
             // Fine-grained while someone may be watching the line, then rarely: this
             // thread lives as long as the opener does.

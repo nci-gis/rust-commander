@@ -44,6 +44,9 @@ that heading and starts a new, empty one here. -->
   `borders` lost its notch titles and glow).
 - **The docs were checked against the code**, page by page (`cargo xtask docs`), and
   corrected where they were wrong.
+- **The release binary is built with fat LTO**: about 5 % smaller, as fast.
+- **Testkit**: `xtask lang` (template, pseudo languages, check a language file);
+  `xtask try --small` makes the 0.6 GiB its help says (it kept the full big file).
 - **A file that differs is no longer skipped as identical** when a copy goes into a
   folder whose name has no letters (`2026`, `照片`) on a disk that tells case apart:
   `A.txt` there could stand for `a.txt`, and an older `a.txt` was left with no
@@ -58,7 +61,9 @@ that heading and starts a new, empty one here. -->
   (Linux); see [security.md](docs/security.md#what-is-synced-and-when).
 - **Moving a folder onto a folder of the same name merges them** on one drive too, as
   the plan says and as a move across drives does. Before, it stopped with "0 moved,
-  1 failed" (the system refuses to rename onto a folder that is not empty).
+  1 failed" (the system refuses to rename onto a folder that is not empty). Ctrl+Z
+  after such a merge says it cannot move it back (what was there before would go with
+  it): F6 moves the files back.
 
 ## [0.4.0-beta.3] - 2026-11-24
 

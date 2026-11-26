@@ -503,7 +503,7 @@ impl App {
             );
             return;
         }
-        let done = format!("opened {name}");
+        let done = tr!("open.opened", "opened {name}", name = name);
         // Said when the opener hands it over (item 45), not before.
         self.status = match opener::spawn(cmd, name, done, self.notes.0.clone()) {
             Ok(()) => String::new(),
@@ -584,7 +584,7 @@ impl App {
             new_shell: Some(line),
             dir: cx.dir,
             paste: false,
-            what: format!("ran {}", item.label),
+            what: tr!("open.ran", "ran {label}", label = item.label),
         });
     }
 }

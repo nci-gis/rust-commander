@@ -32,7 +32,7 @@ dir=$(find "$work" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 bin="$dir/xdevcmd"
 [ -f "$bin.exe" ] && bin="$bin.exe"
 [ -f "$bin" ] || fail "no xdevcmd binary"
-for f in LICENSE README.md THIRD-PARTY.md docs/README.md docs/security.md themes; do
+for f in LICENSE README.md THIRD-PARTY.md docs/README.md docs/security.md themes lang/template.txt lang/vi.toml lang/ja.toml; do
   [ -e "$dir/$f" ] || fail "missing $f"
 done
 

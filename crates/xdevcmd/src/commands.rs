@@ -244,7 +244,7 @@ pub fn rows(
                     rebound: false,
                     keys_name: None,
                     id: extra.id().into(),
-                    name: format!("{group}: {title}"),
+                    name: format!("{}: {title}", group_label(group)),
                     parsed: Vec::new(),
                     hay: String::new(),
                 });
@@ -307,7 +307,7 @@ pub fn rows(
                     rebound: false,
                     keys_name: None,
                     id: extra.id().into(),
-                    name: format!("{group}: {title}"),
+                    name: format!("{}: {title}", group_label(group)),
                     parsed: Vec::new(),
                     hay: String::new(),
                 });
@@ -373,7 +373,7 @@ pub fn rows(
             rebound: false,
             keys_name: None,
             id: format!("menu:{}", m.label),
-            name: format!("{group}: {}", m.label),
+            name: format!("{}: {}", group_label(group), m.label),
             parsed: Vec::new(),
             hay: String::new(),
         });

@@ -483,7 +483,14 @@ impl Worker {
                         .map(|()| true)
                 };
                 match made {
-                    Ok(true) => self.sum.done += 1,
+                    Ok(true) => {
+                        self.sum.done += 1;
+                        // A link has no data, only its name: its folder is synced with
+                        // the batch (B3; beta.4 red-team: a folder of links only).
+                        if self.safe && !self.moving {
+                            self.fresh.dirs.push(dst.to_path_buf());
+                        }
+                    }
                     Ok(false) => {}
                     Err(e) => self.note_error(dst, &e),
                 }
@@ -1133,6 +1140,10 @@ impl Worker {
         });
         for ((path, _), e) in fresh.files.iter().zip(errors) {
             if let Some(e) = e {
+                // Never synced again (fsyncgate): the copy goes, as a move's does, and
+                // it is not counted done; its folder is not told finished.
+                let _ = remove_file_anyway(path);
+                self.sum.done = self.sum.done.saturating_sub(1);
                 self.note_error(path, &e);
             }
         }
@@ -1457,6 +1468,7 @@ impl Worker {
     /// Move each entry of the folder `src` into the folder `dst`, by name order, then
     /// remove `src` if that left it empty: what was skipped or failed keeps it.
     fn merge_into(&mut self, src: &Path, dst: &Path) {
+        self.sum.merged = true;
         let mut entries: Vec<PathBuf> = match fs::read_dir(src) {
             Ok(rd) => rd.flatten().map(|e| e.path()).collect(),
             Err(e) => {

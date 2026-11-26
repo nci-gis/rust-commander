@@ -455,6 +455,9 @@ pub struct App {
     /// The pane filling the screen, if one is zoomed. Cleared as soon as focus moves
     /// elsewhere, as tmux does: a hidden pane must never have the focus.
     zoom: Option<PaneId>,
+    /// The status line the zoom said, so it is cleared when the zoom ends, whatever
+    /// the language (it was matched by its English first word).
+    zoom_said: Option<String>,
     /// The group of two-key bindings open, by its first key: Alt+R, then arrows to
     /// resize, as many as wanted (see `on_key`). Open until a key outside it, Enter,
     /// Esc or the mouse; never by time, so the status line always tells the truth.
@@ -725,6 +728,7 @@ impl App {
             config_outcome: outcome,
             mru: Vec::new(),
             zoom: None,
+            zoom_said: None,
             group: None,
             option_hinted: false,
             recent_commands,

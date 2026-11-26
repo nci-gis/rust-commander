@@ -54,7 +54,7 @@ fn written(r: &Path) -> String {
 pub fn said(texts: &[String], base: &Base) -> String {
     let what = match texts {
         [one] => one.clone(),
-        many => format!("{} paths", many.len()),
+        many => tr!("relpath.n_paths", "{n} paths", n = many.len()),
     };
     let to = match base {
         Base::Repository(root) => tr!(
@@ -71,7 +71,12 @@ pub fn said(texts: &[String], base: &Base) -> String {
         )
         .into(),
     };
-    format!("copied {what}, {to}")
+    tr!(
+        "relpath.copied",
+        "copied {what}, {to}",
+        what = what,
+        to = to
+    )
 }
 
 #[cfg(test)]

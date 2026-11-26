@@ -162,6 +162,11 @@ fn languages_with(built_in: &[(&str, &'static str)], folders: &[PathBuf]) -> Vec
             };
             let meta = |k: &str| table.get(k).and_then(|v| v.as_str()).and_then(id);
             let code = meta("$__code").unwrap_or(stem);
+            // `auto` and `en` are the system's language and the built-in English: a file
+            // cannot take either name.
+            if code.eq_ignore_ascii_case("auto") || code.eq_ignore_ascii_case("en") {
+                continue;
+            }
             let own_name = meta("$__name");
             match out.iter_mut().find(|l| l.code == code) {
                 Some(l) => {
@@ -332,9 +337,20 @@ fn pick_code(
 /// Whether `c` may not come from a language file: a control character (ESC starts a
 /// terminal command: a title, the clipboard), or one that turns text around on screen
 /// (bidirectional overrides and isolates, so "delete" can read as another word).
+/// Also characters that draw nothing or break a line (zero-width spaces and joiners,
+/// the BOM, U+2028/2029): a label of them is an invisible key.
 pub fn unsafe_char(c: char) -> bool {
     xdevcmd_core::controls::is(c)
-        || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}')
+        || matches!(
+            c,
+            '\u{202a}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{061c}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{feff}'
+        )
 }
 
 /// A translation is used only if every such character in it is in its English too (a

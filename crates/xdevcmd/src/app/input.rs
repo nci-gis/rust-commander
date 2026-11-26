@@ -631,11 +631,12 @@ impl App {
                 if let Some(f) = self.focused_files() {
                     f.toggle_hidden();
                     let on = f.show_hidden;
-                    self.status = tr!(
-                        "input.hidden_files",
-                        "hidden files {v}",
-                        v = if on { "shown" } else { "hidden" }
-                    );
+                    self.status = if on {
+                        tr!("input.hidden_files_shown", "hidden files shown")
+                    } else {
+                        tr!("input.hidden_files_hidden", "hidden files hidden")
+                    }
+                    .into_owned();
                 }
             }
             Action::FocusNextPane => self.focus_next_file(),
@@ -814,7 +815,11 @@ impl App {
                 if !self.bookmarks.contains(&p) {
                     self.bookmarks.push(p.clone());
                 }
-                self.save_bookmarks(format!("bookmarked {}", tidy(&p)));
+                self.save_bookmarks(tr!(
+                    "input.bookmarked",
+                    "bookmarked {path}",
+                    path = tidy(&p)
+                ));
             }
             Cmd::RemoveBookmark(p) => {
                 self.bookmarks.retain(|b| *b != p);

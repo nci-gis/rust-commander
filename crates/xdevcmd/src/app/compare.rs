@@ -309,7 +309,7 @@ impl App {
             title,
             body,
             danger: overwrites > 0,
-            yes: (n > 0).then(|| (format!("copy {n}"), Cmd::Sync(pairs))),
+            yes: (n > 0).then(|| (tr!("compare.copy_n", "copy {n}", n = n), Cmd::Sync(pairs))),
             buttons: Vec::new(),
             also: None,
             more: None,

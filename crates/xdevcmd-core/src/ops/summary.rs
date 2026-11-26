@@ -42,6 +42,9 @@ pub struct Summary {
     /// and copied by the kernel (`copy_file_range`). The rest, xdevcmd read and wrote.
     pub cloned: u64,
     pub by_kernel: u64,
+    /// A move merged a folder into a folder already there: what was there before and
+    /// what came cannot be told apart from the request, so undo cannot move it back.
+    pub merged: bool,
 }
 
 impl Summary {

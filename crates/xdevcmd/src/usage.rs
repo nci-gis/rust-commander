@@ -384,16 +384,15 @@ pub fn render(frame: &mut Frame, area: Rect, u: &Usage, h: &Holding) {
     if !u.terminal.is_empty() {
         lines.push((format!("terminal   {}", u.terminal), plain));
     }
-    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
     lines.push((
         tr!(
-            "usage.holding_u_u_listed_u_u",
-            "holding    {v} \u{b7} {v2} \u{b7} {v3} listed \u{b7} {v4} \u{b7} {v5}",
-            v = n(h.panes, "pane", "panes"),
-            v2 = n(h.tabs, "tab", "tabs"),
-            v3 = n(h.listed, "row", "rows"),
-            v4 = n(h.shells, "shell", "shells"),
-            v5 = n(h.jobs, "job", "jobs")
+            "usage.holding",
+            "holding    {panes} panes \u{b7} {tabs} tabs \u{b7} {rows} rows listed \u{b7} {shells} shells \u{b7} {jobs} jobs",
+            panes = h.panes,
+            tabs = h.tabs,
+            rows = h.listed,
+            shells = h.shells,
+            jobs = h.jobs
         ),
         plain,
     ));

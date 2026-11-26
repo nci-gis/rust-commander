@@ -80,6 +80,7 @@ impl App {
                 self.note_trashed(s);
                 self.note_copied(j.kind, s);
                 self.follow_moves(&s.relocated);
+                self.forget_merged_move(s);
             }
         }
         // Marks are cleared once an operation has run, the way every orthodox manager
@@ -104,11 +105,16 @@ impl App {
         for i in finished.into_iter().rev() {
             let j = self.jobs.remove(i);
             if let Some(s) = &j.done {
-                self.status = format!("background: {}", s.describe(j.kind));
+                self.status = tr!(
+                    "jobs.background_done",
+                    "background: {what}",
+                    what = s.describe(j.kind)
+                );
                 let s = s.clone();
                 self.note_trashed(&s);
                 self.note_copied(j.kind, &s);
                 self.follow_moves(&s.relocated);
+                self.forget_merged_move(&s);
                 // A job that ended in errors comes forward so they can be read.
                 if (!s.errors.is_empty() || s.failed > 0) && self.modal.is_none() {
                     self.modal = Some(Modal::Job(j));
@@ -172,11 +178,15 @@ impl App {
                 "Running in the terminal: {shown}{v}. Quitting ends {v2}.",
                 shown = shown,
                 v = if more > 0 {
-                    format!(" and {more} more")
+                    tr!("jobs.and_n_more", " and {more} more", more = more)
                 } else {
                     String::new()
                 },
-                v2 = if programs.len() == 1 { "it" } else { "them" }
+                v2 = if programs.len() == 1 {
+                    tr!("jobs.ends_it", "it")
+                } else {
+                    tr!("jobs.ends_them", "them")
+                }
             ));
         }
         let yes = if n > 0 {
@@ -196,6 +206,22 @@ impl App {
             pictures: Vec::new(),
         }));
         true
+    }
+
+    /// A move that merged a folder into one already there: Ctrl+Z would move the whole
+    /// folder back, what was there before included (beta.4 red-team). It says so
+    /// instead, and F6 moves the files back.
+    pub(super) fn forget_merged_move(&mut self, s: &ops::Summary) {
+        use xdevcmd_core::undo::Undo;
+        if s.merged && matches!(self.last_undo, Some(Undo::Move { .. })) {
+            self.last_undo = Some(Undo::Cannot(
+                tr!(
+                    "jobs.undo_merged_move",
+                    "that move merged folders into ones already there: move the files back with F6"
+                )
+                .into(),
+            ));
+        }
     }
 
     /// What a job about to start means for Ctrl+Z: a move can be undone; the rest say
@@ -308,14 +334,14 @@ impl App {
         let mut check = None;
         let yes = resumable.map(|it| {
             let what = match it.kind.as_str() {
-                "copy" => "a copy",
-                "move" => "a move",
-                _ => "a delete",
+                "copy" => tr!("jobs.kind_a_copy", "a copy"),
+                "move" => tr!("jobs.kind_a_move", "a move"),
+                _ => tr!("jobs.kind_a_delete", "a delete"),
             };
             let to = it
                 .dest
                 .as_deref()
-                .map(|d| format!(" to {}", tidy(d)))
+                .map(|d| tr!("jobs.to_dir", " to {dir}", dir = tidy(d)))
                 .unwrap_or_default();
             body.push(String::new());
             body.push(tr!("jobs.it_was_of", "It was {what} of {v}{to}.", what = what, v = Self::describe(&it.sources), to = to));
@@ -789,7 +815,7 @@ impl App {
         self.follow_renames(&moves);
         self.last_undo = Some(xdevcmd_core::undo::Undo::Rename(moves));
         self.status = match (out.renamed, out.errors.first()) {
-            (n, None) => format!("renamed {n}"),
+            (n, None) => tr!("jobs.renamed_n", "renamed {n}", n = n),
             (n, Some(e)) => tr!(
                 "jobs.renamed_failed_u",
                 "renamed {n}, {errors_len} failed \u{2014} {e}",

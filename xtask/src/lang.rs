@@ -260,10 +260,22 @@ pub fn check(
         // around, not in the English. xdevcmd shows the English for that key.
         if let Some(c) = t.chars().find(|&c| {
             (c.is_control()
-                || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}'))
+                || matches!(
+                    c,
+                    '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                        | '\u{200b}'..='\u{200f}'
+                        | '\u{061c}'
+                        | '\u{2028}'
+                        | '\u{2029}'
+                        | '\u{feff}'
+                ))
                 && !en.contains(c)
         }) {
-            errors.push(format!("{k}: U+{:04X} could act on the terminal; not used", c as u32));
+            errors.push(format!(
+                "{k}: U+{:04X} could act on the terminal; not used",
+                c as u32
+            ));
         }
         // An English with no brace has nothing filled in: its translation is shown as
         // written, braces and all (lang::Catalog::text).
@@ -278,6 +290,14 @@ pub fn check(
                 }
             }
             (Some(_), None) => errors.push(format!("{k}: its English is malformed: {en:?}")),
+        }
+    }
+    // Keys the file lacks show in English: a note each (a partial file is allowed).
+    // A key whose English is empty has nothing to show.
+    let have: std::collections::BTreeSet<&str> = flat.iter().map(|(k, _)| k.as_str()).collect();
+    for (k, en) in keys {
+        if !en.is_empty() && !have.contains(k.as_str()) {
+            notes.push(format!("{k}: missing, shown in English"));
         }
     }
     Ok((errors, notes))
@@ -563,10 +583,9 @@ mod tests {
             "\"$__code\" = \"vi\"\n\"$__name\" = \"Tiếng Việt\"\n",
         )
         .unwrap();
-        assert!(
-            errors.is_empty() && notes.is_empty(),
-            "{errors:?} {notes:?}"
-        );
+        // About the file only: nothing wrong, and `a` is missing (shown in English).
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(notes, ["a: missing, shown in English"]);
         let t = template(&keys);
         assert!(t.contains("a = \"{n} files\""), "{t}");
         let dotted: BTreeMap<String, String> = [("keybar.copy".to_string(), "Copy".to_string())]

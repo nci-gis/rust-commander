@@ -298,6 +298,25 @@ fn ctrl_z_puts_back_what_went_to_the_trash() {
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }
 
+/// A move that merged a folder into one already there cannot be undone by Ctrl+Z:
+/// undo would move the whole folder back, what was there before included (beta.4
+/// red-team). It says so, and nothing moves.
+#[test]
+fn ctrl_z_after_a_merging_move_says_it_cannot_and_moves_nothing() {
+    let (a, b) = fixture();
+    fs::create_dir_all(a.join("A")).unwrap();
+    fs::create_dir_all(b.join("A")).unwrap();
+    fs::write(a.join("A/x"), "x").unwrap();
+    fs::write(b.join("A/mine"), "mine").unwrap();
+    // Folders list first: Down lands on A. F6, Enter: merged into b/A.
+    let s = shot_keys("110x24", "Down,F6,Enter,wait,Ctrl+z", &a, &b);
+    assert!(s.contains("merged folders"), "{s}");
+    assert_eq!(fs::read_to_string(b.join("A/mine")).unwrap(), "mine", "{s}");
+    assert_eq!(fs::read_to_string(b.join("A/x")).unwrap(), "x", "{s}");
+    assert!(!a.join("A").exists(), "{s}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
 #[test]
 fn f5_can_replace_only_older_files() {
     let (a, b) = fixture();

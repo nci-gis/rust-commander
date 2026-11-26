@@ -62,17 +62,26 @@ impl App {
     /// "1 file", "3 files" — the singular matters because these strings sit in a
     /// confirmation for something irreversible, and sloppy copy reads as untrustworthy.
     pub(super) fn count_label(files: u64, bytes: u64) -> String {
-        let noun = if files == 1 { "file" } else { "files" };
+        // Whole texts, never an English word inside a translated one (beta.4 red-team).
+        let count = if files == 1 {
+            tr!("file_ops.one_file", "1 file").into_owned()
+        } else {
+            tr!("file_ops.n_files", "{files} files", files = files)
+        };
         if bytes < 1024 {
             tr!(
-                "file_ops.u_bytes",
-                "{files} {noun} \u{2022} {bytes} bytes",
-                files = files,
-                noun = noun,
+                "file_ops.count_bytes",
+                "{count} \u{2022} {bytes} bytes",
+                count = count,
                 bytes = bytes
             )
         } else {
-            format!("{files} {noun} \u{2022} {}", human_size(bytes))
+            tr!(
+                "file_ops.count_size",
+                "{count} \u{2022} {size}",
+                count = count,
+                size = human_size(bytes)
+            )
         }
     }
 
@@ -626,14 +635,24 @@ impl App {
                 let n = self
                     .focused_files()
                     .map_or(0, |f| f.mark_matching(&pattern, mark));
-                let verb = if mark { "marked" } else { "unmarked" };
                 self.status = match n {
                     0 => tr!(
                         "file_ops.nothing_matches",
                         "nothing matches {trim}",
                         trim = text.trim()
                     ),
-                    n => format!("{verb} {n} matching {}", text.trim()),
+                    n if mark => tr!(
+                        "file_ops.marked_n_matching",
+                        "marked {n} matching {pattern}",
+                        n = n,
+                        pattern = text.trim()
+                    ),
+                    n => tr!(
+                        "file_ops.unmarked_n_matching",
+                        "unmarked {n} matching {pattern}",
+                        n = n,
+                        pattern = text.trim()
+                    ),
                 };
             }
             InputKind::Rename { from } => match xdevcmd_core::rename::rename(from, &text) {

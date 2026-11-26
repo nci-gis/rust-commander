@@ -497,6 +497,7 @@ fn a_folder_moved_onto_a_folder_merges_into_it() {
     }
     assert!(!d.join("src/A").exists(), "the emptied source folder goes");
     assert_eq!(sum.done, 2, "{sum:?}");
+    assert!(sum.merged, "undo is told it cannot move this back");
 }
 
 /// What a merge skips stays, and so does the folder that holds it.
@@ -1467,6 +1468,12 @@ fn new_files_are_synced_before_the_job_ends() {
         for f in ["a", "b", "in/c"] {
             fs::write(src.join(f), f).unwrap();
         }
+        // A folder holding only a link: its name is synced too (beta.4 red-team).
+        #[cfg(unix)]
+        {
+            fs::create_dir_all(src.join("links")).unwrap();
+            std::os::unix::fs::symlink("../a", src.join("links/l")).unwrap();
+        }
         let traced: Vec<(crate::faults::Point, PathBuf)> = {
             let frag = dst.to_string_lossy().into_owned();
             crate::faults::trace(&frag);
@@ -1487,7 +1494,12 @@ fn new_files_are_synced_before_the_job_ends() {
             );
         }
         if safe && cfg!(unix) {
-            for d in [dst.join("src"), dst.join("src/in"), dst.clone()] {
+            for d in [
+                dst.join("src"),
+                dst.join("src/in"),
+                dst.join("src/links"),
+                dst.clone(),
+            ] {
                 assert!(synced("sync-dir", &d), "{d:?}: {traced:?}");
             }
         }
@@ -1543,6 +1555,14 @@ fn a_new_file_whose_sync_fails_is_reported_and_its_folder_not_told() {
     let s = run(req);
     assert_eq!(s.failed, 1, "{s:?}");
     assert!(s.errors.iter().any(|e| e.contains("b3-bad.txt")), "{s:?}");
+    // Its copy goes (it may be damaged: fsyncgate) and is not counted done; the other
+    // file stays. Before (beta.4 red-team) it stayed under its name, counted done.
+    assert!(!dst.join("src/sub/b3-bad.txt").exists());
+    assert_eq!(
+        fs::read_to_string(dst.join("src/sub/b3-ok.txt")).unwrap(),
+        "y"
+    );
+    assert_eq!(s.done, 3, "the folders and b3-ok.txt: {s:?}");
     let told = TOLD.lock().unwrap().clone();
     assert!(!told.contains(&src.join("sub")), "{told:?}");
     let _ = fs::remove_dir_all(&root);

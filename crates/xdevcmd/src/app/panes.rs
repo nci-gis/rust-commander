@@ -149,6 +149,8 @@ impl App {
                 "zoomed \u{b7} {key} to put it back",
                 key = key
             );
+            // Its own words in any language: cleared by them once the zoom ends.
+            self.zoom_said = Some(self.status.clone());
         }
     }
 

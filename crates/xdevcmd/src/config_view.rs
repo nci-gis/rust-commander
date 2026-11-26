@@ -205,9 +205,9 @@ impl ConfigView {
             String::new()
         };
         let hint = tr!("config_view.u_u_scroll_u_esc_u", " \u{2191}\u{2193} scroll \u{b7} Esc {v} \u{b7} read-only: File \u{2192} Settings\u{2026} changes the common ones{more}", v = if self.edit.text().is_empty() {
-                "close"
+                tr!("config_view.esc_close", "close")
             } else {
-                "clear"
+                tr!("config_view.esc_clear", "clear")
             }, more = more);
         frame.buffer_mut().set_style(
             Rect::new(inner.x, y, inner.width, 1),

@@ -33,8 +33,8 @@ Read in this order, the later winning, key by key:
 1. Built in: Vietnamese and Japanese.
 2. `lang/` beside the program: what a release archive ships (`vi.toml`, `ja.toml`,
    `template.txt`). Replaced by each update. `cargo install` and `cargo binstall`
-   bring the program alone: take `template.txt` from a release archive or the
-   [source](../crates/xdevcmd/lang/template.txt).
+   bring the program alone: take `template.txt` from a release archive, or from
+   `crates/xdevcmd/lang/` in the source on GitHub.
 3. `lang/` in your config folder: yours, never touched.
    - Linux, macOS: `~/.config/xdevcmd/lang/`
    - Windows: `%APPDATA%\xdevcmd\lang\`

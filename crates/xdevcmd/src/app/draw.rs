@@ -420,9 +420,10 @@ impl App {
         {
             self.zoom = None;
             // Do not leave "zoomed, press Alt+Z" on screen once it is not.
-            if self.status.starts_with("zoomed") {
+            if self.zoom_said.as_deref() == Some(self.status.as_str()) {
                 self.status.clear();
             }
+            self.zoom_said = None;
         }
         let mut rects = Vec::new();
         match self.zoom {

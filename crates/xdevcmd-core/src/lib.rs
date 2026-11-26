@@ -64,8 +64,21 @@ pub fn walk_thread<F>(f: F) -> std::thread::JoinHandle<()>
 where
     F: FnOnce() + Send + 'static,
 {
-    std::thread::Builder::new()
+    // Where the system will not reserve that much (a strict overcommit), the default
+    // stack: shallow trees still work, rather than a panic here.
+    let f = std::sync::Arc::new(std::sync::Mutex::new(Some(f)));
+    let g = f.clone();
+    let run = move || {
+        let job = g.lock().ok().and_then(|mut x| x.take());
+        if let Some(job) = job {
+            job();
+        }
+    };
+    match std::thread::Builder::new()
         .stack_size(WALK_STACK)
-        .spawn(f)
-        .expect("a thread to walk a tree")
+        .spawn(run.clone())
+    {
+        Ok(h) => h,
+        Err(_) => std::thread::spawn(run),
+    }
 }

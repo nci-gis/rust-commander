@@ -6127,24 +6127,23 @@ fn the_terminal_panel_sits_where_position_says() {
     let row_of = |s: &str, needle: &str| s.lines().position(|l| l.contains(needle));
     let s = shot("top");
     assert!(
-        row_of(&s, "bash \u{b7}") < row_of(&s, "Name \u{25bc}"),
+        row_of(&s, "\u{250c} \u{2302} ") < row_of(&s, "Name \u{25bc}"),
         "{s}"
     );
     let s = shot("bottom");
     assert!(
-        row_of(&s, "bash \u{b7}") > row_of(&s, "Name \u{25bc}"),
+        row_of(&s, "\u{250c} \u{2302} ") > row_of(&s, "Name \u{25bc}"),
         "{s}"
     );
     for (pos, first) in [("left", true), ("right", false)] {
         let s = shot(pos);
-        let line = s.lines().find(|l| l.contains("bash \u{b7}")).unwrap();
+        let line = s
+            .lines()
+            .find(|l| l.contains("\u{250c} \u{2302} "))
+            .unwrap();
         // Three frames start on this row: the shell's and both file panes'.
         assert_eq!(line.matches('\u{250c}').count(), 3, "beside the panes\n{s}");
-        assert_eq!(
-            line.starts_with("\u{250c} \u{2302} bash"),
-            first,
-            "{pos}\n{s}"
-        );
+        assert_eq!(line.starts_with("\u{250c} \u{2302} "), first, "{pos}\n{s}");
     }
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

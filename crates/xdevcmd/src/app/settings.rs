@@ -172,7 +172,10 @@ impl App {
                 let mark = if name == current { "\u{2022}" } else { "" };
                 Item::cmd(name.clone(), mark, Cmd::SetTheme(name), true)
             })
-            .chain(std::iter::once(Item::cancel("Cancel", "Esc")))
+            .chain(std::iter::once(Item::cancel(
+                tr!("menu.cancel", "Cancel"),
+                "Esc",
+            )))
             .collect();
         self.modal = Some(Modal::Menu(Menu::new(
             Some(tr!("settings.theme", "Theme").into()),

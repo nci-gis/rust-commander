@@ -82,6 +82,7 @@ impl App {
                 Text::new("menu.rename_many", "Rename many\u{2026}"),
                 A::BulkRename,
             )),
+            Some((Text::new("menu.undo", "Undo"), A::Undo)),
             Some((
                 Text::new("menu.link_in_other_pane", "Link in other pane"),
                 A::Symlink,
@@ -90,7 +91,10 @@ impl App {
                 Text::new("menu.permissions", "Permissions\u{2026}"),
                 A::Permissions,
             )),
-            Some((Text::new("menu.checksum", "Checksum"), A::Checksum)),
+            Some((
+                Text::new("menu.checksum_sha_256", "Checksum (SHA-256)"),
+                A::Checksum,
+            )),
             None,
             Some((Text::new("menu.new_file", "New file\u{2026}"), A::NewFile)),
             Some((
@@ -138,7 +142,7 @@ impl App {
             Some((Text::new("menu.hotlist", "Hotlist"), A::Hotlist)),
             None,
             Some((
-                Text::new("menu.hidden_files", "Hidden files"),
+                Text::new("app_mouse.show_hidden_files", "Show hidden files"),
                 A::ToggleHidden,
             )),
             Some((Text::new("menu.sort_by_name", "Sort by name"), A::SortName)),
@@ -164,9 +168,13 @@ impl App {
             Some((Text::new("menu.close_pane", "Close pane"), A::ClosePane)),
             Some((Text::new("menu.swap_panes", "Swap panes"), A::SwapPanes)),
             Some((
-                Text::new("menu.same_directory_there", "Same directory there"),
+                Text::new(
+                    "menu.show_this_directory_in_other_pane",
+                    "Show this directory in other pane",
+                ),
                 A::MirrorPane,
             )),
+            None,
             Some((
                 Text::new("menu.compare_with_other_pane", "Compare with other pane"),
                 A::CompareDirs,
@@ -176,7 +184,10 @@ impl App {
                 A::SyncDirs,
             )),
             None,
-            Some((Text::new("menu.terminal", "Terminal"), A::FocusTerminal)),
+            Some((
+                Text::new("menu.focus_terminal", "Focus terminal"),
+                A::FocusTerminal,
+            )),
             Some((
                 Text::new("menu.terminal_history", "Terminal history"),
                 A::TerminalHistory,
@@ -186,31 +197,44 @@ impl App {
                 A::NewTerminal,
             )),
             Some((
-                Text::new("menu.show_or_hide_terminal", "Show or hide terminal"),
+                Text::new("menu.show_terminal", "Show terminal"),
                 A::ToggleTerminal,
             )),
         ];
         // Commands… and Config in use are put in at the top, Documentation and About
         // at the end, below.
         let help: &[Option<(Text, A)>] = &[
-            Some((Text::new("menu.usage", "Usage"), A::Usage)),
-            Some((Text::new("menu.messages", "Messages"), A::Messages)),
+            Some((Text::new("menu.resource_usage", "Resource usage"), A::Usage)),
+            Some((
+                Text::new("menu.status_history", "Status history"),
+                A::Messages,
+            )),
         ];
         let list = match i {
             0 => file,
             1 => view,
             _ => help,
         };
+        let files = self.panes.get(&self.focus).and_then(Pane::as_files);
+        let trash = self.settings.config.general.delete_to_trash;
         let mut items: Vec<Item> = list
             .iter()
+            // With the trash off, Delete deletes permanently: one row (ACT-P2-12).
+            .filter(|e| trash || !matches!(e, Some((_, A::Delete))))
             .map(|e| match e {
                 None => Item::sep(),
-                Some((label, a)) => Item::act(
-                    label.get(),
-                    self.footer_key(*a).unwrap_or_default(),
-                    *a,
-                    self.refused(*a).is_none(),
-                ),
+                Some((label, a)) => {
+                    let hint = match a {
+                        A::DeletePermanent if !trash => self.footer_key(A::Delete),
+                        _ => self.footer_key(*a),
+                    };
+                    Item::act(
+                        self.stateful(label.get().into_owned(), *a, files),
+                        hint.unwrap_or_default(),
+                        *a,
+                        !self.menu_refused(*a),
+                    )
+                }
             })
             .collect();
         if i == 0 {
@@ -270,6 +294,41 @@ impl App {
             ));
         }
         items
+    }
+
+    /// A row's label with the state it toggles (review ACT-P2-3 to 6): Show/Hide, a
+    /// mark on what is on, the sort in effect with its direction as the status shows.
+    fn stateful(&self, label: String, a: Action, files: Option<&FilePane>) -> String {
+        use Action as A;
+        let on = " \u{2022}";
+        let sort = |k: SortKey| {
+            files.filter(|f| f.sort.key == k).map(|f| {
+                if f.sort.reverse {
+                    " \u{25b2}"
+                } else {
+                    " \u{25bc}"
+                }
+            })
+        };
+        match a {
+            A::ToggleHidden => match files {
+                Some(f) if f.show_hidden => {
+                    tr!("app_mouse.hide_hidden_files", "Hide hidden files").into()
+                }
+                _ => tr!("app_mouse.show_hidden_files", "Show hidden files").into(),
+            },
+            A::ToggleTerminal if self.shell_pane.term_shown => {
+                tr!("menu.hide_terminal", "Hide terminal").into()
+            }
+            A::ToggleTerminal => tr!("menu.show_terminal", "Show terminal").into(),
+            A::Zoom if self.zoom.is_some() => label + on,
+            A::QuickView if self.quick_view.is_some() => label + on,
+            A::SortName => label + sort(SortKey::Name).unwrap_or_default(),
+            A::SortExt => label + sort(SortKey::Ext).unwrap_or_default(),
+            A::SortSize => label + sort(SortKey::Size).unwrap_or_default(),
+            A::SortModified => label + sort(SortKey::Modified).unwrap_or_default(),
+            _ => label,
+        }
     }
 
     pub(super) fn open_bar(&mut self, i: usize) {

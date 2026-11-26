@@ -492,7 +492,7 @@ impl App {
                 true,
             ),
             Item::sep(),
-            Item::cancel("Cancel", "Esc"),
+            Item::cancel(tr!("menu.cancel", "Cancel"), "Esc"),
         ];
         self.status = tr!("mouse.drop_into", "drop into {name}?", name = name);
         self.modal = Some(Modal::Menu(Menu::new(
@@ -531,7 +531,23 @@ impl App {
         let any_marks = !f.marked.is_empty();
         let hidden = f.show_hidden;
         let entry_marked = entry.as_ref().is_some_and(|e| f.marked.contains(&e.path));
+        // What the menu acts on, by the row it was opened on, as a drag goes (review
+        // ACT-P1-O1, the owner, 2026-11-26): a marked row, all marks; an unmarked row,
+        // that row alone (the marks are not used); empty space or `..`, the marks, else nothing (it
+        // is the directory's menu then).
+        let only = match &entry {
+            Some(e) if !entry_marked && any_marks => Some(vec![e.path.clone()]),
+            None if !any_marks => Some(Vec::new()),
+            _ => None,
+        };
+        let on_marks = only.is_none() && any_marks;
+        let n = match &only {
+            Some(v) => v.len(),
+            None => self.selection().len(),
+        };
+        let has_sel = n > 0;
         let title = match &entry {
+            _ if on_marks && n > 1 => tr!("mouse.n_marked", "{n} marked items", n = n),
             Some(e) => e.name.clone(),
             None => f
                 .cwd
@@ -539,17 +555,11 @@ impl App {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| f.cwd.display().to_string()),
         };
-        let sel = self.selection();
-        let has_sel = !sel.is_empty();
         let other = self.other_pane_cwd().is_some();
-        let n = sel.len();
         // Hints come from the keymap, so the menu teaches the keys you actually have.
         let k = |a| self.footer_key(a).unwrap_or_default();
-        let many = if n > 1 {
-            format!(" {n} items")
-        } else {
-            String::new()
-        };
+        let many = n > 1;
+        let trash = self.settings.config.general.delete_to_trash;
 
         let mut items = Vec::new();
         if let Some(e) = &entry {
@@ -618,41 +628,77 @@ impl App {
             ));
             items.push(Item::sep());
         }
-        items.push(Item::act(
-            tr!(
-                "mouse.copy_to_other_pane",
-                "Copy{many} to other pane",
-                many = many
-            ),
-            k(Action::Copy),
-            Action::Copy,
-            has_sel && other,
-        ));
-        items.push(Item::act(
-            tr!(
-                "mouse.move_to_other_pane",
-                "Move{many} to other pane",
-                many = many
-            ),
-            k(Action::Move),
-            Action::Move,
-            has_sel && other,
-        ));
-        items.push(Item::act(
-            format!("Delete{many}"),
-            k(Action::Delete),
-            Action::Delete,
-            has_sel,
-        ));
-        items.push(Item::act(
-            tr!("menu.delete_permanently", "Delete permanently"),
-            k(Action::DeletePermanent),
-            Action::DeletePermanent,
-            has_sel,
-        ));
-        items.push(Item::sep());
+        // The directory's own menu, with nothing marked, has no file operations: it
+        // would act on the cursor row, which it does not name (review ACT-P1-4).
+        if has_sel {
+            items.push(Item::act(
+                if many {
+                    tr!(
+                        "mouse.copy_n_to_other_pane",
+                        "Copy {n} items to other pane",
+                        n = n
+                    )
+                } else {
+                    tr!("mouse.copy_to_other_pane_one", "Copy to other pane").to_string()
+                },
+                k(Action::Copy),
+                Action::Copy,
+                other,
+            ));
+            items.push(Item::act(
+                if many {
+                    tr!(
+                        "mouse.move_n_to_other_pane",
+                        "Move {n} items to other pane",
+                        n = n
+                    )
+                } else {
+                    tr!("mouse.move_to_other_pane_one", "Move to other pane").to_string()
+                },
+                k(Action::Move),
+                Action::Move,
+                other,
+            ));
+            // With the trash off, Delete deletes permanently too: one row, named so
+            // (review ACT-P2-12).
+            if trash {
+                items.push(Item::act(
+                    if many {
+                        tr!("mouse.delete_n", "Delete {n} items", n = n)
+                    } else {
+                        tr!("mouse.delete", "Delete").to_string()
+                    },
+                    k(Action::Delete),
+                    Action::Delete,
+                    true,
+                ));
+            }
+            items.push(Item::act(
+                if many {
+                    tr!(
+                        "mouse.delete_n_permanently",
+                        "Delete {n} items permanently",
+                        n = n
+                    )
+                } else {
+                    tr!("menu.delete_permanently", "Delete permanently").to_string()
+                },
+                if trash {
+                    k(Action::DeletePermanent)
+                } else {
+                    k(Action::Delete)
+                },
+                Action::DeletePermanent,
+                true,
+            ));
+            items.push(Item::sep());
+        }
         if entry.is_some() {
-            let label = if entry_marked { "Unmark" } else { "Mark" };
+            let label = if entry_marked {
+                tr!("mouse.unmark", "Unmark")
+            } else {
+                tr!("mouse.mark", "Mark")
+            };
             items.push(Item::act(label, k(Action::Mark), Action::Mark, true));
         }
         items.push(Item::act(
@@ -668,6 +714,14 @@ impl App {
             any_marks,
         ));
         items.push(Item::sep());
+        if entry.is_none() {
+            items.push(Item::act(
+                tr!("mouse.new_file", "New file"),
+                k(Action::NewFile),
+                Action::NewFile,
+                true,
+            ));
+        }
         items.push(Item::act(
             tr!("mouse.new_directory", "New directory"),
             k(Action::MkDir),
@@ -692,18 +746,24 @@ impl App {
             Cmd::CopyRelativePath,
             true,
         ));
+        // The F1 names of these two (review ACT-P3-4): what they do to the shell.
         items.push(Item::act(
-            tr!("menu.terminal_here", "Terminal here"),
+            tr!("menu.cd_the_shell_here", "cd the shell here"),
             k(Action::CdTerminalHere),
             Action::CdTerminalHere,
             self.shell_pane.term_id.is_some(),
         ));
-        items.push(Item::act(
-            tr!("menu.type_into_the_shell", "Type into the shell"),
-            k(Action::TypeNames),
-            Action::TypeNames,
-            self.shell_pane.term_id.is_some() && has_sel,
-        ));
+        if has_sel {
+            items.push(Item::act(
+                tr!(
+                    "menu.type_names_into_the_shell",
+                    "Type names into the shell"
+                ),
+                k(Action::TypeNames),
+                Action::TypeNames,
+                self.shell_pane.term_id.is_some(),
+            ));
+        }
         items.push(Item::act(
             tr!("menu.refresh", "Refresh"),
             k(Action::Refresh),
@@ -725,12 +785,14 @@ impl App {
         let restricted = self.settings.mode == Mode::Restricted;
         for it in &mut items {
             match &it.cmd {
-                Some(Cmd::Act(a)) if self.refused(*a).is_some() => it.enabled = false,
+                Some(Cmd::Act(a)) if self.menu_refused(*a) => it.enabled = false,
                 Some(Cmd::CopyPath | Cmd::CopyRelativePath) if restricted => it.enabled = false,
                 _ => {}
             }
         }
-        self.modal = Some(Modal::Menu(Menu::new(Some(title), items, (x, y))));
+        let mut menu = Menu::new(Some(title), items, (x, y));
+        menu.only = only;
+        self.modal = Some(Modal::Menu(menu));
     }
 
     pub(super) fn on_modal_mouse(&mut self, m: MouseEvent) {
@@ -887,7 +949,7 @@ impl App {
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return Vec::new();
         };
-        if f.marked.is_empty() {
+        if f.marked.is_empty() || self.only.is_some() {
             return self.selection();
         }
         f.entries
@@ -898,6 +960,9 @@ impl App {
     }
 
     pub(super) fn selection(&self) -> Vec<PathBuf> {
+        if let Some(only) = &self.only {
+            return only.clone();
+        }
         let Some(f) = self.panes.get(&self.focus).and_then(Pane::as_files) else {
             return Vec::new();
         };

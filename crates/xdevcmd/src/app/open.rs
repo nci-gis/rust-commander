@@ -206,7 +206,7 @@ impl App {
             return;
         }
         let name = Self::describe(std::slice::from_ref(&path));
-        let mut items = vec![Item::cancel("Cancel", "Esc")];
+        let mut items = vec![Item::cancel(tr!("menu.cancel", "Cancel"), "Esc")];
         if opener::console_program(&path) {
             let cwd = path.parent().map(Path::to_path_buf).unwrap_or_default();
             items.push(Item::cmd(
@@ -298,7 +298,7 @@ impl App {
     pub(super) fn ask_to_open(&mut self, path: PathBuf) {
         let name = Self::describe(std::slice::from_ref(&path));
         let items = vec![
-            Item::cancel("Cancel", "Esc"),
+            Item::cancel(tr!("menu.cancel", "Cancel"), "Esc"),
             Item::cmd(
                 tr!(
                     "open.open_with_the_system_s_program",
@@ -484,7 +484,7 @@ impl App {
                 !self.settings.mode.read_only(),
             ));
         }
-        items.push(Item::cancel("Cancel", "Esc"));
+        items.push(Item::cancel(tr!("menu.cancel", "Cancel"), "Esc"));
         let name = Self::describe(std::slice::from_ref(&path));
         self.modal = Some(Modal::Menu(Menu::new(
             Some(tr!("open.open_with", "Open {name} with", name = name)),
@@ -537,7 +537,7 @@ impl App {
             .map(|(i, m)| Item::cmd(m.label.clone(), m.key.clone(), Cmd::UserCommand(i), true))
             .collect();
         items.push(Item::sep());
-        items.push(Item::cancel("Cancel", "Esc"));
+        items.push(Item::cancel(tr!("menu.cancel", "Cancel"), "Esc"));
         self.modal = Some(Modal::Menu(Menu::new(
             Some(tr!("open.commands", "Commands").into()),
             items,

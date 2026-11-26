@@ -405,6 +405,25 @@ impl App {
         mode.read_only().then(|| mode.turned_off(what, next))
     }
 
+    /// Whether a menu shows `a` greyed out: every reason it would be refused when run
+    /// (review ACT-P2-1), checked again when it runs.
+    pub(super) fn menu_refused(&self, a: Action) -> bool {
+        self.refused(a).is_some()
+            || self.archive_refused(a).is_some()
+            || self.loading_refused(a).is_some()
+            || (a == Action::Undo && self.last_undo.is_none())
+            || (a == Action::Unpack && !self.cursor_is_archive())
+    }
+
+    /// The cursor row is an archive this version opens (Unpack's target).
+    fn cursor_is_archive(&self) -> bool {
+        self.panes
+            .get(&self.focus)
+            .and_then(Pane::as_files)
+            .and_then(|f| f.current())
+            .is_some_and(|e| !e.is_dir() && xdevcmd_core::archive::format_of(&e.path).is_some())
+    }
+
     /// Why `a` cannot run inside an archive, or `None`. Only reading and extracting
     /// make sense there: writing into one would mean rewriting the whole file, which
     /// xdevcmd does not do.

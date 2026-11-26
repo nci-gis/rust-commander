@@ -66,7 +66,7 @@ Pressed in the file panes (in the shell, Alt+C and Alt+G are the program's):
 | Key | Does |
 |---|---|
 | **Alt+C** | Types the shell's own `cd` with this directory, quoted, and Enter: `cd` (sh, bash, zsh, fish), `cd /d` (cmd), `Set-Location -LiteralPath` (PowerShell) |
-| **Alt+Enter** or **Ctrl+Enter** | Types the marked names (else the one under the cursor), each quoted, with a space after the last and **no Enter**: you finish the command. Bare names when the shell is in their directory, full paths otherwise. Also **Type into the shell** in the files' right-click menu, since many terminals send Ctrl+Enter as Enter and Windows Terminal keeps Alt+Enter for full screen |
+| **Alt+Enter** or **Ctrl+Enter** | Types the marked names (else the one under the cursor), each quoted, with a space after the last and **no Enter**: you finish the command. Bare names when the shell is in their directory, full paths otherwise. Also **Type names into the shell** in the files' right-click menu, since many terminals send Ctrl+Enter as Enter and Windows Terminal keeps Alt+Enter for full screen |
 | **Alt+G** | Takes the pane to the shell's directory; types nothing. Refused while a program runs in the shell, when it is `ssh` (the directory is on another machine), and when the directory is unknown, gone, or outside xdevcmd's root |
 
 **`[terminal] follow = true`** (Settings → Terminal; off by default): the file pane used

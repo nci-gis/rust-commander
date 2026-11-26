@@ -430,6 +430,9 @@ pub struct App {
     next_id: PaneId,
     /// Where the last frame drew things, and what the mouse is doing with them.
     hits: Hits,
+    /// While a right-click menu's command runs: what it acts on, in place of the marks
+    /// or the cursor row (review ACT-P1-O1, the owner, 2026-11-26).
+    only: Option<Vec<PathBuf>>,
     /// The shell pane and the terminal it runs in.
     shell_pane: ShellPane,
     status: String,
@@ -700,6 +703,7 @@ impl App {
             panes,
             focus: 0,
             next_id: 2,
+            only: None,
             hits: Hits {
                 rects: Vec::new(),
                 last_click: None,

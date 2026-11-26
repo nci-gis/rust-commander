@@ -233,8 +233,12 @@ impl App {
             }
             ModalAct::Link(a, l) => self.history_link(a, l),
             ModalAct::Run(c) => {
-                self.modal = None;
+                self.only = match self.modal.take() {
+                    Some(Modal::Menu(m)) => m.only,
+                    _ => None,
+                };
                 self.perform_cmd(c);
+                self.only = None;
             }
             ModalAct::Close if matches!(self.modal, Some(Modal::Commands(_))) => {
                 // F1 gives back what it was opened over (the viewer).
@@ -556,7 +560,7 @@ impl App {
                 writable,
             ));
         }
-        items.push(Item::cancel("Cancel", "Esc"));
+        items.push(Item::cancel(tr!("menu.cancel", "Cancel"), "Esc"));
         self.modal = Some(Modal::Menu(Menu::new(
             Some(tr!("modals.hotlist", "Hotlist").into()),
             items,

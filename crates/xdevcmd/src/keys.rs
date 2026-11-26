@@ -610,7 +610,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::FocusTerminal,
         name: "focus_terminal",
-        title: Text::new("action.focus_terminal.title", "Terminal"),
+        title: Text::new("action.focus_terminal.title", "Focus terminal"),
         group: "Terminal",
         about: Text::new(
             "action.focus_terminal.about",
@@ -914,7 +914,10 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::MirrorPane,
         name: "mirror_pane",
-        title: Text::new("action.mirror_pane.title", "Same directory there"),
+        title: Text::new(
+            "action.mirror_pane.title",
+            "Show this directory in other pane",
+        ),
         group: "Panes",
         about: Text::new(
             "action.mirror_pane.about",
@@ -1002,7 +1005,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Checksum,
         name: "checksum",
-        title: Text::new("action.checksum.title", "Checksum"),
+        title: Text::new("action.checksum.title", "Checksum (SHA-256)"),
         group: "Files",
         about: Text::new(
             "action.checksum.about",
@@ -1087,7 +1090,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Usage,
         name: "usage",
-        title: Text::new("action.usage.title", "Usage"),
+        title: Text::new("action.usage.title", "Resource usage"),
         group: "General",
         about: Text::new(
             "action.usage.about",
@@ -1100,7 +1103,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         action: Action::Messages,
         name: "messages",
-        title: Text::new("action.messages.title", "Messages"),
+        title: Text::new("action.messages.title", "Status history"),
         group: "General",
         about: Text::new(
             "action.messages.about",

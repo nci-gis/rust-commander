@@ -46,7 +46,7 @@ Every key: [keys.md](keys.md).
 | **Ctrl+PgUp/PgDn** · **Alt+1**…**Alt+9** | Switch tabs · go to tab N |
 | **Ctrl+U** | Swap two panes |
 | **Alt+=** | Show this pane's directory in the other |
-| **Alt+M** | Messages: the last 50 from the status line, whole, with their time |
+| **Alt+M** | Status history: the last 50 from the status line, whole, with their time |
 
 - **A pane holds up to 16 tabs.** When they do not fit, the bar shows the tabs
   around the current one, with `‹3` and `2›` for those left out (click one to step
@@ -58,7 +58,7 @@ Every key: [keys.md](keys.md).
   and width do not split letters apart (`Éclair` with `eclair`, `ｆｉｌｅ２` with
   `file2`); katakana with hiragana, `が` with `か`; a name copied from a Mac sorts where
   it does here. Kanji keep code-point order: only a reading dictionary could do better.
-- **Start-up time** is in Help → Usage (**Shift+F1**), step by step to the first frame
+- **Start-up time** is in Help → Resource usage (**Shift+F1**), step by step to the first frame
   (config, panes, terminal check, shell). `--timings` (or `XDEVCMD_TIMINGS=1`) also
   shows it on the status line and prints one JSON line on stderr at the end. A slow
   "terminal check" is the terminal not answering what it can draw: it waits up to
@@ -389,7 +389,12 @@ Everything about it, including staying in xdevcmd's directory when you quit:
 - **Drag a border** to resize; double-click it to share the space evenly between its two
   sides (file panes, the file area and the terminal, or two shells).
 - **Right-click** for a menu, or **Shift+F10** (the Menu key too, where the terminal
-  reports it) for the same menu at the cursor's row.
+  reports it) for the same menu at the cursor's row. Like a drag, it acts on its row:
+  on a marked file, on all the marks (its title says how many); on an unmarked one,
+  on that file alone. On empty space it is the directory's menu: new file, new
+  directory, copy its path, and a group for the marks if there are any.
+- **The wheel** scrolls a menu taller than the screen; ▲ and ▼ on its border say rows
+  are hidden. In the menu bar, **Tab** and **Shift+Tab** go along it as ← and → do.
 - **The wheel** scrolls; so does the bar on a long list's right border (drag it, or
   click where to go).
 - **In the viewer**, drag over lines to select; **y** copies, **Esc** lets go. For part
@@ -419,7 +424,7 @@ actions a second key that arrives everywhere:
 | **File → Settings…** | The common settings |
 | **View → Theme…** | Try a theme at once |
 | **Help → Config in use** | The config as in effect |
-| **Shift+F1**, Usage | Memory, CPU, and whether memory keeps growing (also in F1 and Help) |
+| **Shift+F1**, Resource usage | Memory, CPU, and whether memory keeps growing (also in F1 and Help) |
 | **Help → Documentation** | Where the docs for your version are |
 | **Shift+F9** | Your own commands ([config.md](config.md#your-own-commands)) |
 

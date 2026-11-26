@@ -27,6 +27,23 @@ that heading and starts a new, empty one here. -->
   it is open, and Tab's button says which of how many (`other pane 2/3`).
 - **In the shell, the key bar is three buttons**: [ Help ] [ Menu ] [ Quit ], for the
   mouse, with no key on them (the F-keys there are the program's).
+- **Menus, after a review** of all of them:
+  - The right-click menu (and Shift+F10) acts on its row, as a drag does: on a marked
+    file, all marks, titled "N marked items"; on an unmarked one, that file alone.
+    Before, it acted on the marks while its title named the clicked file.
+  - On empty space it is the directory's menu: no Copy/Move/Delete of the cursor row
+    it does not name, Copy path copies the directory, New file added; a group for the
+    marks when there are some.
+  - The wheel scrolls a menu taller than the screen, ▲/▼ on its border say rows are
+    hidden; Tab/Shift+Tab go along the menu bar.
+  - File has Undo (greyed when there is nothing to undo); rows that would be refused
+    (inside an archive, while a folder loads, Unpack off an archive) are greyed.
+  - With `delete_to_trash = false`, one delete row, "Delete permanently", with F8.
+  - View shows state: Show/Hide hidden files, Show/Hide terminal, a mark on Zoom and
+    Quick view, the sort in effect with its direction; a separator before Compare.
+  - Clearer names, the same in F1: Focus terminal, Show this directory in other pane,
+    Checksum (SHA-256), Resource usage, Status history, cd the shell here, Type names
+    into the shell. Mark/Unmark, the item counts and Cancel are translated.
 - **The shell panel can sit at the top, left or right** as well as the bottom:
   `[terminal] position`, or Settings → Terminal, which moves a shown panel at once.
   `height_percent` is its size along that side (its width at the left or right).

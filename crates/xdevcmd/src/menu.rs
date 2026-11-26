@@ -189,11 +189,16 @@ pub struct Menu {
     rows: Vec<(usize, Rect)>,
     /// The first item shown, when there are more than fit.
     top: usize,
+    /// Keep the selected item in view; off once the wheel scrolls, on again with a key.
+    follow: bool,
     /// Set for a menu opened from the menu bar: which one it is.
     pub bar: Option<usize>,
     /// Opened from the keyboard for this screen row: below it when there is room, else
     /// above it, never over it. A menu opened by the mouse has none.
     pub row: Option<u16>,
+    /// What its commands act on, when that is not the marks or the cursor row: the
+    /// right-click menu of an unmarked row while others are marked, or of empty space.
+    pub only: Option<Vec<std::path::PathBuf>>,
 }
 
 impl Menu {
@@ -207,8 +212,10 @@ impl Menu {
             frame: Rect::ZERO,
             rows: Vec::new(),
             top: 0,
+            follow: true,
             bar: None,
             row: None,
+            only: None,
         }
     }
 
@@ -249,11 +256,14 @@ impl Menu {
     }
 
     pub fn on_key(&mut self, k: KeyEvent) -> Outcome {
+        self.follow = true;
         match k.code {
             KeyCode::Esc => Outcome::Close,
-            KeyCode::Left if self.bar.is_some() => Outcome::Side(-1),
-            KeyCode::Right if self.bar.is_some() => Outcome::Side(1),
-            KeyCode::Up => {
+            // In the menu bar, Tab goes along the bar as Left and Right do (the owner,
+            // 2026-11-26); in a menu of its own it goes down the items.
+            KeyCode::Left | KeyCode::BackTab if self.bar.is_some() => Outcome::Side(-1),
+            KeyCode::Right | KeyCode::Tab if self.bar.is_some() => Outcome::Side(1),
+            KeyCode::Up | KeyCode::BackTab => {
                 self.step(-1);
                 Outcome::Stay
             }
@@ -292,6 +302,19 @@ impl Menu {
                 if let Some(i) = under.filter(|i| self.items[*i].selectable()) {
                     self.selected = Some(i);
                 }
+                Outcome::Stay
+            }
+            // The wheel scrolls a menu taller than the screen, so the mouse reaches every
+            // row; the selection stays where it was until the pointer moves.
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                let shown = self.rows.len();
+                let last = self.items.len().saturating_sub(shown);
+                self.top = if m.kind == MouseEventKind::ScrollDown {
+                    (self.top + 1).min(last)
+                } else {
+                    self.top.saturating_sub(1)
+                };
+                self.follow = false;
                 Outcome::Stay
             }
             MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
@@ -350,7 +373,7 @@ impl Menu {
 
         // Taller than the screen: scroll so the selected item is always on it.
         let visible = inner.height as usize;
-        if let Some(s) = self.selected {
+        if let Some(s) = self.selected.filter(|_| self.follow) {
             if s < self.top {
                 self.top = s;
             } else if visible > 0 && s >= self.top + visible {
@@ -358,6 +381,22 @@ impl Menu {
             }
         }
         self.top = self.top.min(self.items.len().saturating_sub(visible));
+        // Rows out of sight: an arrow on the border on that side.
+        let more = Style::new().fg(th.accent).add_modifier(Modifier::BOLD);
+        let arrow_x = r.x + r.width.saturating_sub(4);
+        if self.top > 0 && r.width > 6 {
+            frame
+                .buffer_mut()
+                .set_line(arrow_x, r.y, &Line::styled("\u{25b2}", more), 1);
+        }
+        if self.top + visible < self.items.len() && r.width > 6 && r.height > 1 {
+            frame.buffer_mut().set_line(
+                arrow_x,
+                r.y + r.height - 1,
+                &Line::styled("\u{25bc}", more),
+                1,
+            );
+        }
         self.rows.clear();
         for (i, item) in self.items.iter().enumerate().skip(self.top) {
             let row_y = inner.y + (i - self.top) as u16;
@@ -444,6 +483,71 @@ mod tests {
             .find(|&x| b.cell((x, 1)).unwrap().symbol() == "│")
             .unwrap();
         assert!(right >= label_cells + 2 + 2, "the box (right edge {right}) is narrower than its label ({label_cells} columns): {row}");
+    }
+
+    #[test]
+    fn tab_moves_along_the_bar_and_down_a_menu_of_its_own() {
+        let mut m = Menu::dropdown(0, menu().items, (0, 0));
+        assert!(matches!(m.on_key(key(KeyCode::Tab)), Outcome::Side(1)));
+        assert!(matches!(m.on_key(key(KeyCode::BackTab)), Outcome::Side(-1)));
+        let mut m = menu();
+        m.on_key(key(KeyCode::Tab));
+        assert_eq!(m.selected, Some(3));
+        m.on_key(key(KeyCode::BackTab));
+        assert_eq!(m.selected, Some(0));
+    }
+
+    /// Review ACT-P1-1/2: a menu taller than the screen scrolls with the wheel, so the
+    /// mouse reaches its last row, and an arrow says on which side rows are hidden.
+    #[test]
+    fn the_wheel_scrolls_a_tall_menu_and_arrows_say_what_is_hidden() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let items: Vec<Item> = (0..20)
+            .map(|i| Item::act(format!("item {i:02}"), "", Action::View, true))
+            .collect();
+        let mut m = Menu::new(None, items, (0, 0));
+        let mut t = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let text = |t: &mut Terminal<TestBackend>, m: &mut Menu| {
+            let f = t.draw(|f| m.render(f, f.area())).unwrap();
+            (0..8)
+                .map(|y| {
+                    (0..40)
+                        .map(|x| f.buffer.cell((x, y)).unwrap().symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let s = text(&mut t, &mut m);
+        assert!(
+            !s[0].contains('\u{25b2}') && s[7].contains('\u{25bc}'),
+            "{s:#?}"
+        );
+        let wheel = |kind| MouseEvent {
+            kind,
+            column: 2,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+        for _ in 0..30 {
+            m.on_mouse(wheel(MouseEventKind::ScrollDown));
+            text(&mut t, &mut m);
+        }
+        let s = text(&mut t, &mut m);
+        assert!(s[6].contains("item 19"), "the last row is in reach\n{s:#?}");
+        assert!(
+            s[0].contains('\u{25b2}') && !s[7].contains('\u{25bc}'),
+            "{s:#?}"
+        );
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 3,
+            row: 6,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(matches!(m.on_mouse(click), Outcome::Run(_)));
+        m.on_mouse(wheel(MouseEventKind::ScrollUp));
+        let s = text(&mut t, &mut m);
+        assert!(s[1].contains("item 13"), "{s:#?}");
     }
 
     #[test]

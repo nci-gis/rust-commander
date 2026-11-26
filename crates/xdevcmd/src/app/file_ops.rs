@@ -91,7 +91,7 @@ impl App {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| one.display().to_string()),
-            many => format!("{} items", many.len()),
+            many => tr!("file_ops.n_items", "{n} items", n = many.len()),
         }
     }
 

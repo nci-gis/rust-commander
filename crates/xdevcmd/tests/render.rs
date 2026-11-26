@@ -1648,11 +1648,11 @@ fn the_help_menu_is_commands_config_in_use_usage_documentation_and_about() {
             .to_string()
     };
     assert!(row("Commands\u{2026}").contains("F1"), "{s}");
-    assert!(row("Usage").contains("Shift+F1"), "{s}");
+    assert!(row("Resource usage").contains("Shift+F1"), "{s}");
     let at = |label: &str| s.lines().position(|l| l.contains(label)).unwrap();
     assert!(at("Commands\u{2026}") < at("Config in use"));
-    assert!(at("Config in use") < at("Usage"));
-    assert!(at("Usage") < at("Documentation"));
+    assert!(at("Config in use") < at("Resource usage"));
+    assert!(at("Resource usage") < at("Documentation"));
     assert!(at("Documentation") < at("About xdevcmd"));
     assert!(!s.contains("Keys and settings"), "{s}");
     // Commands… opens F1 at its large size.
@@ -2360,7 +2360,7 @@ fn the_context_menu_types_into_the_shell() {
     let s = shot_keys("100x50", &format!("rclick:{x}:{y}"), &a, &b);
     let line = s
         .lines()
-        .find(|l| l.contains("Type into the shell"))
+        .find(|l| l.contains("Type names into the shell"))
         .unwrap_or_else(|| panic!("{s}"));
     assert!(line.contains("Alt+Enter"), "{line}");
     let help = shot_keys("150x150", "F1,F1", &a, &b);
@@ -4918,8 +4918,8 @@ fn a_click_on_a_title_opens_it_and_an_item_does_its_action() {
     let s = shot_keys("100x34", "", &a, &b);
     let (x, y) = locate(&s, "View");
     let s = shot_keys("100x34", &format!("click:{}:{y}", x + 1), &a, &b);
-    assert!(s.contains("Hidden files"), "{s}");
-    let (hx, hy) = locate(&s, "Hidden files");
+    assert!(s.contains("Show hidden files"), "{s}");
+    let (hx, hy) = locate(&s, "Show hidden files");
     let s = shot_keys(
         "100x34",
         &format!("click:{}:{y},click:{}:{hy}", x + 1, hx + 1),
@@ -6146,4 +6146,164 @@ fn the_terminal_panel_sits_where_position_says() {
         assert_eq!(line.starts_with("\u{250c} \u{2302} "), first, "{pos}\n{s}");
     }
     let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Review ACT-P1-O1 (the owner, 2026-11-26): the right-click menu acts by the row it is
+/// opened on, as a drag does. An unmarked row: that file alone (the marks are left out of it). A marked
+/// row: all marks, and the title says how many. Shift+F10 goes by the cursor row.
+#[test]
+fn the_right_click_menu_acts_on_its_row_or_on_the_marks() {
+    let (a, b) = files(&["alpha.txt", "beta.txt", "gamma.txt"]);
+    let base = shot_keys(SIZE, "", &a, &b);
+    let (bx, by) = locate(&base, "beta");
+    let (ax, ay) = locate(&base, "alpha");
+    // alpha and gamma marked; right-click on beta.
+    let marks = "Down,Insert,Down,Insert";
+    let s = shot_keys(SIZE, &format!("{marks},rclick:{bx}:{by}"), &a, &b);
+    assert!(s.contains(" beta.txt "), "titled by its row\n{s}");
+    assert!(!s.contains("2 items") && !s.contains("marked items"), "{s}");
+    // Delete from that menu asks about beta alone.
+    let s = shot_keys(SIZE, &format!("{marks},rclick:{bx}:{by}"), &a, &b);
+    let (dx, dy) = locate(&s, "Delete ");
+    let s = shot_keys(
+        SIZE,
+        &format!("{marks},rclick:{bx}:{by},click:{dx}:{dy}"),
+        &a,
+        &b,
+    );
+    assert!(s.contains("beta.txt") && !s.contains("2 items"), "{s}");
+    // On a marked row: the marks, named as such.
+    let s = shot_keys(SIZE, &format!("{marks},rclick:{ax}:{ay}"), &a, &b);
+    assert!(
+        s.contains("2 marked items") && s.contains("Delete 2 items"),
+        "{s}"
+    );
+    assert!(s.contains("Delete 2 items permanently"), "{s}");
+    // Shift+F10 on the unmarked cursor row (beta): beta alone.
+    let s = shot_keys(SIZE, &format!("{marks},Up,S-F10"), &a, &b);
+    assert!(
+        s.contains(" beta.txt ") && !s.contains("marked items"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Review ACT-P1-4/O2: the menu of empty space is the directory's. With nothing marked
+/// it has no file operation, and Copy path copies the directory; with marks, a group
+/// for them.
+#[test]
+fn the_empty_space_menu_is_the_directorys_and_marks_are_a_group() {
+    let (a, b) = files(&["alpha.txt", "beta.txt"]);
+    let base = shot_keys(SIZE, "Down", &a, &b);
+    let (x, y) = locate(&base, "beta");
+    let below = y + 4;
+    let s = shot_keys(SIZE, &format!("Down,rclick:{x}:{below}"), &a, &b);
+    assert!(s.contains("New file") && s.contains("New directory"), "{s}");
+    assert!(
+        !s.contains("Delete") && !s.contains("to other pane"),
+        "nothing acts on the cursor row\n{s}"
+    );
+    let (px, py) = locate(&s, "Copy path");
+    let s = shot_keys(
+        SIZE,
+        &format!("Down,rclick:{x}:{below},click:{px}:{py}"),
+        &a,
+        &b,
+    );
+    let st = status(&s);
+    assert!(
+        st.contains("clipboard") && st.contains("/a "),
+        "the directory\n{s}"
+    );
+    assert!(!st.contains("beta"), "not the cursor row\n{s}");
+    let s = shot_keys(
+        SIZE,
+        &format!("Down,Insert,Insert,rclick:{x}:{below}"),
+        &a,
+        &b,
+    );
+    assert!(
+        s.contains("2 marked items") && s.contains("Copy 2 items to other pane"),
+        "{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// Review ACT-P2-12: with the trash off, one delete row, named for what it does.
+#[test]
+fn with_the_trash_off_the_menus_have_one_delete_row() {
+    let (a, b) = files(&["alpha.txt"]);
+    let cfg = "[general]\ndelete_to_trash = false\n";
+    let base = shot_cfg_env(cfg, &[], "", &a, &b);
+    let (x, y) = locate(&base, "alpha");
+    let s = shot_cfg_env(cfg, &[], &format!("rclick:{x}:{y}"), &a, &b);
+    assert_eq!(s.matches("Delete").count(), 1, "{s}");
+    let line = s
+        .lines()
+        .find(|l| l.contains("Delete permanently"))
+        .unwrap();
+    assert!(line.contains("F8"), "{line}");
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// The owner (2026-11-26): Tab in the menu bar goes to the next menu, not down the
+/// items; Shift+Tab back.
+#[test]
+fn tab_in_the_menu_bar_goes_to_the_next_menu() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x34", "F9,Tab", &a, &b);
+    assert!(s.contains("Quick search"), "View is open\n{s}");
+    let s = shot_keys("110x34", "F9,Tab,BackTab", &a, &b);
+    assert!(s.contains("Rename many"), "File again\n{s}");
+}
+
+/// Review ACT-P2-3 to 10: View says the state of what it toggles, and a menu taller
+/// than the screen scrolls with the wheel to its last row.
+#[test]
+fn view_shows_state_and_a_tall_menu_scrolls_to_its_end() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x50", "F9,Tab", &a, &b);
+    assert!(s.contains("Show hidden files"), "{s}");
+    assert!(s.contains("Hide terminal"), "the panel is shown\n{s}");
+    assert!(
+        s.contains("Sort by name \u{25bc}"),
+        "the sort in effect\n{s}"
+    );
+    assert!(!s.contains("Sort by size \u{25bc}"), "{s}");
+    assert!(
+        s.contains("Focus terminal") && s.contains("Show this directory in other pane"),
+        "{s}"
+    );
+    let s = shot_keys(
+        "110x50",
+        "F9,Tab,Down,Down,Down,Down,Down,Down,Down,Down,Down,Down,Down,Enter,F9,Tab",
+        &a,
+        &b,
+    );
+    assert!(
+        s.contains("Sort by size \u{25bc}") || s.contains("Sort by extension \u{25bc}"),
+        "the mark follows\n{s}"
+    );
+    // 80x24: View does not fit; the wheel reaches Theme….
+    let s = shot_keys("80x24", "F9,Tab", &a, &b);
+    assert!(
+        !s.contains("Theme\u{2026}") && s.contains('\u{25bc}'),
+        "{s}"
+    );
+    let (x, y) = locate(&s, "Quick search");
+    let s = shot_keys("80x24", &format!("F9,Tab,wheel:{x}:{y}:20"), &a, &b);
+    assert!(s.contains("Theme\u{2026}"), "{s}");
+}
+
+/// Review ACT-P2-9: File has Undo, greyed with nothing to undo, with Ctrl+Z.
+#[test]
+fn the_file_menu_has_undo() {
+    let (a, b) = fixture();
+    let s = shot_keys("110x40", "F9", &a, &b);
+    let line = s
+        .lines()
+        .find(|l| l.contains(" Undo "))
+        .unwrap_or_else(|| panic!("{s}"));
+    assert!(line.contains("Ctrl+z") || line.contains("Ctrl+Z"), "{line}");
+    assert!(s.contains("Checksum (SHA-256)"), "{s}");
 }

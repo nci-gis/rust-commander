@@ -315,6 +315,11 @@ impl Menu {
                     self.top.saturating_sub(1)
                 };
                 self.follow = false;
+                // The selection stays in sight, so Enter never runs a hidden row.
+                let end = (self.top + shown).min(self.items.len());
+                if self.selected.is_some_and(|i| i < self.top || i >= end) {
+                    self.selected = (self.top..end).find(|&i| self.items[i].selectable());
+                }
                 Outcome::Stay
             }
             MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
@@ -534,6 +539,10 @@ mod tests {
         }
         let s = text(&mut t, &mut m);
         assert!(s[6].contains("item 19"), "the last row is in reach\n{s:#?}");
+        assert!(
+            m.selected.is_some_and(|i| i >= 14),
+            "the selection scrolls into sight with the rows"
+        );
         assert!(
             s[0].contains('\u{25b2}') && !s[7].contains('\u{25bc}'),
             "{s:#?}"

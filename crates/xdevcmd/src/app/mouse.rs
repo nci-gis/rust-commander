@@ -546,8 +546,18 @@ impl App {
             None => self.selection().len(),
         };
         let has_sel = n > 0;
+        // A menu acting on marks says so; one mark, by its name (red team, T37).
+        let one_mark = (on_marks && n == 1)
+            .then(|| {
+                self.selection()
+                    .first()
+                    .and_then(|p| p.file_name())
+                    .map(|s| s.to_string_lossy().into_owned())
+            })
+            .flatten();
         let title = match &entry {
             _ if on_marks && n > 1 => tr!("mouse.n_marked", "{n} marked items", n = n),
+            _ if one_mark.is_some() => one_mark.unwrap_or_default(),
             Some(e) => e.name.clone(),
             None => f
                 .cwd
@@ -562,7 +572,9 @@ impl App {
         let trash = self.settings.config.general.delete_to_trash;
 
         let mut items = Vec::new();
-        if let Some(e) = &entry {
+        // Rows for one file only go with a menu for one file: under "N marked items"
+        // they would act on the clicked row alone (red team, T37).
+        if let Some(e) = entry.as_ref().filter(|_| !(on_marks && many)) {
             if e.is_dir() {
                 items.push(Item::act(
                     tr!("mouse.open", "Open"),

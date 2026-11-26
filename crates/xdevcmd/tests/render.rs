@@ -6179,10 +6179,14 @@ fn the_right_click_menu_acts_on_its_row_or_on_the_marks() {
         "{s}"
     );
     assert!(s.contains("Delete 2 items permanently"), "{s}");
+    assert!(
+        !s.contains("Rename") && !s.contains("Permissions"),
+        "no one-file rows under it\n{s}"
+    );
     // Shift+F10 on the unmarked cursor row (beta): beta alone.
     let s = shot_keys(SIZE, &format!("{marks},Up,S-F10"), &a, &b);
     assert!(
-        s.contains(" beta.txt ") && !s.contains("marked items"),
+        s.contains(" beta.txt ") && !s.contains("2 items") && !s.contains("marked items"),
         "{s}"
     );
     let _ = fs::remove_dir_all(a.parent().unwrap());
@@ -6216,6 +6220,9 @@ fn the_empty_space_menu_is_the_directorys_and_marks_are_a_group() {
         "the directory\n{s}"
     );
     assert!(!st.contains("beta"), "not the cursor row\n{s}");
+    // One mark: the menu is titled by it, not by the directory (red team, T37).
+    let s = shot_keys(SIZE, &format!("Down,Insert,rclick:{x}:{below}"), &a, &b);
+    assert!(s.contains("\u{250c} alpha.txt "), "{s}");
     let s = shot_keys(
         SIZE,
         &format!("Down,Insert,Insert,rclick:{x}:{below}"),
@@ -6238,6 +6245,13 @@ fn with_the_trash_off_the_menus_have_one_delete_row() {
     let (x, y) = locate(&base, "alpha");
     let s = shot_cfg_env(cfg, &[], &format!("rclick:{x}:{y}"), &a, &b);
     assert_eq!(s.matches("Delete").count(), 1, "{s}");
+    let line = s
+        .lines()
+        .find(|l| l.contains("Delete permanently"))
+        .unwrap();
+    assert!(line.contains("F8"), "{line}");
+    let s = shot_cfg_env(cfg, &[], "F9", &a, &b);
+    assert_eq!(s.matches("Delete").count(), 1, "the File menu too\n{s}");
     let line = s
         .lines()
         .find(|l| l.contains("Delete permanently"))
@@ -6274,15 +6288,16 @@ fn view_shows_state_and_a_tall_menu_scrolls_to_its_end() {
         s.contains("Focus terminal") && s.contains("Show this directory in other pane"),
         "{s}"
     );
-    let s = shot_keys(
-        "110x50",
-        "F9,Tab,Down,Down,Down,Down,Down,Down,Down,Down,Down,Down,Down,Enter,F9,Tab",
-        &a,
-        &b,
-    );
+    let v = shot_keys("110x50", "F9,Tab", &a, &b);
+    let (sx, sy) = locate(&v, "Sort by size");
+    let s = shot_keys("110x50", &format!("F9,Tab,click:{sx}:{sy},F9,Tab"), &a, &b);
+    assert!(s.contains("Sort by size \u{25bc}"), "the mark follows\n{s}");
+    assert!(!s.contains("Sort by name \u{25bc}"), "{s}");
+    let again = format!("F9,Tab,click:{sx}:{sy},F9,Tab,click:{sx}:{sy},F9,Tab");
+    let s = shot_keys("110x50", &again, &a, &b);
     assert!(
-        s.contains("Sort by size \u{25bc}") || s.contains("Sort by extension \u{25bc}"),
-        "the mark follows\n{s}"
+        s.contains("Sort by size \u{25b2}"),
+        "again: the other way\n{s}"
     );
     // 80x24: View does not fit; the wheel reaches Theme….
     let s = shot_keys("80x24", "F9,Tab", &a, &b);

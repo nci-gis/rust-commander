@@ -132,3 +132,5 @@ No.
 | T32 | Windows `MAX_DEPTH` 16,400 rests on Linux measurements (compare worst, ~4.2 KB/level debug) | rc: run `measure_stack_per_level` on Windows MSVC before 0.4.0 |
 | T33 | `measure_stack_per_level` left `STACK_FOR_MEASURING` set | fixed (reset on drop) |
 | T34 | A too-deep plan row does not add its subtree to item totals | rc, cosmetic |
+| T35 | CI flake, macos-latest on `9b69be7`: `journal::tests::a_checkpointed_part_is_kept_with_its_journal_until_discarded` got 0 journals at the second `recover_in` (journal.rs:1785); passed on `58418a3` and `7f80008`, and on Linux | rc: find the cause (suspects: the probe lock or `HELD` after `next_start`, the host line on macOS); not seen with this change |
+| T36 | `[terminal] position` left/right: a file pane beside the panel shows a one-row bar with one tab, to keep rows in line; a multi-line file bar beside the panel is not matched by the panel's single row | by design / rc if the owner finds it ugly |

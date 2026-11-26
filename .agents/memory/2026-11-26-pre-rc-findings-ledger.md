@@ -80,6 +80,32 @@ stable release, not code) · **later** (0.4.x / 0.5) · **owner** (a decision) �
 | M2 | Launch venues and AI-use perception (r/opensource bans AI-built projects) | ROADMAP 0.4.0 row: soft launch at rc, real at 0.4.0, a plain build statement |
 | M3 | Rivals in the niche (Rat Commander, Oxide, Zeta); Far on Windows | kept as context for the launch README (lead with resume + shell) |
 
+### beta.4 red-team (2026-11-26; three agents, all SIGN WITH AMENDMENTS)
+
+| # | Finding | Status |
+|---|---|---|
+| T1 | Ctrl+Z after a same-drive merge moved the destination's own folder back | fixed (undo says it cannot; render test fails without the fix) |
+| T2 | A new file whose batched sync failed stayed under its name, counted done | fixed (removed, not counted; test) |
+| T3 | New links not in the fresh batch: a folder of links only was not synced | fixed (their folder synced; test) |
+| T4 | 128 open handles per fresh batch: EMFILE under macOS' 256 | fixed (32) |
+| T5 | `walk_thread` panicked if a 256 MiB stack could not be reserved | fixed (falls back to the default stack) |
+| T6 | Same-drive move renames have no folder sync before "done" (btrfs) | rc (sync the destination folders before the done line) |
+| T7 | A merge counts top-level children; the bar adds a folder's 4096 bytes | rc (cosmetic) |
+| T8 | `only_dirs`/`remove_empty_tree` in undo recurse on the UI thread (1 MiB stack on Windows) | rc |
+| T9 | English words as `{params}`, `format!` status lines, the compare "copy N" button, palette groups, "zoomed" matched by its English | fixed (one key per variant; vi, ja) |
+| T10 | `xtask lang check` did not report missing keys | fixed (a note each; the shipped files are whole) |
+| T11 | A file could claim `$__code = "auto"` or `"en"` | fixed (skipped) |
+| T12 | Zero-width characters, U+061C, U+2028/9, BOM allowed in translations | fixed (both checks) |
+| T13 | A broken language file is named only when its stem is the code; `lang_note` hidden behind config/theme notices | rc |
+| T14 | `[[open]]` program lookup is Unix only | documented (security.md: Windows uses the system's search) |
+| T15 | A killed terminal writes a spurious crash log (EIO in restore) | rc |
+| T16 | smoke.sh did not check `lang/` in the archive | fixed |
+| T17 | language.md link broken in the offline docs | fixed |
+| T18 | CHANGELOG missed fat LTO and the testkit changes | fixed |
+| T19 | `cargo install` from crates.io builds without the workspace's fat LTO and strip | 0.4.0 (note in the install docs) |
+| T20 | docs status: 13 pages changed since the first review | at the cut (review the changed pages) |
+| T21 | release-check: version, dated CHANGELOG section, branch on dev | at the cut (the release flow) |
+
 ## Evidence
 
 Commits on `feat/v0.4.0-beta.4`: `6871143`, `019018c`, `5f75aad`, `c37a1b1`, `00ff48a`;

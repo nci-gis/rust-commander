@@ -6216,7 +6216,7 @@ fn the_empty_space_menu_is_the_directorys_and_marks_are_a_group() {
     );
     let st = status(&s);
     assert!(
-        st.contains("clipboard") && st.contains("/a "),
+        st.contains("clipboard") && (st.contains("/a ") || st.contains("\\a ")),
         "the directory\n{s}"
     );
     assert!(!st.contains("beta"), "not the cursor row\n{s}");

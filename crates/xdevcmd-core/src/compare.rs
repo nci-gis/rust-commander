@@ -230,6 +230,18 @@ impl Walk<'_> {
         if self.stop.load(Ordering::Relaxed) {
             return;
         }
+        // Past the walk's depth limit: one unknown row, so nothing below is planned.
+        let Some(_deeper) = crate::depth::deeper() else {
+            out.push(Diff {
+                rel: rel.to_path_buf(),
+                is_dir: true,
+                state: State::Unreadable(Side::Left),
+                error: Some(crate::depth::too_deep().to_string()),
+                left: None,
+                right: None,
+            });
+            return;
+        };
         let side = |p: &Path, s: Side| {
             entries(p, self.hidden).map_err(|e| {
                 let state = if e.kind() == io::ErrorKind::NotFound {

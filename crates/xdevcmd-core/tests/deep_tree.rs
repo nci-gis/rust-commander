@@ -80,6 +80,13 @@ fn measure_stack_per_level() {
     let env = |k: &str| std::env::var(k).unwrap_or_default();
     let stack: usize = env("XDC_STACK").parse().expect("XDC_STACK");
     let levels: usize = env("XDC_DEPTH").parse().expect("XDC_DEPTH");
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            xdevcmd_core::depth::STACK_FOR_MEASURING.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    let _reset = Reset;
     xdevcmd_core::depth::STACK_FOR_MEASURING.store(stack, std::sync::atomic::Ordering::Relaxed);
     let d = tmp(&format!("measure-{levels}"));
     let mut p = d.join("s");
@@ -171,5 +178,34 @@ fn a_tree_deeper_than_the_limit_is_said_and_the_rest_is_copied() {
         "{sum:?}"
     );
     assert_eq!(fs::read_to_string(d.join("to/s/shallow.txt")).unwrap(), "s");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A compare also stops at the limit: one row that cannot be decided, nothing below it
+/// planned, and no stack overflow. A plain thread has the fallback limit.
+#[test]
+fn a_compare_deeper_than_the_limit_is_one_unknown_row() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
+    let levels = xdevcmd_core::depth::FALLBACK_DEPTH + 10;
+    let d = tmp("compare-deep");
+    for side in ["l", "r"] {
+        let mut p = d.join(side);
+        for _ in 0..levels {
+            p.push("d");
+        }
+        fs::create_dir_all(&p).unwrap();
+        fs::write(p.join(format!("only-{side}")), "x").unwrap();
+    }
+    let rows = xdevcmd_core::compare::compare(&d.join("l"), &d.join("r"), true, true).unwrap();
+    let deep: Vec<_> = rows
+        .iter()
+        .filter(|r| r.error.as_deref().is_some_and(|e| e.contains("too deep")))
+        .collect();
+    assert_eq!(deep.len(), 1, "{rows:?}");
+    assert!(deep[0].state.unknown());
+    assert!(
+        !rows.iter().any(|r| r.rel.ends_with("only-l")),
+        "nothing below is planned"
+    );
     let _ = fs::remove_dir_all(&d);
 }

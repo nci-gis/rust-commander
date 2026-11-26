@@ -127,3 +127,8 @@ beta.4 tag, since after it the journal format is frozen for 0.4.
 ## Promotion candidate?
 
 No.
+| T30 | Red team (depth limit): deep compare walk unguarded; aborted at 800 levels on a 2 MiB fallback stack (debug, `ulimit -v`) | fixed (guard in `compare::Walk::walk`, test `a_compare_deeper_than_the_limit_is_one_unknown_row`, fails without the fix) |
+| T31 | One folder open per level in plan/copy/count: under `ulimit -n` 256 (macOS default) a deep walk fails with "Too many open files" near 250 levels, before the depth limit | known issue (known-issues row); reading each list fully before going down is rc/0.4.x |
+| T32 | Windows `MAX_DEPTH` 16,400 rests on Linux measurements (compare worst, ~4.2 KB/level debug) | rc: run `measure_stack_per_level` on Windows MSVC before 0.4.0 |
+| T33 | `measure_stack_per_level` left `STACK_FOR_MEASURING` set | fixed (reset on drop) |
+| T34 | A too-deep plan row does not add its subtree to item totals | rc, cosmetic |

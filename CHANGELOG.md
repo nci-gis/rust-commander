@@ -27,6 +27,9 @@ that heading and starts a new, empty one here. -->
   it is open, and Tab's button says which of how many (`other pane 2/3`).
 - **In the shell, the key bar is three buttons**: [ Help ] [ Menu ] [ Quit ], for the
   mouse, with no key on them (the F-keys there are the program's).
+- **The shell panel can sit at the top, left or right** as well as the bottom:
+  `[terminal] position`, or Settings → Terminal, which moves a shown panel at once.
+  `height_percent` is its size along that side (its width at the left or right).
 - **Copy from a text field**: Ctrl+C or Ctrl+Insert copies the selection (or the whole
   line, if nothing is selected) in F2 rename and every other input box; Ctrl+X cuts it.
 

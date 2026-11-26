@@ -1132,6 +1132,51 @@ mod tests {
         xdevcmd_core::image::png_bytes(bytes, 64, 64, bg).unwrap()
     }
 
+    /// Each position puts the panel on its side, reads back the size it was given, and
+    /// a change of position in Settings moves a shown panel keeping that size.
+    #[test]
+    fn the_terminal_panel_goes_where_position_says_and_keeps_its_size() {
+        let root = std::env::temp_dir().join(format!("xdevcmd-pos-{}", std::process::id()));
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let mut app = App::new(&a, &b, Settings::default(), Outcome::NoFile);
+        let files = app.tree.clone();
+        let mut leaves = Vec::new();
+        files.leaves(&mut leaves);
+        let id = 999;
+        app.shell_pane.term_id = Some(id);
+        app.shell_pane.term_shown = true;
+        for (pos, axis, first) in [
+            ("bottom", Axis::Rows, false),
+            ("top", Axis::Rows, true),
+            ("left", Axis::Cols, true),
+            ("right", Axis::Cols, false),
+        ] {
+            app.settings.config.terminal.position = pos.into();
+            app.tree = app.with_term(files.clone(), id, 35);
+            match &app.tree {
+                Node::Split { axis: ax, a, .. } => {
+                    assert_eq!(*ax, axis, "{pos}");
+                    assert_eq!(matches!(**a, Node::Leaf(x) if x == id), first, "{pos}");
+                }
+                Node::Leaf(_) => panic!("{pos}: no split"),
+            }
+            let (rest, size) = app.without_term().expect(pos);
+            assert_eq!(size, 35, "{pos}");
+            let mut got = Vec::new();
+            rest.leaves(&mut got);
+            assert_eq!(got, leaves, "{pos}: the file panes untouched");
+        }
+        // Settings moves it from the right to the top: same size, now above.
+        app.settings.config.terminal.position = "top".into();
+        app.place_term();
+        assert!(matches!(&app.tree, Node::Split { axis: Axis::Rows, a, .. }
+            if matches!(**a, Node::Leaf(x) if x == id)));
+        assert_eq!(app.without_term().unwrap().1, 35);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_session_restores_to_exactly_what_was_saved() {
         let root = std::env::temp_dir().join(format!("xdevcmd-snap-{}", std::process::id()));

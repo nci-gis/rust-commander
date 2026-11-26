@@ -393,11 +393,23 @@ const FIELDS: &[Field] = &[
     f(
         3,
         "terminal",
+        "position",
+        Text::new("settings.terminal.position.label", "Where it sits"),
+        Text::new(
+            "settings.terminal.position.help",
+            "beside the file panes: bottom, top, left or right",
+        ),
+        Kind::Pick(&["bottom", "top", "left", "right"]),
+        true,
+    ),
+    f(
+        3,
+        "terminal",
         "height_percent",
-        Text::new("settings.terminal.height_percent.label", "Its height (%)"),
+        Text::new("settings.terminal.height_percent.label", "Its size (%)"),
         Text::new(
             "settings.terminal.height_percent.help",
-            "Drag its border to change it now",
+            "height at the top or bottom, width at the left or right; drag its border to change it now",
         ),
         Kind::Pick(&["20", "25", "30", "35", "40", "50", "60"]),
         false,
@@ -514,6 +526,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("theme", "name") => c.theme.name.clone(),
         ("theme", "colors") => c.theme.colors.clone(),
         ("terminal", "show") => c.terminal.show.to_string(),
+        ("terminal", "position") => c.terminal.position.clone(),
         ("terminal", "height_percent") => c.terminal.height_percent.to_string(),
         ("terminal", "max_terminals") => c.terminal.max_terminals.to_string(),
         ("terminal", "scrollback") => c.terminal.scrollback.to_string(),
@@ -560,6 +573,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         ("theme", "name") => c.theme.name = v.to_string(),
         ("theme", "colors") => c.theme.colors = v.to_string(),
         ("terminal", "show") => c.terminal.show = b,
+        ("terminal", "position") => c.terminal.position = v.to_string(),
         ("terminal", "height_percent") => {
             c.terminal.height_percent = n().map_or(c.terminal.height_percent, |x| x as u16)
         }

@@ -222,7 +222,12 @@ impl Default for Files {
 #[serde(default, deny_unknown_fields)]
 pub struct Terminal {
     pub show: bool,
-    /// Share of the height the shell pane takes, 10–90.
+    /// Where the shell panel sits beside the file panes: "bottom", "top", "left" or
+    /// "right".
+    pub position: String,
+    /// Share of the screen the shell panel takes along its side, 10–90: its height at
+    /// the top or bottom, its width at the left or right. The name is kept from when it
+    /// could only be at the bottom (the owner, 2026-11-26).
     pub height_percent: u16,
     /// Empty means $SHELL, or %COMSPEC% on Windows.
     pub shell: String,
@@ -249,6 +254,7 @@ impl Default for Terminal {
     fn default() -> Self {
         Self {
             show: true,
+            position: "bottom".into(),
             height_percent: 30,
             shell: String::new(),
             max_terminals: 3,
@@ -630,6 +636,15 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         return Err(format!(
             "[files] filter = \"{}\": expected fuzzy or plain",
             config.files.filter
+        ));
+    }
+    if !matches!(
+        config.terminal.position.as_str(),
+        "bottom" | "top" | "left" | "right"
+    ) {
+        return Err(format!(
+            "[terminal] position = \"{}\": expected bottom, top, left or right",
+            config.terminal.position
         ));
     }
     if !matches!(config.files.tab_bar.as_str(), "one-line" | "multi-line") {

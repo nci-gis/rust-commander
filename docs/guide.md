@@ -355,8 +355,9 @@ file where the plan saw none, and you are asked.
 
 ## The terminal
 
-A shell runs under the panes. Everything about it, including staying in xdevcmd's
-directory when you quit: [shell.md](shell.md).
+A shell runs under the panes (or above or beside them, `[terminal] position`).
+Everything about it, including staying in xdevcmd's directory when you quit:
+[shell.md](shell.md).
 
 | Key | Does |
 |---|---|

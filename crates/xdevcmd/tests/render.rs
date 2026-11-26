@@ -3551,7 +3551,7 @@ fn settings_shows_what_a_full_history_costs() {
     let (a, b) = fixture();
     let s = shot_keys(
         "122x34",
-        "F9,Up,Up,Enter,Tab,Tab,Tab,Down,Down,Down",
+        "F9,Up,Up,Enter,Tab,Tab,Tab,Down,Down,Down,Down",
         &a,
         &b,
     );
@@ -6113,5 +6113,38 @@ fn file_tabs_stop_at_sixteen_and_the_bar_stays_in_its_pane() {
         rows[top].contains("\u{2510}\u{250c}"),
         "both panes start on one row\n{s}"
     );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}
+
+/// `[terminal] position` puts the shell panel on that side of the file panes.
+#[test]
+fn the_terminal_panel_sits_where_position_says() {
+    let (a, b) = files(&["alpha.txt"]);
+    let shot = |pos: &str| {
+        let cfg = format!("[terminal]\nposition = \"{pos}\"\n");
+        shot_cfg_env(&cfg, &[], "", &a, &b)
+    };
+    let row_of = |s: &str, needle: &str| s.lines().position(|l| l.contains(needle));
+    let s = shot("top");
+    assert!(
+        row_of(&s, "bash \u{b7}") < row_of(&s, "Name \u{25bc}"),
+        "{s}"
+    );
+    let s = shot("bottom");
+    assert!(
+        row_of(&s, "bash \u{b7}") > row_of(&s, "Name \u{25bc}"),
+        "{s}"
+    );
+    for (pos, first) in [("left", true), ("right", false)] {
+        let s = shot(pos);
+        let line = s.lines().find(|l| l.contains("bash \u{b7}")).unwrap();
+        // Three frames start on this row: the shell's and both file panes'.
+        assert_eq!(line.matches('\u{250c}').count(), 3, "beside the panes\n{s}");
+        assert_eq!(
+            line.starts_with("\u{250c} \u{2302} bash"),
+            first,
+            "{pos}\n{s}"
+        );
+    }
     let _ = fs::remove_dir_all(a.parent().unwrap());
 }

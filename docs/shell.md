@@ -1,6 +1,7 @@
 # Your shell and xdevcmd
 
-xdevcmd has a shell panel under the file panes. It starts a new shell there, of the
+xdevcmd has a shell panel under the file panes (or above, or beside them:
+`[terminal] position`, or Settings → Terminal). It starts a new shell there, of the
 kind you use: not the session you started xdevcmd from.
 
 **In short**

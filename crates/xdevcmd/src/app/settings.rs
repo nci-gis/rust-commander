@@ -139,7 +139,11 @@ impl App {
         if let Some(p) = self.panel() {
             p.set_scrollback(scrollback);
         }
+        let moved = s.config.terminal.position != self.settings.config.terminal.position;
         self.settings = s;
+        if moved {
+            self.place_term();
+        }
         self.config_outcome = Outcome::Loaded(path.clone());
         let name = self.settings.config.theme.name.clone();
         self.set_theme(&name);

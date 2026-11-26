@@ -63,10 +63,9 @@ impl App {
 
     /// What is open now, as a session to save.
     pub fn snapshot(&mut self) -> Session {
-        let (files_tree, height) = match (&self.tree, self.shell_pane.term_shown) {
-            (Node::Split { pct, a, .. }, true) => ((**a).clone(), 100 - *pct),
-            _ => (self.tree.clone(), self.shell_pane.term_height),
-        };
+        let (files_tree, height) = self
+            .without_term()
+            .unwrap_or_else(|| (self.tree.clone(), self.shell_pane.term_height));
         let panes = self.save_node(&files_tree);
         let mut leaves = Vec::new();
         files_tree.leaves(&mut leaves);

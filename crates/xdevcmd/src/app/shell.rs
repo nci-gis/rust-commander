@@ -3,12 +3,50 @@
 use super::*;
 
 impl App {
+    /// The file panes with the shell panel `id` beside them, where `[terminal] position`
+    /// puts it, taking `size` percent of that side.
+    pub(super) fn with_term(&self, files: Node, id: PaneId, size: u16) -> Node {
+        let size = size.clamp(10, 90);
+        match self.settings.config.terminal.position.as_str() {
+            "top" => Node::split(Axis::Rows, size, Node::Leaf(id), files),
+            "left" => Node::split(Axis::Cols, size, Node::Leaf(id), files),
+            "right" => Node::split(Axis::Cols, 100 - size, files, Node::Leaf(id)),
+            _ => Node::split(Axis::Rows, 100 - size, files, Node::Leaf(id)),
+        }
+    }
+
+    /// The file panes apart from the shell panel, and the panel's share of its side,
+    /// read from the layout as it is (it may predate a change of position). None when
+    /// the panel is not shown.
+    pub(super) fn without_term(&self) -> Option<(Node, u16)> {
+        let id = self
+            .shell_pane
+            .term_id
+            .filter(|_| self.shell_pane.term_shown)?;
+        match &self.tree {
+            Node::Split { pct, a, b, .. } if matches!(**a, Node::Leaf(x) if x == id) => {
+                Some(((**b).clone(), *pct))
+            }
+            Node::Split { pct, a, b, .. } if matches!(**b, Node::Leaf(x) if x == id) => {
+                Some(((**a).clone(), 100 - *pct))
+            }
+            _ => None,
+        }
+    }
+
+    /// Settings changed `[terminal] position`: a shown panel moves there, its size kept.
+    pub(super) fn place_term(&mut self) {
+        if let (Some(id), Some((files, size))) = (self.shell_pane.term_id, self.without_term()) {
+            self.tree = self.with_term(files, id, size);
+        }
+    }
+
     pub(super) fn toggle_term(&mut self, area: Rect) {
         match (self.shell_pane.term_id, self.shell_pane.term_shown) {
             (Some(id), true) => {
-                // Remember the height it was dragged to, so showing it again restores it.
-                if let Node::Split { pct, .. } = &self.tree {
-                    self.shell_pane.term_height = 100 - *pct;
+                // Remember the size it was dragged to, so showing it again restores it.
+                if let Some((_, size)) = self.without_term() {
+                    self.shell_pane.term_height = size;
                 }
                 self.tree.remove_leaf(id);
                 self.shell_pane.term_shown = false;
@@ -18,12 +56,7 @@ impl App {
             }
             (Some(id), false) => {
                 let old = std::mem::replace(&mut self.tree, Node::Leaf(id));
-                self.tree = Node::split(
-                    Axis::Rows,
-                    100 - self.shell_pane.term_height,
-                    old,
-                    Node::Leaf(id),
-                );
+                self.tree = self.with_term(old, id, self.shell_pane.term_height);
                 self.shell_pane.term_shown = true;
                 self.focus = id;
             }
@@ -34,8 +67,13 @@ impl App {
                     .take()
                     .unwrap_or_else(|| self.focused_cwd());
                 let pct = self.shell_pane.term_height;
-                let rows = (area.height * pct / 100).saturating_sub(2).max(1);
-                let cols = area.width.saturating_sub(2).max(1);
+                // The shell's first size; the first frame sets the exact one.
+                let (rows, cols) = match self.settings.config.terminal.position.as_str() {
+                    "left" | "right" => (area.height, area.width * pct / 100),
+                    _ => (area.height * pct / 100, area.width),
+                };
+                let rows = rows.saturating_sub(2).max(1);
+                let cols = cols.saturating_sub(2).max(1);
                 let shell = self.settings.config.terminal.shell.clone();
                 let scrollback = self.settings.config.terminal.scrollback;
                 match TermPanel::new(&cwd, rows, cols, &shell, scrollback) {
@@ -43,12 +81,7 @@ impl App {
                         let id = self.alloc_id();
                         self.panes.insert(id, Pane::Term(Box::new(t)));
                         let old = std::mem::replace(&mut self.tree, Node::Leaf(id));
-                        self.tree = Node::split(
-                            Axis::Rows,
-                            100 - self.shell_pane.term_height,
-                            old,
-                            Node::Leaf(id),
-                        );
+                        self.tree = self.with_term(old, id, self.shell_pane.term_height);
                         self.shell_pane.term_id = Some(id);
                         self.shell_pane.term_shown = true;
                     }

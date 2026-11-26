@@ -80,7 +80,7 @@ your `PATH`. Each release's archives can be checked:
 ## Quick start
 
 ```bash
-xdevcmd                  # open in the current directory
+xdevcmd                  # your last panes and tabs come back (--no-restore: start fresh)
 xdevcmd ~/src /tmp       # or with two directories
 ```
 

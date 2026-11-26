@@ -5,7 +5,9 @@
 
 **Released**: 0.3.0 (2026-11-10, Latest); **0.4.0-beta.1** (2026-11-13), **beta.2**
 (2026-11-23) and **beta.3** (2026-11-24), GitHub pre-releases. **In progress**:
-0.4.0-beta.4 on `feat/v0.4.0-beta.4` (Round 037, languages).
+0.4.0-beta.4 on `feat/v0.4.0-beta.4` (Rounds 037 languages, 038 docs review), code
+complete 2026-11-26; red-team and the owner's hand tests before the cut. After it, only
+rc.N: fixes, no new behaviour (owner, 2026-11-26).
 Rewritten 2026-11-12 around v0.4.0 as the first stable release; shortened 2026-11-15
 (the longer version, with the finished items' design notes, is in git history).
 
@@ -55,9 +57,9 @@ start at 0.4.0; winget is item 48 [draft] (owner, 2026-11-15).
 | **0.4.0-beta.1** | Items 21, 30a, 30b, 31–33, 35, 37 (light), 38, 40 (Rounds 018–028); pillar 1 (data correct) and **Smart Planner v1**, item 42 (Rounds 029–031); the pre-release plumbing (032) | Released 2026-11-13. Rounds 018–028 at Review until the owner's hand tests; 029–031 Complete; 032 open |
 | **0.4.0-beta.2** | **Smart Planner v2**, item 43: group commit for copies and replaces, the platform's fast copy (22), checkpointed resume, finished folders skipped; pillar 2 (responsive and bounded); items 45, 46; and rc.1's planned work, moved here by the owner (2026-11-14): pillars 3 and 4 (compatibility promise, what a copy keeps, fuzzing, smoke test and provenance, the hand-test matrix, the benchmark protocol) | Released 2026-11-23 (GitHub pre-release, #68, tag `v0.4.0-beta.2` at `e3e528e`); Round 033 Complete. Hardened by plan v3 (#42–#67); hand-test ledger PASS, speed gate and fuzz passed. Lanes: the owner's call on the D0 numbers; else 0.5, as planned |
 | **0.4.0-beta.3** | **Refactor**, Round 035 (branch `feat/v0.4.0-beta.3`, from `dev` at `e3e528e`) (owner, 2026-11-23): one definition per concept, as measured by the cosf rounds (R5–R7 synthesis §6.3; `xtask qa defs`): the concepts still defined in several places (control characters, home and state folders, atomic write H-06, display width and text fit, refusal messages, SortKey text, CLI options), one job type for the workers, and splitting `ops.rs` and `App`'s state. No new features. The owner accepts the risk and retests: the hand-test ledger, the speed A/B against beta.2 and a red-team per data-path PR, as for beta.2. Before and after numbers: `qa defs`, deleted/added lines, `App` fields, the size of `ops.rs`. Also two fixes: the release notes' relative links (the CHANGELOG section's `docs/…` links do not open on the release page; beta.1 and beta.2 alike), the hand-test README says to log a row on the machine that ran it (Round 033 Act), and the release's xtask archive is renamed `xdevcmd-testkit-…` (was `xdevcmd-bench-…`; owner, 2026-11-23). Hand tests between releases use the CI artifact of the commit (xdevcmd + xtask), so no local build. All in #70. **Timebox: one week at most, to 2026-11-30** (owner, 2026-11-23); not done by then → Plan B. Then, after the code freeze and before the cut, **Round 036** (owner, 2026-11-24): data-safety cases 01, 03, 04, 05 end-to-end in CI on three systems (kills at markers, small files), 02, 06, 07 by hand, a hand cell stale only when its own files change: 21 hand cells become 9 at most | Tagged 2026-11-24 (`v0.4.0-beta.3` at `5624a4e`, #101), the draft read (12 archives, checksums, `--version`); Rounds 035 and 036 Complete. Hand-test ledger PASS (9 cells: 6 PASS, 3 waived), speed A/B and fuzz passed |
-| **0.4.0-beta.4** | **Languages** (owner, 2026-11-15; restated 2026-11-23): the i18n mechanism and a pseudo-locale; English, Vietnamese, and Japanese as a preview | — |
-| **0.4.0-rc.N** | Fixes only (feature freeze); rc.1 also syncs new files before a job ends (B3, a power cut), and fixes what the beta.3 reviews left open (C1–C9 in `memory/2026-11-24-beta3-review-carryover.md`; its L rows go to beta.4) | — |
-| **0.4.0** | When an rc is good: all tests and the owner's week green; then packages, then the launch (item 10) | — |
+| **0.4.0-beta.4** | **Languages** (owner, 2026-11-15; restated 2026-11-23): the i18n mechanism and a pseudo-locale; English, Vietnamese, and Japanese, built in (Round 037). **Docs checked against the code** with a skill and a ledger (Round 038). Pulled in by the owner, 2026-11-25/26: the pre-rc review's P0 fixes (case folding when the case rule is unknown, deep trees on a large stack, a folder moved onto a folder merges), **B3** (new files synced in batches before done marks and the job's end), fat LTO for size, Alt+X q from the shell, the shell key-bar buttons, the copy dialog's destination light, Windows-reserved names refused, the beta.3 review's L1–L3 | Code complete 2026-11-26; red-team, hand tests (M-DS cells stale since B3), then the cut |
+| **0.4.0-rc.N** | **Fixes only, no new behaviour** (owner, 2026-11-26). rc.1: the beta.3 reviews' C1–C9 (`memory/2026-11-24-beta3-review-carryover.md`) and the pre-rc review's rc rows (`memory/2026-11-26-pre-rc-findings-ledger.md`): pin the release toolchain and actions, a frozen-surface test for the compatibility promise, Ctrl+G replacing its prefilled path, "1 items", docs for GNOME Terminal's F10/F1/Alt+F7 and tmux's Ctrl+A, the MSRV policy in compatibility.md, what beta.4's red-team leaves. The **GIF** is recorded right after rc.1 is cut (the UI is frozen then), scripted so it can be made again | — |
+| **0.4.0** | When an rc is good: all tests and the owner's week green; then packages (crates.io: core then app, `--dry-run` both first; binstall; Scoop), then the launch (item 10): a soft one at the rc (r/commandline, Vietnamese and Japanese dev communities), the real one at 0.4.0 (Show HN, This Week in Rust, awesome lists), with the README led by resume-after-a-kill and the shell workflow, and a plain statement of how xdevcmd is built (an AI writes most of the code; what the human checks). Not r/opensource: it bans AI-built projects (2026-10) | — |
 
 **Plan B** (owner, 2026-11-23): beta.2 is cut and tagged, so if beta.3 or beta.4 slips,
 rc.1 can be built from `v0.4.0-beta.2` instead (fixes only), and the refactor and
@@ -84,7 +86,8 @@ Not for 0.4 (the review agrees): mmap, a trie, a custom arena, Tokio, a batch WA
    before each release.
 6. **CI on for the pull request into `dev`**, ConPTY tests included. Green on beta.2.
 7. **Docs and README for a first-time reader**: a 20–30 s GIF, three lines of why, one
-   install command each. The GIF is still to make.
+   install command each. The GIF is recorded after rc.1 (scripted: kill a copy, start
+   again, continue; Alt+C; Alt+Enter); the README's text-art screen is replaced then.
 
 ### Packages
 
@@ -136,7 +139,7 @@ Steered by launch feedback. Not started before 0.4.0 ships.
 | 34 Remote | Mounts instead; revisit only with feedback, keeping hard rule 2 |
 | 11 File icon sets; 12–13 plugins | Optional extras; plugins not for now |
 | 47 **[draft] Go to anything** | A direction, not a commitment; note below |
-| 48 **[draft] winget** | Needs a signed Windows build; Scoop and the release zip cover Windows until then |
+| 48 **[draft] winget** | Said to need a signed build; the pre-rc review read that winget may not require one, only that an unsigned build meets SmartScreen (not verified; check before planning); Scoop and the release zip cover Windows until then |
 
 ## Items
 

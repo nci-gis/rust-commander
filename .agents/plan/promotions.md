@@ -348,3 +348,14 @@ and "nên lưu ở: .agents/lesgers/docs-review.tsv" (written `ledgers/`).
 agent write its rows only through the skill that owns it, with the owner's agreement.
 Two lines joined elsewhere to stay under 100 lines; no rule changed.
 **Promoted by**: the owner's word in session. Written by Claude Code.
+
+## 2026-11-26: ROADMAP brought up to date for the beta.4 cut
+
+**Source**: the owner, 2026-11-26: "Bro update roadmap lại cho đúng nhé"; "Sau beta.4
+chỉ còn RC.X - bug fixed nhé."
+**What**: the In-progress line; the beta.4 row (languages, docs review, the pre-rc P0
+fixes, B3, fat LTO, the smaller features that landed); the rc.N row (fixes only, B3
+removed, the pre-rc rc rows, the GIF after rc.1); the 0.4.0 row (packages and launch
+plan); release bar 7 (when the GIF is made); item 48 (the signing claim marked
+unverified). Findings ledger: `memory/2026-11-26-pre-rc-findings-ledger.md`.
+**Promoted by**: the owner's word in session. Written by Claude Code.

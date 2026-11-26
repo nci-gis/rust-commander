@@ -3,7 +3,8 @@
 A template, filled for each release from the files the release workflow makes
 (`.github/workflows/release.yml`). It points at the archive
 `xdevcmd-v<version>-x86_64-pc-windows-msvc.zip`, which holds one folder of the same name
-with `xdevcmd.exe`, `themes/`, `LICENSE`, `README.md` and `THIRD-PARTY.md`.
+with `xdevcmd.exe`, `themes/`, `lang/`, `docs/`, `LICENSE`, `README.md` and
+`THIRD-PARTY.md`.
 `crates/xdevcmd/tests/packaging.rs` checks that the URL and folder name here still match
 what release.yml makes.
 

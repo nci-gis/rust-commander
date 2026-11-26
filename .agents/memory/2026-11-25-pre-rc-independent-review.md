@@ -3,7 +3,7 @@
 **Date**: 2026-11-25
 **Agent**: Claude Code (4 read-only subagents: algorithms, UX, market, release)
 **Confidence**: High for items marked verified; Medium otherwise
-**Status**: New — waiting for the owner's decisions
+**Status**: Archived — every finding has a row in `2026-11-26-pre-rc-findings-ledger.md`
 **Source**: the owner: "deep research and review … sau beta.4 là cut rc.X, không thêm tính năng"
 **Review-by**: 2026-12-10
 

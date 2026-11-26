@@ -878,6 +878,7 @@ type_to_jump_u_u_u = "type to jump · ↑↓ next match · Enter or Esc to stop"
 you_cannot_write_there_tab_for = "you cannot write there: Tab for the other pane, Esc to cancel"
 
 [mode]
+named = "{mode} mode"
 normal = "normal"
 "off.changing_permissions" = "changing permissions"
 "off.copying_and_moving" = "copying and moving"

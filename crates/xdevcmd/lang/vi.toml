@@ -877,6 +877,7 @@ you_cannot_write_there_tab_for = "bạn không ghi được ở đó: Tab sang k
 
 [mode]
 normal = "bình thường"
+named = "chế độ {mode}"
 "off.changing_permissions" = "đổi quyền"
 "off.copying_and_moving" = "chép và chuyển"
 "off.creating_directories" = "tạo thư mục"

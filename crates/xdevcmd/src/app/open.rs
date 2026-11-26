@@ -271,7 +271,11 @@ impl App {
             return self.apply_rule(i, path);
         }
         if self.refused(Action::OpenWith).is_some() {
-            let why = format!("{} mode", self.settings.mode.label());
+            let why = tr!(
+                "mode.named",
+                "{mode} mode",
+                mode = self.settings.mode.label_text()
+            );
             return self.view_instead(&why);
         }
         if opener::runs_something(&path) {
@@ -360,7 +364,11 @@ impl App {
         }
         // A command runs a program: not where programs may not run.
         if self.refused(Action::OpenWith).is_some() {
-            let why = format!("{} mode", self.settings.mode.label());
+            let why = tr!(
+                "mode.named",
+                "{mode} mode",
+                mode = self.settings.mode.label_text()
+            );
             return self.view_instead(&why);
         }
         let argv = rule.argv(&path);

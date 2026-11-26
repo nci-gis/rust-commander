@@ -383,14 +383,6 @@ impl Mode {
             mode = self.label_text()
         )
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Mode::Normal => "normal",
-            Mode::ReadOnly => "read-only",
-            Mode::Restricted => "restricted",
-        }
-    }
 }
 
 /// Colours as written in the file: "#rrggbb", "reset" for the terminal's own colour,

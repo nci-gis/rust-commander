@@ -311,7 +311,7 @@ fn page(settings: &Settings, outcome: &Outcome) -> Vec<Entry> {
         &mut out,
         Line::from(vec![
             Span::styled("    mode      ", Style::new().fg(th.fg_dim)),
-            Span::styled(settings.mode.label().to_string(), mode_style),
+            Span::styled(settings.mode.label_text().into_owned(), mode_style),
         ]),
         false,
     );

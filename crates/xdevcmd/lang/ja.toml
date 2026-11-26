@@ -876,6 +876,7 @@ you_cannot_write_there_tab_for = "そこには書き込めません: Tab でも�
 
 [mode]
 normal = "通常"
+named = "{mode} モード"
 "off.changing_permissions" = "権限の変更"
 "off.copying_and_moving" = "コピーと移動"
 "off.creating_directories" = "ディレクトリの作成"

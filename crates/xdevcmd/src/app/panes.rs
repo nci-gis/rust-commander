@@ -22,6 +22,17 @@ impl App {
         self.panes.get_mut(&self.focus)?.as_tabs_mut()
     }
 
+    /// Ctrl+T or the bar's +: a tab on the same directory, up to the cap, which is said.
+    pub(super) fn new_file_tab(&mut self) {
+        if self.focused_tabs().is_some_and(|t| !t.duplicate()) {
+            self.status = tr!(
+                "panes.tab_limit",
+                "at most {n} tabs in a pane",
+                n = crate::pane::tabs::MAX_TABS
+            );
+        }
+    }
+
     pub(super) fn focused_files(&mut self) -> Option<&mut FilePane> {
         self.panes.get_mut(&self.focus)?.as_files_mut()
     }

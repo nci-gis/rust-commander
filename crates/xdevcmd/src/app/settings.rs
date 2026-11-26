@@ -123,6 +123,7 @@ impl App {
         s.root = self.settings.root.clone();
         s.depth = self.settings.depth;
         crate::pane::files::set_fuzzy(s.config.files.filter == "fuzzy");
+        crate::pane::tabs::set_wrap(s.config.files.tab_bar == "multi-line");
         xdevcmd_core::ops::set_safe(s.config.general.safe_operations);
         xdevcmd_core::fastcopy::set_enabled(s.config.general.fast_copy);
         if self.interactive {

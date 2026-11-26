@@ -200,7 +200,7 @@ impl App {
                     return;
                 };
                 match tabs.on_click(x, y) {
-                    TabClick::New => tabs.duplicate(),
+                    TabClick::New => self.new_file_tab(),
                     TabClick::Close(i) => {
                         tabs.close(i);
                     }

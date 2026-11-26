@@ -441,21 +441,28 @@ impl App {
             self.quick_view = None;
         }
         let previewing = self.quick_view.as_ref().map(|(q, _)| *q);
-        // The rows where a pane starts with a tab bar: terminal panels always have one,
-        // file panes when they hold more than one tab. A file pane starting on the same
-        // row shows its bar too, or its list would sit a row higher than its neighbour's.
-        let barred: Vec<u16> = rects
-            .iter()
-            .filter(|(id, r)| {
-                previewing != Some(*id)
-                    && match self.panes.get(id) {
-                        Some(Pane::Files(f)) => f.wants_bar(*r),
-                        Some(Pane::Term(_)) => true,
-                        None => false,
-                    }
-            })
-            .map(|(_, r)| r.y)
-            .collect();
+        // The rows where a pane starts with a tab bar, and how tall it is there: terminal
+        // panels always have one row, file panes as many as their tabs need. A file pane
+        // starting on the same row shows a bar as tall, or its list would sit higher
+        // than its neighbour's.
+        let mut barred: Vec<(u16, u16)> = Vec::new();
+        for (id, r) in &rects {
+            if previewing == Some(*id) {
+                continue;
+            }
+            let rows = match self.panes.get(id) {
+                Some(Pane::Files(f)) => f.bar_rows(*r),
+                Some(Pane::Term(_)) => 1,
+                None => 0,
+            };
+            if rows == 0 {
+                continue;
+            }
+            match barred.iter_mut().find(|(y, _)| *y == r.y) {
+                Some((_, h)) => *h = (*h).max(rows),
+                None => barred.push((r.y, rows)),
+            }
+        }
         // While a copy or move asks where to, the pane it goes to is lit as a drop target
         // is: Tab moves the light with the destination (the owner, 2026-11-25).
         let landing = match &self.modal {
@@ -478,7 +485,11 @@ impl App {
                         .as_ref()
                         .is_some_and(|d| d.mode == DragMode::Files && d.hover == Some(id))
                         || landing == Some(id);
-                    f.render(frame, r, active, target, barred.contains(&r.y))
+                    let rows = barred
+                        .iter()
+                        .find(|(y, _)| *y == r.y)
+                        .map_or(0, |(_, h)| *h);
+                    f.render(frame, r, active, target, rows)
                 }
                 Some(Pane::Term(p)) => p.render(frame, r, active),
                 None => {}

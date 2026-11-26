@@ -356,6 +356,7 @@ fn main() -> Result<()> {
     }
     let files = &settings.config.files;
     crate::pane::files::set_fuzzy(files.filter == "fuzzy");
+    crate::pane::tabs::set_wrap(files.tab_bar == "multi-line");
     xdevcmd_core::ops::set_safe(settings.config.general.safe_operations);
     xdevcmd_core::fastcopy::set_enabled(settings.config.general.fast_copy);
     // XDEVCMD_STATE names the session file (config.md), by its full path. A folder, a

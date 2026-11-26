@@ -194,6 +194,9 @@ pub struct Files {
     /// Ctrl+F's filter: "fuzzy", the letters in order, best matches first; or "plain",
     /// the text as typed anywhere in the name. Wildcards (`*.rs`) work in both.
     pub filter: String,
+    /// The tab bar when its tabs do not fit: "one-line", the tabs around the selected
+    /// one with a count of the rest; or "multi-line", up to three rows first.
+    pub tab_bar: String,
 }
 
 impl Default for Files {
@@ -210,6 +213,7 @@ impl Default for Files {
             git_status: false,
             enter: "open".into(),
             filter: "fuzzy".into(),
+            tab_bar: "one-line".into(),
         }
     }
 }
@@ -626,6 +630,12 @@ pub fn resolve(config: Config) -> Result<Settings, String> {
         return Err(format!(
             "[files] filter = \"{}\": expected fuzzy or plain",
             config.files.filter
+        ));
+    }
+    if !matches!(config.files.tab_bar.as_str(), "one-line" | "multi-line") {
+        return Err(format!(
+            "[files] tab_bar = \"{}\": expected one-line or multi-line",
+            config.files.tab_bar
         ));
     }
     if !matches!(config.files.enter.as_str(), "open" | "view") {

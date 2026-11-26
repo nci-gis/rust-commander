@@ -31,6 +31,11 @@ that heading and starts a new, empty one here. -->
   line, if nothing is selected) in F2 rename and every other input box; Ctrl+X cuts it.
 
 ### Fixed
+- **File tabs stop at 16 per pane, and the tab bar stays inside its pane**: before,
+  Ctrl+T had no limit and the bar ran into the next pane, with the current tab
+  possibly off screen. When tabs do not fit, the bar shows those around the current
+  one with `‹k`/`k›` for the rest, or wraps onto up to three rows first with
+  `[files] tab_bar = "multi-line"` (Settings → Files).
 - **Enter on a `.docx`, `.xlsx`, `.pptx`, `.odt` or `.epub` opens the document** with its
   program, rather than browsing the zip inside it. Shift+O → *Browse inside* still
   looks in.

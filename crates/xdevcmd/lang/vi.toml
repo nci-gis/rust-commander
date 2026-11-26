@@ -1003,6 +1003,7 @@ run = "Enter chạy"
 "why.viewer_key" = "phím riêng của trình xem: hãy nhấn ở đó"
 
 [panes]
+tab_limit = "tối đa {n} tab mỗi khung"
 at_most_file_panes_u_files = "tối đa {max} khung tệp — [files] max_panes trong config.toml"
 both_panes_on = "cả hai khung ở {v}"
 panes_swapped = "đã đổi chỗ khung"
@@ -1068,6 +1069,8 @@ unsafe_to_type = "đường dẫn chứa {c} — không gửi, nó có thể ch�
 no_match = " không khớp "
 
 [settings]
+"files.tab_bar.help" = "khi tab không vừa — one-line: các tab quanh tab hiện tại; multi-line: tối đa 3 dòng"
+"files.tab_bar.label" = "Thanh tab"
 "languages.prereview" = "chưa duyệt"
 cannot_read = "không đọc được {path}: {e}"
 cannot_save = "không lưu được {path}: {e}"

@@ -6075,3 +6075,43 @@ fn enter_opens_a_zip_document_and_open_with_browses_inside() {
     );
     assert!(s.contains("report.docx/"), "Browse inside goes in\n{s}");
 }
+
+/// Ctrl+T stops at 16 tabs and says so; the bar stays inside its pane, one row, with
+/// the selected tab shown and a count of those left out.
+#[test]
+fn file_tabs_stop_at_sixteen_and_the_bar_stays_in_its_pane() {
+    let (a, b) = files(&["alpha.txt"]);
+    let keys = ["C-t"; 16].join(",");
+    let s = shot_keys("80x24", &keys, &a, &b);
+    assert!(status(&s).contains("at most 16 tabs"), "{s}");
+    assert!(status(&s).contains("tab 16/16"), "{s}");
+    let bar: Vec<&str> = s.lines().collect();
+    let row = bar[1];
+    assert!(row.contains("\u{2039}") && row.contains("16 a"), "{row}");
+    // The right pane's own bar starts at its own left edge, not pushed by the left one.
+    assert_eq!(col(row, "1 b"), 41, "{row}");
+    assert!(bar[2].starts_with('\u{250c}'), "one row of tabs\n{s}");
+    let back = col(row, "\u{2039}");
+    let s = shot_keys("80x24", &format!("{keys},click:{back}:1"), &a, &b);
+    assert!(
+        status(&s).contains("tab 12/16"),
+        "\u{2039} steps to the nearest left out\n{s}"
+    );
+
+    // Wrapping: several rows first, both panes' lists still in line.
+    let cfg = "[files]\ntab_bar = \"multi-line\"\n";
+    let keys = ["C-t"; 11].join(",");
+    let s = shot_cfg_env(cfg, &[], &keys, &a, &b);
+    let rows: Vec<&str> = s.lines().collect();
+    assert!(
+        rows[1].contains(" a \u{00d7}") && rows[2].contains(" a \u{00d7}"),
+        "{s}"
+    );
+    assert!(!s.contains('\u{2039}'), "all twelve shown\n{s}");
+    let top = rows.iter().position(|l| l.starts_with('\u{250c}')).unwrap();
+    assert!(
+        rows[top].contains("\u{2510}\u{250c}"),
+        "both panes start on one row\n{s}"
+    );
+    let _ = fs::remove_dir_all(a.parent().unwrap());
+}

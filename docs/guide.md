@@ -48,6 +48,10 @@ Every key: [keys.md](keys.md).
 | **Alt+=** | Show this pane's directory in the other |
 | **Alt+M** | Messages: the last 50 from the status line, whole, with their time |
 
+- **A pane holds up to 16 tabs.** When they do not fit, the bar shows the tabs
+  around the current one, with `‹3` and `2›` for those left out (click one to step
+  to it); or, with `[files] tab_bar = "multi-line"` (Settings → Files), it takes
+  up to three rows first.
 - **Your panes, tabs and directories come back** next time. Start with `--no-restore`,
   or name directories on the command line, to start fresh.
 - **Names sort as you read them**, in any script: `file2` before `file10`; case, accents

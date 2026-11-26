@@ -89,6 +89,7 @@ max_panes = 3             # how many file panes you can split into (2-16)
 auto_refresh_ms = 1000    # how often panes look for changes where the system cannot tell; 0 (off) or 100-60000
                           # (network drives; 10 times less often where it can); 0 = never
 filter = "fuzzy"          # Ctrl+F: fuzzy (letters in order, best first) or plain
+tab_bar = "one-line"      # tabs that do not fit: one-line (those around the current one, ‹k k› for the rest) or multi-line (up to 3 rows)
 ls_colors = false         # use your $LS_COLORS
 icons = false             # file icons; needs a Nerd Font
 git_status = false        # a git letter per file; runs git (see security.md)

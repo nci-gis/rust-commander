@@ -210,6 +210,18 @@ const FIELDS: &[Field] = &[
     f(
         1,
         "files",
+        "tab_bar",
+        Text::new("settings.files.tab_bar.label", "Tab bar"),
+        Text::new(
+            "settings.files.tab_bar.help",
+            "when tabs do not fit — one-line: those around the current one; multi-line: up to 3 rows",
+        ),
+        Kind::Pick(&["one-line", "multi-line"]),
+        true,
+    ),
+    f(
+        1,
+        "files",
         "show_hidden",
         Text::new("settings.files.show_hidden.label", "Show hidden files"),
         Text::new(
@@ -486,6 +498,7 @@ pub fn get(c: &Config, f: &Field) -> String {
         ("general", "safe_operations") => c.general.safe_operations.to_string(),
         ("files", "enter") => c.files.enter.clone(),
         ("files", "filter") => c.files.filter.clone(),
+        ("files", "tab_bar") => c.files.tab_bar.clone(),
         ("files", "show_hidden") => c.files.show_hidden.to_string(),
         ("files", "sort") => c.files.sort.clone(),
         ("files", "dirs_first") => c.files.dirs_first.to_string(),
@@ -527,6 +540,7 @@ fn set(c: &mut Config, f: &Field, v: &str) {
         ("general", "safe_operations") => c.general.safe_operations = b,
         ("files", "enter") => c.files.enter = v.to_string(),
         ("files", "filter") => c.files.filter = v.to_string(),
+        ("files", "tab_bar") => c.files.tab_bar = v.to_string(),
         ("files", "show_hidden") => c.files.show_hidden = b,
         ("files", "sort") => c.files.sort = v.to_string(),
         ("files", "dirs_first") => c.files.dirs_first = b,

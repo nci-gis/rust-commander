@@ -1003,6 +1003,7 @@ run = "Enter 実行"
 "why.viewer_key" = "ビューア専用のキー: ビューアで押してください"
 
 [panes]
+tab_limit = "1つのペインのタブは最大 {n} 個です"
 at_most_file_panes_u_files = "ファイルペインは最大 {max} 個 — config.toml の [files] max_panes"
 both_panes_on = "両方のペインが {v}"
 panes_swapped = "ペインを入れ替えました"
@@ -1068,6 +1069,8 @@ unsafe_to_type = "パスに {c} が含まれます — コマンドが実行さ�
 no_match = " 一致なし "
 
 [settings]
+"files.tab_bar.help" = "タブが収まらないとき — one-line: 現在のタブの周りだけ表示; multi-line: 最大3行"
+"files.tab_bar.label" = "タブバー"
 "languages.prereview" = "レビュー前"
 cannot_read = "{path} を読めません: {e}"
 cannot_save = "{path} を保存できません: {e}"

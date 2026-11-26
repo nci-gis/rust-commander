@@ -1141,7 +1141,7 @@ mod tests {
 
         let mut app = App::new(&a, &b, Settings::default(), Outcome::NoFile);
         // Two tabs in the left pane, the second inside sub, sorted by size, reversed.
-        app.focused_tabs().unwrap().duplicate();
+        assert!(app.focused_tabs().unwrap().duplicate());
         app.focused_files().unwrap().set_cwd(&a.join("sub"));
         app.focused_files().unwrap().set_sort(SortKey::Size);
         app.focused_files().unwrap().set_sort(SortKey::Size);

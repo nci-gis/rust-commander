@@ -666,11 +666,7 @@ impl App {
             }
             Action::Zoom => self.toggle_zoom(),
             Action::NewTerminal => self.new_terminal(),
-            Action::NewTab => {
-                if let Some(t) = self.focused_tabs() {
-                    t.duplicate();
-                }
-            }
+            Action::NewTab => self.new_file_tab(),
             Action::CloseTab => {
                 let closed = self.focused_tabs().map(|t| {
                     let i = t.active_index();
